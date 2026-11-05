@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET state = 'running', attempts = attempts + 1, updated_at = now(),\n                             locked_until = now() + make_interval(secs => $2::bigint / 1000.0)\n             WHERE id = (\n                 SELECT id FROM jobs\n                 WHERE lane = ANY($1)\n                   AND ((state = 'queued' AND run_at <= now())\n                        OR (state = 'running' AND locked_until < now()))\n                 ORDER BY lane, priority DESC, run_at, id\n                 LIMIT 1\n                 FOR UPDATE SKIP LOCKED)\n             RETURNING id, lane, kind, payload, dedupe_key, attempts, max_attempts",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "lane",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "lane"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "payload",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "payload"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "dedupe_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "dedupe_key"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "max_attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "max_attempts"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int2Array",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "d98c9ca1ca04d34f1021af80566a0023461a5881307a8aaaf0b43c62cc52e2ca"
+}

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO external_ids (item_id, kind, namespace, value) VALUES ($1, $2, $3, $4)\n                 ON CONFLICT (kind, namespace, value) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b28c40c29673cde9bd6a449c19ae6f138b0d84af5f0984ed3d70d01bb796de52"
+}

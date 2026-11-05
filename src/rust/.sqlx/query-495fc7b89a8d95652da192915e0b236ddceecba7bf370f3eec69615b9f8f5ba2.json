@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO jobs (id, lane, kind, payload, dedupe_key, priority, run_at)\n                 VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, now()))\n                 ON CONFLICT (dedupe_key) WHERE state IN ('queued', 'running') DO NOTHING\n                 RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int2",
+        "Text",
+        "Jsonb",
+        "Text",
+        "Int2",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "495fc7b89a8d95652da192915e0b236ddceecba7bf370f3eec69615b9f8f5ba2"
+}

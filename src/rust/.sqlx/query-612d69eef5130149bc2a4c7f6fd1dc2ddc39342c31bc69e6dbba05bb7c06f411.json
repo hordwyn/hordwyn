@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, user_id, item_id, occurred_at, progress, client_op_id\n             FROM progress_events WHERE user_id = $1 AND item_id = $2 ORDER BY occurred_at, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "item_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "item_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "occurred_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "occurred_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "progress",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "progress"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "client_op_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "client_op_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "612d69eef5130149bc2a4c7f6fd1dc2ddc39342c31bc69e6dbba05bb7c06f411"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET state = 'queued', attempts = greatest(attempts - 1, 0),\n                             locked_until = NULL, updated_at = now()\n             WHERE id = $1 AND state = 'running'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b37e598d8c4a52b93b6696a68eabebe3dcb43049b96ad2601feb076b9c549ca5"
+}

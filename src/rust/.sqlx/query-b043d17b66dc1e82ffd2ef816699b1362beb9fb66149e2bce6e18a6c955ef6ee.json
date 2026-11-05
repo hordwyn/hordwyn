@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO lists (id, owner_id, name, description, visibility, created_at, updated_at)\n         VALUES ($1, $2, $3, $4, $5, $6, $7)\n         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description,\n             visibility = EXCLUDED.visibility, updated_at = EXCLUDED.updated_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b043d17b66dc1e82ffd2ef816699b1362beb9fb66149e2bce6e18a6c955ef6ee"
+}

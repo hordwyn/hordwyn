@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT next_run_at FROM cron_schedules WHERE name = 'digest'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "next_run_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "cron_schedules",
+            "name": "next_run_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "131678365f95857c2a8aaa07b65b696a2337bd825eddd4a71d53b4035f4c44aa"
+}

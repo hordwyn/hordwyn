@@ -1,24 +1,34 @@
-//! `cargo xtask <command>`: ci | fmt | e2e | dev.
+//! `cargo xtask <command>`, see [`USAGE`].
 #![deny(unsafe_code)]
 
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
-const USAGE: &str = "usage: cargo xtask <ci|fmt|e2e|dev>
+const USAGE: &str = "usage: cargo xtask <command>
 
-  ci    everything CI runs that does not need docker: fmt check, clippy, cargo-deny, tests
-  fmt   format the workspace
-  e2e   run the Playwright end-to-end suite
-  dev   start the development server";
+  ci                 everything CI runs that does not need docker: fmt check, clippy,
+                     cargo-deny, sqlx offline-cache check, tests (starts local services
+                     when TEST_DATABASE_URL is unset)
+  fmt                format the workspace
+  e2e                run the Playwright end-to-end suite
+  dev                start the development server
+  services up|down   start or stop local Postgres (and later Meilisearch)
+  sqlx-prepare       migrate the dev database and refresh the sqlx offline cache";
 
 fn main() -> Result<()> {
     let cmd = std::env::args().nth(1).unwrap_or_default();
     match cmd.as_str() {
         "ci" => ci(),
-        "fmt" => cargo(&["fmt", "--all"]),
+        "fmt" => cargo(&["fmt", "--all"], &[]),
         "e2e" => e2e(),
         "dev" => dev(),
+        "services" => match std::env::args().nth(2).as_deref() {
+            Some("up") => xtask::services::up(),
+            Some("down") => xtask::services::down(),
+            _ => bail!("usage: cargo xtask services up|down"),
+        },
+        "sqlx-prepare" => sqlx_prepare(false),
         _ => {
             eprintln!("{USAGE}");
             bail!("unknown command `{cmd}`")
@@ -27,22 +37,37 @@ fn main() -> Result<()> {
 }
 
 fn ci() -> Result<()> {
-    step("fmt", || cargo(&["fmt", "--all", "--check"]))?;
+    step("fmt", || cargo(&["fmt", "--all", "--check"], &[]))?;
     step("clippy", || {
-        cargo(&[
-            "clippy",
-            "--workspace",
-            "--all-targets",
-            "--all-features",
-            "--",
-            "-D",
-            "warnings",
-            "-W",
-            "clippy::pedantic",
-        ])
+        cargo(
+            &[
+                "clippy",
+                "--workspace",
+                "--all-targets",
+                "--all-features",
+                "--",
+                "-D",
+                "warnings",
+                "-W",
+                "clippy::pedantic",
+            ],
+            &[],
+        )
     })?;
-    step("deny", || cargo(&["deny", "--all-features", "check"]))?;
-    step("test", || cargo(&["test", "--workspace", "--all-features"]))?;
+    step("deny", || cargo(&["deny", "--all-features", "check"], &[]))?;
+    step("sqlx", || sqlx_prepare(true))?;
+    let test_db = if let Ok(url) = std::env::var("TEST_DATABASE_URL") {
+        url
+    } else {
+        step("services", xtask::services::up)?;
+        xtask::services::pg_admin_url()
+    };
+    step("test", || {
+        cargo(
+            &["test", "--workspace", "--all-features"],
+            &[("TEST_DATABASE_URL", &test_db), ("REQUIRE_SERVICES", "1")],
+        )
+    })?;
     println!("xtask ci: all green");
     Ok(())
 }
@@ -64,7 +89,35 @@ fn dev() -> Result<()> {
         println!("xtask dev: no Leptos app configured yet");
         return Ok(());
     }
-    cargo(&["leptos", "watch"])
+    xtask::services::up()?;
+    cargo(&["leptos", "watch"], &[])
+}
+
+/// Migrate the dev database and refresh (or, with `check`, verify) the `.sqlx/` cache.
+fn sqlx_prepare(check: bool) -> Result<()> {
+    let url = if let Ok(url) = std::env::var("DATABASE_URL") {
+        url
+    } else {
+        xtask::services::up()?;
+        xtask::services::pg_dev_url()
+    };
+    let root = xtask::workspace_root();
+    run(Command::new("sqlx")
+        .args([
+            "migrate",
+            "run",
+            "--source",
+            "crates/store-pg/migrations",
+            "--database-url",
+            &url,
+        ])
+        .current_dir(&root))?;
+    let mut args = vec!["sqlx", "prepare", "--workspace"];
+    if check {
+        args.push("--check");
+    }
+    args.extend(["--", "--all-targets", "--all-features"]);
+    cargo(&args, &[("DATABASE_URL", &url)])
 }
 
 fn step(name: &str, f: impl FnOnce() -> Result<()>) -> Result<()> {
@@ -72,10 +125,11 @@ fn step(name: &str, f: impl FnOnce() -> Result<()>) -> Result<()> {
     f().with_context(|| format!("step `{name}` failed"))
 }
 
-fn cargo(args: &[&str]) -> Result<()> {
+fn cargo(args: &[&str], env: &[(&str, &str)]) -> Result<()> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     run(Command::new(cargo)
         .args(args)
+        .envs(env.iter().copied())
         .current_dir(xtask::workspace_root()))
 }
 

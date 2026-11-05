@@ -1,0 +1,124 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT session_id, companion_id, score, winner, rank, team, faction, starting_player, first_play\n             FROM session_participants WHERE session_id = ANY($1) ORDER BY session_id, position",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "session_participants",
+            "name": "session_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "companion_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "session_participants",
+            "name": "companion_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "score",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "session_participants",
+            "name": "score"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "winner",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "session_participants",
+            "name": "winner"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "rank",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "session_participants",
+            "name": "rank"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "team",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "session_participants",
+            "name": "team"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "faction",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "session_participants",
+            "name": "faction"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "starting_player",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "session_participants",
+            "name": "starting_player"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "first_play",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "session_participants",
+            "name": "first_play"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "c55f7b332a3418e16ee0dafb9b6c7485cb43ecd5864495efd38f691a664090ba"
+}

@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO cron_schedules (name, schedule, lane, kind, payload, next_run_at)\n             VALUES ($1, $2, $3, $4, $5, $6)\n             ON CONFLICT (name) DO UPDATE SET schedule = EXCLUDED.schedule, lane = EXCLUDED.lane,\n                 kind = EXCLUDED.kind, payload = EXCLUDED.payload, next_run_at = EXCLUDED.next_run_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int2",
+        "Text",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "272c52fa8ce62621e6d000aebbca62aa4c54f7a865bf8c586a2bce6cf4989c0b"
+}

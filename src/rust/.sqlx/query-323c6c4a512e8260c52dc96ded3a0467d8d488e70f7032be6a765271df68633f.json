@@ -1,0 +1,66 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT seq, entity, entity_id, op FROM user_changes\n             WHERE user_id = $1 AND seq > $2 ORDER BY seq LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "seq",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "user_changes",
+            "name": "seq"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "entity",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_changes",
+            "name": "entity"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "entity_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "user_changes",
+            "name": "entity_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "op",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_changes",
+            "name": "op"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "323c6c4a512e8260c52dc96ded3a0467d8d488e70f7032be6a765271df68633f"
+}

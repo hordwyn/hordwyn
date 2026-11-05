@@ -75,6 +75,36 @@ impl<T> Lww<T> {
     }
 }
 
+impl std::fmt::Display for Hlc {
+    /// Sortable text form: `{wall_ms:016x}-{counter:08x}-{node:08x}`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:016x}-{:08x}-{:08x}",
+            self.wall_ms, self.counter, self.node
+        )
+    }
+}
+
+impl std::str::FromStr for Hlc {
+    type Err = crate::DomainError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bad = || crate::DomainError::invalid("hlc", format!("`{s}` is not an HLC stamp"));
+        let mut parts = s.split('-');
+        let (Some(w), Some(c), Some(n), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return Err(bad());
+        };
+        Ok(Self::new(
+            u64::from_str_radix(w, 16).map_err(|_| bad())?,
+            u32::from_str_radix(c, 16).map_err(|_| bad())?,
+            u32::from_str_radix(n, 16).map_err(|_| bad())?,
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,5 +144,19 @@ mod tests {
         y.set("a", a);
         assert_eq!(x, y);
         assert_eq!(x.value, "b");
+    }
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::Hlc;
+
+    #[test]
+    fn text_form_roundtrips_and_sorts_like_the_struct() {
+        let a = Hlc::new(1_700_000_000_000, 3, 9);
+        let b = Hlc::new(1_700_000_000_000, 12, 1);
+        assert_eq!(a.to_string().parse::<Hlc>().unwrap(), a);
+        assert!(a < b && a.to_string() < b.to_string());
+        assert!("zz".parse::<Hlc>().is_err());
     }
 }

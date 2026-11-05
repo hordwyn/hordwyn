@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET state = 'queued', last_error = $2, locked_until = NULL, updated_at = now(),\n                                 run_at = now() + make_interval(secs => $3::bigint / 1000.0)\n                 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b931d1c9b3b9b396ff7fb3a113c7b464717321ded38ad240533f6e85e6683668"
+}
