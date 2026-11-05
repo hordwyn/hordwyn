@@ -1,0 +1,2 @@
+# Proper nouns used in docs that clippy::doc_markdown would otherwise ask to backtick.
+doc-valid-idents = ["OpenAPI", "OpenLibrary", "MusicBrainz", "BoardGameGeek", "AniList", "PostgreSQL", "TMDB", "TVDB", "IGDB", "VNDB", "JSON", "OIDC", "TOTP", "WebP", "AVIF", "WebAssembly", ".."]

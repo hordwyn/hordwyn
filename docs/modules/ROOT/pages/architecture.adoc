@@ -1,0 +1,28 @@
+= Architecture overview
+
+The cargo workspace lives in `src/rust`. The dependency rule is enforced by
+`xtask/tests/architecture.rs`, which reads `cargo metadata`.
+
+[mermaid]
+....
+graph BT
+  app --> domain
+  adapters["store-pg, search, jobs, realtime, catalog-core, connectors,
+  assets, importers, integrations, notify, auth"] --> app
+  api --> app
+  web --> ui
+  web --> contracts
+  web -. ssr only .-> app
+  server --> adapters
+  server --> api
+  server --> web
+  cli --> adapters
+....
+
+Rules:
+
+* `domain` and `app` must not depend (even transitively) on sqlx, axum, leptos,
+  reqwest, opendal, meilisearch-sdk or wasmtime. `domain` also has no tokio.
+* `app` depends on `domain` only (within the workspace).
+* `ui` and `contracts` have no workspace dependencies.
+* `web` depends on `ui`, `contracts`, `brand`, and on `app` only under the `ssr` feature.

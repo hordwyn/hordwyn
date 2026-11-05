@@ -1,0 +1,11 @@
+= Overview
+
+A self-hosted, multi-user, white-label tracker for media of many kinds
+(movies, shows, anime, manga, books, audiobooks, podcasts, music, video games,
+visual novels, comics and board games).
+
+The product name used in these docs is a codename; deployments set their own
+name through the brand configuration (see the white-labelling guide).
+
+* Specification: `docs/design/DESIGN.md`
+* Decisions log: `docs/DECISIONS.md`

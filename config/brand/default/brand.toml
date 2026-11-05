@@ -1,0 +1,4 @@
+# Default brand. Replace this directory (or point APP__BRAND__DIR elsewhere) to white-label.
+name = "kithkeep"
+short_name = "kithkeep"
+default_locale = "en"

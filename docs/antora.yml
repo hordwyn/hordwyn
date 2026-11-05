@@ -1,0 +1,5 @@
+name: tracker
+title: Tracker
+version: ~
+nav:
+  - modules/ROOT/nav.adoc

@@ -1,0 +1,17 @@
+# build output
+/src/rust/target/
+/target/
+/src/web/node_modules/
+/src/web/test-results/
+/src/web/playwright-report/
+/docs/build/
+/build/
+# local state and secrets
+.env
+/config/.env
+/.dev/
+/src/rust/.dev/
+*.local.toml
+# nix
+/result
+/.direnv/
