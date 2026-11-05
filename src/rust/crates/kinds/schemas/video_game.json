@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Attributes of a video game.",
+  "properties": {
+    "developers": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "game_modes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "genres": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "platforms": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "publishers": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "release_date": {
+      "format": "date",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "VideoGameAttributes",
+  "type": "object"
+}

@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Attributes of a comic issue or collection.",
+  "properties": {
+    "artists": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "cover_date": {
+      "format": "date",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "issue_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "page_count": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "publisher": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "series": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "volume": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "writers": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "title": "ComicAttributes",
+  "type": "object"
+}

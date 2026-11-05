@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Attributes of a podcast.",
+  "properties": {
+    "author": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "categories": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "episode_count": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "explicit": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "feed_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "language": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "PodcastAttributes",
+  "type": "object"
+}

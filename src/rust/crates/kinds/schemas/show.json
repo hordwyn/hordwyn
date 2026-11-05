@@ -1,0 +1,78 @@
+{
+  "$defs": {
+    "SeasonInfo": {
+      "additionalProperties": false,
+      "description": "One season of an episodic item.",
+      "properties": {
+        "episode_count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "number": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "number",
+        "episode_count"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Attributes of a TV show.",
+  "properties": {
+    "airing_status": {
+      "description": "`returning`, `ended`, `cancelled`, ...",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "episode_runtime_minutes": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "first_air_date": {
+      "format": "date",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "genres": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "network": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "original_language": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "seasons": {
+      "items": {
+        "$ref": "#/$defs/SeasonInfo"
+      },
+      "type": "array"
+    }
+  },
+  "title": "ShowAttributes",
+  "type": "object"
+}

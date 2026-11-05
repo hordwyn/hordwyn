@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Attributes of an audiobook.",
+  "properties": {
+    "asin": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "authors": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "duration_seconds": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "isbn13": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "language": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "narrators": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "published": {
+      "format": "date",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "publisher": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "AudiobookAttributes",
+  "type": "object"
+}

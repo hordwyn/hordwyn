@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Attributes of a visual novel.",
+  "properties": {
+    "developers": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "languages": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "length_minutes": {
+      "description": "Typical play time in minutes.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "platforms": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "release_date": {
+      "format": "date",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "title": "VisualNovelAttributes",
+  "type": "object"
+}

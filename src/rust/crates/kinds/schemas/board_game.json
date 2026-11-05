@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Attributes of a board game (D-9a). People (designers, artists, publishers) are\ncatalog relations, not attributes.",
+  "properties": {
+    "bgg_id": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "categories": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "mechanics": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "min_age": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "players_best": {
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "players_max": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "players_min": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "playtime_max_minutes": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "playtime_min_minutes": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "weight": {
+      "description": "Complexity on a 1..=5 scale.",
+      "format": "float",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "title": "BoardGameAttributes",
+  "type": "object"
+}

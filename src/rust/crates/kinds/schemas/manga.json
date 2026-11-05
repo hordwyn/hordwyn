@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Attributes of a manga.",
+  "properties": {
+    "authors": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "chapter_count": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "genres": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "publishing_status": {
+      "description": "`releasing`, `finished`, `hiatus`, ...",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "start_date": {
+      "format": "date",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "volume_count": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "title": "MangaAttributes",
+  "type": "object"
+}

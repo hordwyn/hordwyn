@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Attributes of a book.",
+  "properties": {
+    "authors": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "isbn13": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "language": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "page_count": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "published": {
+      "format": "date",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "publisher": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "series": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "series_position": {
+      "format": "float",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "subjects": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "title": "BookAttributes",
+  "type": "object"
+}

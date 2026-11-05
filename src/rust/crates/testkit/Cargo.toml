@@ -10,3 +10,9 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+app.workspace = true
+domain.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
