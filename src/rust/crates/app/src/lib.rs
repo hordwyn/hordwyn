@@ -15,15 +15,16 @@ mod users;
 
 use std::sync::Arc;
 
-pub use catalog::NewCatalogItem;
+pub use catalog::{CatalogRefresh, NewCatalogItem, REFRESH_JOB};
 pub use error::{AppError, AppResult};
 pub use sessions::NewSession;
 
 use domain::Timestamp;
 use domain::hlc::Hlc;
 use ports::{
-    AppEvent, CatalogRepo, Clock, CompanionRepo, EventBus, IdGen, InviteRepo, KindCatalog,
-    LibraryRepo, LinkRequestRepo, ListRepo, ProgressRepo, ReviewRepo, SessionRepo, UserRepo,
+    AppEvent, CatalogRepo, Clock, CompanionRepo, EventBus, IdGen, InviteRepo, JobQueue,
+    KindCatalog, LibraryRepo, LinkRequestRepo, ListRepo, ProgressRepo, ReviewRepo, SessionRepo,
+    UserRepo,
 };
 
 /// Repository adapters, one per aggregate.
@@ -49,6 +50,7 @@ pub struct App {
     pub clock: Arc<dyn Clock>,
     pub ids: Arc<dyn IdGen>,
     pub events: Arc<dyn EventBus>,
+    pub jobs: Arc<dyn JobQueue>,
 }
 
 impl App {

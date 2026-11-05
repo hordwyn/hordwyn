@@ -7,7 +7,7 @@ use domain::catalog::{CatalogItem, ExternalId};
 use domain::kind::KindId;
 use domain::user::{Actor, Role, User};
 use store_pg::PgStore;
-use testkit::{FixedClock, RecordingEvents, SeqIds, StaticKinds};
+use testkit::{FixedClock, MemJobs, RecordingEvents, SeqIds, StaticKinds};
 
 pub struct PgEnv {
     pub app: App,
@@ -35,6 +35,7 @@ pub async fn env() -> Option<PgEnv> {
         clock: Arc::new(FixedClock::default()),
         ids: Arc::new(SeqIds::default()),
         events: Arc::new(RecordingEvents::default()),
+        jobs: Arc::new(MemJobs::default()),
     };
     Some(PgEnv { app, store })
 }

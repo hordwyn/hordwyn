@@ -2,6 +2,7 @@
 #![deny(unsafe_code)]
 
 pub mod arch;
+pub mod record;
 pub mod services;
 pub mod whitelabel;
 

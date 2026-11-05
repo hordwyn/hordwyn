@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use app::ports::{
-    AppEvent, BlobStore, Clock, EventBus, HttpFetch, HttpRequest, HttpResponse, IdGen, JobQueue,
-    NewJob, Notification, Notifier, PortError, SearchDoc, SearchHit, SearchIndex, SearchQuery,
+    AppEvent, BlobStore, Clock, EventBus, HttpError, HttpFetch, HttpRequest, HttpResponse, IdGen,
+    JobQueue, NewJob, Notification, Notifier, PortError, SearchDoc, SearchHit, SearchIndex,
+    SearchQuery,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
@@ -290,7 +291,7 @@ impl ReplayHttp {
 
 #[async_trait]
 impl HttpFetch for ReplayHttp {
-    async fn fetch(&self, req: HttpRequest) -> Result<HttpResponse, PortError> {
+    async fn fetch(&self, req: HttpRequest) -> Result<HttpResponse, HttpError> {
         let key = format!("{} {}", req.method, req.url);
         self.requests.lock().expect("lock").push(req);
         self.responses
@@ -298,6 +299,64 @@ impl HttpFetch for ReplayHttp {
             .expect("lock")
             .get(&key)
             .cloned()
-            .ok_or_else(|| PortError(format!("no recorded response for {key}")))
+            .ok_or_else(|| HttpError::Network(format!("no recorded response for {key}")))
+    }
+}
+
+impl ReplayHttp {
+    /// Load every recorded-HTTP fixture (`*.json` with `request`, `status`, `headers`,
+    /// `body`) in `dir`.
+    ///
+    /// # Panics
+    /// If the directory or a fixture cannot be read or parsed.
+    #[must_use]
+    pub fn from_dir(dir: &std::path::Path) -> Self {
+        let replay = Self::default();
+        let mut entries: Vec<_> = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("fixture dir {}: {e}", dir.display()))
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .collect();
+        entries.sort();
+        for path in entries {
+            let text = std::fs::read_to_string(&path).expect("read fixture");
+            let f: serde_json::Value = serde_json::from_str(&text).expect("fixture json");
+            let method = f["request"]["method"].as_str().expect("request.method");
+            let url = f["request"]["url"].as_str().expect("request.url");
+            let status =
+                u16::try_from(f["status"].as_u64().expect("status")).expect("status range");
+            let headers = f["headers"]
+                .as_array()
+                .map(|hs| {
+                    hs.iter()
+                        .filter_map(|h| {
+                            Some((h[0].as_str()?.to_string(), h[1].as_str()?.to_string()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let body = match &f["body"] {
+                serde_json::Value::String(s) => s.clone().into_bytes(),
+                other => serde_json::to_vec(other).expect("body"),
+            };
+            replay.responses.lock().expect("lock").insert(
+                format!("{method} {url}"),
+                HttpResponse {
+                    status,
+                    headers,
+                    body,
+                },
+            );
+        }
+        replay
+    }
+}
+
+impl FixedClock {
+    /// Current fake time (convenience for assertions).
+    #[must_use]
+    pub fn now_for_tests(&self) -> DateTime<Utc> {
+        Clock::now(self)
     }
 }

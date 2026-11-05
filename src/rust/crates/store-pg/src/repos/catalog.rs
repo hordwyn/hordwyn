@@ -16,7 +16,9 @@ struct ItemRow {
     year: Option<i32>,
     description: Option<String>,
     cover_asset: Option<String>,
+    cover_url: Option<String>,
     attributes: serde_json::Value,
+    provenance: serde_json::Value,
     state: String,
     fetched_at: Option<chrono::DateTime<chrono::Utc>>,
     fresh_until: Option<chrono::DateTime<chrono::Utc>>,
@@ -42,8 +44,10 @@ impl PgStore {
             year: row.year,
             description: row.description,
             cover_asset: row.cover_asset,
+            cover_url: row.cover_url,
             external_ids,
             attributes: row.attributes,
+            provenance: crate::conv::json("provenance", row.provenance)?,
             state: entity_state(&row.state)?,
             fetched_at: row.fetched_at,
             fresh_until: row.fresh_until,
@@ -57,14 +61,15 @@ impl CatalogRepo for PgStore {
         let mut tx = self.begin().await?;
         sqlx::query!(
             "INSERT INTO catalog_items (id, kind, title, original_title, year, description, cover_asset,
-                                        attributes, state, fetched_at, fresh_until, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+                                        attributes, state, fetched_at, fresh_until, updated_at,
+                                        cover_url, provenance)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), $12, $13)
              ON CONFLICT (id) DO UPDATE SET kind = EXCLUDED.kind, title = EXCLUDED.title,
                  original_title = EXCLUDED.original_title, year = EXCLUDED.year,
                  description = EXCLUDED.description, cover_asset = EXCLUDED.cover_asset,
                  attributes = EXCLUDED.attributes, state = EXCLUDED.state,
                  fetched_at = EXCLUDED.fetched_at, fresh_until = EXCLUDED.fresh_until,
-                 updated_at = now()",
+                 updated_at = now(), cover_url = EXCLUDED.cover_url, provenance = EXCLUDED.provenance",
             item.id.0,
             item.kind.as_str(),
             item.title,
@@ -75,7 +80,9 @@ impl CatalogRepo for PgStore {
             item.attributes,
             entity_state_str(item.state),
             item.fetched_at,
-            item.fresh_until
+            item.fresh_until,
+            item.cover_url,
+            crate::conv::to_json(&item.provenance)?
         )
         .execute(&mut *tx)
         .await
@@ -102,7 +109,7 @@ impl CatalogRepo for PgStore {
         let row = sqlx::query_as!(
             ItemRow,
             "SELECT id, kind, title, original_title, year, description, cover_asset, attributes,
-                    state, fetched_at, fresh_until
+                    state, fetched_at, fresh_until, cover_url, provenance
              FROM catalog_items WHERE id = $1",
             id.0
         )
@@ -119,7 +126,7 @@ impl CatalogRepo for PgStore {
         let row = sqlx::query_as!(
             ItemRow,
             "SELECT c.id, c.kind, c.title, c.original_title, c.year, c.description, c.cover_asset,
-                    c.attributes, c.state, c.fetched_at, c.fresh_until
+                    c.attributes, c.state, c.fetched_at, c.fresh_until, c.cover_url, c.provenance
              FROM external_ids e JOIN catalog_items c ON c.id = e.item_id
              WHERE e.kind = $1 AND e.namespace = $2 AND e.value = $3",
             kind.as_str(),

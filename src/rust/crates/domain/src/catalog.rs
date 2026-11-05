@@ -42,9 +42,13 @@ pub struct CatalogItem {
     pub description: Option<String>,
     /// blake3 hash of the cover asset, if one is stored.
     pub cover_asset: Option<String>,
+    /// Provider URL of the cover, used until (or instead of) a stored asset (D-7 redirect).
+    pub cover_url: Option<String>,
     pub external_ids: Vec<ExternalId>,
     /// Kind-specific data, validated against the kind's attributes schema on write.
     pub attributes: serde_json::Value,
+    /// Which connector supplied each field (`title`, `attributes.genres`, ...), D-6.7.
+    pub provenance: std::collections::BTreeMap<String, String>,
     pub state: EntityState,
     pub fetched_at: Option<Timestamp>,
     pub fresh_until: Option<Timestamp>,

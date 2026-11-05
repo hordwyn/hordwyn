@@ -306,8 +306,26 @@ pub struct HttpResponse {
     pub body: Vec<u8>,
 }
 
-/// Outgoing HTTP. The production adapter is the governed client in `catalog-core`.
+/// Why an outgoing request was not answered by the upstream server.
+#[derive(Debug, Error, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum HttpError {
+    /// Host not on the connector's allowlist, or unknown connector.
+    #[error("blocked: {0}")]
+    Blocked(String),
+    /// The connector's circuit breaker is open; no request was sent.
+    #[error("circuit open")]
+    CircuitOpen,
+    /// Upstream asked us to slow down for longer than we are willing to wait.
+    #[error("rate limited, retry after {retry_after_ms} ms")]
+    RateLimited { retry_after_ms: u64 },
+    #[error("network: {0}")]
+    Network(String),
+}
+
+/// Outgoing HTTP. The production adapter is the governed client in `catalog-core`
+/// (allowlist, rate limit, circuit breaker, cache); connectors only ever see this port.
+/// Non-2xx answers are returned as `Ok` responses.
 #[async_trait]
 pub trait HttpFetch: Send + Sync {
-    async fn fetch(&self, req: HttpRequest) -> Result<HttpResponse, PortError>;
+    async fn fetch(&self, req: HttpRequest) -> Result<HttpResponse, HttpError>;
 }

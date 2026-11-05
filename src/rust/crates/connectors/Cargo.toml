@@ -10,3 +10,21 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+app.workspace = true
+domain.workspace = true
+kinds.workspace = true
+catalog-core.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+url.workspace = true
+tracing.workspace = true
+
+[features]
+default = []
+tmdb = []
+
+[dev-dependencies]
+testkit.workspace = true
+tokio.workspace = true

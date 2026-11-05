@@ -14,7 +14,8 @@ const USAGE: &str = "usage: cargo xtask <command>
   e2e                run the Playwright end-to-end suite
   dev                start the development server
   services up|down   start or stop local Postgres (and later Meilisearch)
-  sqlx-prepare       migrate the dev database and refresh the sqlx offline cache";
+  sqlx-prepare       migrate the dev database and refresh the sqlx offline cache
+  record <connector> re-record connector fixtures from the live API (needs its key)";
 
 fn main() -> Result<()> {
     let cmd = std::env::args().nth(1).unwrap_or_default();
@@ -29,6 +30,10 @@ fn main() -> Result<()> {
             _ => bail!("usage: cargo xtask services up|down"),
         },
         "sqlx-prepare" => sqlx_prepare(false),
+        "record" => match std::env::args().nth(2) {
+            Some(id) => xtask::record::record(&id),
+            None => bail!("usage: cargo xtask record <connector>"),
+        },
         _ => {
             eprintln!("{USAGE}");
             bail!("unknown command `{cmd}`")

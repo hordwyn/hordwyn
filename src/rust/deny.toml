@@ -27,6 +27,11 @@ allow = [
     "MPL-2.0",
 ]
 
+# Mozilla root CA data used by rustls-platform-verifier; permissive data licence (DEC-036).
+[[licenses.exceptions]]
+crate = "webpki-root-certs"
+allow = ["CDLA-Permissive-2.0"]
+
 [licenses.private]
 ignore = true
 

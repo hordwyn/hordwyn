@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.id, c.kind, c.title, c.original_title, c.year, c.description, c.cover_asset,\n                    c.attributes, c.state, c.fetched_at, c.fresh_until\n             FROM external_ids e JOIN catalog_items c ON c.id = e.item_id\n             WHERE e.kind = $1 AND e.namespace = $2 AND e.value = $3",
+  "query": "SELECT id, kind, title, original_title, year, description, cover_asset, attributes,\n                    state, fetched_at, fresh_until, cover_url, provenance\n             FROM catalog_items WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -123,13 +123,33 @@
             "name": "fresh_until"
           }
         }
+      },
+      {
+        "ordinal": 11,
+        "name": "cover_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "catalog_items",
+            "name": "cover_url"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "provenance",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "catalog_items",
+            "name": "provenance"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Text",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -143,8 +163,10 @@
       false,
       false,
       true,
-      true
+      true,
+      true,
+      false
     ]
   },
-  "hash": "4dd19051a4c3bf7d6e2c8e5f602b13194111db4b654b62ed6c3b4930c5b7e73e"
+  "hash": "b2e0533c2939e81875f08521ac9eafb3303d7764bdfc7301a724d3b15e229c6e"
 }

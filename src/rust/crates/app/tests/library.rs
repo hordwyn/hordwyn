@@ -139,3 +139,15 @@ async fn writes_publish_entity_updated() {
     env.app.add_to_library(me, movie.id, None).await.unwrap();
     assert!(env.events.topics().iter().any(|t| t == "entity.updated"));
 }
+
+#[tokio::test]
+async fn item_detail_returns_immediately_and_enqueues_one_refresh() {
+    let env = TestEnv::new();
+    let movie = common::item(&env.app, "movie", "Solaris").await;
+    env.app.item_detail(movie.id).await.unwrap();
+    env.app.item_detail(movie.id).await.unwrap();
+    let jobs = env.jobs.jobs();
+    assert_eq!(jobs.len(), 1, "deduplicated");
+    assert_eq!(jobs[0].kind, app::REFRESH_JOB);
+    assert_eq!(jobs[0].lane, app::ports::Lane::Interactive);
+}

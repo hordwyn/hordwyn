@@ -32,6 +32,21 @@ pub const ALLOWED_WORKSPACE_DEPS: &[(&str, &[&str])] = &[
     ("web", &["ui", "contracts", "brand", "app"]),
 ];
 
+/// Crates that must not depend *directly* on an HTTP client: all their outgoing HTTP goes
+/// through the `HttpFetch` port (governed client in `catalog-core`), D-5.2 / D-6.3.
+pub const NO_DIRECT_HTTP: &[&str] = &["connectors", "importers", "integrations", "notify"];
+
+/// HTTP client crates covered by [`NO_DIRECT_HTTP`].
+pub const HTTP_CLIENTS: &[&str] = &[
+    "reqwest",
+    "hyper",
+    "hyper-util",
+    "ureq",
+    "isahc",
+    "surf",
+    "attohttpc",
+];
+
 /// Workspace dependencies that are only allowed behind a feature: (crate, dep, feature).
 pub const FEATURE_GATED_DEPS: &[(&str, &str, &str)] = &[("web", "app", "ssr")];
 
@@ -144,6 +159,17 @@ pub fn check(g: &Graph) -> Vec<String> {
             if g.members.contains(&e.to) && !allowed.contains(&e.to.as_str()) {
                 v.push(format!(
                     "`{krate}` must not depend on workspace crate `{}`",
+                    e.to
+                ));
+            }
+        }
+    }
+
+    for krate in NO_DIRECT_HTTP {
+        for e in g.deps.get(*krate).into_iter().flatten() {
+            if HTTP_CLIENTS.contains(&e.to.as_str()) {
+                v.push(format!(
+                    "`{krate}` must not depend directly on HTTP client `{}`; use the HttpFetch port",
                     e.to
                 ));
             }
@@ -277,5 +303,28 @@ mod tests {
             .unwrap()
             .insert("hydrate".into(), vec!["dep:app".into()]);
         assert!(!check(&g).is_empty(), "app enabled by hydrate must fail");
+    }
+}
+
+#[cfg(test)]
+mod http_tests {
+    use super::*;
+
+    #[test]
+    fn connectors_with_their_own_http_client_are_caught() {
+        let mut g = Graph::default();
+        g.members.insert("connectors".into());
+        g.deps.insert(
+            "connectors".into(),
+            vec![Edge {
+                to: "reqwest".into(),
+                optional: false,
+            }],
+        );
+        assert!(
+            check(&g)
+                .iter()
+                .any(|m| m.contains("HTTP client `reqwest`"))
+        );
     }
 }

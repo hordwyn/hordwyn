@@ -26,6 +26,7 @@ pub struct TestEnv {
     pub clock: Arc<FixedClock>,
     pub ids: Arc<SeqIds>,
     pub events: Arc<RecordingEvents>,
+    pub jobs: Arc<MemJobs>,
 }
 
 impl TestEnv {
@@ -42,6 +43,7 @@ impl TestEnv {
         let clock = Arc::new(FixedClock::default());
         let ids = Arc::new(SeqIds::default());
         let events = Arc::new(RecordingEvents::default());
+        let jobs = Arc::new(MemJobs::default());
         let app = App {
             repos: Repos {
                 users: store.clone(),
@@ -59,6 +61,7 @@ impl TestEnv {
             clock: clock.clone(),
             ids: ids.clone(),
             events: events.clone(),
+            jobs: jobs.clone(),
         };
         Self {
             app,
@@ -66,6 +69,7 @@ impl TestEnv {
             clock,
             ids,
             events,
+            jobs,
         }
     }
 }
