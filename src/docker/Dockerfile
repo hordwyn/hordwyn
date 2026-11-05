@@ -9,10 +9,9 @@ RUN sh src/sh/ci-tools.sh leptos wasm-bindgen tailwind
 COPY src/rust src/rust
 COPY config config
 WORKDIR /repo/src/rust
+ENV SQLX_OFFLINE=true
 RUN rustup show active-toolchain || rustup toolchain install
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/repo/src/rust/target \
-    if grep -q '\[\[workspace.metadata.leptos\]\]' Cargo.toml; then \
+RUN if grep -q '\[\[workspace.metadata.leptos\]\]' Cargo.toml; then \
       cargo leptos build --release && mkdir -p /out/site && cp -r target/site/. /out/site/; \
     else \
       cargo build --release -p server && mkdir -p /out/site; \

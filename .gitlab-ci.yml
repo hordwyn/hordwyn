@@ -90,16 +90,15 @@ leptos-build:
       else echo "no Leptos app configured yet"; fi
 
 docker-image:
+  # The runner is not privileged, so no docker-in-docker; kaniko builds without a daemon
+  # (DEC-042). The image is built and checked, not pushed.
   stage: build
-  image: docker:28
-  services: [docker:28-dind]
-  variables:
-    # plain TCP to the dind service; GitLab shared runners do not share the TLS cert volume
-    DOCKER_HOST: "tcp://docker:2375"
-    DOCKER_TLS_CERTDIR: ""
+  image:
+    name: gcr.io/kaniko-project/executor:v1.24.0-debug
+    entrypoint: [""]
   script:
-    - docker build -f src/docker/Dockerfile -t app:$CI_COMMIT_SHORT_SHA .
-    - docker image ls app:$CI_COMMIT_SHORT_SHA
+    - /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/src/docker/Dockerfile" --no-push --tar-path image.tar --destination app:$CI_COMMIT_SHORT_SHA
+    - ls -l image.tar
 
 antora:
   stage: docs
