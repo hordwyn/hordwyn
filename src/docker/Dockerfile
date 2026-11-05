@@ -11,11 +11,9 @@ COPY config config
 WORKDIR /repo/src/rust
 ENV SQLX_OFFLINE=true
 RUN rustup show active-toolchain || rustup toolchain install
-RUN if grep -q '\[\[workspace.metadata.leptos\]\]' Cargo.toml; then \
-      cargo leptos build --release && mkdir -p /out/site && cp -r target/site/. /out/site/; \
-    else \
-      cargo build --release -p server && mkdir -p /out/site; \
-    fi \
+RUN rustup target add wasm32-unknown-unknown \
+    && cargo leptos build --release \
+    && mkdir -p /out/site && cp -r target/site/. /out/site/ \
     && cp target/release/server /out/server
 
 FROM debian:trixie-slim AS runtime
@@ -25,7 +23,11 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-cert
 COPY --from=build /out/server /usr/local/bin/server
 COPY --from=build /out/site /srv/site
 COPY config/brand /etc/app/brand
-ENV APP__SERVER__SITE_ROOT=/srv/site \
+COPY src/rust/crates/ui/icons/vendor /usr/share/doc/app/icons
+ENV LEPTOS_SITE_ROOT=/srv/site \
+    LEPTOS_OUTPUT_NAME=app \
+    LEPTOS_SITE_ADDR=0.0.0.0:3000 \
+    LEPTOS_ENV=PROD \
     APP__BRAND__DIR=/etc/app/brand/default \
     APP__STORAGE__FS_ROOT=/data
 USER app

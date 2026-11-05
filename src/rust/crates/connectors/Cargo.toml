@@ -24,6 +24,8 @@ tracing.workspace = true
 [features]
 default = []
 tmdb = []
+# every connector (CI, server builds)
+all = ["tmdb"]
 
 [dev-dependencies]
 testkit.workspace = true

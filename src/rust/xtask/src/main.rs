@@ -41,23 +41,41 @@ fn main() -> Result<()> {
     }
 }
 
+/// Features enabled for workspace-wide native checks. `--all-features` is not usable because
+/// `web`'s `ssr`, `hydrate` and `csr` are mutually exclusive.
+const NATIVE_FEATURES: &str = "connectors/all,server/gallery";
+/// Features for the browser (wasm32) build of the web app.
+const WASM_FEATURES: &str = "web/hydrate,web/gallery";
+const PEDANTIC: [&str; 5] = ["--", "-D", "warnings", "-W", "clippy::pedantic"];
+
 fn ci() -> Result<()> {
     step("fmt", || cargo(&["fmt", "--all", "--check"], &[]))?;
     step("clippy", || {
-        cargo(
-            &[
-                "clippy",
-                "--workspace",
-                "--all-targets",
-                "--all-features",
-                "--",
-                "-D",
-                "warnings",
-                "-W",
-                "clippy::pedantic",
-            ],
-            &[],
-        )
+        let mut args = vec![
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--features",
+            NATIVE_FEATURES,
+        ];
+        args.extend(PEDANTIC);
+        cargo(&args, &[])
+    })?;
+    step("clippy-wasm", || {
+        let mut args = vec![
+            "clippy",
+            "-p",
+            "web",
+            "-p",
+            "ui",
+            "--all-targets",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--features",
+            WASM_FEATURES,
+        ];
+        args.extend(PEDANTIC);
+        cargo(&args, &[])
     })?;
     step("deny", || cargo(&["deny", "--all-features", "check"], &[]))?;
     step("sqlx", || sqlx_prepare(true))?;
@@ -69,19 +87,38 @@ fn ci() -> Result<()> {
     };
     step("test", || {
         cargo(
-            &["test", "--workspace", "--all-features"],
+            &["test", "--workspace", "--features", NATIVE_FEATURES],
             &[("TEST_DATABASE_URL", &test_db), ("REQUIRE_SERVICES", "1")],
+        )
+    })?;
+    step("test-wasm", || {
+        cargo(
+            &["test", "-p", "ui", "--target", "wasm32-unknown-unknown"],
+            &[],
         )
     })?;
     println!("xtask ci: all green");
     Ok(())
 }
 
+/// Build the site with the dev gallery and run the Playwright suite against it.
 fn e2e() -> Result<()> {
     let web = xtask::repo_root().join("src/web");
-    if !web.join("playwright.config.ts").exists() {
-        println!("xtask e2e: no Playwright suite yet");
-        return Ok(());
+    cargo(
+        &[
+            "leptos",
+            "build",
+            "--bin-features",
+            "gallery",
+            "--lib-features",
+            "hydrate,gallery",
+        ],
+        &[],
+    )?;
+    if !web.join("node_modules").exists() {
+        run(Command::new("npm")
+            .args(["ci", "--no-audit", "--no-fund"])
+            .current_dir(&web))?;
     }
     run(Command::new("npx")
         .args(["playwright", "test"])
@@ -89,13 +126,18 @@ fn e2e() -> Result<()> {
 }
 
 fn dev() -> Result<()> {
-    let manifest = std::fs::read_to_string(xtask::workspace_root().join("Cargo.toml"))?;
-    if !manifest.contains("[[workspace.metadata.leptos]]") {
-        println!("xtask dev: no Leptos app configured yet");
-        return Ok(());
-    }
     xtask::services::up()?;
-    cargo(&["leptos", "watch"], &[])
+    cargo(
+        &[
+            "leptos",
+            "watch",
+            "--bin-features",
+            "gallery",
+            "--lib-features",
+            "hydrate,gallery",
+        ],
+        &[],
+    )
 }
 
 /// Migrate the dev database and refresh (or, with `check`, verify) the `.sqlx/` cache.
@@ -121,7 +163,7 @@ fn sqlx_prepare(check: bool) -> Result<()> {
     if check {
         args.push("--check");
     }
-    args.extend(["--", "--all-targets", "--all-features"]);
+    args.extend(["--", "--all-targets", "--features", NATIVE_FEATURES]);
     cargo(&args, &[("DATABASE_URL", &url)])
 }
 

@@ -6,6 +6,8 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+# paste is unmaintained (not vulnerable); it comes in through leptos -> either_of (DEC-044).
+ignore = [{ id = "RUSTSEC-2024-0436", reason = "transitive via leptos 0.8; compile-time macro only" }]
 
 [licenses]
 version = 2
@@ -23,6 +25,8 @@ allow = [
     "Unicode-3.0",
     "Unicode-DFS-2016",
     "CC0-1.0",
+    # Boost Software License 1.0 (permissive; not the BUSL source-available licence), DEC-044
+    "BSL-1.0",
     # file-level copyleft only; every MPL-2.0 dependency is listed in docs/DECISIONS.md (DEC-005)
     "MPL-2.0",
 ]

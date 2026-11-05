@@ -1,0 +1,41 @@
+= Vendored icons and logos
+
+Every icon or logo file shipped with the application is listed here with its source and
+licence (KICKOFF rule 11, DESIGN D-10). The research behind the choice is in
+`docs/research/icons.md`; the decision is DEC-043.
+
+== UI icons
+
+Vendored under `src/rust/crates/ui/icons/vendor/`. Only the icons named in
+`src/rust/crates/ui/icons/icons.toml` are copied and compiled in. The licence files sit next
+to the icons and are copied into the Docker image (`/usr/share/doc/app/icons`).
+
+[cols="1,1,1,2"]
+|===
+| Set | Version | Licence | Source
+
+| Lucide (`lucide-static`)
+| 1.69.0
+| ISC (glyphs derived from Feather: MIT)
+| https://registry.npmjs.org/lucide-static/-/lucide-static-1.69.0.tgz
+
+| Tabler Icons (`@tabler/icons`), only `meeple`
+| 3.50.0
+| MIT
+| https://registry.npmjs.org/@tabler/icons/-/icons-3.50.0.tgz
+|===
+
+Neither licence requires per-use attribution; keeping the licence texts with the files and in
+the image satisfies them.
+
+== Service logos
+
+None vendored yet. Until they are, integrations and data sources are identified by name
+(text) only. When added, they come from Simple Icons (CC0-1.0) and, for gaps, selfh.st/icons
+(CC-BY-4.0, credit on the About page), are shown only to identify the service, and are listed
+here.
+
+== Brand logo
+
+The default brand (`config/brand/default/`) uses the product name set as text; no drawn or
+generated mark. Third-party icon files never go into the brand logo slots.

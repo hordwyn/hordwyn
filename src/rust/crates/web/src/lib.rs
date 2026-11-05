@@ -1,13 +1,19 @@
-//! Leptos web application: routes, pages and domain widgets.
+//! Leptos web application: routes, pages and domain widgets (features `ssr`, `hydrate`,
+//! `csr`). Generic components come from `ui`.
 #![deny(unsafe_code)]
+// Leptos `#[component]` props are owned by design, and `view!` bodies are long markup.
+#![allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
 
-/// Name of this crate, used by the bootstrap smoke test.
-pub const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
+mod app;
+#[cfg(feature = "gallery")]
+mod gallery;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_name_matches_package() {
-        assert_eq!(super::CRATE_NAME, "web");
-    }
+pub use app::{App, shell};
+
+/// Browser entry point: hydrate the server-rendered page.
+#[cfg(feature = "hydrate")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn hydrate() {
+    console_error_panic_hook::set_once();
+    leptos::mount::hydrate_body(App);
 }

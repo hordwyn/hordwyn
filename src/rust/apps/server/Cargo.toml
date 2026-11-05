@@ -10,3 +10,17 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+anyhow.workspace = true
+web = { workspace = true, features = ["ssr"] }
+leptos = { workspace = true, features = ["ssr"] }
+leptos_axum.workspace = true
+axum.workspace = true
+tokio = { workspace = true, features = ["net", "signal"] }
+tracing.workspace = true
+
+[features]
+default = []
+gallery = ["web/gallery"]
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

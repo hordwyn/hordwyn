@@ -9,6 +9,9 @@ variables:
   CARGO_TERM_COLOR: "always"
   # compile-checked queries use the committed .sqlx cache (cargo xtask sqlx-prepare)
   SQLX_OFFLINE: "true"
+  # web's ssr/hydrate/csr features are exclusive, so no --all-features (DEC-045)
+  NATIVE_FEATURES: "connectors/all,server/gallery"
+  WASM_FEATURES: "web/hydrate,web/gallery"
   POSTGRES_DB: "app_test"
   POSTGRES_USER: "app"
   POSTGRES_PASSWORD: "app"
@@ -54,7 +57,9 @@ clippy:
   extends: .rust
   stage: lint
   script:
-    - cargo clippy --workspace --all-targets --all-features -- -D warnings -W clippy::pedantic
+    - rustup target add wasm32-unknown-unknown
+    - cargo clippy --workspace --all-targets --features "$NATIVE_FEATURES" -- -D warnings -W clippy::pedantic
+    - cargo clippy -p web -p ui --all-targets --target wasm32-unknown-unknown --features "$WASM_FEATURES" -- -D warnings -W clippy::pedantic
 
 deny:
   extends: .rust
@@ -77,7 +82,30 @@ test:
     REQUIRE_SERVICES: "1"
     MEILI_URL: "http://meilisearch:7700"
   script:
-    - cargo test --workspace --all-features
+    - cargo test --workspace --features "$NATIVE_FEATURES"
+
+wasm-test:
+  extends: .rust
+  stage: test
+  script:
+    - apt-get install -y -qq --no-install-recommends chromium chromium-driver >/dev/null
+    - sh ../sh/ci-tools.sh wasm-bindgen
+    - rustup target add wasm32-unknown-unknown
+    - CHROMEDRIVER=/usr/bin/chromedriver cargo test -p ui --target wasm32-unknown-unknown
+
+e2e:
+  extends: .rust
+  stage: test
+  script:
+    - apt-get install -y -qq --no-install-recommends nodejs npm >/dev/null
+    - sh ../sh/ci-tools.sh leptos wasm-bindgen tailwind
+    - rustup target add wasm32-unknown-unknown
+    - cargo leptos build --bin-features gallery --lib-features hydrate,gallery
+    - cd ../web && npm ci --no-audit --no-fund && npx playwright install --with-deps chromium
+    - CI=1 npx playwright test
+  artifacts:
+    when: on_failure
+    paths: [src/web/playwright-report, src/web/test-results]
 
 leptos-build:
   extends: .rust
@@ -85,9 +113,7 @@ leptos-build:
   script:
     - sh ../sh/ci-tools.sh leptos wasm-bindgen tailwind
     - rustup target add wasm32-unknown-unknown
-    - |
-      if grep -q '\[\[workspace.metadata.leptos\]\]' Cargo.toml; then cargo leptos build --release;
-      else echo "no Leptos app configured yet"; fi
+    - cargo leptos build --release
 
 docker-image:
   # The runner is not privileged, so no docker-in-docker; kaniko builds without a daemon

@@ -31,6 +31,9 @@
           pkgs.postgresql_18
           pkgs.meilisearch
           pkgs.playwright-driver
+          # browser + driver for wasm-bindgen-test (same nixpkgs, matching versions)
+          pkgs.chromium
+          pkgs.chromedriver
           pkgs.nodejs
           pkgs.pkg-config
           pkgs.openssl

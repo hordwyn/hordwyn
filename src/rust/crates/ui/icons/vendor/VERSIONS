@@ -1,0 +1,7 @@
+Vendored icon files (only those named in ../icons.toml). Updated by hand: download the
+release tarball, copy the listed SVGs and the LICENSE file, update this file.
+
+lucide   npm lucide-static 1.69.0   ISC (glyphs derived from Feather: MIT, see LICENSE)
+         https://registry.npmjs.org/lucide-static/-/lucide-static-1.69.0.tgz   2026-11-05
+tabler   npm @tabler/icons 3.50.0    MIT
+         https://registry.npmjs.org/@tabler/icons/-/icons-3.50.0.tgz           2026-11-05
