@@ -1,0 +1,11 @@
+# build output, caches and local state never go into the image build context
+.git
+.cargo-home
+src/rust/target
+src/rust/.dev
+src/web/node_modules
+src/web/test-results
+src/web/playwright-report
+build
+docs/build
+config/.env

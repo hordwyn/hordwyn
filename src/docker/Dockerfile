@@ -7,6 +7,9 @@ WORKDIR /repo
 COPY src/sh/ci-tools.sh src/sh/ci-tools.sh
 RUN sh src/sh/ci-tools.sh leptos wasm-bindgen tailwind
 COPY src/rust src/rust
+# Tailwind input and static files referenced by workspace.metadata.leptos
+COPY src/web/style src/web/style
+COPY src/web/public src/web/public
 COPY config config
 WORKDIR /repo/src/rust
 ENV SQLX_OFFLINE=true
