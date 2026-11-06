@@ -1,0 +1,106 @@
+= Storage budget
+
+Every byte the server stores goes through `StorageBudget` (crate `assets`): image variants,
+kept originals, raw provider responses of the HTTP cache and user uploads. The raw storage
+backend (opendal: local filesystem, S3 or memory) is private to the `assets` crate, and the
+budget is also the `BlobStore` handed to the HTTP cache, so there is no second write path.
+
+The budget decides from an index of stored objects (table `stored_objects`). It never asks
+the backend whether an object exists, so S3 sees exactly one PUT per new object and no HEAD.
+
+== Settings
+
+All settings live in the `[storage]` section, see xref:configuration.adoc[configuration
+reference]. Defaults:
+
+[cols="1,1,3"]
+|===
+|Key |Default |Meaning
+
+|`max_total_bytes` |`20GiB` |Hard cap for all stored bytes (pinned and cache tier).
+|`high_watermark` |`0.90` |Above this fraction of the cap an eviction job is queued.
+|`low_watermark` |`0.75` |Eviction removes cache-tier objects down to this fraction.
+|`min_free_disk` |`5GiB` |Filesystem backend: free space that must remain on the volume
+(also `10%`). It lowers the effective cap when the disk is fuller than the budget.
+|`keep_originals` |`false` |Store the downloaded original next to the variants.
+|`variants` |`thumb, card, detail` |Which of `thumb` (200 px), `card` (400 px), `detail`
+(800 px) and `full` are materialised.
+|`formats` |`avif, webp` |Encoded formats per variant.
+|`max_source_pixels` |`4096x4096` |Larger sources are downscaled first.
+|`fetch_policy` |`library` |Which images get bytes before a client asks for them.
+|`per_user_upload_quota` |`1GiB` |Limit for each user's uploads.
+|`http_cache_max_bytes` |`2GiB` |Limit for raw provider responses.
+|`s3.max_put_per_day` |`50000` |S3 only: no new objects after this many PUTs per UTC day.
+|`s3.max_get_per_day` |`500000` |S3 only: redirect instead of proxying after this many GETs.
+|`s3.max_egress_bytes_per_day` |`20GiB` |S3 only: estimated bytes served; redirect when
+exceeded.
+|===
+
+== Fetch priority
+
+[cols="1,2,1,1"]
+|===
+|Priority |When |Job lane |Fetched ahead under
+
+|`visible` |a client requests `/assets/...` right now |interactive |every policy
+|`library` |cover of an item in a library, list or play |background_refresh |`library`, `eager`
+|`related` |people, seasons, expansions of library items |prefetch |`library`, `eager`
+|`catalog` |search results, trending |prefetch |`eager` only
+|===
+
+== Tiers and eviction
+
+* *Pinned*: user uploads and every asset referenced by a library item, list or play. Pinned
+  objects count toward the cap and quotas but are never evicted.
+* *Cache*: everything else. Eviction picks cache-tier objects by weighted LRU: the score is
+  (seconds since last access + 1) times a weight (visible and library 1, related 2,
+  catalog 4). Access times are updated at most once an hour per object.
+
+A write is admitted in this order:
+
+[mermaid]
+....
+flowchart TD
+  W[write key, bytes] --> D{key already stored?}
+  D -- yes --> T[touch, no PUT]
+  D -- no --> S{S3 daily PUT limit?}
+  S -- reached --> R1[refuse: redirect]
+  S -- ok --> U{upload over user quota?}
+  U -- yes --> R2[refuse: 413 for the user]
+  U -- no --> H{HTTP cache over its limit?}
+  H -- yes --> E1[evict oldest responses] --> H2{fits now?}
+  H2 -- no --> R3[refuse]
+  H -- no --> C{total over effective cap?}
+  H2 -- yes --> C
+  C -- yes, pinned write --> E2[evict cache tier synchronously] --> C2{fits now?}
+  C2 -- no --> R4[refuse: hard cap, admin event]
+  C -- yes, cache write --> R4
+  C -- no --> P[PUT and record]
+  C2 -- yes --> P
+  P --> HW{above high watermark?}
+  HW -- yes --> J[queue storage.evict job]
+....
+
+At the hard cap nothing new is materialised: `/assets/{hash}/{variant}.{ext}` answers with
+a `302` to the provider's original URL, no regeneration is queued, an
+`admin.storage.hard_cap` event is published once per episode and a `storage.hard_cap`
+metric is logged on every refusal. User requests never fail because of the budget; only an
+upload over the uploader's own quota is refused.
+
+Admission is serialised per process. With separate web and worker processes two writes can
+pass the check at the same moment, so the cap can be exceeded by at most one object per
+process until the next eviction.
+
+== Report
+
+[source,shell]
+----
+cli --config app.toml storage report --dry-run
+cli --config app.toml storage report --json
+cli --config app.toml storage evict
+----
+
+The report shows usage per tier, the HTTP cache, cap and watermarks, the effective cap after
+the free-disk rule, the volume's free space, today's S3 counters, whether the hard cap is
+reached and what eviction would remove right now. The Postgres database size is reported
+but not budgeted; the Meilisearch index size is added by the search crate.

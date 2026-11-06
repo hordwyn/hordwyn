@@ -13,7 +13,7 @@ const USAGE: &str = "usage: cargo xtask <command>
   fmt                format the workspace
   e2e                run the Playwright end-to-end suite
   dev                start the development server
-  services up|down   start or stop local Postgres (and later Meilisearch)
+  services up|down   start or stop local Postgres and versitygw (S3)
   sqlx-prepare       migrate the dev database and refresh the sqlx offline cache
   record <connector> re-record connector fixtures from the live API (needs its key)";
 
@@ -25,7 +25,7 @@ fn main() -> Result<()> {
         "e2e" => e2e(),
         "dev" => dev(),
         "services" => match std::env::args().nth(2).as_deref() {
-            Some("up") => xtask::services::up(),
+            Some("up") => xtask::services::up().and_then(|()| xtask::services::s3_up().map(|_| ())),
             Some("down") => xtask::services::down(),
             _ => bail!("usage: cargo xtask services up|down"),
         },
@@ -85,10 +85,23 @@ fn ci() -> Result<()> {
         step("services", xtask::services::up)?;
         xtask::services::pg_admin_url()
     };
+    // S3 tests run when an S3 endpoint is available, and are skipped with a message otherwise.
+    let s3 = if std::env::var_os("TEST_S3_ENDPOINT").is_some() || !xtask::services::s3_up()? {
+        None
+    } else {
+        Some(xtask::services::s3_url())
+    };
     step("test", || {
         cargo(
             &["test", "--workspace", "--features", NATIVE_FEATURES],
-            &[("TEST_DATABASE_URL", &test_db), ("REQUIRE_SERVICES", "1")],
+            &[
+                ("TEST_DATABASE_URL", test_db.as_str()),
+                ("REQUIRE_SERVICES", "1"),
+                ("TEST_S3_ENDPOINT", s3.as_deref().unwrap_or("")),
+            ]
+            .into_iter()
+            .filter(|(_, v)| !v.is_empty())
+            .collect::<Vec<_>>(),
         )
     })?;
     step("test-wasm", || {

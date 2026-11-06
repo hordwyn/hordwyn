@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT puts, gets, deletes, egress_bytes FROM storage_ops WHERE day = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "puts",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "storage_ops",
+            "name": "puts"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "gets",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "storage_ops",
+            "name": "gets"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "deletes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "storage_ops",
+            "name": "deletes"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "egress_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "storage_ops",
+            "name": "egress_bytes"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a0a7c10843587232a5cddc7ca198da7c34836230a02ecef74a7b5e44db029e2f"
+}

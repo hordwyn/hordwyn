@@ -73,9 +73,24 @@ web-sys = "0.3.107"
 cargo_metadata = "0.23"
 # must match wasm-bindgen-cli in flake.nix
 wasm-bindgen = "=0.2.130"
+# assets (versions checked on crates.io 2026-11-06)
+opendal = { version = "0.59.5", default-features = false, features = ["services-fs", "services-s3", "services-memory", "executors-tokio", "http-transport-reqwest"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp", "gif", "avif"] }
+fast_image_resize = { version = "6.1.0", features = ["image"] }
+thumbhash = "0.1.0"
+webp = { version = "0.3.1", default-features = false }
+rayon = "1.12.0"
+fs4 = "1.1.0"
+proptest = "1.12.0"
+toml = "1.2.0"
+
+# Small target dirs (DEC-055): line tables for our code (backtraces), no debug info for deps.
+[profile.dev]
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 1
+debug = false
 
 [profile.wasm-release]
 inherits = "release"

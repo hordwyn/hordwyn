@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(SUM(bytes), 0)::bigint AS \"n!\" FROM stored_objects\n               WHERE class = 'upload' AND owner_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7747e48b3cd114f542d499bb48e2a8f2c8efced73d2633461ff4c4631a5d6c45"
+}

@@ -1,0 +1,68 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO storage_ops (day, puts, gets, deletes, egress_bytes) VALUES ($1, $2, $3, $4, $5)\n             ON CONFLICT (day) DO UPDATE SET\n                 puts = storage_ops.puts + EXCLUDED.puts,\n                 gets = storage_ops.gets + EXCLUDED.gets,\n                 deletes = storage_ops.deletes + EXCLUDED.deletes,\n                 egress_bytes = storage_ops.egress_bytes + EXCLUDED.egress_bytes\n             RETURNING puts, gets, deletes, egress_bytes",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "puts",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "storage_ops",
+            "name": "puts"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "gets",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "storage_ops",
+            "name": "gets"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "deletes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "storage_ops",
+            "name": "deletes"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "egress_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "storage_ops",
+            "name": "egress_bytes"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "28f4c5f78938406f7cd820f78b3f9447d3ad1972ce6b51a86a123df1a7182ea3"
+}

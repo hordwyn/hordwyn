@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE stored_objects SET tier = $2 WHERE asset_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "237b017be614713eacddcf93412bcc56f7db50aa2d683973efe923ef402d0b59"
+}

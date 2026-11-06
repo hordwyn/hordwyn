@@ -102,5 +102,81 @@ pub fn down() -> Result<()> {
             .arg(&data)
             .args(["-m", "fast", "stop"]))?;
     }
+    s3_down()
+}
+
+// ---------------------------------------------------------------- S3 (versitygw)
+
+pub const S3_PORT: u16 = 55433;
+pub const S3_ACCESS_KEY: &str = "test";
+pub const S3_SECRET_KEY: &str = "testsecret";
+pub const S3_BUCKET: &str = "assets";
+
+/// Endpoint of the local S3-compatible server.
+#[must_use]
+pub fn s3_url() -> String {
+    format!("http://127.0.0.1:{S3_PORT}")
+}
+
+fn port_open(port: u16) -> bool {
+    std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+}
+
+fn on_path(bin: &str) -> bool {
+    Command::new(bin).arg("--version").output().is_ok()
+}
+
+/// Start versitygw (Apache-2.0) with a posix backend if it is installed. Returns whether an
+/// S3 endpoint is available; S3 tests are skipped otherwise.
+///
+/// # Errors
+/// If versitygw is installed but does not come up.
+pub fn s3_up() -> Result<bool> {
+    if port_open(S3_PORT) {
+        return Ok(true);
+    }
+    if !on_path("versitygw") {
+        println!("s3: versitygw not installed, S3 tests will be skipped");
+        return Ok(false);
+    }
+    let dir = dev_dir().join("s3");
+    let data = dir.join("data");
+    let iam = dir.join("iam");
+    std::fs::create_dir_all(data.join(S3_BUCKET))?;
+    std::fs::create_dir_all(&iam)?;
+    let log = std::fs::File::create(dir.join("s3.log"))?;
+    let child = Command::new("versitygw")
+        .env("ROOT_ACCESS_KEY", S3_ACCESS_KEY)
+        .env("ROOT_SECRET_KEY", S3_SECRET_KEY)
+        .arg("--port")
+        .arg(format!("127.0.0.1:{S3_PORT}"))
+        .arg("--iam-dir")
+        .arg(&iam)
+        .arg("posix")
+        .arg(&data)
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        .spawn()
+        .context("start versitygw")?;
+    std::fs::write(dir.join("pid"), child.id().to_string())?;
+    for _ in 0..50 {
+        if port_open(S3_PORT) {
+            println!("s3: {}", s3_url());
+            return Ok(true);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    bail!(
+        "versitygw did not start, see {}",
+        dir.join("s3.log").display()
+    )
+}
+
+fn s3_down() -> Result<()> {
+    let pid_file = dev_dir().join("s3").join("pid");
+    if let Ok(pid) = std::fs::read_to_string(&pid_file) {
+        let _ = Command::new("kill").arg(pid.trim()).status();
+        std::fs::remove_file(pid_file)?;
+    }
     Ok(())
 }

@@ -34,7 +34,14 @@ pub const ALLOWED_WORKSPACE_DEPS: &[(&str, &[&str])] = &[
 
 /// Crates that must not depend *directly* on an HTTP client: all their outgoing HTTP goes
 /// through the `HttpFetch` port (governed client in `catalog-core`), D-5.2 / D-6.3.
-pub const NO_DIRECT_HTTP: &[&str] = &["connectors", "importers", "integrations", "notify"];
+pub const NO_DIRECT_HTTP: &[&str] = &[
+    "connectors",
+    "importers",
+    "integrations",
+    "notify",
+    // image downloads use HttpFetch; S3 traffic goes through opendal (transitive)
+    "assets",
+];
 
 /// HTTP client crates covered by [`NO_DIRECT_HTTP`].
 pub const HTTP_CLIENTS: &[&str] = &[

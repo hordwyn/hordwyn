@@ -10,3 +10,29 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+app.workspace = true
+async-trait.workspace = true
+blake3.workspace = true
+chrono.workspace = true
+fast_image_resize.workspace = true
+fs4.workspace = true
+image.workspace = true
+opendal.workspace = true
+rayon.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+thumbhash.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+webp.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+store-pg.workspace = true
+testkit.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "time"] }
+toml.workspace = true

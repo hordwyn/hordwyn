@@ -36,6 +36,12 @@ allow = [
 crate = "webpki-root-certs"
 allow = ["CDLA-Permissive-2.0"]
 
+# rav1e (AVIF encoder) lists libfuzzer-sys for its fuzzing cfg only; it is never built for our
+# targets (`cargo tree -i libfuzzer-sys` is empty). NCSA is permissive (OSI, FSF free), DEC-065.
+[[licenses.exceptions]]
+crate = "libfuzzer-sys"
+allow = ["NCSA"]
+
 [licenses.private]
 ignore = true
 

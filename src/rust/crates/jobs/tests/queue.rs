@@ -347,8 +347,15 @@ async fn shutdown_waits_for_running_jobs() {
     .handle("slow", rec.clone());
     let stop = CancellationToken::new();
     let handle = tokio::spawn(worker.run(stop.clone()));
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert_eq!(state(&q, id).await.0, "running");
+    // Wait until the worker has claimed the job (a fixed sleep was flaky on loaded CI runners).
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while state(&q, id).await.0 == "queued" {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "job was never claimed"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
     stop.cancel();
     handle.await.unwrap();
     assert_eq!(

@@ -25,6 +25,13 @@ Date checked: 2026-11-05
 - Logo: from TMDB's own logo page only (https://www.themoviedb.org/about/logos-attribution); not
   vendored yet. Until then the attribution is text plus link (see docs/research/icons.md).
 
+## Other conditions (terms, checked 2026-11-06)
+
+- No use of TMDB content for training or validating machine-learning or AI systems.
+- On termination all TMDB content, including cached content, must be purged.
+- Commercial use (fees, ads, revenue) needs a separate written agreement with TMDB; an operator
+  who rebrands and sells this application must obtain one.
+
 ## Caching
 
 Terms: do not "Cache, for longer than 6 months, any information obtained through or from TMDB".

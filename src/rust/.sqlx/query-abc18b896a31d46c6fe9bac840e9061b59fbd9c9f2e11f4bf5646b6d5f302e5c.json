@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE stored_objects SET last_accessed = $2 WHERE key = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "abc18b896a31d46c6fe9bac840e9061b59fbd9c9f2e11f4bf5646b6d5f302e5c"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM stored_objects WHERE key = ANY($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ff92e6bf925368f193e4b2c7a895644a5e210bfbdcba2a23daf7e9f00783105c"
+}

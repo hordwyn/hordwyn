@@ -1,0 +1,157 @@
+= Configuration reference
+// Generated from the config structs by `UPDATE_DOCS=1 cargo test -p config`. Do not edit.
+
+The server reads an optional TOML file (`--config <path>`, example: `config/app.example.toml`)
+and then environment variables. Every key can be set as `APP__<SECTION>__<KEY>`
+(nested tables add further `__` parts). Secrets (API keys, the Meilisearch master key,
+OIDC client secret, S3 secret key) should only be set through the environment;
+they are never written back or logged.
+
+== `[auth]`
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`secure_cookies` |`APP__AUTH__SECURE_COOKIES` |boolean |`true` |Send cookies with `Secure` (disable only for plain-HTTP development).
+|`session_days` |`APP__AUTH__SESSION_DAYS` |integer |`30` |Session lifetime in days (sliding).
+|`signup` |`APP__AUTH__SIGNUP` |`open` \| `invite` \| `closed` |`"invite"` |
+|===
+
+== `[auth.oidc]`
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`auto_create` |`APP__AUTH__OIDC__AUTO_CREATE` |boolean |- |Create an account on first OIDC sign-in even when sign-up is not open.
+|`client_id` |`APP__AUTH__OIDC__CLIENT_ID` |string |- |
+|`client_secret` |`APP__AUTH__OIDC__CLIENT_SECRET` |string |- |Set through `APP__AUTH__OIDC__CLIENT_SECRET`.
+|`display_name` |`APP__AUTH__OIDC__DISPLAY_NAME` |string |- |Button label on the sign-in page.
+|`issuer` |`APP__AUTH__OIDC__ISSUER` |string |- |Issuer URL used for discovery (`/.well-known/openid-configuration`).
+|===
+
+== `[brand]`
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`dir` |`APP__BRAND__DIR` |string |`"config/brand/default"` |Directory with `brand.toml`, logos and i18n overrides (D-10).
+|===
+
+== `[connectors.<id>]`
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`api_key` |`APP__CONNECTORS__<ID>__API_KEY` |string |- |API key or token. Prefer `APP__CONNECTORS__<ID>__API_KEY`; `KK_<ID>_API_KEY` is read as a fallback.
+|`base_url` |`APP__CONNECTORS__<ID>__BASE_URL` |string |- |Override of the API base URL (tests, mirrors). Its host is added to the allowlist.
+|`enabled` |`APP__CONNECTORS__<ID>__ENABLED` |boolean |- |
+|===
+
+== `[database]`
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`max_connections` |`APP__DATABASE__MAX_CONNECTIONS` |integer |`20` |
+|`url` |`APP__DATABASE__URL` |string |`"postgres://app@localhost:5432/app"` |Postgres connection URL.
+|===
+
+== `[features]`
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`kinds` |`APP__FEATURES__KINDS` |list of string |`[]` |Enabled media kinds; empty = all built-in kinds (D-10 feature toggles).
+|===
+
+== `[jobs]`
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`concurrency` |`APP__JOBS__CONCURRENCY` |integer |`4` |Concurrent jobs per worker process.
+|`shutdown_grace_secs` |`APP__JOBS__SHUTDOWN_GRACE_SECS` |integer |`20` |Seconds a stopping worker waits for running jobs.
+|===
+
+== `[search]`
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`backend` |`APP__SEARCH__BACKEND` |`meilisearch` \| `postgres` |`"meilisearch"` |
+|`index_prefix` |`APP__SEARCH__INDEX_PREFIX` |string |`""` |Prefix for index names, so several instances can share one Meilisearch.
+|`meili_master_key` |`APP__SEARCH__MEILI_MASTER_KEY` |string |- |Master key; only the server uses it, clients never see it (D-13). Set it through `APP__SEARCH__MEILI_MASTER_KEY`.
+|`meili_url` |`APP__SEARCH__MEILI_URL` |string |`"http://localhost:7700"` |
+|===
+
+== `[server]`
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`assets_base_url` |`APP__SERVER__ASSETS_BASE_URL` |string |- |Optional CDN base URL for `/assets/...` (D-7).
+|`bind` |`APP__SERVER__BIND` |string |`"127.0.0.1:3000"` |Address the HTTP server listens on.
+|`public_url` |`APP__SERVER__PUBLIC_URL` |string |`"http://localhost:3000"` |Public base URL (links in emails, OIDC redirect, share links).
+|`role` |`APP__SERVER__ROLE` |`all` \| `web` \| `worker` |`"all"` |Default role; the `--role` flag overrides it.
+|===
+
+== `[storage]`
+
+The `storage` section of the configuration (D-8).
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`backend` |`APP__STORAGE__BACKEND` |`fs` \| `memory` |`"fs"` |
+|`fetch_policy` |`APP__STORAGE__FETCH_POLICY` |`lazy` \| `library` \| `eager` |`"library"` |Which images get bytes ahead of being requested (D-8).
+|`formats` |`APP__STORAGE__FORMATS` |list of `avif` \| `webp` |`["avif", "webp"]` |
+|`fs_root` |`APP__STORAGE__FS_ROOT` |string |`"data/blobs"` |Root directory of the fs backend.
+|`high_watermark` |`APP__STORAGE__HIGH_WATERMARK` |number |`0.9` |Start evicting above this fraction of the cap.
+|`http_cache_max_bytes` |`APP__STORAGE__HTTP_CACHE_MAX_BYTES` |string |`"2GiB"` |Limit for raw provider responses kept by the HTTP cache.
+|`keep_originals` |`APP__STORAGE__KEEP_ORIGINALS` |boolean |`false` |
+|`low_watermark` |`APP__STORAGE__LOW_WATERMARK` |number |`0.75` |Evict down to this fraction of the cap.
+|`max_source_pixels` |`APP__STORAGE__MAX_SOURCE_PIXELS` |string |`"4096x4096"` |
+|`max_total_bytes` |`APP__STORAGE__MAX_TOTAL_BYTES` |string |`"20GiB"` |Hard cap for all stored bytes (pinned and cache tier).
+|`min_free_disk` |`APP__STORAGE__MIN_FREE_DISK` |string |`"5GiB"` |fs only: never let free space on the volume drop below this.
+|`per_user_upload_quota` |`APP__STORAGE__PER_USER_UPLOAD_QUOTA` |string |`"1GiB"` |Per-user limit for uploads (play photos, avatars).
+|`variants` |`APP__STORAGE__VARIANTS` |list of `thumb` \| `card` \| `detail` \| `full` |`["thumb", "card", "detail"]` |Which variants to materialise.
+|===
+
+== `[storage.s3]`
+
+S3 settings and daily operation limits.
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`access_key_id` |`APP__STORAGE__S3__ACCESS_KEY_ID` |string |- |Access key id; the secret comes from the environment only (`APP__STORAGE__S3__SECRET_KEY`).
+|`bucket` |`APP__STORAGE__S3__BUCKET` |string |`""` |
+|`endpoint` |`APP__STORAGE__S3__ENDPOINT` |string |- |
+|`max_egress_bytes_per_day` |`APP__STORAGE__S3__MAX_EGRESS_BYTES_PER_DAY` |string |`"20GiB"` |Estimated bytes served from S3 per day; when exceeded, redirect instead of proxying.
+|`max_get_per_day` |`APP__STORAGE__S3__MAX_GET_PER_DAY` |integer |`500000` |
+|`max_put_per_day` |`APP__STORAGE__S3__MAX_PUT_PER_DAY` |integer |`50000` |
+|`region` |`APP__STORAGE__S3__REGION` |string |`"us-east-1"` |
+|`root` |`APP__STORAGE__S3__ROOT` |string |`"/"` |
+|`secret_access_key` |`APP__STORAGE__S3__SECRET_ACCESS_KEY` |string |- |
+|===
+
+== `[telemetry]`
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`filter` |`APP__TELEMETRY__FILTER` |string |`"info,sqlx=warn"` |`tracing` filter directives, e.g. `info,sqlx=warn`. `RUST_LOG` overrides it.
+|`log_format` |`APP__TELEMETRY__LOG_FORMAT` |`text` \| `json` |`"text"` |
+|===

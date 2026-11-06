@@ -1,2 +1,4 @@
 * xref:index.adoc[Overview]
 * xref:architecture.adoc[Architecture]
+* xref:storage-budget.adoc[Storage budget]
+* xref:configuration.adoc[Configuration reference]

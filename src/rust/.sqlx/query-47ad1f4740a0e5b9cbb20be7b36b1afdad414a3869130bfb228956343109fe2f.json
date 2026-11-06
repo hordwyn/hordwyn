@@ -1,0 +1,114 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT key, class, tier, bytes, owner_id, asset_id, priority, last_accessed\n             FROM stored_objects\n             WHERE tier = 'cache' AND ($1::text IS NULL OR class = $1)\n             ORDER BY (GREATEST(EXTRACT(EPOCH FROM ($2 - last_accessed))::bigint, 0) + 1)\n                      * CASE priority WHEN 'related' THEN 2 WHEN 'catalog' THEN 4 ELSE 1 END DESC,\n                      key\n             LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "stored_objects",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "class",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "stored_objects",
+            "name": "class"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "tier",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "stored_objects",
+            "name": "tier"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "stored_objects",
+            "name": "bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "stored_objects",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "asset_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "stored_objects",
+            "name": "asset_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "priority",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "stored_objects",
+            "name": "priority"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "last_accessed",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "stored_objects",
+            "name": "last_accessed"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "47ad1f4740a0e5b9cbb20be7b36b1afdad414a3869130bfb228956343109fe2f"
+}
