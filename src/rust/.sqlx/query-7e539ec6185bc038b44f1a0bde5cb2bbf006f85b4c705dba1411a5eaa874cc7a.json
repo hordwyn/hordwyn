@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS \"n!\" FROM notify_deliveries\n               WHERE channel_id = $1 AND event = $2 AND created_at >= $3\n                 AND state <> 'suppressed'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7e539ec6185bc038b44f1a0bde5cb2bbf006f85b4c705dba1411a5eaa874cc7a"
+}

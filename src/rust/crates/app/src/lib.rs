@@ -23,8 +23,8 @@ use domain::Timestamp;
 use domain::hlc::Hlc;
 use ports::{
     AppEvent, CatalogRepo, Clock, CompanionRepo, EventBus, IdGen, InviteRepo, JobQueue,
-    KindCatalog, LibraryRepo, LinkRequestRepo, ListRepo, ProgressRepo, ReviewRepo, SessionRepo,
-    UserRepo,
+    KindCatalog, LibraryRepo, LinkRequestRepo, ListRepo, Notification, Notifications, ProgressRepo,
+    ReviewRepo, SessionRepo, UserRepo,
 };
 
 /// How far ahead of the server clock a client's HLC stamp may be (5 minutes).
@@ -54,6 +54,7 @@ pub struct App {
     pub ids: Arc<dyn IdGen>,
     pub events: Arc<dyn EventBus>,
     pub jobs: Arc<dyn JobQueue>,
+    pub notifications: Arc<dyn Notifications>,
 }
 
 impl App {
@@ -82,5 +83,9 @@ impl App {
 
     async fn publish(&self, event: AppEvent) {
         self.events.publish(event).await;
+    }
+
+    async fn notify(&self, n: Notification) {
+        self.notifications.emit(n).await;
     }
 }

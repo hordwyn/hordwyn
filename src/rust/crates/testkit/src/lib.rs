@@ -13,7 +13,7 @@ use std::sync::Arc;
 use app::{App, Repos};
 
 pub use fakes::{
-    FixedClock, MemBlobs, MemJobs, MemSearch, RecordingEvents, RecordingNotifier, ReplayHttp,
+    FixedClock, MemBlobs, MemJobs, MemSearch, RecordingEvents, RecordingNotifications, ReplayHttp,
     SeqIds,
 };
 pub use kinds::StaticKinds;
@@ -27,6 +27,7 @@ pub struct TestEnv {
     pub ids: Arc<SeqIds>,
     pub events: Arc<RecordingEvents>,
     pub jobs: Arc<MemJobs>,
+    pub notifications: Arc<RecordingNotifications>,
 }
 
 impl TestEnv {
@@ -44,6 +45,7 @@ impl TestEnv {
         let ids = Arc::new(SeqIds::default());
         let events = Arc::new(RecordingEvents::default());
         let jobs = Arc::new(MemJobs::default());
+        let notifications = Arc::new(RecordingNotifications::default());
         let app = App {
             repos: Repos {
                 users: store.clone(),
@@ -62,6 +64,7 @@ impl TestEnv {
             ids: ids.clone(),
             events: events.clone(),
             jobs: jobs.clone(),
+            notifications: notifications.clone(),
         };
         Self {
             app,
@@ -70,6 +73,7 @@ impl TestEnv {
             ids,
             events,
             jobs,
+            notifications,
         }
     }
 }

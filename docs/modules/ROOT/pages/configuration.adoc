@@ -80,6 +80,30 @@ they are never written back or logged.
 |`shutdown_grace_secs` |`APP__JOBS__SHUTDOWN_GRACE_SECS` |integer |`20` |Seconds a stopping worker waits for running jobs.
 |===
 
+== `[notify]`
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`allow_private_targets` |`APP__NOTIFY__ALLOW_PRIVATE_TARGETS` |boolean |`false` |Allow channel targets (ntfy, Gotify, webhooks, ...) in private and loopback networks. Off by default: otherwise any member could make the server call internal services.
+|`max_attempts` |`APP__NOTIFY__MAX_ATTEMPTS` |integer |`5` |Attempts per delivery before it is marked failed.
+|===
+
+== `[notify.smtp]`
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`from` |`APP__NOTIFY__SMTP__FROM` |string |- |Sender, e.g. `Shelf <noreply@example.org>`.
+|`host` |`APP__NOTIFY__SMTP__HOST` |string |- |
+|`password` |`APP__NOTIFY__SMTP__PASSWORD` |string |- |Secret: set it with `APP__NOTIFY__SMTP__PASSWORD`.
+|`port` |`APP__NOTIFY__SMTP__PORT` |integer |- |
+|`security` |`APP__NOTIFY__SMTP__SECURITY` |`tls` \| `starttls` \| `none` |- |
+|`username` |`APP__NOTIFY__SMTP__USERNAME` |string |- |
+|===
+
 == `[search]`
 
 [cols="2,3,2,2,4"]

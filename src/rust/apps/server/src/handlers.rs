@@ -115,6 +115,26 @@ impl Handler for Evict {
     }
 }
 
+struct Deliver(Arc<notify::Deliverer>);
+
+#[async_trait]
+impl Handler for Deliver {
+    async fn run(&self, job: &Job) -> Result<(), String> {
+        self.0.deliver(uuid_field(job, "delivery_id")?).await
+    }
+}
+
+struct Digest(Arc<notify::Deliverer>);
+
+#[async_trait]
+impl Handler for Digest {
+    async fn run(&self, job: &Job) -> Result<(), String> {
+        let until = serde_json::from_value(job.payload["until"].clone())
+            .map_err(|e| format!("job payload `until`: {e}"))?;
+        self.0.digest(uuid_field(job, "channel_id")?, until).await
+    }
+}
+
 pub fn worker(s: &Server) -> Worker {
     let cfg = WorkerConfig {
         concurrency: usize::try_from(s.config.jobs.concurrency).unwrap_or(4),
@@ -137,4 +157,6 @@ pub fn worker(s: &Server) -> Worker {
             importers::IMPORT_JOB,
             Arc::new(Import(s.api.importer.clone().expect("importer is wired"))),
         )
+        .handle(notify::DELIVER_JOB, Arc::new(Deliver(s.deliverer.clone())))
+        .handle(notify::DIGEST_JOB, Arc::new(Digest(s.deliverer.clone())))
 }

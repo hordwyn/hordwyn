@@ -88,6 +88,7 @@ async fn offline_clients_converge_and_replays_are_no_ops() {
         registry: Registry::default(),
         assets: None,
         importer: None,
+        notify: None,
         changes: Some(store),
         naming: Naming::from_prefix("app", "App"),
         secure_cookies: true,

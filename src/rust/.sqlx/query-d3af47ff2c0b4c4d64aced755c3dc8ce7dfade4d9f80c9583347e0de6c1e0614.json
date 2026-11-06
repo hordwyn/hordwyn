@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO notify_channels (id, user_id, name, config, enabled, created_at)\n             VALUES ($1, $2, $3, $4, $5, $6)\n             ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, config = EXCLUDED.config,\n                 enabled = EXCLUDED.enabled",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Jsonb",
+        "Bool",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d3af47ff2c0b4c4d64aced755c3dc8ce7dfade4d9f80c9583347e0de6c1e0614"
+}

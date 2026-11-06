@@ -99,6 +99,10 @@ async fn imports_rows_and_reports_errors() {
     assert!(jobs.iter().any(|j| j.kind == importers::IMPORT_JOB));
     let progress = e.t.events.topics();
     assert!(progress.iter().any(|t| t == "import.progress"));
+    let n = e.t.notifications.all().pop().unwrap();
+    assert_eq!(n.event, "import.finished");
+    assert_eq!(n.args["imported"], 2);
+    assert_eq!(n.args["errors"], 2);
 }
 
 #[tokio::test]

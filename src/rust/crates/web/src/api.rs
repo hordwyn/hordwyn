@@ -10,6 +10,7 @@ use contracts::{
     ShareLinkDto, SharedListDto, UserDto,
 };
 use leptos::prelude::*;
+use leptos::server_fn::codec::Json;
 
 #[cfg(feature = "ssr")]
 mod server {
@@ -304,6 +305,64 @@ pub async fn shared_list(token: String) -> Result<SharedListDto, ServerFnError> 
         .shared_list(&token)
         .await
         .map_err(server::code)
+}
+
+// ---------------------------------------------------------------- notifications (D-17)
+
+#[server(prefix = "/_fn")]
+pub async fn notifications() -> Result<contracts::NotificationPageDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.notifications(&t).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn mark_read(id: String) -> Result<(), ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.mark_read(&t, &id).await.map_err(server::code)
+}
+
+// nested JSON (`config`) does not survive URL encoding: JSON input
+#[server(prefix = "/_fn", input = Json)]
+pub async fn create_channel(
+    channel: contracts::NewChannelDto,
+) -> Result<contracts::ChannelDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.create_channel(&t, channel).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn delete_channel(id: String) -> Result<(), ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.delete_channel(&t, &id).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn test_channel(id: String) -> Result<(), ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.test_channel(&t, &id).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn", input = Json)]
+pub async fn put_subscription(
+    subscription: contracts::SubscriptionDto,
+) -> Result<contracts::SubscriptionDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.put_subscription(&t, subscription)
+        .await
+        .map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn delete_subscription(id: String) -> Result<(), ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.delete_subscription(&t, &id).await.map_err(server::code)
 }
 
 /// Error code carried by a server function error (see `server::code`).

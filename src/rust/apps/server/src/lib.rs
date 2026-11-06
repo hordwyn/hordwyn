@@ -40,6 +40,8 @@ pub struct Server {
     pub bus: realtime::Bus,
     pub pool: sqlx::PgPool,
     pub search: Arc<dyn SearchIndex>,
+    pub notify: Arc<notify::Engine>,
+    pub deliverer: Arc<notify::Deliverer>,
 }
 
 /// Test and embedding hooks; production uses the defaults.
@@ -51,6 +53,91 @@ pub struct Overrides {
     pub http: Option<Arc<dyn HttpFetch>>,
     /// Search index instead of the configured backend.
     pub search: Option<Arc<dyn SearchIndex>>,
+}
+
+/// Built-in kinds, limited to `features.kinds` when set, and their ids.
+fn enabled_kinds(config: &AppConfig) -> (kinds::Registry, Vec<String>) {
+    let mut kinds = kinds::Registry::with_builtins();
+    if !config.features.kinds.is_empty() {
+        kinds.retain(&config.features.kinds);
+    }
+    let ids = kinds.ids().map(ToString::to_string).collect();
+    (kinds, ids)
+}
+
+/// The notification engine and deliverer, and the VAPID public key if web push is on.
+async fn notify_engine(
+    config: &AppConfig,
+    brand: &brand::Brand,
+    pool: &sqlx::PgPool,
+    queue: &jobs::PgQueue,
+    bus: &realtime::Bus,
+    clock: Arc<dyn app::ports::Clock>,
+) -> anyhow::Result<(Arc<notify::Engine>, Arc<notify::Deliverer>, Option<String>)> {
+    let engine = Arc::new(notify::Engine::new(
+        Arc::new(notify::pg::PgNotifyStore::new(pool.clone())),
+        Arc::new(queue.clone()),
+        Arc::new(bus.clone()),
+        clock.clone(),
+        Arc::new(infra::SystemIds),
+        &brand.name,
+        &brand.default_locale,
+        brand.strings.clone(),
+    ));
+    engine
+        .reload_templates()
+        .await
+        .context("notification templates")?;
+    let (channels, web_push_key) =
+        notify_channels(config, &brand.user_agent(env!("CARGO_PKG_VERSION")))?;
+    let deliverer = Arc::new(notify::Deliverer::new(
+        engine.clone(),
+        Arc::new(channels),
+        clock,
+        &config.server.public_url,
+        config.notify.max_attempts,
+    ));
+    Ok((engine, deliverer, web_push_key))
+}
+
+/// Notification channels from the configuration, and the VAPID public key if web push is on
+/// (never yet, DEC-141).
+fn notify_channels(
+    cfg: &AppConfig,
+    user_agent: &str,
+) -> anyhow::Result<(notify::channels::Channels, Option<String>)> {
+    use notify::channels::{Channels, email, http};
+    let n = &cfg.notify;
+    let email = n
+        .smtp
+        .as_ref()
+        .map(|s| {
+            email::Email::new(&email::SmtpSettings {
+                host: s.host.clone(),
+                port: s.port,
+                security: match s.security {
+                    config::SmtpSecurity::Tls => email::SmtpSecurity::Tls,
+                    config::SmtpSecurity::Starttls => email::SmtpSecurity::StartTls,
+                    config::SmtpSecurity::None => email::SmtpSecurity::None,
+                },
+                username: s.username.clone(),
+                password: s.password.as_ref().map(|p| p.expose().to_string()),
+                from: s.from.clone(),
+            })
+        })
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("notify.smtp: {e}"))?;
+    Ok((
+        Channels {
+            http: Some(http::HttpChannels::new(
+                Arc::new(catalog_core::PlainHttp::new(user_agent)),
+                n.allow_private_targets,
+            )),
+            email,
+        },
+        // web push is not built yet (DEC-141)
+        None,
+    ))
 }
 
 /// Compiled-in connectors enabled by the configuration (all by default).
@@ -115,6 +202,8 @@ impl Server {
     ///
     /// # Errors
     /// Unreachable database, invalid brand or storage configuration.
+    // The composition root: every adapter is wired here, in one place, on purpose.
+    #[allow(clippy::too_many_lines)]
     pub async fn build(config: AppConfig, role: ServerRole, o: Overrides) -> anyhow::Result<Self> {
         let brand = brand::Brand::load(std::path::Path::new(&config.brand.dir))
             .with_context(|| format!("brand directory {}", config.brand.dir))?;
@@ -132,11 +221,9 @@ impl Server {
         };
         let queue = jobs::PgQueue::new(pool.clone());
         let clock: Arc<dyn app::ports::Clock> = Arc::new(infra::SystemClock::default());
-        let mut kinds = kinds::Registry::with_builtins();
-        if !config.features.kinds.is_empty() {
-            kinds.retain(&config.features.kinds);
-        }
-        let kind_ids: Vec<String> = kinds.ids().map(ToString::to_string).collect();
+        let (kinds, kind_ids) = enabled_kinds(&config);
+        let (engine, deliverer, web_push_key) =
+            notify_engine(&config, &brand, &pool, &queue, &bus, clock.clone()).await?;
         let app = App {
             repos,
             kinds: Arc::new(kinds),
@@ -144,14 +231,18 @@ impl Server {
             ids: Arc::new(infra::SystemIds),
             events: Arc::new(bus.clone()),
             jobs: Arc::new(queue.clone()),
+            notifications: engine.clone(),
         };
 
+        // storage watermark events also become admin notifications
+        let budget_events =
+            notify::AdminBridge::new(Arc::new(bus.clone()), engine.clone(), clock.clone());
         let budget = Arc::new(
             assets::StorageBudget::open(
                 config.storage.clone(),
                 Arc::new(assets::pg::PgObjectIndex::new(pool.clone())),
                 clock.clone(),
-                Arc::new(bus.clone()),
+                Arc::new(budget_events),
             )?
             .with_jobs(Arc::new(queue.clone())),
         );
@@ -187,6 +278,11 @@ impl Server {
             registry: registry.clone(),
             assets: Some(assets.clone()),
             changes: Some(Arc::new(store_pg::PgStore::new(pool.clone()))),
+            notify: Some(api::NotifyApi {
+                engine: engine.clone(),
+                deliverer: deliverer.clone(),
+                web_push_key,
+            }),
             importer: Some(Arc::new(importers::Importer::new(
                 app.clone(),
                 Arc::new(importers::pg::PgImportStore::new(pool.clone())),
@@ -210,6 +306,8 @@ impl Server {
             bus,
             pool,
             search,
+            notify: engine,
+            deliverer,
         })
     }
 

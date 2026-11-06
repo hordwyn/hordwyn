@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO notify_inbox (id, user_id, event, dedupe_key, title, body, link,\n                 created_at, read_at)\n             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n             ON CONFLICT (user_id, event, dedupe_key) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "58a8790a888f020c33f8de7723a40fa6b7af8fa3f0ee4a7b85c65b2ef9f16d9a"
+}

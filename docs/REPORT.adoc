@@ -49,17 +49,25 @@ server clock merge and drift cap; convergence and replay test. Tauri spike not d
 sessions with "copy to my log" (idempotent), per-user privacy (`share_sessions`), link-shared
 lists readable without an account; REST, web pages, e2e (promote, accept, see history,
 demote, merge; history unchanged). Profile visibility not built (DEC-130).
-|M10, M11, M13, M14, M17 |- |Not started (see "Known gaps").
+|M13 Notifications |`m13` |Event catalogue (22 events), inbox (always on, dedupe per event
+key), subscriptions with filters, targets, immediate/digest (cron in the user's timezone),
+quiet hours, rate limits, instance defaults with locking, Fluent templates with brand and
+admin overrides, delivery log, retries and gone handling. Channels: email (SMTP), ntfy,
+Gotify, Discord, Matrix, Apprise API, signed webhooks (Standard Webhooks) through the
+`HttpFetch` port with an SSRF guard. Web push not built (DEC-141). Emitted so far: social,
+import, sign-up and storage events (DEC-143).
+|M10, M11, M14, M17 |- |Not started (see "Known gaps").
 |===
 
 == Test results
 
 * `cd src/rust && cargo xtask ci`: fmt, clippy pedantic (native and wasm32), cargo-deny,
   sqlx offline cache, all tests against local Postgres, Meilisearch and versitygw (S3),
-  wasm tests. Last green run: the commit of tag `m15`; 217 tests passed, 0 failed, 2 ignored
+  wasm tests. Last green run: the commit of tag `m13`; 249 tests passed, 0 failed, 2 ignored
   (live provider smoke tests), no service-dependent test skipped.
-* `cargo xtask e2e`: 11 Playwright tests green (8 gallery/accessibility tests with axe
-  WCAG A/AA, the M07 slice test with the TMDB fixture server, 2 M15 sharing tests).
+* `cargo xtask e2e`: 12 Playwright tests green (8 gallery/accessibility tests with axe
+  WCAG A/AA, the M07 slice test with the TMDB fixture server, 2 M15 sharing tests, 1 M13
+  notifications test).
 * Latency (M05 acceptance, `apps/server/tests/latency.rs`): with a connector that takes 10 s,
   item detail 3-5 ms, search 1-2 ms (limit 200 ms); `entity.updated` after 10.2 s,
   `search.results` after 10.0 s.
@@ -106,7 +114,7 @@ demote, merge; history unchanged). Profile visibility not built (DEC-130).
 
 == Known gaps and bugs
 
-* M10 (board-game research), M11 (board games), M13 (notifications), M14 (integrations),
+* M10 (board-game research), M11 (board games), M14 (integrations),
   M17 (hardening, load test, image size, G2) not done; M12 and M09 only
   in part.
 * Legacy importer fixture (Q4) not present in the repository.
@@ -123,4 +131,6 @@ demote, merge; history unchanged). Profile visibility not built (DEC-130).
 . M12: Trakt importer (API docs research), Goodreads and BG Stats from owner sample exports.
 . M10/M11 board games once BGG is unblocked.
 . M16: Tauri desktop spike on a host with more disk.
-. M13, M14, M17 and an independent review (G2, and of M04-M08).
+. M13 follow-ups: web push on p256 0.14 (DEC-141), release and library event emitters
+  (DEC-143), per-user language for texts (DEC-138).
+. M14, M17 and an independent review (G2, and of M04-M08).

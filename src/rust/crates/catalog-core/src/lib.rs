@@ -16,6 +16,7 @@ mod http;
 pub mod merge;
 mod model;
 pub mod pg;
+mod plain;
 pub mod refresh;
 mod registry;
 pub mod search;
@@ -29,5 +30,6 @@ pub use model::{
     Attribution, Auth, Capability, ConnectorError, ConnectorInfo, DetailsRequest, ImageKind,
     ImageRef, RateLimit, SearchRequest, Snapshot,
 };
+pub use plain::PlainHttp;
 pub use registry::Registry;
 pub use singleflight::SingleFlight;

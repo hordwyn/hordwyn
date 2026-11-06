@@ -6,7 +6,7 @@ use domain::ids::{CompanionId, InviteId, LinkRequestId, UserId};
 use domain::user::{Actor, Role, User};
 
 use crate::error::OptionExt;
-use crate::ports::AppEvent;
+use crate::ports::{AppEvent, Audience, Notification, Subject};
 use crate::{App, AppError, AppResult};
 
 impl App {
@@ -172,6 +172,22 @@ impl App {
             vec![req.from, req.to],
         ))
         .await;
+        let from = self.user(actor.user_id).await?;
+        self.notify(
+            Notification::new(
+                "social.link_request",
+                Audience::Users(vec![target]),
+                format!("link-request:{}", req.id.0),
+            )
+            .arg("from", from.display_name)
+            .arg("companion", c.name.clone())
+            .subject(Subject {
+                companion: Some(c.id),
+                ..Subject::default()
+            })
+            .link("/companions"),
+        )
+        .await;
         Ok(req)
     }
 
@@ -219,6 +235,22 @@ impl App {
         req.state = RequestState::Accepted;
         self.repos.link_requests.update(&req).await?;
         self.publish_companion(&c).await;
+        let me = self.user(actor.user_id).await?;
+        self.notify(
+            Notification::new(
+                "social.link_accepted",
+                Audience::Users(vec![req.from]),
+                format!("link-accepted:{}", req.id.0),
+            )
+            .arg("user", me.display_name)
+            .arg("companion", c.name.clone())
+            .subject(Subject {
+                companion: Some(c.id),
+                ..Subject::default()
+            })
+            .link("/companions"),
+        )
+        .await;
         Ok(c)
     }
 

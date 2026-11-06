@@ -5,9 +5,11 @@ use axum::http::header::{LOCATION, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use contracts::{
-    AttributionDto, CatalogItemDto, CompanionDto, InviteDto, LibraryEntryDto, LibraryItemDto,
-    LinkRequestDto, ListDto, LoggedSessionDto, NewProgressDto, PrivacyDto, ProgressEventDto,
-    SearchResponseDto, SessionDto, ShareLinkDto, SharedListDto, SignInDto, SignUpDto, UserDto,
+    AttributionDto, CatalogItemDto, ChannelDto, CompanionDto, DeliveryDto, EventTypeDto,
+    InboxItemDto, InviteDto, LibraryEntryDto, LibraryItemDto, LinkRequestDto, ListDto,
+    LoggedSessionDto, NewChannelDto, NewProgressDto, PrivacyDto, ProgressEventDto,
+    SearchResponseDto, SessionDto, ShareLinkDto, SharedListDto, SignInDto, SignUpDto,
+    SubscriptionDto, TemplateOverrideDto, UserDto, WebPushKeyDto,
 };
 use domain::ids::ItemId;
 use serde::Deserialize;
@@ -17,7 +19,7 @@ use utoipa_axum::routes;
 
 use crate::error::ApiResult;
 use crate::extract::cookie;
-use crate::{ApiError, ApiState, Authed, dto, ops, sharing};
+use crate::{ApiError, ApiState, Authed, dto, notifications, ops, sharing};
 
 #[derive(OpenApi)]
 #[openapi(info(description = "REST API for integrations, scripts and sync clients."))]
@@ -58,6 +60,17 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(set_privacy))
         .routes(routes!(share_list))
         .routes(routes!(shared_list))
+        .routes(routes!(notification_events))
+        .routes(routes!(inbox))
+        .routes(routes!(mark_read))
+        .routes(routes!(channels, create_channel))
+        .routes(routes!(update_channel, delete_channel))
+        .routes(routes!(test_channel))
+        .routes(routes!(subscriptions, put_subscription))
+        .routes(routes!(delete_subscription))
+        .routes(routes!(deliveries))
+        .routes(routes!(templates, set_template))
+        .routes(routes!(web_push_key))
         .routes(routes!(sync_changes))
         .routes(routes!(sync_commands))
         .routes(routes!(start_import))
@@ -602,6 +615,158 @@ async fn shared_list(
     Path(token): Path<String>,
 ) -> ApiResult<Json<SharedListDto>> {
     Ok(Json(sharing::shared_list(&s, &token).await?))
+}
+
+// ---------------------------------------------------------------- notifications (D-17)
+
+#[utoipa::path(get, path = "/notifications/events", tag = "notifications",
+    responses((status = 200, body = Vec<EventTypeDto>)))]
+async fn notification_events(Authed(a): Authed) -> Json<Vec<EventTypeDto>> {
+    Json(notifications::catalogue(a))
+}
+
+#[utoipa::path(get, path = "/notifications/inbox", tag = "notifications",
+    responses((status = 200, body = Vec<InboxItemDto>)))]
+async fn inbox(State(s): State<ApiState>, Authed(a): Authed) -> ApiResult<Json<Vec<InboxItemDto>>> {
+    Ok(Json(notifications::inbox(&s, a).await?))
+}
+
+#[utoipa::path(post, path = "/notifications/inbox/{id}/read", tag = "notifications",
+    params(("id" = String, Path)), responses((status = 204)))]
+async fn mark_read(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    notifications::mark_read(&s, a, &id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(get, path = "/notifications/channels", tag = "notifications",
+    responses((status = 200, body = Vec<ChannelDto>)))]
+async fn channels(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+) -> ApiResult<Json<Vec<ChannelDto>>> {
+    Ok(Json(notifications::channels(&s, a).await?))
+}
+
+#[utoipa::path(post, path = "/notifications/channels", tag = "notifications",
+    request_body = NewChannelDto, responses((status = 201, body = ChannelDto)))]
+async fn create_channel(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Json(b): Json<NewChannelDto>,
+) -> ApiResult<(StatusCode, Json<ChannelDto>)> {
+    Ok((
+        StatusCode::CREATED,
+        Json(notifications::create_channel(&s, a, b).await?),
+    ))
+}
+
+#[utoipa::path(put, path = "/notifications/channels/{id}", tag = "notifications",
+    request_body = NewChannelDto, params(("id" = String, Path)),
+    responses((status = 200, body = ChannelDto)))]
+async fn update_channel(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+    Json(b): Json<NewChannelDto>,
+) -> ApiResult<Json<ChannelDto>> {
+    Ok(Json(notifications::update_channel(&s, a, &id, b).await?))
+}
+
+#[utoipa::path(delete, path = "/notifications/channels/{id}", tag = "notifications",
+    params(("id" = String, Path)), responses((status = 204)))]
+async fn delete_channel(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    notifications::delete_channel(&s, a, &id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Send a test message now; 502 `channel_error` carries what the channel answered.
+#[utoipa::path(post, path = "/notifications/channels/{id}/test", tag = "notifications",
+    params(("id" = String, Path)),
+    responses((status = 204), (status = 502, body = contracts::ErrorDto)))]
+async fn test_channel(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    notifications::test_channel(&s, a, &id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(get, path = "/notifications/subscriptions", tag = "notifications",
+    responses((status = 200, body = Vec<SubscriptionDto>)))]
+async fn subscriptions(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+) -> ApiResult<Json<Vec<SubscriptionDto>>> {
+    Ok(Json(notifications::subscriptions(&s, a).await?))
+}
+
+/// Create (no `id`) or update a subscription; admins set instance defaults with
+/// `instance_default: true`.
+#[utoipa::path(put, path = "/notifications/subscriptions", tag = "notifications",
+    request_body = SubscriptionDto, responses((status = 200, body = SubscriptionDto)))]
+async fn put_subscription(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Json(b): Json<SubscriptionDto>,
+) -> ApiResult<Json<SubscriptionDto>> {
+    Ok(Json(notifications::put_subscription(&s, a, b).await?))
+}
+
+#[utoipa::path(delete, path = "/notifications/subscriptions/{id}", tag = "notifications",
+    params(("id" = String, Path)), responses((status = 204)))]
+async fn delete_subscription(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    notifications::delete_subscription(&s, a, &id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(get, path = "/notifications/deliveries", tag = "notifications",
+    responses((status = 200, body = Vec<DeliveryDto>)))]
+async fn deliveries(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+) -> ApiResult<Json<Vec<DeliveryDto>>> {
+    Ok(Json(notifications::deliveries(&s, a).await?))
+}
+
+#[utoipa::path(get, path = "/notifications/templates", tag = "notifications",
+    responses((status = 200, body = Vec<TemplateOverrideDto>)))]
+async fn templates(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+) -> ApiResult<Json<Vec<TemplateOverrideDto>>> {
+    Ok(Json(notifications::templates(&s, a).await?))
+}
+
+#[utoipa::path(put, path = "/notifications/templates", tag = "notifications",
+    request_body = TemplateOverrideDto, responses((status = 204)))]
+async fn set_template(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Json(b): Json<TemplateOverrideDto>,
+) -> ApiResult<StatusCode> {
+    notifications::set_template(&s, a, b).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(get, path = "/notifications/web-push-key", tag = "notifications",
+    responses((status = 200, body = WebPushKeyDto)))]
+async fn web_push_key(State(s): State<ApiState>) -> Json<WebPushKeyDto> {
+    Json(WebPushKeyDto {
+        public_key: s.notify.as_ref().and_then(|n| n.web_push_key.clone()),
+    })
 }
 
 // ---------------------------------------------------------------- sync

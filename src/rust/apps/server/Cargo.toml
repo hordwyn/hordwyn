@@ -28,6 +28,8 @@ connectors.workspace = true
 domain.workspace = true
 getrandom.workspace = true
 jobs.workspace = true
+serde_json.workspace = true
+notify = { workspace = true, features = ["all"] }
 kinds.workspace = true
 leptos = { workspace = true, features = ["ssr"] }
 leptos_axum.workspace = true

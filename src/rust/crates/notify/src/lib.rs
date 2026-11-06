@@ -1,13 +1,26 @@
-//! Notification channels behind the `Notifier` port.
+//! Notifications (D-17): event catalogue, subscriptions with filters, quiet hours, digests
+//! and rate limits, templates with brand and admin overrides, the inbox, a delivery log with
+//! dedupe, and the channels behind the [`Notifier`] port.
 #![deny(unsafe_code)]
 
-/// Name of this crate, used by the bootstrap smoke test.
-pub const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
+mod bridge;
+pub mod catalogue;
+pub mod channels;
+mod deliver;
+mod engine;
+pub mod model;
+#[cfg(feature = "pg")]
+pub mod pg;
+pub mod plan;
+pub mod store;
+pub mod template;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_name_matches_package() {
-        assert_eq!(super::CRATE_NAME, "notify");
-    }
-}
+pub use bridge::AdminBridge;
+pub use deliver::{Deliverer, Message, Notifier, SendError};
+pub use engine::{Engine, INBOX_TOPIC};
+pub use store::{MemNotifyStore, NotifyStore};
+
+/// Job sending one delivery (`{"delivery_id": ...}`).
+pub const DELIVER_JOB: &str = "notify.deliver";
+/// Job sending a channel's digest (`{"channel_id": ..., "until": ...}`).
+pub const DIGEST_JOB: &str = "notify.digest";

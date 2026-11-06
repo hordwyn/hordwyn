@@ -210,6 +210,78 @@ pub trait EventBus: Send + Sync {
     async fn publish(&self, event: AppEvent);
 }
 
+/// Who receives a notification.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", content = "users", rename_all = "snake_case")]
+pub enum Audience {
+    Users(Vec<UserId>),
+    /// Every admin of the instance.
+    Admins,
+}
+
+/// What a notification is about: used by subscription filters.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Subject {
+    pub kind: Option<String>,
+    pub item: Option<domain::ids::ItemId>,
+    pub list: Option<domain::ids::ListId>,
+    pub companion: Option<domain::ids::CompanionId>,
+}
+
+/// Something worth telling people about (D-17): an event of the catalogue plus the values
+/// its templates use. Subscriptions, rendering, channels and delivery belong to the adapter.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Notification {
+    /// Catalogue id, e.g. `social.link_request`.
+    pub event: String,
+    pub audience: Audience,
+    /// The same event with the same key reaches a user once (dedupe), e.g. `episode:<id>:1x02`.
+    pub dedupe_key: String,
+    /// Template arguments.
+    pub args: serde_json::Map<String, Value>,
+    pub subject: Subject,
+    /// App path to open, e.g. `/sessions`.
+    pub link: Option<String>,
+}
+
+impl Notification {
+    #[must_use]
+    pub fn new(event: &str, audience: Audience, dedupe_key: impl Into<String>) -> Self {
+        Self {
+            event: event.into(),
+            audience,
+            dedupe_key: dedupe_key.into(),
+            args: serde_json::Map::new(),
+            subject: Subject::default(),
+            link: None,
+        }
+    }
+
+    #[must_use]
+    pub fn arg(mut self, name: &str, value: impl Into<Value>) -> Self {
+        self.args.insert(name.into(), value.into());
+        self
+    }
+
+    #[must_use]
+    pub fn link(mut self, path: impl Into<String>) -> Self {
+        self.link = Some(path.into());
+        self
+    }
+
+    #[must_use]
+    pub fn subject(mut self, subject: Subject) -> Self {
+        self.subject = subject;
+        self
+    }
+}
+
+#[async_trait]
+pub trait Notifications: Send + Sync {
+    /// Best effort like [`EventBus::publish`]: failures are logged by the adapter.
+    async fn emit(&self, n: Notification);
+}
+
 /// Job-queue lanes in priority order (D-6.4).
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -281,19 +353,6 @@ pub trait BlobStore: Send + Sync {
     async fn put(&self, key: &str, bytes: Vec<u8>) -> Result<(), PortError>;
     async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, PortError>;
     async fn delete(&self, keys: &[String]) -> Result<(), PortError>;
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Notification {
-    pub channel: String,
-    pub recipient: String,
-    pub title: String,
-    pub body: String,
-}
-
-#[async_trait]
-pub trait Notifier: Send + Sync {
-    async fn send(&self, n: &Notification) -> Result<(), PortError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

@@ -282,6 +282,61 @@ impl Default for JobsConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+pub enum SmtpSecurity {
+    /// TLS from the first byte (usually port 465).
+    Tls,
+    /// STARTTLS upgrade (usually port 587).
+    #[default]
+    Starttls,
+    /// No encryption: only for a relay on localhost or in a private network.
+    None,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SmtpConfig {
+    pub host: String,
+    #[serde(default = "default_smtp_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub security: SmtpSecurity,
+    #[serde(default)]
+    pub username: Option<String>,
+    /// Secret: set it with `APP__NOTIFY__SMTP__PASSWORD`.
+    #[serde(default, skip_serializing)]
+    pub password: Option<Secret>,
+    /// Sender, e.g. `Shelf <noreply@example.org>`.
+    pub from: String,
+}
+
+const fn default_smtp_port() -> u16 {
+    587
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct NotifyConfig {
+    /// Allow channel targets (ntfy, Gotify, webhooks, ...) in private and loopback networks.
+    /// Off by default: otherwise any member could make the server call internal services.
+    pub allow_private_targets: bool,
+    /// Attempts per delivery before it is marked failed.
+    pub max_attempts: u32,
+    /// Email channel; email notifications are unavailable without it.
+    pub smtp: Option<SmtpConfig>,
+}
+
+impl Default for NotifyConfig {
+    fn default() -> Self {
+        Self {
+            allow_private_targets: false,
+            max_attempts: 5,
+            smtp: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum LogFormat {
     #[default]
     Text,
@@ -325,6 +380,7 @@ pub struct AppConfig {
     pub jobs: JobsConfig,
     pub telemetry: TelemetryConfig,
     pub features: FeaturesConfig,
+    pub notify: NotifyConfig,
     /// Per connector id (`tmdb`, `igdb`, ...).
     pub connectors: BTreeMap<String, ConnectorConfig>,
 }

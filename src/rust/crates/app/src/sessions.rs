@@ -8,7 +8,7 @@ use domain::session::{CoopOutcome, Participant, Session};
 use domain::user::Actor;
 
 use crate::error::OptionExt;
-use crate::ports::AppEvent;
+use crate::ports::{AppEvent, Audience, Notification, Subject};
 use crate::{App, AppError, AppResult};
 
 /// Input for [`App::log_session`].
@@ -82,7 +82,51 @@ impl App {
             self.add_to_library(actor, session.item_id, None).await?;
         }
         self.publish_session(&session).await?;
+        self.announce_session(&session, &item).await?;
         Ok(session)
+    }
+
+    /// Tell linked participants that a session was shared with them (unless the owner
+    /// keeps sessions private).
+    async fn announce_session(
+        &self,
+        s: &Session,
+        item: &domain::catalog::CatalogItem,
+    ) -> AppResult<()> {
+        let owner = self.user(s.owner).await?;
+        if !owner.share_sessions {
+            return Ok(());
+        }
+        let mut users = Vec::new();
+        for p in &s.participants {
+            if let Some(c) = self.repos.companions.get(p.companion_id).await?
+                && let Some(u) = c.linked_user
+                && u != s.owner
+                && !users.contains(&u)
+            {
+                users.push(u);
+            }
+        }
+        if users.is_empty() {
+            return Ok(());
+        }
+        self.notify(
+            Notification::new(
+                "social.session_shared",
+                Audience::Users(users),
+                format!("session:{}", s.id.0),
+            )
+            .arg("owner", owner.display_name)
+            .arg("title", item.title.clone())
+            .subject(Subject {
+                kind: Some(item.kind.to_string()),
+                item: Some(item.id),
+                ..Subject::default()
+            })
+            .link("/sessions"),
+        )
+        .await;
+        Ok(())
     }
 
     async fn check_participants(&self, actor: Actor, ps: &[Participant]) -> AppResult<()> {

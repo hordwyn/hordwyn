@@ -3,7 +3,7 @@ use domain::ids::{CompanionId, UserId};
 use domain::user::{Actor, Role, User, validate_username};
 
 use crate::error::OptionExt;
-use crate::ports::{AppEvent, RepoError};
+use crate::ports::{AppEvent, Audience, Notification, RepoError};
 use crate::{App, AppError, AppResult};
 
 impl App {
@@ -55,6 +55,16 @@ impl App {
                 RepoError::Duplicate(m) => AppError::Conflict(m),
                 e @ RepoError::Backend(_) => AppError::Repo(e),
             })?;
+        self.notify(
+            Notification::new(
+                "admin.signup",
+                Audience::Admins,
+                format!("user:{}", user.id.0),
+            )
+            .arg("username", user.username.clone())
+            .arg("name", user.display_name.clone()),
+        )
+        .await;
         Ok(user)
     }
 

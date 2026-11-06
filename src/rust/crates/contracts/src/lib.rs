@@ -406,3 +406,156 @@ mod tests {
         assert_eq!(back, e);
     }
 }
+
+// ---------------------------------------------------------------- notifications (D-17)
+
+/// An event of the notification catalogue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct EventTypeDto {
+    /// Stable id, e.g. `release.episode`; subscriptions also accept `release.*` and `*`.
+    pub id: String,
+    /// `user` or `admin`.
+    pub audience: String,
+    /// Template arguments.
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct InboxItemDto {
+    pub id: String,
+    pub event: String,
+    pub title: String,
+    pub body: String,
+    pub link: Option<String>,
+    pub created_at: String,
+    pub read: bool,
+}
+
+/// A notification channel. `config` is tagged by `kind` (`email`, `ntfy`, `gotify`,
+/// `discord`, `matrix`, `apprise`, `webhook`, `web_push`); secrets in it are replaced by
+/// `********` in answers and kept when sent back unchanged.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct ChannelDto {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub enabled: bool,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    pub config: serde_json::Value,
+    /// Only in the answer that created a webhook without a secret: the generated signing
+    /// secret (Standard Webhooks `whsec_...`). It is not shown again.
+    pub secret: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct NewChannelDto {
+    pub name: String,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    pub config: serde_json::Value,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+}
+
+const fn yes() -> bool {
+    true
+}
+
+fn default_targets() -> serde_json::Value {
+    serde_json::json!({ "type": "all" })
+}
+
+fn default_mode() -> serde_json::Value {
+    serde_json::json!({ "mode": "immediate" })
+}
+
+fn utc() -> String {
+    "UTC".into()
+}
+
+/// A subscription: event pattern + filter + channels + delivery mode + quiet hours.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct SubscriptionDto {
+    /// Omit to create.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Event id, `group.*` or `*`.
+    pub event: String,
+    /// `{"kinds": [...], "lists": [...], "items": [...], "companions": [...]}`; empty = any.
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    pub filter: serde_json::Value,
+    /// `{"type": "all"}` or `{"type": "only", "ids": [channel ids]}`.
+    #[serde(default = "default_targets")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    pub targets: serde_json::Value,
+    /// `{"mode": "immediate"}` or `{"mode": "digest", "cron": "0 8 * * *"}`.
+    #[serde(default = "default_mode")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    pub mode: serde_json::Value,
+    /// `{"start": "22:00:00", "end": "07:00:00"}` in `timezone`.
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<Object>))]
+    pub quiet_hours: Option<serde_json::Value>,
+    #[serde(default = "utc")]
+    pub timezone: String,
+    #[serde(default)]
+    pub rate_limit_per_hour: Option<u32>,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Instance defaults only: users cannot override it.
+    #[serde(default)]
+    pub locked: bool,
+    /// Set by the server: an admin's instance default.
+    #[serde(default)]
+    pub instance_default: bool,
+}
+
+/// One entry of the delivery log.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct DeliveryDto {
+    pub id: String,
+    pub channel_id: String,
+    pub event: String,
+    pub title: String,
+    /// `queued`, `digest`, `sent`, `failed` or `suppressed`.
+    pub state: String,
+    pub attempts: u32,
+    pub last_error: Option<String>,
+    pub due_at: String,
+    pub created_at: String,
+    pub sent_at: Option<String>,
+}
+
+/// Admin override of a notification text (Fluent message id, e.g. `release-episode-title`
+/// or `release-episode-email-body`); `text: null` removes the override.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct TemplateOverrideDto {
+    pub locale: String,
+    pub key: String,
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct WebPushKeyDto {
+    /// VAPID public key for `pushManager.subscribe`; `null` when web push is not set up.
+    pub public_key: Option<String>,
+}
+
+/// Everything the notifications page shows, in one answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct NotificationPageDto {
+    pub inbox: Vec<InboxItemDto>,
+    pub channels: Vec<ChannelDto>,
+    pub subscriptions: Vec<SubscriptionDto>,
+    pub events: Vec<EventTypeDto>,
+    pub deliveries: Vec<DeliveryDto>,
+}

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO notify_subscriptions (id, user_id, event, filter, targets, mode,\n                 quiet_hours, timezone, rate_limit_per_hour, enabled, locked)\n             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n             ON CONFLICT (id) DO UPDATE SET event = EXCLUDED.event, filter = EXCLUDED.filter,\n                 targets = EXCLUDED.targets, mode = EXCLUDED.mode,\n                 quiet_hours = EXCLUDED.quiet_hours, timezone = EXCLUDED.timezone,\n                 rate_limit_per_hour = EXCLUDED.rate_limit_per_hour,\n                 enabled = EXCLUDED.enabled, locked = EXCLUDED.locked",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Text",
+        "Int4",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b84c9c035ca06e12a155e309077c3148974d92c43482924cc583ce28bc7d9339"
+}

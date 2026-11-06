@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM notify_templates WHERE locale = $1 AND key = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ff0efd0de5d253e4cae39ca1f99ef9c14f6bd0ab3e42d4739d1f97c60bcadeca"
+}

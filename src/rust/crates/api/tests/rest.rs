@@ -11,7 +11,26 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 fn state() -> (ApiState, testkit::TestEnv) {
-    let t = testkit::TestEnv::new();
+    let mut t = testkit::TestEnv::new();
+    let store = Arc::new(notify::MemNotifyStore::default());
+    let engine = Arc::new(notify::Engine::new(
+        store,
+        t.jobs.clone(),
+        t.events.clone(),
+        t.clock.clone(),
+        t.ids.clone(),
+        "Shelf",
+        "en",
+        notify::template::Overrides::new(),
+    ));
+    t.app.notifications = engine.clone();
+    let deliverer = Arc::new(notify::Deliverer::new(
+        engine.clone(),
+        Arc::new(notify::channels::Channels::default()),
+        t.clock.clone(),
+        "https://shelf.example.org",
+        3,
+    ));
     let auth = auth::Auth::new(
         t.app.clone(),
         Arc::new(auth::MemAuthStore::default()),
@@ -34,6 +53,11 @@ fn state() -> (ApiState, testkit::TestEnv) {
         registry: Registry::default(),
         assets: None,
         importer: None,
+        notify: Some(api::NotifyApi {
+            engine,
+            deliverer,
+            web_push_key: None,
+        }),
         changes: None,
         naming: Naming::from_prefix("shelf", "Shelf"),
         secure_cookies: true,
@@ -561,4 +585,248 @@ async fn sharing_and_companion_flows() {
     assert_eq!(public["items"][0]["title"], "Heat");
     let (status, _, _) = call(&app, "GET", "/api/v1/shared/lists/nope", None, None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// M13 over REST: a link request lands in the target's inbox; channels keep their secrets;
+/// subscriptions are validated; deliveries are logged; only admins edit defaults and texts.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn notifications_inbox_channels_and_subscriptions() {
+    let (s, t) = state();
+    let app = api::router(s);
+    let anna = signed_up(&app).await;
+    let (_, _, ben) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/sign-up",
+        None,
+        Some(serde_json::json!({"username": "ben", "display_name": "Ben",
+            "password": "correct horse battery"})),
+    )
+    .await;
+    let bent = ben["token"].as_str().unwrap().to_string();
+
+    // ben subscribes to social events on a signed webhook
+    let (status, _, ch) = call(
+        &app,
+        "POST",
+        "/api/v1/notifications/channels",
+        Some(&bent),
+        Some(serde_json::json!({"name": "Hook",
+            "config": {"kind": "webhook", "url": "https://hooks.example.org/x", "secret": ""}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{ch}");
+    assert!(ch["secret"].as_str().unwrap().starts_with("whsec_"));
+    assert_eq!(ch["config"]["secret"], "********");
+    let (_, _, list) = call(
+        &app,
+        "GET",
+        "/api/v1/notifications/channels",
+        Some(&bent),
+        None,
+    )
+    .await;
+    assert_eq!(list[0]["secret"], serde_json::Value::Null);
+    let (status, _, err) = call(
+        &app,
+        "PUT",
+        "/api/v1/notifications/subscriptions",
+        Some(&bent),
+        Some(serde_json::json!({"event": "nope.*"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{err}");
+    let (status, _, err) = call(
+        &app,
+        "PUT",
+        "/api/v1/notifications/subscriptions",
+        Some(&bent),
+        Some(serde_json::json!({"event": "social.*",
+            "mode": {"mode": "digest", "cron": "every day"}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{err}");
+    let (status, _, sub) = call(
+        &app,
+        "PUT",
+        "/api/v1/notifications/subscriptions",
+        Some(&bent),
+        Some(serde_json::json!({"event": "social.*", "timezone": "Europe/Berlin"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sub}");
+    assert_eq!(sub["mode"]["mode"], "immediate");
+
+    // anna asks ben to confirm a companion
+    let (_, _, c) = call(
+        &app,
+        "POST",
+        "/api/v1/companions",
+        Some(&anna),
+        Some(serde_json::json!({"name": "B."})),
+    )
+    .await;
+    call(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/companions/{}/link-requests",
+            c["id"].as_str().unwrap()
+        ),
+        Some(&anna),
+        Some(serde_json::json!({"username": "ben"})),
+    )
+    .await;
+    let (_, _, inbox) = call(
+        &app,
+        "GET",
+        "/api/v1/notifications/inbox",
+        Some(&bent),
+        None,
+    )
+    .await;
+    assert_eq!(inbox[0]["title"], "Anna says you are \"B.\"");
+    assert_eq!(inbox[0]["read"], false);
+    let id = inbox[0]["id"].as_str().unwrap();
+    let (status, _, _) = call(
+        &app,
+        "POST",
+        &format!("/api/v1/notifications/inbox/{id}/read"),
+        Some(&bent),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, _, inbox) = call(
+        &app,
+        "GET",
+        "/api/v1/notifications/inbox",
+        Some(&bent),
+        None,
+    )
+    .await;
+    assert_eq!(inbox[0]["read"], true);
+    let (_, _, log) = call(
+        &app,
+        "GET",
+        "/api/v1/notifications/deliveries",
+        Some(&bent),
+        None,
+    )
+    .await;
+    assert_eq!(log[0]["state"], "queued");
+    assert_eq!(log[0]["event"], "social.link_request");
+    assert!(t.jobs.jobs().iter().any(|j| j.kind == notify::DELIVER_JOB));
+
+    // only admins edit defaults and texts (the first account is admin)
+    let (status, _, _) = call(
+        &app,
+        "PUT",
+        "/api/v1/notifications/subscriptions",
+        Some(&bent),
+        Some(serde_json::json!({"event": "*", "instance_default": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _, d) = call(
+        &app,
+        "PUT",
+        "/api/v1/notifications/subscriptions",
+        Some(&anna),
+        Some(serde_json::json!({"event": "admin.*", "instance_default": true, "locked": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{d}");
+    assert_eq!(
+        (d["instance_default"].clone(), d["locked"].clone()),
+        (true.into(), true.into())
+    );
+    let (_, _, subs) = call(
+        &app,
+        "GET",
+        "/api/v1/notifications/subscriptions",
+        Some(&bent),
+        None,
+    )
+    .await;
+    assert_eq!(subs.as_array().unwrap().len(), 2);
+    let (status, _, _) = call(
+        &app,
+        "PUT",
+        "/api/v1/notifications/templates",
+        Some(&anna),
+        Some(
+            serde_json::json!({"locale": "en", "key": "social-link_request-title",
+            "text": "Link request from { $from }"}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, _, c2) = call(
+        &app,
+        "POST",
+        "/api/v1/companions",
+        Some(&anna),
+        Some(serde_json::json!({"name": "Ben"})),
+    )
+    .await;
+    call(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/companions/{}/link-requests",
+            c2["id"].as_str().unwrap()
+        ),
+        Some(&anna),
+        Some(serde_json::json!({"username": "ben"})),
+    )
+    .await;
+    let (_, _, inbox) = call(
+        &app,
+        "GET",
+        "/api/v1/notifications/inbox",
+        Some(&bent),
+        None,
+    )
+    .await;
+    let titles: Vec<_> = inbox
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["title"].clone())
+        .collect();
+    assert!(
+        titles.contains(&"Link request from Anna".into()),
+        "{titles:?}"
+    );
+    let (_, _, events) = call(
+        &app,
+        "GET",
+        "/api/v1/notifications/events",
+        Some(&bent),
+        None,
+    )
+    .await;
+    assert!(
+        events
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["audience"] == "user")
+    );
+    // a test send reports what the channel answered (no adapters in this build)
+    let (status, _, err) = call(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/notifications/channels/{}/test",
+            ch["id"].as_str().unwrap()
+        ),
+        Some(&bent),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert_eq!(err["code"], "channel_error");
 }

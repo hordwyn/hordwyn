@@ -8,6 +8,7 @@
 mod dto;
 mod error;
 mod extract;
+pub mod notifications;
 pub mod ops;
 mod routes;
 pub mod sharing;
@@ -53,6 +54,15 @@ impl Naming {
     }
 }
 
+/// What the notification endpoints need.
+#[derive(Clone)]
+pub struct NotifyApi {
+    pub engine: Arc<notify::Engine>,
+    pub deliverer: Arc<notify::Deliverer>,
+    /// VAPID public key, when web push is configured.
+    pub web_push_key: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct ApiState {
     pub app: App,
@@ -64,6 +74,8 @@ pub struct ApiState {
     pub registry: Registry,
     pub assets: Option<Arc<assets::AssetService>>,
     pub importer: Option<Arc<importers::Importer>>,
+    /// Notifications (inbox, channels, subscriptions, delivery log).
+    pub notify: Option<NotifyApi>,
     /// Per-user change feed for sync clients.
     pub changes: Option<Arc<dyn app::ports::ChangeFeed>>,
     pub naming: Naming,

@@ -10,3 +10,41 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+app.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+chrono.workspace = true
+chrono-tz = "0.10.4"
+croner.workspace = true
+domain.workspace = true
+fluent-bundle.workspace = true
+hmac = "0.12.1"
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10.9"
+sqlx = { workspace = true, optional = true }
+thiserror.workspace = true
+tracing.workspace = true
+unic-langid.workspace = true
+uuid.workspace = true
+tokio = { workspace = true, features = ["net"], optional = true }
+url = { workspace = true, optional = true }
+lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "pool", "hostname", "tokio1", "tokio1-rustls-tls"], optional = true }
+
+[features]
+default = []
+# Postgres store
+pg = ["dep:sqlx"]
+# HTTP channels: ntfy, Gotify, Discord, Matrix, Apprise, signed webhook
+http = ["dep:tokio", "dep:url"]
+email = ["dep:lettre"]
+all = ["pg", "http", "email"]
+
+[dev-dependencies]
+reqwest.workspace = true
+testkit.workspace = true
+tokio.workspace = true
+wiremock.workspace = true
+async-trait.workspace = true
+store-pg.workspace = true
+domain.workspace = true

@@ -1,0 +1,146 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, user_id, event, filter, targets, mode, quiet_hours, timezone,\n                    rate_limit_per_hour, enabled, locked\n             FROM notify_subscriptions WHERE user_id IS NULL ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "notify_subscriptions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "notify_subscriptions",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "event",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notify_subscriptions",
+            "name": "event"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "filter",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "notify_subscriptions",
+            "name": "filter"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "targets",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "notify_subscriptions",
+            "name": "targets"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "mode",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "notify_subscriptions",
+            "name": "mode"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "quiet_hours",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "notify_subscriptions",
+            "name": "quiet_hours"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "timezone",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notify_subscriptions",
+            "name": "timezone"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "rate_limit_per_hour",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "notify_subscriptions",
+            "name": "rate_limit_per_hour"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "notify_subscriptions",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "locked",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "notify_subscriptions",
+            "name": "locked"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "47b36960cd9ff8f15ed9dce1a2e6b83421cfd0cb06badf36989b0e1ae12983ac"
+}

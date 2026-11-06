@@ -5,8 +5,7 @@ use std::sync::Mutex;
 
 use app::ports::{
     AppEvent, BlobStore, Clock, EventBus, HttpError, HttpFetch, HttpRequest, HttpResponse, IdGen,
-    JobQueue, NewJob, Notification, Notifier, PortError, SearchDoc, SearchHit, SearchIndex,
-    SearchQuery,
+    JobQueue, NewJob, PortError, SearchDoc, SearchHit, SearchIndex, SearchQuery,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
@@ -111,6 +110,31 @@ impl RecordingEvents {
 impl EventBus for RecordingEvents {
     async fn publish(&self, event: AppEvent) {
         self.events.lock().expect("lock").push(event);
+    }
+}
+
+/// Notifications emitted by use-cases, for assertions.
+#[derive(Default)]
+pub struct RecordingNotifications {
+    emitted: Mutex<Vec<app::ports::Notification>>,
+}
+
+impl RecordingNotifications {
+    #[must_use]
+    pub fn all(&self) -> Vec<app::ports::Notification> {
+        self.emitted.lock().expect("lock").clone()
+    }
+
+    #[must_use]
+    pub fn events(&self) -> Vec<String> {
+        self.all().into_iter().map(|n| n.event).collect()
+    }
+}
+
+#[async_trait]
+impl app::ports::Notifications for RecordingNotifications {
+    async fn emit(&self, n: app::ports::Notification) {
+        self.emitted.lock().expect("lock").push(n);
     }
 }
 
@@ -246,26 +270,6 @@ impl BlobStore for MemBlobs {
         for k in keys {
             b.remove(k);
         }
-        Ok(())
-    }
-}
-
-#[derive(Default)]
-pub struct RecordingNotifier {
-    sent: Mutex<Vec<Notification>>,
-}
-
-impl RecordingNotifier {
-    #[must_use]
-    pub fn sent(&self) -> Vec<Notification> {
-        self.sent.lock().expect("lock").clone()
-    }
-}
-
-#[async_trait]
-impl Notifier for RecordingNotifier {
-    async fn send(&self, n: &Notification) -> Result<(), PortError> {
-        self.sent.lock().expect("lock").push(n.clone());
         Ok(())
     }
 }

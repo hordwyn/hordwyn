@@ -36,6 +36,7 @@ pub async fn env() -> Option<PgEnv> {
         ids: Arc::new(SeqIds::default()),
         events: Arc::new(RecordingEvents::default()),
         jobs: Arc::new(MemJobs::default()),
+        notifications: Arc::new(testkit::RecordingNotifications::default()),
     };
     Some(PgEnv { app, store })
 }

@@ -21,6 +21,8 @@ confidence-threshold = 0.9
 allow = [
     "MIT",
     "MIT-0",
+    # BSD Zero Clause (quoted_printable via lettre), more permissive than MIT, DEC-144
+    "0BSD",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",

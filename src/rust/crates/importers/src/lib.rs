@@ -309,11 +309,14 @@ impl Importer {
             user_id: user.id,
             role: user.role,
         };
-        let bytes = self
-            .blobs
-            .get(&r.source_key)
-            .await?
-            .ok_or(ImportError::MissingFile)?;
+        let Some(bytes) = self.blobs.get(&r.source_key).await? else {
+            r.state = ImportState::Failed;
+            r.updated_at = self.app.clock.now();
+            self.store.save(&r).await?;
+            self.notify(&r, "import.failed", ImportError::MissingFile.to_string())
+                .await;
+            return Err(ImportError::MissingFile);
+        };
         let format = r.format.clone();
         // parsing is CPU work: do it off the async workers, in one go per run
         let rows: Vec<Result<ImportRow, RowError>> =
@@ -353,7 +356,26 @@ impl Importer {
         r.updated_at = self.app.clock.now();
         self.store.save(&r).await?;
         self.progress(&r, total).await;
+        if !r.dry_run {
+            self.notify(&r, "import.finished", String::new()).await;
+        }
         Ok(r)
+    }
+
+    async fn notify(&self, r: &ImportRecord, event: &str, error: String) {
+        self.app
+            .notifications
+            .emit(
+                app::ports::Notification::new(
+                    event,
+                    app::ports::Audience::Users(vec![domain::ids::UserId(r.user_id)]),
+                    format!("import:{}", r.id),
+                )
+                .arg("imported", r.imported)
+                .arg("errors", r.errors.len())
+                .arg("error", error),
+            )
+            .await;
     }
 
     async fn progress(&self, r: &ImportRecord, total: u64) {

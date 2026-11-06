@@ -1,7 +1,7 @@
 //! `web::Backend` for the web app's server functions, on top of the same operations as the
 //! REST API (`api::ops`).
 
-use api::{ApiError, ApiState, ops, sharing};
+use api::{ApiError, ApiState, notifications, ops, sharing};
 use async_trait::async_trait;
 use contracts::{
     AttributionDto, CompanionDto, ErrorDto, InviteDto, ItemPageDto, LibraryEntryDto,
@@ -255,6 +255,59 @@ impl Backend for WebBackend {
 
     async fn shared_list(&self, share_token: &str) -> BResult<SharedListDto> {
         sharing::shared_list(&self.0, share_token)
+            .await
+            .map_err(err)
+    }
+
+    async fn notifications(&self, token: &str) -> BResult<contracts::NotificationPageDto> {
+        let a = self.actor(token).await?;
+        notifications::page(&self.0, a).await.map_err(err)
+    }
+
+    async fn mark_read(&self, token: &str, id: &str) -> BResult<()> {
+        let a = self.actor(token).await?;
+        notifications::mark_read(&self.0, a, id).await.map_err(err)
+    }
+
+    async fn create_channel(
+        &self,
+        token: &str,
+        b: contracts::NewChannelDto,
+    ) -> BResult<contracts::ChannelDto> {
+        let a = self.actor(token).await?;
+        notifications::create_channel(&self.0, a, b)
+            .await
+            .map_err(err)
+    }
+
+    async fn delete_channel(&self, token: &str, id: &str) -> BResult<()> {
+        let a = self.actor(token).await?;
+        notifications::delete_channel(&self.0, a, id)
+            .await
+            .map_err(err)
+    }
+
+    async fn test_channel(&self, token: &str, id: &str) -> BResult<()> {
+        let a = self.actor(token).await?;
+        notifications::test_channel(&self.0, a, id)
+            .await
+            .map_err(err)
+    }
+
+    async fn put_subscription(
+        &self,
+        token: &str,
+        b: contracts::SubscriptionDto,
+    ) -> BResult<contracts::SubscriptionDto> {
+        let a = self.actor(token).await?;
+        notifications::put_subscription(&self.0, a, b)
+            .await
+            .map_err(err)
+    }
+
+    async fn delete_subscription(&self, token: &str, id: &str) -> BResult<()> {
+        let a = self.actor(token).await?;
+        notifications::delete_subscription(&self.0, a, id)
             .await
             .map_err(err)
     }
