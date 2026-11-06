@@ -47,6 +47,29 @@ impl App {
         }
     }
 
+    /// Share a list by link: a new random token replaces any earlier one, so sharing again
+    /// revokes the old link. Returns the token.
+    ///
+    /// # Errors
+    /// Unknown list or not the owner.
+    pub async fn share_list(&self, actor: Actor, id: ListId) -> AppResult<String> {
+        let mut list = self.owned_list(actor, id).await?;
+        let token = self.ids.new_token();
+        list.visibility = Visibility::Link {
+            token: token.clone(),
+        };
+        self.save_list(list).await?;
+        Ok(token)
+    }
+
+    /// Read a link-shared list without an account.
+    ///
+    /// # Errors
+    /// Unknown or revoked token.
+    pub async fn list_by_token(&self, token: &str) -> AppResult<List> {
+        self.repos.lists.by_share_token(token).await?.found("list")
+    }
+
     /// # Errors
     /// Storage errors.
     pub async fn lists(&self, actor: Actor) -> AppResult<Vec<List>> {

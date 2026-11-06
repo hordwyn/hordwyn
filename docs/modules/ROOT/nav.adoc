@@ -8,3 +8,4 @@
 * xref:connectors.adoc[Connectors]
 * xref:import-format.adoc[Import and export format]
 * xref:sync.adoc[Sync protocol]
+* xref:sharing.adoc[Sharing and companions]

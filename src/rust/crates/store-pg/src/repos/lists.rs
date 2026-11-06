@@ -136,4 +136,17 @@ impl ListRepo for PgStore {
         .map_err(be)?;
         self.load_lists(rows).await
     }
+
+    async fn by_share_token(&self, token: &str) -> Res<Option<List>> {
+        let rows = sqlx::query_as!(
+            ListRow,
+            "SELECT * FROM lists
+             WHERE visibility ->> 'type' = 'link' AND visibility ->> 'token' = $1",
+            token
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?;
+        Ok(self.load_lists(rows).await?.pop())
+    }
 }

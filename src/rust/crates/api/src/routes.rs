@@ -5,8 +5,9 @@ use axum::http::header::{LOCATION, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use contracts::{
-    AttributionDto, CatalogItemDto, CompanionDto, LibraryEntryDto, LibraryItemDto, ListDto,
-    NewProgressDto, ProgressEventDto, SearchResponseDto, SessionDto, SignInDto, SignUpDto, UserDto,
+    AttributionDto, CatalogItemDto, CompanionDto, InviteDto, LibraryEntryDto, LibraryItemDto,
+    LinkRequestDto, ListDto, LoggedSessionDto, NewProgressDto, PrivacyDto, ProgressEventDto,
+    SearchResponseDto, SessionDto, ShareLinkDto, SharedListDto, SignInDto, SignUpDto, UserDto,
 };
 use domain::ids::ItemId;
 use serde::Deserialize;
@@ -16,7 +17,7 @@ use utoipa_axum::routes;
 
 use crate::error::ApiResult;
 use crate::extract::cookie;
-use crate::{ApiError, ApiState, Authed, dto, ops};
+use crate::{ApiError, ApiState, Authed, dto, ops, sharing};
 
 #[derive(OpenApi)]
 #[openapi(info(description = "REST API for integrations, scripts and sync clients."))]
@@ -44,6 +45,19 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(companions, create_companion))
         .routes(routes!(lists, create_list))
         .routes(routes!(add_to_list))
+        .routes(routes!(request_link))
+        .routes(routes!(link_requests))
+        .routes(routes!(accept_link))
+        .routes(routes!(decline_link))
+        .routes(routes!(unlink_companion))
+        .routes(routes!(merge_companions))
+        .routes(routes!(invite_companion))
+        .routes(routes!(my_sessions))
+        .routes(routes!(shared_sessions))
+        .routes(routes!(claim_session))
+        .routes(routes!(set_privacy))
+        .routes(routes!(share_list))
+        .routes(routes!(shared_list))
         .routes(routes!(sync_changes))
         .routes(routes!(sync_commands))
         .routes(routes!(start_import))
@@ -425,6 +439,169 @@ async fn add_to_list(
     Json(b): Json<ListItemBody>,
 ) -> ApiResult<Json<ListDto>> {
     Ok(Json(ops::add_to_list(&s, a, &id, &b.item_id).await?))
+}
+
+// ---------------------------------------------------------------- sharing (D-9)
+
+#[derive(Deserialize, ToSchema)]
+struct LinkRequestBody {
+    /// Username of the person the companion stands for.
+    username: String,
+}
+
+#[utoipa::path(post, path = "/companions/{id}/link-requests", tag = "sharing",
+    request_body = LinkRequestBody, params(("id" = String, Path)),
+    responses((status = 201, body = LinkRequestDto), (status = 409, body = contracts::ErrorDto)))]
+async fn request_link(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+    Json(b): Json<LinkRequestBody>,
+) -> ApiResult<(StatusCode, Json<LinkRequestDto>)> {
+    Ok((
+        StatusCode::CREATED,
+        Json(sharing::request_link(&s, a, &id, &b.username).await?),
+    ))
+}
+
+#[utoipa::path(get, path = "/link-requests", tag = "sharing",
+    responses((status = 200, body = Vec<LinkRequestDto>)))]
+async fn link_requests(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+) -> ApiResult<Json<Vec<LinkRequestDto>>> {
+    Ok(Json(sharing::link_requests(&s, a).await?))
+}
+
+#[utoipa::path(post, path = "/link-requests/{id}/accept", tag = "sharing",
+    params(("id" = String, Path)), responses((status = 200, body = CompanionDto)))]
+async fn accept_link(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+) -> ApiResult<Json<CompanionDto>> {
+    Ok(Json(sharing::accept_link(&s, a, &id).await?))
+}
+
+#[utoipa::path(post, path = "/link-requests/{id}/decline", tag = "sharing",
+    params(("id" = String, Path)), responses((status = 204)))]
+async fn decline_link(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    sharing::decline_link(&s, a, &id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Demote: end the link. The companion keeps a snapshot of the name; history is unchanged.
+#[utoipa::path(post, path = "/companions/{id}/unlink", tag = "sharing",
+    params(("id" = String, Path)), responses((status = 200, body = CompanionDto)))]
+async fn unlink_companion(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+) -> ApiResult<Json<CompanionDto>> {
+    Ok(Json(sharing::unlink(&s, a, &id).await?))
+}
+
+#[derive(Deserialize, ToSchema)]
+struct MergeBody {
+    /// The duplicate that is merged into the companion of the path.
+    remove: String,
+}
+
+#[utoipa::path(post, path = "/companions/{id}/merge", tag = "sharing", request_body = MergeBody,
+    params(("id" = String, Path)), responses((status = 200, body = CompanionDto)))]
+async fn merge_companions(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+    Json(b): Json<MergeBody>,
+) -> ApiResult<Json<CompanionDto>> {
+    Ok(Json(sharing::merge(&s, a, &id, &b.remove).await?))
+}
+
+#[derive(Deserialize, ToSchema)]
+struct InviteBody {
+    #[serde(default)]
+    email: Option<String>,
+}
+
+/// Promote: a single-use invite to create the account the companion stands for.
+#[utoipa::path(post, path = "/companions/{id}/invite", tag = "sharing", request_body = InviteBody,
+    params(("id" = String, Path)), responses((status = 201, body = InviteDto)))]
+async fn invite_companion(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+    Json(b): Json<InviteBody>,
+) -> ApiResult<(StatusCode, Json<InviteDto>)> {
+    Ok((
+        StatusCode::CREATED,
+        Json(sharing::invite(&s, a, &id, b.email).await?),
+    ))
+}
+
+#[utoipa::path(get, path = "/sessions", tag = "sharing",
+    responses((status = 200, body = Vec<LoggedSessionDto>)))]
+async fn my_sessions(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+) -> ApiResult<Json<Vec<LoggedSessionDto>>> {
+    Ok(Json(sharing::my_sessions(&s, a).await?))
+}
+
+#[utoipa::path(get, path = "/sessions/shared", tag = "sharing",
+    responses((status = 200, body = Vec<LoggedSessionDto>)))]
+async fn shared_sessions(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+) -> ApiResult<Json<Vec<LoggedSessionDto>>> {
+    Ok(Json(sharing::shared_sessions(&s, a).await?))
+}
+
+/// "Copy to my log": idempotent.
+#[utoipa::path(post, path = "/sessions/{id}/claim", tag = "sharing",
+    params(("id" = String, Path)), responses((status = 200, body = LoggedSessionDto)))]
+async fn claim_session(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+) -> ApiResult<Json<LoggedSessionDto>> {
+    Ok(Json(sharing::claim(&s, a, &id).await?))
+}
+
+#[utoipa::path(put, path = "/auth/me/privacy", tag = "sharing", request_body = PrivacyDto,
+    responses((status = 200, body = UserDto)))]
+async fn set_privacy(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Json(b): Json<PrivacyDto>,
+) -> ApiResult<Json<UserDto>> {
+    Ok(Json(sharing::set_privacy(&s, a, b).await?))
+}
+
+/// Share by link; a new link revokes the previous one.
+#[utoipa::path(post, path = "/lists/{id}/share", tag = "sharing",
+    params(("id" = String, Path)), responses((status = 200, body = ShareLinkDto)))]
+async fn share_list(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+) -> ApiResult<Json<ShareLinkDto>> {
+    Ok(Json(sharing::share_list(&s, a, &id).await?))
+}
+
+/// A link-shared list; no account needed.
+#[utoipa::path(get, path = "/shared/lists/{token}", tag = "sharing",
+    params(("token" = String, Path)),
+    responses((status = 200, body = SharedListDto), (status = 404, body = contracts::ErrorDto)))]
+async fn shared_list(
+    State(s): State<ApiState>,
+    Path(token): Path<String>,
+) -> ApiResult<Json<SharedListDto>> {
+    Ok(Json(sharing::shared_list(&s, &token).await?))
 }
 
 // ---------------------------------------------------------------- sync

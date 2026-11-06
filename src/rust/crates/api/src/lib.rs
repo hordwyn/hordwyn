@@ -10,6 +10,7 @@ mod error;
 mod extract;
 pub mod ops;
 mod routes;
+pub mod sharing;
 pub mod sync;
 
 use std::sync::Arc;

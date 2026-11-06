@@ -15,7 +15,7 @@ use domain::ids::{
 };
 use domain::kind::KindId;
 use domain::library::LibraryEntry;
-use domain::list::List;
+use domain::list::{List, Visibility};
 use domain::progress::ProgressEvent;
 use domain::review::Review;
 use domain::session::Session;
@@ -364,6 +364,15 @@ impl ListRepo for MemStore {
             .filter(|l| l.owner == owner)
             .cloned()
             .collect())
+    }
+
+    async fn by_share_token(&self, token: &str) -> RepoResult<Option<List>> {
+        Ok(self
+            .state()
+            .lists
+            .values()
+            .find(|l| matches!(&l.visibility, Visibility::Link { token: t } if t == token))
+            .cloned())
     }
 }
 

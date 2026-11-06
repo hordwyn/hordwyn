@@ -60,3 +60,43 @@ async fn list_lifecycle() {
         Err(AppError::NotFound(_))
     ));
 }
+
+#[tokio::test]
+async fn link_shared_lists_are_read_by_token_only() {
+    let env = TestEnv::new();
+    let (_, me) = common::user(&env, "alice").await;
+    let (_, other) = common::user(&env, "bob").await;
+    let list = env
+        .app
+        .create_list(me, "Picks", None, Visibility::Private)
+        .await
+        .unwrap();
+    let token = env.app.share_list(me, list.id).await.unwrap();
+    assert_ne!(token, "");
+    assert_eq!(env.app.list_by_token(&token).await.unwrap().id, list.id);
+    // the token, not the id, grants access
+    assert!(matches!(
+        env.app.list(other, list.id).await,
+        Err(AppError::Forbidden)
+    ));
+    assert!(matches!(
+        env.app.share_list(other, list.id).await,
+        Err(AppError::Forbidden)
+    ));
+    // sharing again rotates the token
+    let rotated = env.app.share_list(me, list.id).await.unwrap();
+    assert_ne!(rotated, token);
+    assert!(matches!(
+        env.app.list_by_token(&token).await,
+        Err(AppError::NotFound(_))
+    ));
+    // back to private revokes the link
+    env.app
+        .update_list(me, list.id, None, None, Some(Visibility::Private))
+        .await
+        .unwrap();
+    assert!(matches!(
+        env.app.list_by_token(&rotated).await,
+        Err(AppError::NotFound(_))
+    ));
+}

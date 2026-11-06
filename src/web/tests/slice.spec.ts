@@ -21,7 +21,7 @@ test("sign up, find a movie, watch it with a companion", async ({ page }) => {
 
   await page.goto("/companions");
   await hydrated(page);
-  await page.getByLabel("Name").fill("Ben");
+  await page.getByLabel("Name", { exact: true }).fill("Ben");
   await page.getByRole("button", { name: "Add companion" }).click();
   await expect(page.getByRole("listitem").filter({ hasText: "Ben" })).toBeVisible();
 

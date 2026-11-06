@@ -19,6 +19,7 @@ struct UserRow {
     role: String,
     self_companion: uuid::Uuid,
     created_at: chrono::DateTime<chrono::Utc>,
+    share_sessions: bool,
 }
 
 impl TryFrom<UserRow> for User {
@@ -31,6 +32,7 @@ impl TryFrom<UserRow> for User {
             email: r.email,
             role: role(&r.role)?,
             self_companion: CompanionId(r.self_companion),
+            share_sessions: r.share_sessions,
             created_at: r.created_at,
         })
     }
@@ -107,15 +109,17 @@ impl UserRepo for PgStore {
     async fn insert_with_self(&self, user: &User, self_companion: &Companion) -> Res<()> {
         let mut tx = self.begin().await?;
         sqlx::query!(
-            "INSERT INTO users (id, username, display_name, email, role, self_companion, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            "INSERT INTO users (id, username, display_name, email, role, self_companion, created_at,
+                                share_sessions)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
             user.id.0,
             user.username,
             user.display_name,
             user.email,
             role_str(user.role),
             user.self_companion.0,
-            user.created_at
+            user.created_at,
+            user.share_sessions
         )
         .execute(&mut *tx)
         .await
@@ -154,12 +158,14 @@ impl UserRepo for PgStore {
     async fn update(&self, user: &User) -> Res<()> {
         let mut tx = self.begin().await?;
         sqlx::query!(
-            "UPDATE users SET username = $2, display_name = $3, email = $4, role = $5 WHERE id = $1",
+            "UPDATE users SET username = $2, display_name = $3, email = $4, role = $5,
+                              share_sessions = $6 WHERE id = $1",
             user.id.0,
             user.username,
             user.display_name,
             user.email,
-            role_str(user.role)
+            role_str(user.role),
+            user.share_sessions
         )
         .execute(&mut *tx)
         .await

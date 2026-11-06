@@ -22,7 +22,14 @@ pub struct User {
     pub role: Role,
     /// The companion that represents this user in their own address book.
     pub self_companion: CompanionId,
+    /// Privacy (D-9): sessions this user logged are visible to linked participants.
+    #[serde(default = "default_true")]
+    pub share_sessions: bool,
     pub created_at: Timestamp,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 /// The authenticated caller of a use-case.

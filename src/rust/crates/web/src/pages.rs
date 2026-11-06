@@ -13,7 +13,7 @@ use crate::i18n::{t, use_i18n};
 use crate::widgets::{CompanionPicker, Cover, PosterCard, RatingInput};
 
 /// Full page load after sign-in/out so the server renders with the new cookie.
-fn go(path: &str) {
+pub(crate) fn go(path: &str) {
     #[cfg(feature = "hydrate")]
     if let Some(w) = web_sys::window() {
         let _ = w.location().assign(path);
@@ -22,7 +22,7 @@ fn go(path: &str) {
     let _ = path;
 }
 
-fn error_text(e: &ServerFnError) -> String {
+pub(crate) fn error_text(e: &ServerFnError) -> String {
     let code = api::error_code(e);
     let key = format!("auth-error-{code}");
     let text = t(&key);
@@ -34,7 +34,7 @@ fn error_text(e: &ServerFnError) -> String {
 }
 
 #[component]
-fn PageTitle(#[prop(into)] text: String) -> impl IntoView {
+pub(crate) fn PageTitle(#[prop(into)] text: String) -> impl IntoView {
     let product = expect_context::<crate::app::ClientConfig>().product_name;
     view! {
         <Title text=format!("{text} - {product}")/>
@@ -117,6 +117,10 @@ pub fn SignIn() -> impl IntoView {
 #[component]
 pub fn SignUp() -> impl IntoView {
     let i18n = use_i18n();
+    // `/invite/:token`: promotion of a companion (D-9); the account is linked on creation
+    let params = use_params_map();
+    let invite = move || params.with_untracked(|p| p.get("token"));
+    let invited = invite().is_some();
     let username = RwSignal::new(String::new());
     let display = RwSignal::new(String::new());
     let email = RwSignal::new(String::new());
@@ -129,9 +133,10 @@ pub fn SignUp() -> impl IntoView {
             email.get_untracked(),
             password.get_untracked(),
         );
+        let inv = invite();
         async move {
             let d = if d.trim().is_empty() { u.clone() } else { d };
-            match api::sign_up(u, d, p, Some(e)).await {
+            match api::sign_up(u, d, p, Some(e), inv).await {
                 Ok(_) => go("/library"),
                 Err(e) => error.set(Some(error_text(&e))),
             }
@@ -164,6 +169,7 @@ pub fn SignUp() -> impl IntoView {
                 <Input id="password" r#type="password" value=password/>
             </FormField>
             <p role="alert" class="text-sm text-destructive">{move || error.get()}</p>
+            {invited.then(|| view! { <p class="text-sm text-muted-foreground">{t("auth-invited")}</p> })}
             <Button r#type="submit" disabled=Signal::derive(move || submit.pending().get())>{l_submit}</Button>
             <p class="text-sm text-muted-foreground">
                 {have} " " <A href="/sign-in" attr:class="underline">{l_signin}</A>
@@ -173,7 +179,7 @@ pub fn SignUp() -> impl IntoView {
 }
 
 /// Redirect to sign-in when a server function says the caller is not signed in.
-fn needs_sign_in(e: &ServerFnError) -> bool {
+pub(crate) fn needs_sign_in(e: &ServerFnError) -> bool {
     api::error_code(e) == "unauthorized"
 }
 
@@ -405,50 +411,20 @@ fn ItemView(
 }
 
 #[component]
-pub fn Companions() -> impl IntoView {
+pub fn Lists() -> impl IntoView {
     let i18n = use_i18n();
-    let data = Resource::new(|| (), |()| api::companions());
-    let name = RwSignal::new(String::new());
-    let add = Action::new(move |(): &()| {
-        let n = name.get_untracked();
+    let data = Resource::new(|| (), |()| api::lists());
+    // list id -> public URL, after "share by link"
+    let shared = RwSignal::new(None::<(String, String)>);
+    let share = Action::new(move |id: &String| {
+        let id = id.clone();
         async move {
-            if api::create_companion(n).await.is_ok() {
-                name.set(String::new());
+            if let Ok(l) = api::share_list(id.clone()).await {
+                shared.set(Some((id, crate::sharing::absolute(&l.path))));
             }
             data.refetch();
         }
     });
-    view! {
-        <PageTitle text=i18n.t("companions-title")/>
-        <p class="mb-4 text-sm text-muted-foreground">{i18n.t("companions-lead")}</p>
-        <form class="mb-6 flex max-w-md items-end gap-2" on:submit=move |ev| { ev.prevent_default(); add.dispatch(()); }>
-            <FormField id="companion-name" label=i18n.t("companions-new")>
-                <Input id="companion-name" value=name/>
-            </FormField>
-            <Button r#type="submit">{i18n.t("companions-add")}</Button>
-        </form>
-        <Suspense fallback=|| view! { <Skeleton class="h-24 w-full"/> }>
-            {move || data.get().map(|r| match r {
-                Err(e) if needs_sign_in(&e) => { go("/sign-in"); ().into_any() }
-                Err(e) => view! { <p role="alert">{error_text(&e)}</p> }.into_any(),
-                Ok(list) => view! {
-                    <ul class="flex flex-col gap-2" aria-label=t("companions-title")>
-                        {list.into_iter().filter(|c| c.merged_into.is_none()).map(|c| view! {
-                            <li class="rounded-md border border-border px-3 py-2">
-                                {c.name.clone()} {c.is_self.then(|| format!(" {}", t("companions-you")))}
-                            </li>
-                        }).collect_view()}
-                    </ul>
-                }.into_any(),
-            })}
-        </Suspense>
-    }
-}
-
-#[component]
-pub fn Lists() -> impl IntoView {
-    let i18n = use_i18n();
-    let data = Resource::new(|| (), |()| api::lists());
     let name = RwSignal::new(String::new());
     let add = Action::new(move |(): &()| {
         let n = name.get_untracked();
@@ -476,10 +452,24 @@ pub fn Lists() -> impl IntoView {
                     <ul class="flex flex-col gap-2">
                         {list.into_iter().map(|l| {
                             let count = use_i18n().t_args("lists-items", &[("count", l.item_ids.len().into())]);
+                            let (share_id, row_id) = (l.id.clone(), l.id.clone());
+                            let label = format!("{} {}", t("lists-share"), l.name);
                             view! {
-                                <li class="rounded-md border border-border px-3 py-2">
-                                    <span class="font-medium">{l.name.clone()}</span>
-                                    <span class="ml-2 text-sm text-muted-foreground">{count}</span>
+                                <li class="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
+                                    <span class="flex-1">
+                                        <span class="font-medium">{l.name.clone()}</span>
+                                        <span class="ml-2 text-sm text-muted-foreground">{count}</span>
+                                    </span>
+                                    <Button size=ui::ButtonSize::Sm variant=ButtonVariant::Outline attr:aria-label=label
+                                        on:click=move |_| { share.dispatch(share_id.clone()); }>
+                                        {t("lists-share")}
+                                    </Button>
+                                    {move || shared.get().filter(|(id, _)| *id == row_id).map(|(_, url)| view! {
+                                        <p class="basis-full text-sm">
+                                            {t("lists-share-link")} " "
+                                            <output class="break-all font-mono" data-testid="share-link">{url}</output>
+                                        </p>
+                                    })}
                                 </li>
                             }
                         }).collect_view()}

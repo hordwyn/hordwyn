@@ -5,8 +5,9 @@
 #![allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 
 use contracts::{
-    AttributionDto, CompanionDto, ItemPageDto, LibraryEntryDto, LibraryItemDto, ListDto,
-    NewProgressDto, ProgressEventDto, SearchResponseDto, UserDto,
+    AttributionDto, CompanionDto, InviteDto, ItemPageDto, LibraryEntryDto, LibraryItemDto,
+    LinkRequestDto, ListDto, LoggedSessionDto, NewProgressDto, ProgressEventDto, SearchResponseDto,
+    ShareLinkDto, SharedListDto, UserDto,
 };
 use leptos::prelude::*;
 
@@ -101,6 +102,7 @@ pub async fn sign_up(
     display_name: String,
     password: String,
     email: Option<String>,
+    invite: Option<String>,
 ) -> Result<UserDto, ServerFnError> {
     let b = server::backend()?;
     let s = b
@@ -109,7 +111,7 @@ pub async fn sign_up(
             display_name,
             password,
             email: email.filter(|e| !e.is_empty()),
-            invite: None,
+            invite: invite.filter(|i| !i.is_empty()),
         })
         .await
         .map_err(server::code)?;
@@ -214,6 +216,94 @@ pub async fn add_to_list(list_id: String, item_id: String) -> Result<ListDto, Se
 #[server(prefix = "/_fn")]
 pub async fn sources() -> Result<Vec<AttributionDto>, ServerFnError> {
     Ok(server::backend()?.sources().await)
+}
+
+// ---------------------------------------------------------------- sharing (D-9)
+
+#[server(prefix = "/_fn")]
+pub async fn request_link(
+    companion_id: String,
+    username: String,
+) -> Result<LinkRequestDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.request_link(&t, &companion_id, &username)
+        .await
+        .map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn link_requests() -> Result<Vec<LinkRequestDto>, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.link_requests(&t).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn answer_link(id: String, accept: bool) -> Result<(), ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.answer_link(&t, &id, accept).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn unlink(companion_id: String) -> Result<CompanionDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.unlink(&t, &companion_id).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn merge(keep: String, remove: String) -> Result<CompanionDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.merge(&t, &keep, &remove).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn invite(companion_id: String) -> Result<InviteDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.invite(&t, &companion_id).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn sessions(shared: bool) -> Result<Vec<LoggedSessionDto>, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.sessions(&t, shared).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn claim(session_id: String) -> Result<LoggedSessionDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.claim(&t, &session_id).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn set_privacy(share_sessions: bool) -> Result<UserDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.set_privacy(&t, contracts::PrivacyDto { share_sessions })
+        .await
+        .map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn share_list(list_id: String) -> Result<ShareLinkDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.share_list(&t, &list_id).await.map_err(server::code)
+}
+
+/// A link-shared list; works without signing in.
+#[server(prefix = "/_fn")]
+pub async fn shared_list(token: String) -> Result<SharedListDto, ServerFnError> {
+    server::backend()?
+        .shared_list(&token)
+        .await
+        .map_err(server::code)
 }
 
 /// Error code carried by a server function error (see `server::code`).

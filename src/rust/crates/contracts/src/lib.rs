@@ -18,6 +18,9 @@ pub struct UserDto {
     /// `admin` or `member`.
     pub role: String,
     pub self_companion: String,
+    /// Privacy: linked participants see the sessions this user logs.
+    #[serde(default)]
+    pub share_sessions: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -218,6 +221,81 @@ pub struct ListDto {
     /// `private`, `instance` or `link`.
     pub visibility: String,
     pub item_ids: Vec<String>,
+}
+
+// ---------------------------------------------------------------- sharing (D-9)
+
+/// A link-shared list as anyone with the link sees it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct SharedListDto {
+    pub name: String,
+    pub description: Option<String>,
+    pub owner_name: String,
+    pub items: Vec<CatalogItemDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct ShareLinkDto {
+    /// Path of the shared page; sharing again replaces (revokes) the previous link.
+    pub path: String,
+    pub token: String,
+}
+
+/// "This companion is you": a request to link a companion of another user to the caller.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct LinkRequestDto {
+    pub id: String,
+    pub companion_id: String,
+    pub companion_name: String,
+    /// Display name of the user who asks.
+    pub from_name: String,
+}
+
+/// Promotion of a companion to an account: the single-use invite link.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct InviteDto {
+    pub id: String,
+    /// Shown once; only its hash is stored.
+    pub token: String,
+    /// Sign-up page with the token filled in.
+    pub path: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct ParticipantDto {
+    pub companion_id: String,
+    pub name: String,
+    /// The participant stands for the caller.
+    pub is_me: bool,
+    pub score: Option<f64>,
+    pub winner: bool,
+}
+
+/// A logged session (play, "watched with").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct LoggedSessionDto {
+    pub id: String,
+    pub item_id: String,
+    pub item_title: String,
+    pub owner_name: String,
+    /// Logged by the caller (otherwise shared with them, read-only).
+    pub mine: bool,
+    pub started_at: String,
+    pub participants: Vec<ParticipantDto>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct PrivacyDto {
+    /// Linked participants see the sessions you log.
+    pub share_sessions: bool,
 }
 
 // ---------------------------------------------------------------- sync (D-12)

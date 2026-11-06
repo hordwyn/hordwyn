@@ -339,3 +339,226 @@ async fn export_then_import_moves_a_library_to_another_account() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+/// M15 over REST: promote by invite, the new user sees and claims the shared session, link
+/// requests, demote, merge, privacy, and a link-shared list read without an account.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn sharing_and_companion_flows() {
+    let (s, t) = state();
+    let item = t
+        .app
+        .upsert_catalog_item(app::NewCatalogItem {
+            kind: domain::kind::KindId::new("movie").unwrap(),
+            title: "Heat".into(),
+            original_title: None,
+            year: Some(1995),
+            description: None,
+            external_ids: vec![domain::catalog::ExternalId::new("tmdb", "949")],
+            attributes: serde_json::json!({}),
+            cover_url: None,
+        })
+        .await
+        .unwrap();
+    let id = item.id.0.to_string();
+    let app = api::router(s);
+    let anna = signed_up(&app).await;
+    let (_, _, ben) = call(
+        &app,
+        "POST",
+        "/api/v1/companions",
+        Some(&anna),
+        Some(serde_json::json!({"name": "Ben"})),
+    )
+    .await;
+    let ben_id = ben["id"].as_str().unwrap().to_string();
+    call(
+        &app,
+        "POST",
+        &format!("/api/v1/items/{id}/progress"),
+        Some(&anna),
+        Some(serde_json::json!({"progress": {"type": "finished"}, "with": [ben_id]})),
+    )
+    .await;
+    let (_, _, before) = call(&app, "GET", "/api/v1/sessions", Some(&anna), None).await;
+    assert_eq!(before.as_array().unwrap().len(), 1);
+
+    // promote: invite, then sign up with it
+    let (status, _, inv) = call(
+        &app,
+        "POST",
+        &format!("/api/v1/companions/{ben_id}/invite"),
+        Some(&anna),
+        Some(serde_json::json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{inv}");
+    let invite = inv["token"].as_str().unwrap();
+    assert_eq!(inv["path"], format!("/invite/{invite}"));
+    let (status, _, signed) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/sign-up",
+        None,
+        Some(
+            serde_json::json!({"username": "ben", "display_name": "Ben B.",
+            "password": "correct horse battery", "invite": invite}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{signed}");
+    let bent = signed["token"].as_str().unwrap().to_string();
+
+    // the new user sees the shared session and copies it to their log, once
+    let (_, _, shared) = call(&app, "GET", "/api/v1/sessions/shared", Some(&bent), None).await;
+    assert_eq!(shared[0]["item_title"], "Heat");
+    assert_eq!(shared[0]["owner_name"], "Anna");
+    assert_eq!(shared[0]["mine"], false);
+    let me_rows: Vec<_> = shared[0]["participants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["is_me"] == true)
+        .collect();
+    assert_eq!(me_rows.len(), 1);
+    assert_eq!(me_rows[0]["name"], "Ben");
+    let sid = shared[0]["id"].as_str().unwrap();
+    let (status, _, copy) = call(
+        &app,
+        "POST",
+        &format!("/api/v1/sessions/{sid}/claim"),
+        Some(&bent),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{copy}");
+    assert_eq!(copy["mine"], true);
+    let (_, _, again) = call(
+        &app,
+        "POST",
+        &format!("/api/v1/sessions/{sid}/claim"),
+        Some(&bent),
+        None,
+    )
+    .await;
+    assert_eq!(again["id"], copy["id"]);
+    let (_, _, lib) = call(&app, "GET", "/api/v1/library", Some(&bent), None).await;
+    assert_eq!(lib[0]["entry"]["status"], "completed");
+
+    // privacy: the owner stops sharing sessions
+    let (_, _, me) = call(
+        &app,
+        "PUT",
+        "/api/v1/auth/me/privacy",
+        Some(&anna),
+        Some(serde_json::json!({"share_sessions": false})),
+    )
+    .await;
+    assert_eq!(me["share_sessions"], false);
+    let (_, _, hidden) = call(&app, "GET", "/api/v1/sessions/shared", Some(&bent), None).await;
+    assert_eq!(hidden, serde_json::json!([]));
+    call(
+        &app,
+        "PUT",
+        "/api/v1/auth/me/privacy",
+        Some(&anna),
+        Some(serde_json::json!({"share_sessions": true})),
+    )
+    .await;
+
+    // demote: history is unchanged
+    let (_, _, demoted) = call(
+        &app,
+        "POST",
+        &format!("/api/v1/companions/{ben_id}/unlink"),
+        Some(&anna),
+        None,
+    )
+    .await;
+    assert_eq!(demoted["linked_user"], serde_json::Value::Null);
+    assert_eq!(demoted["name"], "Ben");
+    let (_, _, after) = call(&app, "GET", "/api/v1/sessions", Some(&anna), None).await;
+    assert_eq!(after, before);
+
+    // link request by username, accepted by the other user
+    let (status, _, req) = call(
+        &app,
+        "POST",
+        &format!("/api/v1/companions/{ben_id}/link-requests"),
+        Some(&anna),
+        Some(serde_json::json!({"username": "ben"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{req}");
+    let (_, _, pending) = call(&app, "GET", "/api/v1/link-requests", Some(&bent), None).await;
+    assert_eq!(pending[0]["from_name"], "Anna");
+    assert_eq!(pending[0]["companion_name"], "Ben");
+    let rid = pending[0]["id"].as_str().unwrap();
+    let (status, _, linked) = call(
+        &app,
+        "POST",
+        &format!("/api/v1/link-requests/{rid}/accept"),
+        Some(&bent),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{linked}");
+    assert_eq!(linked["linked_user"], signed["user"]["id"]);
+
+    // merge a duplicate: history unchanged
+    let (_, _, dup) = call(
+        &app,
+        "POST",
+        "/api/v1/companions",
+        Some(&anna),
+        Some(serde_json::json!({"name": "Benny"})),
+    )
+    .await;
+    let (status, _, kept) = call(
+        &app,
+        "POST",
+        &format!("/api/v1/companions/{ben_id}/merge"),
+        Some(&anna),
+        Some(serde_json::json!({"remove": dup["id"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{kept}");
+    let (_, _, cs) = call(&app, "GET", "/api/v1/companions", Some(&anna), None).await;
+    assert!(cs.as_array().unwrap().iter().all(|c| c["name"] != "Benny"));
+    let (_, _, after) = call(&app, "GET", "/api/v1/sessions", Some(&anna), None).await;
+    assert_eq!(after, before);
+
+    // a list shared by link is readable without an account
+    let (_, _, list) = call(
+        &app,
+        "POST",
+        "/api/v1/lists",
+        Some(&anna),
+        Some(serde_json::json!({"name": "Crime"})),
+    )
+    .await;
+    let lid = list["id"].as_str().unwrap();
+    call(
+        &app,
+        "POST",
+        &format!("/api/v1/lists/{lid}/items"),
+        Some(&anna),
+        Some(serde_json::json!({"item_id": id})),
+    )
+    .await;
+    let (_, _, link) = call(
+        &app,
+        "POST",
+        &format!("/api/v1/lists/{lid}/share"),
+        Some(&anna),
+        None,
+    )
+    .await;
+    let path = link["path"].as_str().unwrap();
+    let (status, _, public) = call(&app, "GET", &format!("/api/v1{path}"), None, None).await;
+    assert_eq!(status, StatusCode::OK, "{public}");
+    assert_eq!(public["owner_name"], "Anna");
+    assert_eq!(public["items"][0]["title"], "Heat");
+    let (status, _, _) = call(&app, "GET", "/api/v1/shared/lists/nope", None, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

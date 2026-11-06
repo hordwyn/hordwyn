@@ -4,8 +4,10 @@
 
 use async_trait::async_trait;
 use contracts::{
-    AttributionDto, CompanionDto, ErrorDto, ItemPageDto, LibraryEntryDto, LibraryItemDto, ListDto,
-    NewProgressDto, ProgressEventDto, SearchResponseDto, SessionDto, SignInDto, SignUpDto, UserDto,
+    AttributionDto, CompanionDto, ErrorDto, InviteDto, ItemPageDto, LibraryEntryDto,
+    LibraryItemDto, LinkRequestDto, ListDto, LoggedSessionDto, NewProgressDto, PrivacyDto,
+    ProgressEventDto, SearchResponseDto, SessionDto, ShareLinkDto, SharedListDto, SignInDto,
+    SignUpDto, UserDto,
 };
 
 pub type BResult<T> = Result<T, ErrorDto>;
@@ -52,4 +54,23 @@ pub trait Backend: Send + Sync {
     async fn add_to_list(&self, token: &str, list_id: &str, item_id: &str) -> BResult<ListDto>;
 
     async fn sources(&self) -> Vec<AttributionDto>;
+
+    // sharing (D-9)
+    async fn request_link(
+        &self,
+        token: &str,
+        companion_id: &str,
+        username: &str,
+    ) -> BResult<LinkRequestDto>;
+    async fn link_requests(&self, token: &str) -> BResult<Vec<LinkRequestDto>>;
+    async fn answer_link(&self, token: &str, id: &str, accept: bool) -> BResult<()>;
+    async fn unlink(&self, token: &str, companion_id: &str) -> BResult<CompanionDto>;
+    async fn merge(&self, token: &str, keep: &str, remove: &str) -> BResult<CompanionDto>;
+    async fn invite(&self, token: &str, companion_id: &str) -> BResult<InviteDto>;
+    async fn sessions(&self, token: &str, shared: bool) -> BResult<Vec<LoggedSessionDto>>;
+    async fn claim(&self, token: &str, session_id: &str) -> BResult<LoggedSessionDto>;
+    async fn set_privacy(&self, token: &str, p: PrivacyDto) -> BResult<UserDto>;
+    async fn share_list(&self, token: &str, list_id: &str) -> BResult<ShareLinkDto>;
+    /// A link-shared list; `share_token` is the list's token, no session needed.
+    async fn shared_list(&self, share_token: &str) -> BResult<SharedListDto>;
 }

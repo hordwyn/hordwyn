@@ -45,17 +45,21 @@ generic JSON Lines/CSV format with published JSON Schema, export, REST endpoints
 importer stub (fixture missing). Trakt, Goodreads, BG Stats, BGG not built (DEC-122).
 |M16 Sync protocol |`m16` |`GET /sync/changes`, `POST /sync/commands`, HLC per field with
 server clock merge and drift cap; convergence and replay test. Tauri spike not done.
-|M10, M11, M13, M14, M15, M17 |- |Not started (see "Known gaps").
+|M15 Sharing and companions |`m15` |Link request/accept, promote by invite, demote, merge, shared
+sessions with "copy to my log" (idempotent), per-user privacy (`share_sessions`), link-shared
+lists readable without an account; REST, web pages, e2e (promote, accept, see history,
+demote, merge; history unchanged). Profile visibility not built (DEC-130).
+|M10, M11, M13, M14, M17 |- |Not started (see "Known gaps").
 |===
 
 == Test results
 
 * `cd src/rust && cargo xtask ci`: fmt, clippy pedantic (native and wasm32), cargo-deny,
   sqlx offline cache, all tests against local Postgres, Meilisearch and versitygw (S3),
-  wasm tests. Last green run: see the commit of tag `m07`/`m09`; about 190 tests, 0 failed,
-  1 ignored (live TMDB smoke test), no service-dependent test skipped.
-* `cargo xtask e2e`: 9 Playwright tests green (8 gallery/accessibility tests with axe
-  WCAG A/AA, 1 M07 slice test with the TMDB fixture server).
+  wasm tests. Last green run: the commit of tag `m15`; 217 tests passed, 0 failed, 2 ignored
+  (live provider smoke tests), no service-dependent test skipped.
+* `cargo xtask e2e`: 11 Playwright tests green (8 gallery/accessibility tests with axe
+  WCAG A/AA, the M07 slice test with the TMDB fixture server, 2 M15 sharing tests).
 * Latency (M05 acceptance, `apps/server/tests/latency.rs`): with a connector that takes 10 s,
   item detail 3-5 ms, search 1-2 ms (limit 200 ms); `entity.updated` after 10.2 s,
   `search.results` after 10.0 s.
@@ -103,7 +107,7 @@ server clock merge and drift cap; convergence and replay test. Tauri spike not d
 == Known gaps and bugs
 
 * M10 (board-game research), M11 (board games), M13 (notifications), M14 (integrations),
-  M15 (sharing flows), M17 (hardening, load test, image size, G2) not done; M12 and M09 only
+  M17 (hardening, load test, image size, G2) not done; M12 and M09 only
   in part.
 * Legacy importer fixture (Q4) not present in the repository.
 * Docker image build and compose quick start are only verified by the GitLab kaniko job; no
@@ -118,6 +122,5 @@ server clock merge and drift cap; convergence and replay test. Tauri spike not d
   source (DEC-108), BGG docs and token (DEC-107).
 . M12: Trakt importer (API docs research), Goodreads and BG Stats from owner sample exports.
 . M10/M11 board games once BGG is unblocked.
-. M15 sharing flows (the companion/user model already supports them in `app`).
 . M16: Tauri desktop spike on a host with more disk.
 . M13, M14, M17 and an independent review (G2, and of M04-M08).

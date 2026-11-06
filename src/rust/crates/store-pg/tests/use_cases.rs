@@ -90,6 +90,14 @@ async fn lists_keep_order() {
     );
     assert_eq!(got.items[0].note.as_deref(), Some("note"));
     assert_eq!(app.lists(me).await.unwrap().len(), 1);
+    let token = app.share_list(me, l.id).await.unwrap();
+    assert_eq!(app.list_by_token(&token).await.unwrap().id, l.id);
+    let rotated = app.share_list(me, l.id).await.unwrap();
+    assert!(matches!(
+        app.list_by_token(&token).await,
+        Err(AppError::NotFound(_))
+    ));
+    assert_eq!(app.list_by_token(&rotated).await.unwrap().items.len(), 2);
     app.delete_list(me, l.id).await.unwrap();
     assert!(matches!(
         app.list(me, l.id).await,
@@ -154,6 +162,15 @@ async fn companion_lifecycle_without_rewriting_history() {
         role: carl_user.role,
     };
     assert_eq!(app.shared_sessions(carl_actor).await.unwrap()[0].id, s.id);
+
+    // claim (idempotent) and the owner's privacy setting
+    let copy = app.claim_session(carl_actor, s.id).await.unwrap();
+    assert_eq!(app.claim_session(carl_actor, s.id).await.unwrap(), copy);
+    assert_eq!(app.progress(carl_actor, game.id).await.unwrap().len(), 1);
+    assert!(!app.set_privacy(me, false).await.unwrap().share_sessions);
+    assert_eq!(app.shared_sessions(carl_actor).await.unwrap().len(), 0);
+    assert!(!app.user(u.id).await.unwrap().share_sessions);
+    app.set_privacy(me, true).await.unwrap();
 
     // demote by deleting bob's account
     app.delete_user(bob, bob_user.id).await.unwrap();

@@ -1,0 +1,34 @@
+= Sharing and companions
+
+People you watch, read and play with are *companions* in your own address book. Sessions
+("watched with", plays) always reference companions, so the history never has to be
+rewritten when people get accounts, leave or turn out to be duplicates.
+
+== Flows
+
+Link:: Ask an existing user to confirm that one of your companions is them
+  (`POST /api/v1/companions/{id}/link-requests` with their username). They accept or decline
+  under _Requests for you_ (`POST /api/v1/link-requests/{id}/accept|decline`).
+Promote:: Create a single-use invite from a companion (`POST /api/v1/companions/{id}/invite`).
+  Signing up with it (`/invite/<token>` in the web app, `invite` in `POST /auth/sign-up`)
+  creates the account and links the companion. Only a hash of the token is stored.
+Demote:: End a link (`POST /api/v1/companions/{id}/unlink`, owner or linked user). Deleting an
+  account demotes every companion linked to it. The companion keeps a snapshot of the name.
+Merge:: Fold a duplicate into the companion you keep (`POST /api/v1/companions/{id}/merge`).
+  Sessions keep pointing at the duplicate, which resolves to the kept companion.
+
+== Shared sessions
+
+A linked user sees the sessions of others in which they took part
+(`GET /api/v1/sessions/shared`, _History_ in the web app), read-only. _Copy to my log_
+(`POST /api/v1/sessions/{id}/claim`) copies one into their own history once: their own
+score and result come along; the owner's notes, location and other participants do not.
+
+The owner can stop sharing with the privacy setting
+(`PUT /api/v1/auth/me/privacy` with `{"share_sessions": false}`).
+
+== Lists
+
+Lists are `private`, `instance` (every user of the instance) or `link`.
+`POST /api/v1/lists/{id}/share` creates a link (`/shared/lists/<token>`) that anyone can open
+without an account; sharing again replaces the link, making the list private revokes it.

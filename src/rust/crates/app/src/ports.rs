@@ -125,6 +125,8 @@ pub trait ListRepo: Send + Sync {
     async fn update(&self, l: &List) -> RepoResult<()>;
     async fn delete(&self, id: ListId) -> RepoResult<()>;
     async fn by_owner(&self, owner: UserId) -> RepoResult<Vec<List>>;
+    /// The list shared with visibility `link` and this token.
+    async fn by_share_token(&self, token: &str) -> RepoResult<Option<List>>;
 }
 
 #[async_trait]

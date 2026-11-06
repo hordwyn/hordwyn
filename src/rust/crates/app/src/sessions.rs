@@ -114,11 +114,78 @@ impl App {
         if s.participants
             .iter()
             .any(|p| mine.contains(&p.companion_id))
+            && self.shares_sessions(s.owner).await?
         {
             Ok(s)
         } else {
             Err(AppError::Forbidden)
         }
+    }
+
+    async fn shares_sessions(&self, owner: domain::ids::UserId) -> AppResult<bool> {
+        Ok(self
+            .repos
+            .users
+            .get(owner)
+            .await?
+            .is_some_and(|u| u.share_sessions))
+    }
+
+    /// "Copy to my log": a session shared with the actor becomes a session of their own, with
+    /// their self-companion carrying the score and result of the participant that stood for
+    /// them. The owner's notes, location and other participants stay with the owner. The copy
+    /// has an id derived from the original, so claiming twice changes nothing.
+    ///
+    /// # Errors
+    /// Not shared with the actor, or the actor's own session.
+    pub async fn claim_session(&self, actor: Actor, id: SessionId) -> AppResult<Session> {
+        let s = self.session(actor, id).await?;
+        if s.owner == actor.user_id {
+            return Err(AppError::Conflict("the session is already yours".into()));
+        }
+        let copy_id = SessionId(uuid::Uuid::new_v5(&s.id.0, actor.user_id.0.as_bytes()));
+        if let Some(existing) = self.repos.sessions.get(copy_id).await? {
+            return Ok(existing);
+        }
+        let me = self.user(actor.user_id).await?;
+        let mine = self.companion_ids_representing(actor).await?;
+        let mut participant = s
+            .participants
+            .iter()
+            .find(|p| mine.contains(&p.companion_id))
+            .cloned()
+            .found("participant")?;
+        participant.companion_id = me.self_companion;
+        let copy = Session {
+            id: copy_id,
+            owner: actor.user_id,
+            item_id: s.item_id,
+            started_at: s.started_at,
+            duration_minutes: s.duration_minutes,
+            location: None,
+            notes: None,
+            participants: vec![participant],
+            coop_outcome: s.coop_outcome,
+            incomplete: s.incomplete,
+        };
+        copy.validate()?;
+        self.repos.sessions.insert(&copy).await?;
+        let kind = self.kind(&self.catalog_item(s.item_id).await?.kind)?;
+        let progress = match kind.progress_model {
+            ProgressModel::Sessions => Some(Progress::Session {
+                session_id: copy.id,
+            }),
+            ProgressModel::Single => Some(Progress::Finished),
+            _ => None,
+        };
+        if let Some(p) = progress {
+            self.log_progress(actor, s.item_id, p, Some(s.started_at), Some(copy_id.0))
+                .await?;
+        } else {
+            self.add_to_library(actor, s.item_id, None).await?;
+        }
+        self.publish_session(&copy).await?;
+        Ok(copy)
     }
 
     /// # Errors
@@ -145,8 +212,51 @@ impl App {
             .collect();
         let mut sessions = self.repos.sessions.with_participants(&ids).await?;
         sessions.retain(|s| s.owner != actor.user_id);
+        let mut hidden = HashSet::new();
+        for owner in sessions.iter().map(|s| s.owner).collect::<HashSet<_>>() {
+            if !self.shares_sessions(owner).await? {
+                hidden.insert(owner);
+            }
+        }
+        sessions.retain(|s| !hidden.contains(&s.owner));
         sessions.sort_by_key(|s| std::cmp::Reverse(s.started_at));
         Ok(sessions)
+    }
+
+    /// Sessions the actor logged, newest first.
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn my_sessions(&self, actor: Actor) -> AppResult<Vec<Session>> {
+        let mut sessions = self.repos.sessions.by_owner(actor.user_id).await?;
+        sessions.sort_by_key(|s| std::cmp::Reverse(s.started_at));
+        Ok(sessions)
+    }
+
+    /// Participant names of a session visible to the actor (the owner's companion names),
+    /// each with whether it stands for the actor.
+    ///
+    /// # Errors
+    /// Not visible to the actor.
+    pub async fn participant_names(
+        &self,
+        actor: Actor,
+        id: SessionId,
+    ) -> AppResult<Vec<(String, bool)>> {
+        let s = self.session(actor, id).await?;
+        let mut mine = self.companion_ids_representing(actor).await?;
+        mine.insert(self.user(actor.user_id).await?.self_companion);
+        let mut out = Vec::with_capacity(s.participants.len());
+        for p in &s.participants {
+            let name = self
+                .repos
+                .companions
+                .get(p.companion_id)
+                .await?
+                .map_or_else(String::new, |c| c.name);
+            out.push((name, mine.contains(&p.companion_id)));
+        }
+        Ok(out)
     }
 
     /// Companions of other users that stand for the actor: linked to them, plus companions

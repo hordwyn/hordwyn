@@ -44,6 +44,7 @@ impl App {
             email,
             role,
             self_companion: self_companion.id,
+            share_sessions: true,
             created_at: now,
         };
         self.repos
@@ -61,6 +62,17 @@ impl App {
     /// Unknown user.
     pub async fn user(&self, id: UserId) -> AppResult<User> {
         self.repos.users.get(id).await?.found("user")
+    }
+
+    /// Per-user privacy: whether linked participants see the sessions this user logs.
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn set_privacy(&self, actor: Actor, share_sessions: bool) -> AppResult<User> {
+        let mut user = self.user(actor.user_id).await?;
+        user.share_sessions = share_sessions;
+        self.repos.users.update(&user).await?;
+        Ok(user)
     }
 
     /// Delete an account (admin or the user themself). Companions of other users that were

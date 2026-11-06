@@ -1,11 +1,13 @@
 //! `web::Backend` for the web app's server functions, on top of the same operations as the
 //! REST API (`api::ops`).
 
-use api::{ApiError, ApiState, ops};
+use api::{ApiError, ApiState, ops, sharing};
 use async_trait::async_trait;
 use contracts::{
-    AttributionDto, CompanionDto, ErrorDto, ItemPageDto, LibraryEntryDto, LibraryItemDto, ListDto,
-    NewProgressDto, ProgressEventDto, SearchResponseDto, SessionDto, SignInDto, SignUpDto, UserDto,
+    AttributionDto, CompanionDto, ErrorDto, InviteDto, ItemPageDto, LibraryEntryDto,
+    LibraryItemDto, LinkRequestDto, ListDto, LoggedSessionDto, NewProgressDto, PrivacyDto,
+    ProgressEventDto, SearchResponseDto, SessionDto, ShareLinkDto, SharedListDto, SignInDto,
+    SignUpDto, UserDto,
 };
 use domain::user::Actor;
 use web::backend::{BResult, Backend};
@@ -180,5 +182,80 @@ impl Backend for WebBackend {
 
     async fn sources(&self) -> Vec<AttributionDto> {
         ops::sources(&self.0)
+    }
+
+    async fn request_link(
+        &self,
+        token: &str,
+        companion_id: &str,
+        username: &str,
+    ) -> BResult<LinkRequestDto> {
+        let a = self.actor(token).await?;
+        sharing::request_link(&self.0, a, companion_id, username)
+            .await
+            .map_err(err)
+    }
+
+    async fn link_requests(&self, token: &str) -> BResult<Vec<LinkRequestDto>> {
+        let a = self.actor(token).await?;
+        sharing::link_requests(&self.0, a).await.map_err(err)
+    }
+
+    async fn answer_link(&self, token: &str, id: &str, accept: bool) -> BResult<()> {
+        let a = self.actor(token).await?;
+        if accept {
+            sharing::accept_link(&self.0, a, id).await.map(|_| ())
+        } else {
+            sharing::decline_link(&self.0, a, id).await
+        }
+        .map_err(err)
+    }
+
+    async fn unlink(&self, token: &str, companion_id: &str) -> BResult<CompanionDto> {
+        let a = self.actor(token).await?;
+        sharing::unlink(&self.0, a, companion_id).await.map_err(err)
+    }
+
+    async fn merge(&self, token: &str, keep: &str, remove: &str) -> BResult<CompanionDto> {
+        let a = self.actor(token).await?;
+        sharing::merge(&self.0, a, keep, remove).await.map_err(err)
+    }
+
+    async fn invite(&self, token: &str, companion_id: &str) -> BResult<InviteDto> {
+        let a = self.actor(token).await?;
+        sharing::invite(&self.0, a, companion_id, None)
+            .await
+            .map_err(err)
+    }
+
+    async fn sessions(&self, token: &str, shared: bool) -> BResult<Vec<LoggedSessionDto>> {
+        let a = self.actor(token).await?;
+        if shared {
+            sharing::shared_sessions(&self.0, a).await
+        } else {
+            sharing::my_sessions(&self.0, a).await
+        }
+        .map_err(err)
+    }
+
+    async fn claim(&self, token: &str, session_id: &str) -> BResult<LoggedSessionDto> {
+        let a = self.actor(token).await?;
+        sharing::claim(&self.0, a, session_id).await.map_err(err)
+    }
+
+    async fn set_privacy(&self, token: &str, p: PrivacyDto) -> BResult<UserDto> {
+        let a = self.actor(token).await?;
+        sharing::set_privacy(&self.0, a, p).await.map_err(err)
+    }
+
+    async fn share_list(&self, token: &str, list_id: &str) -> BResult<ShareLinkDto> {
+        let a = self.actor(token).await?;
+        sharing::share_list(&self.0, a, list_id).await.map_err(err)
+    }
+
+    async fn shared_list(&self, share_token: &str) -> BResult<SharedListDto> {
+        sharing::shared_list(&self.0, share_token)
+            .await
+            .map_err(err)
     }
 }

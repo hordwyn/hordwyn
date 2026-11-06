@@ -27,6 +27,7 @@ pub fn user(u: &User) -> UserDto {
             Role::Member => "member".into(),
         },
         self_companion: u.self_companion.0.to_string(),
+        share_sessions: u.share_sessions,
     }
 }
 

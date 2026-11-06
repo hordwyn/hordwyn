@@ -129,9 +129,12 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/") view=crate::pages::Home/>
                     <Route path=path!("/sign-in") view=crate::pages::SignIn/>
                     <Route path=path!("/sign-up") view=crate::pages::SignUp/>
+                    <Route path=path!("/invite/:token") view=crate::pages::SignUp/>
                     <Route path=path!("/library") view=crate::pages::Library/>
                     <Route path=path!("/items/:id") view=crate::pages::ItemPage/>
-                    <Route path=path!("/companions") view=crate::pages::Companions/>
+                    <Route path=path!("/companions") view=crate::sharing::Companions/>
+                    <Route path=path!("/sessions") view=crate::sharing::Sessions/>
+                    <Route path=path!("/shared/lists/:token") view=crate::sharing::SharedList/>
                     <Route path=path!("/lists") view=crate::pages::Lists/>
                     <Route path=path!("/sources") view=crate::pages::Sources/>
                     <Route path=path!("/dev/gallery") view=GalleryPage/>
@@ -168,6 +171,7 @@ fn Header() -> impl IntoView {
                             Ok(Some(_)) => view! {
                                 <A href="/library">{t("nav-library")}</A>
                                 <A href="/lists">{t("nav-lists")}</A>
+                                <A href="/sessions">{t("nav-sessions")}</A>
                                 <A href="/companions">{t("nav-companions")}</A>
                                 <A href="/sources">{t("nav-sources")}</A>
                             }.into_any(),

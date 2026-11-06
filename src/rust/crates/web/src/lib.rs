@@ -22,6 +22,7 @@ mod gallery;
 pub mod i18n;
 mod pages;
 mod palette;
+mod sharing;
 pub mod widgets;
 
 pub use app::{App, CONFIG_ID, ClientConfig, shell};
