@@ -97,6 +97,13 @@ pub trait LibraryRepo: Send + Sync {
     /// Insert or replace by `(user, item)`.
     async fn upsert(&self, entry: &LibraryEntry) -> RepoResult<()>;
     async fn by_user(&self, user: UserId) -> RepoResult<Vec<LibraryEntry>>;
+    /// One page of the user's library, most recently added first, and the total count.
+    async fn page(
+        &self,
+        user: UserId,
+        offset: u64,
+        limit: u32,
+    ) -> RepoResult<(Vec<LibraryEntry>, u64)>;
     /// Is the item in anyone's library (pins its cover, D-8)?
     async fn any_for_item(&self, item: ItemId) -> RepoResult<bool>;
 }

@@ -172,16 +172,27 @@ pub fn sources(s: &ApiState) -> Vec<AttributionDto> {
 
 /// # Errors
 /// Storage errors.
-pub async fn library(s: &ApiState, a: Actor) -> ApiResult<Vec<LibraryItemDto>> {
-    let mut out = Vec::new();
-    for e in s.app.library(a).await? {
+pub async fn library(
+    s: &ApiState,
+    a: Actor,
+    offset: u64,
+    limit: u32,
+) -> ApiResult<contracts::LibraryPageDto> {
+    let (entries, total) = s.app.library_page(a, offset, limit).await?;
+    let mut out = Vec::with_capacity(entries.len());
+    for e in entries {
         let item = s.app.catalog_item(e.item_id).await?;
         out.push(LibraryItemDto {
             entry: dto::entry(&e),
             item: dto::item(s, &item).await,
         });
     }
-    Ok(out)
+    Ok(contracts::LibraryPageDto {
+        items: out,
+        total,
+        offset,
+        limit: limit.clamp(1, app::App::MAX_PAGE),
+    })
 }
 
 /// # Errors

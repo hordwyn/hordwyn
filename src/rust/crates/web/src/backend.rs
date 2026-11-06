@@ -5,9 +5,8 @@
 use async_trait::async_trait;
 use contracts::{
     AttributionDto, CompanionDto, ErrorDto, InviteDto, ItemPageDto, LibraryEntryDto,
-    LibraryItemDto, LinkRequestDto, ListDto, LoggedSessionDto, NewProgressDto, PrivacyDto,
-    ProgressEventDto, SearchResponseDto, SessionDto, ShareLinkDto, SharedListDto, SignInDto,
-    SignUpDto, UserDto,
+    LinkRequestDto, ListDto, LoggedSessionDto, NewProgressDto, PrivacyDto, ProgressEventDto,
+    SearchResponseDto, SessionDto, ShareLinkDto, SharedListDto, SignInDto, SignUpDto, UserDto,
 };
 
 pub type BResult<T> = Result<T, ErrorDto>;
@@ -24,7 +23,7 @@ pub trait Backend: Send + Sync {
     async fn sign_up(&self, b: SignUpDto) -> BResult<SessionDto>;
     async fn sign_out(&self, token: &str);
 
-    async fn library(&self, token: &str) -> BResult<Vec<LibraryItemDto>>;
+    async fn library(&self, token: &str, limit: u32) -> BResult<contracts::LibraryPageDto>;
     async fn item(&self, token: &str, id: &str) -> BResult<ItemPageDto>;
     async fn search(
         &self,

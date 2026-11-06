@@ -223,3 +223,5 @@ notify-error-channel_error = The channel did not accept the message. Check its s
 notify-error-forbidden = You may not do that.
 notify-error-not_found = Not found.
 notify-error-unavailable = Notifications are not enabled on this server.
+
+library-more = Show more

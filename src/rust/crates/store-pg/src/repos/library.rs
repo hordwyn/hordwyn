@@ -135,6 +135,33 @@ impl LibraryRepo for PgStore {
         .map(LibraryEntry::try_from)
         .collect()
     }
+
+    async fn page(&self, user: UserId, offset: u64, limit: u32) -> Res<(Vec<LibraryEntry>, u64)> {
+        let rows = sqlx::query_as!(
+            EntryRow,
+            "SELECT * FROM library_entries WHERE user_id = $1
+             ORDER BY added_at DESC, id DESC OFFSET $2 LIMIT $3",
+            user.0,
+            i64::try_from(offset).unwrap_or(i64::MAX),
+            i64::from(limit)
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?;
+        let total = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) AS "n!" FROM library_entries WHERE user_id = $1"#,
+            user.0
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(be)?;
+        Ok((
+            rows.into_iter()
+                .map(LibraryEntry::try_from)
+                .collect::<Res<_>>()?,
+            u64::try_from(total).unwrap_or(0),
+        ))
+    }
 }
 
 struct EventRow {

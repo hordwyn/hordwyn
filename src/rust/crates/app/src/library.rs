@@ -64,6 +64,27 @@ impl App {
         Ok(self.repos.library.by_user(actor.user_id).await?)
     }
 
+    /// Largest library page.
+    pub const MAX_PAGE: u32 = 500;
+
+    /// One page of the library, most recently added first, with the total count.
+    /// `limit` is clamped to 1..=[`App::MAX_PAGE`].
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn library_page(
+        &self,
+        actor: Actor,
+        offset: u64,
+        limit: u32,
+    ) -> AppResult<(Vec<LibraryEntry>, u64)> {
+        Ok(self
+            .repos
+            .library
+            .page(actor.user_id, offset, limit.clamp(1, Self::MAX_PAGE))
+            .await?)
+    }
+
     /// Set the status (LWW). Adds the item to the library if needed.
     ///
     /// # Errors

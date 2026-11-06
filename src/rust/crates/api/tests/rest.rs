@@ -184,10 +184,10 @@ async fn library_flow_with_a_companion() {
     .await;
     assert_eq!(status, StatusCode::OK, "{p}");
     let (_, _, lib) = call(&app, "GET", "/api/v1/library", Some(&token), None).await;
-    assert_eq!(lib[0]["item"]["title"], "Heat");
-    assert_eq!(lib[0]["entry"]["status"], "completed");
+    assert_eq!(lib["items"][0]["item"]["title"], "Heat");
+    assert_eq!(lib["items"][0]["entry"]["status"], "completed");
     assert_eq!(
-        lib[0]["item"]["cover"]["url"],
+        lib["items"][0]["item"]["cover"]["url"],
         "https://image.tmdb.org/t/p/w780/heat.jpg"
     );
     // replaying the same command is a no-op
@@ -350,8 +350,8 @@ async fn export_then_import_moves_a_library_to_another_account() {
         "matched the existing item by its TMDB id"
     );
     let (_, _, lib) = call(&app, "GET", "/api/v1/library", Some(&ben), None).await;
-    assert_eq!(lib[0]["item"]["id"], item.id.0.to_string());
-    assert_eq!(lib[0]["entry"]["status"], "completed");
+    assert_eq!(lib["items"][0]["item"]["id"], item.id.0.to_string());
+    assert_eq!(lib["items"][0]["entry"]["status"], "completed");
     // anna cannot read ben's import
     let (status, _, _) = call(
         &app,
@@ -467,7 +467,7 @@ async fn sharing_and_companion_flows() {
     .await;
     assert_eq!(again["id"], copy["id"]);
     let (_, _, lib) = call(&app, "GET", "/api/v1/library", Some(&bent), None).await;
-    assert_eq!(lib[0]["entry"]["status"], "completed");
+    assert_eq!(lib["items"][0]["entry"]["status"], "completed");
 
     // privacy: the owner stops sharing sessions
     let (_, _, me) = call(

@@ -179,6 +179,9 @@ pub fn SignUp() -> impl IntoView {
 }
 
 /// Redirect to sign-in when a server function says the caller is not signed in.
+/// Library entries per "show more" step.
+const LIBRARY_PAGE: u32 = 120;
+
 pub(crate) fn needs_sign_in(e: &ServerFnError) -> bool {
     api::error_code(e) == "unauthorized"
 }
@@ -186,7 +189,9 @@ pub(crate) fn needs_sign_in(e: &ServerFnError) -> bool {
 #[component]
 pub fn Library() -> impl IntoView {
     let i18n = use_i18n();
-    let data = Resource::new(|| (), |()| api::library());
+    // grows by one page per "show more"
+    let limit = RwSignal::new(LIBRARY_PAGE);
+    let data = Resource::new(move || limit.get(), api::library);
     let events = use_events();
     Effect::new(move |_| {
         if let Some((topic, _)) = events.0.get()
@@ -201,9 +206,15 @@ pub fn Library() -> impl IntoView {
             {move || data.get().map(|r| match r {
                 Err(e) if needs_sign_in(&e) => { go("/sign-in"); ().into_any() }
                 Err(e) => view! { <p role="alert">{error_text(&e)}</p> }.into_any(),
-                Ok(list) if list.is_empty() => view! { <p class="text-muted-foreground">{t("library-empty")}</p> }.into_any(),
-                Ok(list) => {
-                    let count = use_i18n().t_args("library-count", &[("count", list.len().into())]);
+                Ok(page) if page.items.is_empty() => view! { <p class="text-muted-foreground">{t("library-empty")}</p> }.into_any(),
+                Ok(page) => {
+                    let count = use_i18n().t_args("library-count", &[("count", page.total.into())]);
+                    let more = (page.total > page.items.len() as u64).then(|| view! {
+                        <div class="mt-6 flex justify-center">
+                            <Button variant=ButtonVariant::Outline on:click=move |_| limit.update(|l| *l += LIBRARY_PAGE)>{t("library-more")}</Button>
+                        </div>
+                    });
+                    let list = page.items;
                     view! {
                         <p class="mb-4 text-sm text-muted-foreground">{count}</p>
                         <ul class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-5" aria-label=t("library-title")>
@@ -211,6 +222,7 @@ pub fn Library() -> impl IntoView {
                                 <PosterCard item=li.item status=li.entry.status/>
                             }).collect_view()}
                         </ul>
+                        {more}
                     }.into_any()
                 }
             })}

@@ -6,10 +6,10 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use contracts::{
     AttributionDto, CatalogItemDto, ChannelDto, CompanionDto, DeliveryDto, EventTypeDto,
-    InboxItemDto, InviteDto, LibraryEntryDto, LibraryItemDto, LinkRequestDto, ListDto,
-    LoggedSessionDto, NewChannelDto, NewProgressDto, PrivacyDto, ProgressEventDto,
-    SearchResponseDto, SessionDto, ShareLinkDto, SharedListDto, SignInDto, SignUpDto,
-    SubscriptionDto, TemplateOverrideDto, UserDto, WebPushKeyDto,
+    InboxItemDto, InviteDto, LibraryEntryDto, LinkRequestDto, ListDto, LoggedSessionDto,
+    NewChannelDto, NewProgressDto, PrivacyDto, ProgressEventDto, SearchResponseDto, SessionDto,
+    ShareLinkDto, SharedListDto, SignInDto, SignUpDto, SubscriptionDto, TemplateOverrideDto,
+    UserDto, WebPushKeyDto,
 };
 use domain::ids::ItemId;
 use serde::Deserialize;
@@ -310,13 +310,28 @@ async fn sources(State(s): State<ApiState>) -> Json<Vec<AttributionDto>> {
 
 // ---------------------------------------------------------------- library
 
-#[utoipa::path(get, path = "/library", tag = "library",
-    responses((status = 200, body = Vec<LibraryItemDto>)))]
+#[derive(Deserialize, IntoParams)]
+struct PageParams {
+    #[serde(default)]
+    offset: u64,
+    /// 1 to 500, default 100.
+    #[serde(default = "default_page")]
+    limit: u32,
+}
+
+const fn default_page() -> u32 {
+    100
+}
+
+/// The library, most recently added first, in pages.
+#[utoipa::path(get, path = "/library", tag = "library", params(PageParams),
+    responses((status = 200, body = contracts::LibraryPageDto)))]
 async fn library(
     State(s): State<ApiState>,
     Authed(a): Authed,
-) -> ApiResult<Json<Vec<LibraryItemDto>>> {
-    Ok(Json(ops::library(&s, a).await?))
+    Query(p): Query<PageParams>,
+) -> ApiResult<Json<contracts::LibraryPageDto>> {
+    Ok(Json(ops::library(&s, a, p.offset, p.limit).await?))
 }
 
 #[derive(Deserialize, ToSchema)]

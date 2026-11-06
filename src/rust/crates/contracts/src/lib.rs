@@ -96,6 +96,17 @@ pub struct LibraryItemDto {
     pub item: CatalogItemDto,
 }
 
+/// One page of the library, most recently added first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct LibraryPageDto {
+    pub items: Vec<LibraryItemDto>,
+    /// Entries in the whole library.
+    pub total: u64,
+    pub offset: u64,
+    pub limit: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ProgressEventDto {

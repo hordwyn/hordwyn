@@ -5,9 +5,8 @@ use api::{ApiError, ApiState, notifications, ops, sharing};
 use async_trait::async_trait;
 use contracts::{
     AttributionDto, CompanionDto, ErrorDto, InviteDto, ItemPageDto, LibraryEntryDto,
-    LibraryItemDto, LinkRequestDto, ListDto, LoggedSessionDto, NewProgressDto, PrivacyDto,
-    ProgressEventDto, SearchResponseDto, SessionDto, ShareLinkDto, SharedListDto, SignInDto,
-    SignUpDto, UserDto,
+    LinkRequestDto, ListDto, LoggedSessionDto, NewProgressDto, PrivacyDto, ProgressEventDto,
+    SearchResponseDto, SessionDto, ShareLinkDto, SharedListDto, SignInDto, SignUpDto, UserDto,
 };
 use domain::user::Actor;
 use web::backend::{BResult, Backend};
@@ -108,9 +107,9 @@ impl Backend for WebBackend {
         let _ = self.0.auth.sign_out(token).await;
     }
 
-    async fn library(&self, token: &str) -> BResult<Vec<LibraryItemDto>> {
+    async fn library(&self, token: &str, limit: u32) -> BResult<contracts::LibraryPageDto> {
         let a = self.actor(token).await?;
-        ops::library(&self.0, a).await.map_err(err)
+        ops::library(&self.0, a, 0, limit).await.map_err(err)
     }
 
     async fn item(&self, token: &str, id: &str) -> BResult<ItemPageDto> {

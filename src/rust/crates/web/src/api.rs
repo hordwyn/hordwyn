@@ -5,9 +5,9 @@
 #![allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 
 use contracts::{
-    AttributionDto, CompanionDto, InviteDto, ItemPageDto, LibraryEntryDto, LibraryItemDto,
-    LinkRequestDto, ListDto, LoggedSessionDto, NewProgressDto, ProgressEventDto, SearchResponseDto,
-    ShareLinkDto, SharedListDto, UserDto,
+    AttributionDto, CompanionDto, InviteDto, ItemPageDto, LibraryEntryDto, LinkRequestDto, ListDto,
+    LoggedSessionDto, NewProgressDto, ProgressEventDto, SearchResponseDto, ShareLinkDto,
+    SharedListDto, UserDto,
 };
 use leptos::prelude::*;
 use leptos::server_fn::codec::Json;
@@ -130,11 +130,12 @@ pub async fn sign_out() -> Result<(), ServerFnError> {
     Ok(())
 }
 
+/// The first `limit` entries of the library, most recently added first.
 #[server(prefix = "/_fn")]
-pub async fn library() -> Result<Vec<LibraryItemDto>, ServerFnError> {
+pub async fn library(limit: u32) -> Result<contracts::LibraryPageDto, ServerFnError> {
     let b = server::backend()?;
     let t = server::require_token(b.as_ref()).await?;
-    b.library(&t).await.map_err(server::code)
+    b.library(&t, limit).await.map_err(server::code)
 }
 
 #[server(prefix = "/_fn")]

@@ -272,6 +272,23 @@ impl LibraryRepo for MemStore {
         v.sort_by_key(|e| e.added_at);
         Ok(v)
     }
+
+    async fn page(
+        &self,
+        user: UserId,
+        offset: u64,
+        limit: u32,
+    ) -> RepoResult<(Vec<LibraryEntry>, u64)> {
+        let mut v = self.by_user(user).await?;
+        v.sort_by_key(|e| std::cmp::Reverse((e.added_at, e.id.0)));
+        let total = v.len() as u64;
+        let page = v
+            .into_iter()
+            .skip(usize::try_from(offset).unwrap_or(usize::MAX))
+            .take(limit as usize)
+            .collect();
+        Ok((page, total))
+    }
 }
 
 #[async_trait]
