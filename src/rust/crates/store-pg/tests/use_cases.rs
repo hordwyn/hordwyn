@@ -193,3 +193,22 @@ async fn duplicate_username_is_a_conflict() {
         .unwrap_err();
     assert!(matches!(err, AppError::Conflict(_)));
 }
+
+#[tokio::test]
+async fn connecting_to_an_absent_server_retries_until_patience_runs_out() {
+    // nothing listens on port 1
+    let started = std::time::Instant::now();
+    let r = store_pg::connect_with_retry(
+        "postgres://app@127.0.0.1:1/app",
+        1,
+        std::time::Duration::from_millis(1600),
+    )
+    .await;
+    assert!(r.is_err());
+    let waited = started.elapsed();
+    assert!(
+        waited >= std::time::Duration::from_millis(1400),
+        "{waited:?}"
+    );
+    assert!(waited < std::time::Duration::from_secs(10), "{waited:?}");
+}

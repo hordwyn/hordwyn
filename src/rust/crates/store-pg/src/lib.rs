@@ -48,6 +48,41 @@ pub async fn connect(url: &str, max_connections: u32) -> Result<PgPool, sqlx::Er
         .await
 }
 
+/// Like [`connect`], but retries while the server is not reachable yet (container start-up:
+/// DNS names and the listening socket may appear a moment after this process starts), with
+/// backoff up to 5 s between attempts, for at most `patience`. Errors from a reachable server
+/// (wrong password, missing database) are returned at once.
+///
+/// # Errors
+/// The last error once `patience` is used up, or the first non-network error.
+pub async fn connect_with_retry(
+    url: &str,
+    max_connections: u32,
+    patience: std::time::Duration,
+) -> Result<PgPool, sqlx::Error> {
+    let started = std::time::Instant::now();
+    let mut pause = std::time::Duration::from_millis(500);
+    loop {
+        // one attempt waits at most 3 s (sqlx's pool would wait 30 s for a refused socket)
+        let attempt = PgPoolOptions::new()
+            .max_connections(max_connections)
+            .acquire_timeout(std::time::Duration::from_secs(3).min(patience))
+            .connect(url)
+            .await;
+        match attempt {
+            Ok(pool) => return Ok(pool),
+            Err(e @ (sqlx::Error::Io(_) | sqlx::Error::PoolTimedOut | sqlx::Error::Tls(_)))
+                if started.elapsed() + pause < patience =>
+            {
+                tracing::warn!(error = %e, retry_in_ms = pause.as_millis(), "database not reachable yet");
+                tokio::time::sleep(pause).await;
+                pause = (pause * 2).min(std::time::Duration::from_secs(5));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 /// Apply pending migrations.
 ///
 /// # Errors

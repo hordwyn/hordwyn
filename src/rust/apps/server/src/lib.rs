@@ -211,9 +211,14 @@ impl Server {
     pub async fn build(config: AppConfig, role: ServerRole, o: Overrides) -> anyhow::Result<Self> {
         let brand = brand::Brand::load(std::path::Path::new(&config.brand.dir))
             .with_context(|| format!("brand directory {}", config.brand.dir))?;
-        let pool = store_pg::connect(&config.database.url, config.database.max_connections)
-            .await
-            .context("connect to Postgres")?;
+        // in containers the database name may resolve only a moment after start-up
+        let pool = store_pg::connect_with_retry(
+            &config.database.url,
+            config.database.max_connections,
+            Duration::from_secs(60),
+        )
+        .await
+        .context("connect to Postgres")?;
         store_pg::migrate(&pool).await.context("migrations")?;
 
         let repos = pg_repos(&pool);

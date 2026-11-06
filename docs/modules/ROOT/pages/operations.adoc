@@ -77,3 +77,12 @@ If a corporate proxy re-signs HTTPS traffic, the image build fails with certific
 (PEM, `.crt`) to `config/certs/` before building, e.g.
 `cp /usr/local/share/ca-certificates/*.crt config/certs/`. They are trusted in the build and
 in the running server, and are never committed.
+
+== Rootless podman on Ubuntu
+
+If the app logs `failed to lookup address information` for `postgres`, container DNS is not
+working. On Ubuntu, AppArmor can stop podman from signalling `pasta`, which leaves stale
+network namespaces (and a DNS server nobody reaches) behind after `down`; the kernel log then
+shows `apparmor="DENIED" ... profile="pasta" ... signal=term`. Allow the signal in the local
+override of the passt profile (`signal (receive) peer=podman,`), reload it with
+`apparmor_parser -r`, stop stray `aardvark-dns`/`pasta` processes and start again.

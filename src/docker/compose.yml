@@ -6,6 +6,7 @@ services:
     build:
       context: ../..
       dockerfile: src/docker/Dockerfile
+    restart: unless-stopped
     environment:
       APP__DATABASE__URL: "postgres://app:${POSTGRES_PASSWORD:-app}@postgres:5432/app"
       APP__SEARCH__MEILI_URL: "http://meilisearch:7700"
