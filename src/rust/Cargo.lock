@@ -6762,7 +6762,6 @@ dependencies = [
 name = "web"
 version = "0.1.0"
 dependencies = [
- "app",
  "async-trait",
  "axum",
  "base64 0.22.1",

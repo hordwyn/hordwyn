@@ -389,3 +389,56 @@ async fn shutdown_waits_for_running_jobs() {
         "in-flight job finished before run() returned"
     );
 }
+
+/// Counts runs and takes longer than the lease.
+struct Slow(Mutex<u32>, Duration);
+
+#[async_trait]
+impl Handler for Slow {
+    async fn run(&self, _job: &Job) -> Result<(), String> {
+        *self.0.lock().unwrap() += 1;
+        tokio::time::sleep(self.1).await;
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn a_job_longer_than_its_lease_runs_once() {
+    let Some(q) = queue().await else {
+        return;
+    };
+    let id = q.push(job(Lane::UserImport, "slow", None)).await.unwrap();
+    let slow = Arc::new(Slow(Mutex::new(0), Duration::from_millis(1500)));
+    let cfg = || WorkerConfig {
+        concurrency: 1,
+        lease: Duration::from_millis(300),
+        poll_interval: Duration::from_millis(20),
+        ..WorkerConfig::default()
+    };
+    let stop = CancellationToken::new();
+    // two workers compete; the heartbeat keeps the first one's lease alive
+    let a = tokio::spawn(
+        Worker::new(q.clone(), cfg())
+            .handle("slow", slow.clone())
+            .run(stop.clone()),
+    );
+    let b = tokio::spawn(
+        Worker::new(q.clone(), cfg())
+            .handle("slow", slow.clone())
+            .run(stop.clone()),
+    );
+    for _ in 0..200 {
+        if state(&q, id).await.0 == "done" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    stop.cancel();
+    let _ = (a.await, b.await);
+    assert_eq!(state(&q, id).await.0, "done");
+    assert_eq!(
+        *slow.0.lock().unwrap(),
+        1,
+        "claimed again while still running"
+    );
+}

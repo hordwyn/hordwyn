@@ -240,3 +240,4 @@ integrations-last = last call:
 integrations-never = never
 integrations-error = Last call failed
 integrations-revoke = Revoke
+auth-error-too_many_attempts = Too many failed attempts. Please wait a few minutes.

@@ -137,6 +137,24 @@ impl PgQueue {
         }))
     }
 
+    /// Extend the lease of a running job (heartbeat of a long job, so no other worker
+    /// claims it meanwhile).
+    ///
+    /// # Errors
+    /// Database errors.
+    pub async fn extend(&self, id: Uuid, lease: Duration) -> Result<(), QueueError> {
+        let lease_ms = i64::try_from(lease.as_millis()).unwrap_or(i64::MAX);
+        sqlx::query!(
+            "UPDATE jobs SET locked_until = now() + make_interval(secs => $2::bigint / 1000.0)
+             WHERE id = $1 AND state = 'running'",
+            id,
+            lease_ms
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Mark a claimed job as done.
     ///
     /// # Errors

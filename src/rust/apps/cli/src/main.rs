@@ -1,4 +1,5 @@
-//! Admin CLI: migrate, storage report, reindex, user management, imports.
+//! Admin CLI: migrate, storage report and eviction, search reindex. (User management and
+//! imports are in the web app and the REST API.)
 //!
 //! `cli [--config <file>] <command>`; the configuration is the server's (file + `APP__*`).
 #![deny(unsafe_code)]

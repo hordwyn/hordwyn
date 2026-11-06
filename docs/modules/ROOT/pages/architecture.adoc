@@ -10,9 +10,13 @@ graph BT
   adapters["store-pg, search, jobs, realtime, catalog-core, connectors,
   assets, importers, integrations, notify, auth"] --> app
   api --> app
+  api --> adapters
   web --> ui
   web --> contracts
-  web -. ssr only .-> app
+  server --> brand
+  server --> config
+  server --> kinds
+  server --> telemetry
   server --> adapters
   server --> api
   server --> web

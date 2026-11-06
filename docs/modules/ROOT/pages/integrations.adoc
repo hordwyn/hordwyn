@@ -31,11 +31,13 @@ body:
 |`season`, `episode` |numbers |episodes: required
 |`watched_at` |RFC 3339 time |default: when the webhook arrives
 |`source` |string |shown in the notification, e.g. `Jellyfin`
+|`id` |string |the sender's id for this play, optional: posts with the same id are one play
 |===
 
 At least one provider id (`tmdb`, `imdb`, `tvdb`, ...) is required; it decides which item is
 meant. Unknown fields are refused, so typos in a template show up as errors instead of being
-ignored. Posting the same play again (same item, episode and time) records it once.
+ignored. Posting the same play again (same item and episode, and the same `id`, else the same
+`watched_at`, else within the same 15 minutes) records it once.
 
 Answers: `200` with `{"item_id", "event_id"}`, `401` for an unknown or revoked token, `422`
 with a message for an invalid body.

@@ -197,3 +197,51 @@ async fn client_stamps_from_the_far_future_do_not_lock_a_field() {
         "server clock observed the client stamp"
     );
 }
+
+#[tokio::test]
+async fn user_supplied_ids_do_not_change_shared_items() {
+    use app::NewCatalogItem;
+    use domain::catalog::ExternalId;
+    use domain::kind::KindId;
+    let env = testkit::TestEnv::new();
+    let real = common::item(&env.app, "movie", "Heat").await;
+    let new = |ids: Vec<ExternalId>, title: &str| NewCatalogItem {
+        kind: KindId::new("movie").unwrap(),
+        title: title.into(),
+        original_title: None,
+        year: None,
+        description: None,
+        external_ids: ids,
+        attributes: serde_json::json!({}),
+        cover_url: Some("https://evil.example/x.jpg".into()),
+    };
+    // an import row claims the real item also has someone else's tmdb id
+    let found = env
+        .app
+        .find_or_create_catalog_item(new(
+            vec![
+                ExternalId::new("test", "Heat"),
+                ExternalId::new("tmdb", "1"),
+            ],
+            "whatever",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(found.id, real.id);
+    let stored = env.app.catalog_item(real.id).await.unwrap();
+    assert_eq!(stored.external_ids, real.external_ids, "no id was attached");
+    assert_eq!(stored.cover_url, None);
+    // limits for new items
+    assert!(
+        env.app
+            .find_or_create_catalog_item(new(vec![ExternalId::new("tmdb", "2")], &"x".repeat(501)))
+            .await
+            .is_err()
+    );
+    assert!(
+        env.app
+            .find_or_create_catalog_item(new(vec![ExternalId::new("Bad NS", "2")], "ok"))
+            .await
+            .is_err()
+    );
+}

@@ -25,6 +25,11 @@ use crate::{ApiError, ApiState, Authed, dto, hooks, notifications, ops, sharing}
 #[openapi(info(description = "REST API for integrations, scripts and sync clients."))]
 struct ApiDoc;
 
+/// Largest JSON request body.
+pub const JSON_BODY_LIMIT: usize = 2 << 20;
+/// Largest import upload.
+pub const IMPORT_BODY_LIMIT: usize = 64 << 20;
+
 /// `/api/v1` routes plus `/api/v1/openapi.json`.
 pub fn router(state: ApiState) -> axum::Router {
     let title = state.naming.api_title.clone();
@@ -76,26 +81,30 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(watched_hook))
         .routes(routes!(sync_changes))
         .routes(routes!(sync_commands))
-        .routes(routes!(start_import))
         .routes(routes!(import_status))
         .routes(routes!(export))
         .routes(routes!(events))
+        // JSON bodies are small (G2-10); only file imports may be large (the upload quota
+        // limits what is kept)
+        .layer(axum::extract::DefaultBodyLimit::max(JSON_BODY_LIMIT))
+        .merge(
+            OpenApiRouter::new()
+                .routes(routes!(start_import))
+                .layer(axum::extract::DefaultBodyLimit::max(IMPORT_BODY_LIMIT)),
+        )
         .with_state(state)
         .split_for_parts();
     doc.info.title = title;
     let json = doc.to_pretty_json().unwrap_or_default();
     axum::Router::new().nest(
         "/api/v1",
-        // imports upload whole files; the upload quota limits what is kept
-        router
-            .layer(axum::extract::DefaultBodyLimit::max(64 << 20))
-            .route(
-                "/openapi.json",
-                axum::routing::get(move || {
-                    let json = json.clone();
-                    async move { ([("content-type", "application/json")], json) }
-                }),
-            ),
+        router.route(
+            "/openapi.json",
+            axum::routing::get(move || {
+                let json = json.clone();
+                async move { ([("content-type", "application/json")], json) }
+            }),
+        ),
     )
 }
 

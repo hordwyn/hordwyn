@@ -240,3 +240,4 @@ integrations-last = letzter Aufruf:
 integrations-never = nie
 integrations-error = Letzter Aufruf fehlgeschlagen
 integrations-revoke = Widerrufen
+auth-error-too_many_attempts = Zu viele Fehlversuche. Bitte warte ein paar Minuten.

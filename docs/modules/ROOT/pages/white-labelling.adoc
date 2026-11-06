@@ -16,7 +16,7 @@ short_name = "Reading Room"    # cookie names and the outgoing User-Agent use it
 default_locale = "de"          # used when the browser's Accept-Language matches no locale
 support_url = "https://example.org/support"   # added to the User-Agent
 
-[legal]                        # footer links
+[legal]                        # footer links (read, not displayed yet)
 imprint = "https://example.org/imprint"
 privacy = "https://example.org/privacy"
 
@@ -27,7 +27,7 @@ primary-foreground = "oklch(0.98 0 0)"
 [theme_dark]                   # the same for the dark theme
 primary = "oklch(0.7 0.18 145)"
 
-[logos]                        # files inside the brand directory
+[logos]                        # files inside the brand directory (read, not displayed yet)
 light = "logo-light.svg"
 dark = "logo-dark.svg"
 favicon = "favicon.svg"
@@ -69,8 +69,8 @@ from the browser's `Accept-Language`, falling back to the brand's `default_local
 == Logos of other services
 
 Operators may hide integrations and data sources, but must not use third-party service logos
-as their own branding. The licence notices page must stay reachable; vendored icon files and
-their licences are listed in `config/brand/ICONS.adoc`.
+as their own branding. A licence notices page is planned; until then, vendored icon files and their licences are
+listed in `config/brand/ICONS.adoc`.
 
 == Data source terms
 

@@ -128,3 +128,25 @@ async fn bad_tokens_and_events_are_refused() {
         Err(IntegrationError::Unauthorized)
     ));
 }
+
+#[tokio::test]
+async fn retries_without_a_time_are_one_play() {
+    let (t, i, actor, token) = env().await;
+    let movie =
+        event(serde_json::json!({"kind": "movie", "title": "Heat", "ids": {"tmdb": "949"}}));
+    let first = i.receive(&token, &movie).await.unwrap();
+    t.clock.advance(chrono::Duration::seconds(30));
+    let retry = i.receive(&token, &movie).await.unwrap();
+    assert_eq!(first, retry, "a retry 30 s later is the same play");
+    // a sender id decides on its own
+    let with_id = |id: &str| {
+        event(
+            serde_json::json!({"kind": "movie", "title": "Heat", "ids": {"tmdb": "949"}, "id": id}),
+        )
+    };
+    let p1 = i.receive(&token, &with_id("p1")).await.unwrap();
+    t.clock.advance(chrono::Duration::hours(2));
+    assert_eq!(i.receive(&token, &with_id("p1")).await.unwrap(), p1);
+    assert_ne!(i.receive(&token, &with_id("p2")).await.unwrap(), p1);
+    assert_eq!(t.app.progress(actor, first.item_id).await.unwrap().len(), 3);
+}

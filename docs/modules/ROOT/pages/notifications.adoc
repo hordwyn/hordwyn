@@ -25,6 +25,11 @@ companion.
 
 The same event about the same thing (for example the same episode) reaches a user once.
 
+Emitted today: `social.link_request`, `social.link_accepted`, `social.session_shared`,
+`import.finished`, `import.failed`, `integration.play_recorded`, `admin.signup`,
+`admin.storage_high` and `admin.storage_full`. The other events are in the catalogue (you
+can subscribe to them) but nothing sends them yet (DEC-143).
+
 == Delivery
 
 `immediate`:: sent right away, or when the subscription's quiet hours end (local time in the

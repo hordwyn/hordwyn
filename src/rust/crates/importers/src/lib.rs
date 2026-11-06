@@ -432,7 +432,7 @@ impl Importer {
             None => {
                 let item = self
                     .app
-                    .ensure_catalog_item(NewCatalogItem {
+                    .find_or_create_catalog_item(NewCatalogItem {
                         kind: kind.clone(),
                         title: row.title.clone(),
                         original_title: None,

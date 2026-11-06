@@ -31,4 +31,5 @@ The owner can stop sharing with the privacy setting
 
 Lists are `private`, `instance` (every user of the instance) or `link`.
 `POST /api/v1/lists/{id}/share` creates a link (`/shared/lists/<token>`) that anyone can open
-without an account; sharing again replaces the link, making the list private revokes it.
+without an account; sharing again replaces (and so revokes) the previous link. Making a list private again is
+not exposed in the API or the web app yet.

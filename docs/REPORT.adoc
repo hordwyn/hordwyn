@@ -67,7 +67,7 @@ user-written template; no Jellyfin polling and no Radarr/Sonarr (GPL docs, DEC-1
 
 * `cd src/rust && cargo xtask ci`: fmt, clippy pedantic (native and wasm32), cargo-deny,
   sqlx offline cache, all tests against local Postgres, Meilisearch and versitygw (S3),
-  wasm tests. Last green run: the commit of tag `m14`; 252 tests passed, 0 failed, 3 ignored
+  wasm tests. Last green run: the commit of tag `m17`; 259 tests passed, 0 failed, 3 ignored
   (live provider smoke tests, load test), no service-dependent test skipped.
 * `cargo xtask e2e`: 12 Playwright tests green (8 gallery/accessibility tests with axe
   WCAG A/AA, the M07 slice test with the TMDB fixture server, 2 M15 sharing tests, 1 M13
@@ -118,12 +118,21 @@ user-written template; no Jellyfin polling and no Radarr/Sonarr (GPL docs, DEC-1
 
 * Prior run assessment: kept as-is; seven defects found and fixed.
 * G1: eight findings; applied G1-1; decided G1-2..G1-7 (DEC-098..104).
-* G2: not run (M17 not reached).
+* G2: independent review (Fable model) of the finished system, 13 findings: applied G2-1..G2-4,
+  G2-7..G2-10 and parts of G2-6, G2-12, G2-13 with tests; recorded or rejected the rest
+  (DEC-152..164).
 
 == Known gaps and bugs
 
-* M10 (board-game research), M11 (board games), M17 (hardening, load test, image size, G2) not done; M12 and M09 only
-  in part.
+* G2 review (docs/reviews/2026-11-06-g2-review.md): sync v1 covers library entries only
+  (DEC-156); no admin user management in CLI or web (DEC-157); TMDB asks for its logo, which
+  is not shown because provider images must not be committed (owner question, DEC-164);
+  service-dependent tests skip without `REQUIRE_SERVICES=1`, so `cargo xtask ci` is the
+  proving command; brand `[legal]` and `[logos]` are read but not displayed; web push not
+  built (DEC-141).
+* M10 (board-game research) and M11 (board games) not done (BGG blocked, DEC-107); M12 and
+  M09 only in part. M17: load test, image size (kaniko tarball 62.9 MB), G2 and docs done;
+  the compose quick start is not verified on a clean machine (no Docker on the build host).
 * Legacy importer fixture (Q4) not present in the repository.
 * Docker image build and compose quick start are only verified by the GitLab kaniko job; no
   Docker on the build host.

@@ -14,7 +14,8 @@ are recorded in `docs/connectors/<id>.md`.
 |movie, show
 |API read access token (`APP__CONNECTORS__TMDB__API_KEY` or `KK_TMDB_API_KEY`)
 |"This product uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise
-approved by TMDB." plus the TMDB logo (less prominent than the product's own marks).
+approved by TMDB." The terms also ask for the TMDB logo; it is not shown yet, because
+provider images must not be committed (rule 8) - an owner decision (see REPORT, known gaps).
 Non-commercial use only without an agreement; no caching longer than 6 months; no ML
 training. Details: `docs/connectors/tmdb.md`.
 

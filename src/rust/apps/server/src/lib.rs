@@ -2,6 +2,7 @@
 //! the `app` core and serves the web app, the REST API, SSE and `/assets`.
 #![deny(unsafe_code)]
 
+mod csrf;
 mod handlers;
 pub mod infra;
 pub mod web_backend;
@@ -130,7 +131,10 @@ fn notify_channels(
     Ok((
         Channels {
             http: Some(http::HttpChannels::new(
-                Arc::new(catalog_core::PlainHttp::new(user_agent)),
+                Arc::new(catalog_core::PlainHttp::new(
+                    user_agent,
+                    n.allow_private_targets,
+                )),
                 n.allow_private_targets,
             )),
             email,
@@ -318,13 +322,22 @@ impl Server {
 
     /// HTTP routes that do not need Leptos: health, REST API, SSE, assets.
     pub fn base_router(&self) -> Router {
-        Router::new()
+        let r = Router::new()
             .route("/healthz", get(|| async { "ok" }))
             .route(
                 "/assets/{hash}/{file}",
                 get(serve_asset).with_state(self.assets.clone()),
             )
-            .merge(api::router(self.api.clone()))
+            .merge(api::router(self.api.clone()));
+        self.guarded(r)
+    }
+
+    /// Cross-site request protection for cookie-authenticated mutations (G2-1).
+    fn guarded(&self, r: Router) -> Router {
+        r.layer(axum::middleware::from_fn_with_state(
+            csrf::public_origin(&self.config.server.public_url),
+            csrf::guard,
+        ))
     }
 
     /// The job worker with every handler registered.
@@ -526,6 +539,7 @@ impl Server {
             })
             .fallback(leptos_axum::file_and_error_handler(web::shell))
             .with_state(options.clone());
+        let pages = self.guarded(pages);
         self.base_router().merge(pages)
     }
 }

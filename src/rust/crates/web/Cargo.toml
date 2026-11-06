@@ -29,7 +29,6 @@ console_error_panic_hook = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true, optional = true }
 web-sys = { workspace = true, optional = true, features = ["EventSource", "MessageEvent", "Location", "Window", "Document", "Element", "HtmlElement"] }
 # server side only
-app = { workspace = true, optional = true }
 brand = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
 axum = { workspace = true, optional = true }
@@ -41,7 +40,6 @@ ssr = [
     "leptos/ssr",
     "leptos_meta/ssr",
     "leptos_router/ssr",
-    "dep:app",
     "dep:brand",
     "dep:async-trait",
     "dep:axum",

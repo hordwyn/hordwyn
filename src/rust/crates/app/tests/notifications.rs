@@ -73,6 +73,15 @@ async fn private_owners_do_not_announce_sessions() {
             .events()
             .contains(&"social.session_shared".to_string())
     );
+    // and the update event goes to the owner only (G2-9)
+    let last = env
+        .events
+        .all()
+        .into_iter()
+        .rev()
+        .find(|e| e.entity.as_ref().is_some_and(|r| r.entity == "session"))
+        .unwrap();
+    assert_eq!(last.audience, vec![alice.user_id]);
 }
 
 #[tokio::test]

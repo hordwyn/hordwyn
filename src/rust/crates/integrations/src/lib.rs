@@ -76,6 +76,11 @@ pub struct WatchedEvent {
     /// Shown in the notification, e.g. `Jellyfin`.
     #[serde(default)]
     pub source: Option<String>,
+    /// The sender's own id for this play, if it has one: repeated posts with the same id are
+    /// one play. Without it, plays are told apart by `watched_at`, or (if that is missing
+    /// too) by the arrival time rounded down to 15 minutes.
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 /// JSON Schema of [`WatchedEvent`] (published in the docs).
@@ -276,7 +281,7 @@ impl Integrations {
         } = target(e)?;
         let item = self
             .app
-            .ensure_catalog_item(NewCatalogItem {
+            .find_or_create_catalog_item(NewCatalogItem {
                 kind: KindId::new(kind).map_err(AppError::from)?,
                 title: title.trim().into(),
                 original_title: None,
@@ -301,8 +306,14 @@ impl Integrations {
                 })
                 .await?;
         }
-        let at = e.watched_at.unwrap_or_else(|| self.app.clock.now());
-        // the same play posted again (retries, two senders) is one event
+        let now = self.app.clock.now();
+        let at = e.watched_at.unwrap_or(now);
+        // the same play posted again (retries, two senders) is one event (G2-8)
+        let when = match (&e.id, e.watched_at) {
+            (Some(id), _) => format!("id:{}", id.trim()),
+            (None, Some(t)) => t.timestamp().to_string(),
+            (None, None) => format!("~{}", now.timestamp() / 900),
+        };
         let key = format!(
             "{kind}|{}|{:?}|{:?}|{}",
             external
@@ -312,7 +323,7 @@ impl Integrations {
                 .join(","),
             e.season,
             e.episode,
-            at.timestamp()
+            when
         );
         let op = Uuid::new_v5(&integration.id, key.as_bytes());
         let event = self

@@ -208,6 +208,37 @@ impl App {
     }
 }
 
+/// Size limits for catalog data from users (G2-10).
+pub const MAX_TITLE_CHARS: usize = 500;
+pub const MAX_EXTERNAL_IDS: usize = 10;
+
+fn check_untrusted(new: &NewCatalogItem) -> AppResult<()> {
+    let bad =
+        |m: &str| -> AppResult<()> { Err(DomainError::invalid("item", m.to_string()).into()) };
+    if new.title.chars().count() > MAX_TITLE_CHARS {
+        return bad("title is longer than 500 characters");
+    }
+    if new.external_ids.len() > MAX_EXTERNAL_IDS {
+        return bad("more than 10 external ids");
+    }
+    let ns_ok = |ns: &str| {
+        (1..=32).contains(&ns.len())
+            && ns
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    };
+    if new
+        .external_ids
+        .iter()
+        .any(|e| !ns_ok(&e.namespace) || e.value.is_empty() || e.value.chars().count() > 200)
+    {
+        return bad(
+            "external ids need a namespace of a-z, 0-9, _ (up to 32) and a value up to 200 characters",
+        );
+    }
+    Ok(())
+}
+
 impl App {
     /// Like [`App::upsert_catalog_item`], but an item that already exists (same external id)
     /// is returned unchanged except for new external ids and a missing cover URL. Search
@@ -232,6 +263,22 @@ impl App {
                 if changed {
                     self.repos.catalog.upsert(&item).await?;
                 }
+                return Ok(item);
+            }
+        }
+        self.upsert_catalog_item(new).await
+    }
+
+    /// For data from users (imports, webhooks), not from connectors: an existing item (same
+    /// external id) is returned unchanged, so nobody can attach ids or covers to a shared
+    /// item that a refresh would then follow (G2-2). New items are size-checked.
+    ///
+    /// # Errors
+    /// Unknown kind, a blank or too long title, too many or too long ids.
+    pub async fn find_or_create_catalog_item(&self, new: NewCatalogItem) -> AppResult<CatalogItem> {
+        check_untrusted(&new)?;
+        for ext in &new.external_ids {
+            if let Some(item) = self.repos.catalog.by_external_id(&new.kind, ext).await? {
                 return Ok(item);
             }
         }

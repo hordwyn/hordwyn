@@ -422,8 +422,9 @@ impl HttpFetch for GovernedHttp {
                     "blocked request to a host outside the allowlist"
                 );
                 return Err(HttpError::Blocked(format!(
-                    "host of {} is not allowed for connector `{}`",
-                    req.url, req.connector
+                    "host {} is not allowed for connector `{}`",
+                    url.host_str().unwrap_or_default(),
+                    req.connector
                 )));
             }
             let cacheable = req.method == "GET" && req.body.is_none();

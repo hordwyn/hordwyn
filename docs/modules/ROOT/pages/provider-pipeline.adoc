@@ -59,7 +59,10 @@ status. OIDC discovery and token requests use the same client as connector `oidc
 == Jobs
 
 The Postgres queue orders strictly by lane, then priority, then due time; dedupe keys keep
-one pending job per key. Handlers: `catalog.refresh`, `assets.fetch`, `storage.evict`.
+one pending job per key. Handlers: `catalog.refresh`, `assets.fetch`, `storage.evict`, `import.run`,
+`notify.deliver`, `notify.digest`. Workers renew the lease of a running job (heartbeat), so a
+long job is never claimed twice; a crashed worker stops renewing and the job is picked up
+again after the lease.
 With `--role=web` and `--role=worker` in separate processes, events travel over Postgres
 `LISTEN/NOTIFY`, so a worker's `entity.updated` reaches browsers on any web process.
 

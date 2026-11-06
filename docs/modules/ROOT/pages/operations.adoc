@@ -60,3 +60,12 @@ cli storage evict              # evict now instead of waiting for the background
 The report also shows the Postgres database size and, with the Meilisearch backend, its
 document count and database size. Both are reported, not budgeted. See
 xref:storage-budget.adoc[storage budget].
+
+== API
+
+The REST API is described by an OpenAPI document at `/api/v1/openapi.json` (titled with the
+product name). Sign in with `POST /api/v1/auth/sign-in` and send the returned token as
+`Authorization: Bearer <token>`. Browsers use the session cookie instead; state-changing
+requests from other sites are refused (checked with `Origin` and `Sec-Fetch-Site`).
+Sign-in is throttled after 10 failed attempts for a name within 15 minutes. JSON request
+bodies are limited to 2 MiB, import uploads to 64 MiB.

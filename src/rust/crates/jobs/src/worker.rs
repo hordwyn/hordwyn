@@ -109,9 +109,10 @@ impl Worker {
             };
             let queue = self.queue.clone();
             let handlers = handlers.clone();
+            let lease = self.config.lease;
             tokio::spawn(async move {
                 let _permit = permit;
-                execute(&queue, &handlers, job).await;
+                execute(&queue, &handlers, job, lease).await;
             });
         }
         let all = u32::try_from(self.config.concurrency).unwrap_or(u32::MAX);
@@ -124,17 +125,47 @@ impl Worker {
     }
 }
 
-async fn execute(queue: &PgQueue, handlers: &HashMap<String, Arc<dyn Handler>>, job: Job) {
+async fn execute(
+    queue: &PgQueue,
+    handlers: &HashMap<String, Arc<dyn Handler>>,
+    job: Job,
+    lease: Duration,
+) {
     // `instrument`, not `span.enter()`: an entered guard held across `.await` would attach the
     // span to whatever else runs on this thread meanwhile.
     let span = tracing::info_span!("job", id = %job.id, kind = %job.kind, attempt = job.attempts);
-    execute_in_span(queue, handlers, job).instrument(span).await;
+    execute_in_span(queue, handlers, job, lease)
+        .instrument(span)
+        .await;
 }
 
-async fn execute_in_span(queue: &PgQueue, handlers: &HashMap<String, Arc<dyn Handler>>, job: Job) {
-    let result = match handlers.get(&job.kind) {
-        Some(h) => h.run(&job).await,
-        None => Err(format!("no handler for job kind `{}`", job.kind)),
+async fn execute_in_span(
+    queue: &PgQueue,
+    handlers: &HashMap<String, Arc<dyn Handler>>,
+    job: Job,
+    lease: Duration,
+) {
+    let run = async {
+        match handlers.get(&job.kind) {
+            Some(h) => h.run(&job).await,
+            None => Err(format!("no handler for job kind `{}`", job.kind)),
+        }
+    };
+    // heartbeat: renew the lease while the handler runs (G2-3), so a long import is not
+    // claimed a second time; a crashed worker stops renewing and the job is reclaimed
+    let beat = async {
+        let mut every = tokio::time::interval((lease / 3).max(Duration::from_millis(100)));
+        every.tick().await;
+        loop {
+            every.tick().await;
+            if let Err(e) = queue.extend(job.id, lease).await {
+                tracing::warn!(error = %e, "extending the job lease failed");
+            }
+        }
+    };
+    let result = tokio::select! {
+        r = run => r,
+        () = beat => unreachable!("the heartbeat never ends"),
     };
     let stored = match result {
         Ok(()) => queue.complete(job.id).await,

@@ -1,6 +1,9 @@
 //! A plain `HttpFetch` for user-configured targets (notification channels): one attempt, no
-//! allowlist, cache or rate limit, no redirects, short timeouts. Callers check targets
-//! themselves (the notify crate refuses private addresses). Retries are the caller's job.
+//! allowlist, cache or rate limit, no redirects, short timeouts. Unless private targets are
+//! allowed, its resolver refuses names that resolve to private addresses, at connect time,
+//! so a DNS answer cannot change between a check and the request (G2-7). IP literals do not
+//! go through a resolver; callers check those (the notify crate does). Retries are the
+//! caller's job.
 
 use std::time::Duration;
 
@@ -11,12 +14,33 @@ pub struct PlainHttp {
     client: reqwest::Client,
 }
 
+/// DNS that only answers with public addresses.
+struct PublicOnly;
+
+impl reqwest::dns::Resolve for PublicOnly {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        Box::pin(async move {
+            let addrs: Vec<std::net::SocketAddr> =
+                tokio::net::lookup_host((name.as_str(), 0)).await?.collect();
+            if addrs.iter().any(|a| domain::net::is_private_ip(a.ip())) {
+                return Err(format!("{} resolves to a private address", name.as_str()).into());
+            }
+            let addrs: reqwest::dns::Addrs = Box::new(addrs.into_iter());
+            Ok(addrs)
+        })
+    }
+}
+
 impl PlainHttp {
     /// # Panics
     /// If the TLS backend cannot be initialised.
     #[must_use]
-    pub fn new(user_agent: &str) -> Self {
-        let client = reqwest::Client::builder()
+    pub fn new(user_agent: &str, allow_private: bool) -> Self {
+        let mut b = reqwest::Client::builder();
+        if !allow_private {
+            b = b.dns_resolver(std::sync::Arc::new(PublicOnly));
+        }
+        let client = b
             .user_agent(user_agent)
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(15))
@@ -60,5 +84,42 @@ impl HttpFetch for PlainHttp {
             headers,
             body,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use app::ports::Lane;
+
+    fn get(url: String) -> HttpRequest {
+        HttpRequest {
+            connector: "notify".into(),
+            op: "test".into(),
+            method: "GET".into(),
+            url,
+            headers: vec![],
+            body: None,
+            lane: Lane::Interactive,
+        }
+    }
+
+    #[tokio::test]
+    async fn names_of_private_addresses_are_refused_at_connect_time() {
+        let s = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::any())
+            .respond_with(wiremock::ResponseTemplate::new(204))
+            .mount(&s)
+            .await;
+        let port = s.address().port();
+        // `localhost` resolves to a loopback address
+        let url = format!("http://localhost:{port}/x");
+        let strict = PlainHttp::new("test", false);
+        assert!(matches!(
+            strict.fetch(get(url.clone())).await,
+            Err(HttpError::Network(_))
+        ));
+        let lan = PlainHttp::new("test", true);
+        assert_eq!(lan.fetch(get(url)).await.unwrap().status, 204);
     }
 }

@@ -76,6 +76,68 @@ pub enum AuthError {
     Store(String),
     #[error("oidc: {0}")]
     Oidc(String),
+    /// Too many failed sign-ins for this name; try again later (G2-4).
+    #[error("too many failed attempts, try again in {retry_after_secs} s")]
+    TooManyAttempts { retry_after_secs: i64 },
+}
+
+/// Failed sign-ins per username allowed within [`THROTTLE_WINDOW_MINUTES`].
+pub const MAX_FAILED_SIGN_INS: u32 = 10;
+pub const THROTTLE_WINDOW_MINUTES: i64 = 15;
+/// Names tracked at most (oldest windows are dropped first).
+const THROTTLE_CAPACITY: usize = 10_000;
+
+/// Failed sign-ins per lowercased username: (count, window start). In memory, per process.
+#[derive(Default)]
+struct Throttle(std::sync::Mutex<std::collections::HashMap<String, (u32, DateTime<Utc>)>>);
+
+impl Throttle {
+    fn check(&self, name: &str, now: DateTime<Utc>) -> Result<(), AuthError> {
+        let window = Duration::minutes(THROTTLE_WINDOW_MINUTES);
+        let map = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match map.get(name) {
+            Some((n, start)) if *n >= MAX_FAILED_SIGN_INS && now < *start + window => {
+                Err(AuthError::TooManyAttempts {
+                    retry_after_secs: (*start + window - now).num_seconds().max(1),
+                })
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn failed(&self, name: &str, now: DateTime<Utc>) {
+        let window = Duration::minutes(THROTTLE_WINDOW_MINUTES);
+        let mut map = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if map.len() >= THROTTLE_CAPACITY && !map.contains_key(name) {
+            map.retain(|_, (_, start)| now < *start + window);
+            if map.len() >= THROTTLE_CAPACITY
+                && let Some(oldest) = map
+                    .iter()
+                    .min_by_key(|(_, (_, s))| *s)
+                    .map(|(k, _)| k.clone())
+            {
+                map.remove(&oldest);
+            }
+        }
+        let e = map.entry(name.to_string()).or_insert((0, now));
+        if now >= e.1 + window {
+            *e = (0, now);
+        }
+        e.0 += 1;
+    }
+
+    fn succeeded(&self, name: &str) {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(name);
+    }
 }
 
 impl From<app::ports::PortError> for AuthError {
@@ -166,6 +228,7 @@ pub struct Auth {
     store: Arc<dyn AuthStore>,
     clock: Arc<dyn Clock>,
     settings: AuthSettings,
+    throttle: Arc<Throttle>,
 }
 
 impl Auth {
@@ -177,6 +240,7 @@ impl Auth {
             store,
             clock,
             settings,
+            throttle: Arc::default(),
         }
     }
 
@@ -241,6 +305,25 @@ impl Auth {
     /// [`AuthError::InvalidCredentials`], [`AuthError::TotpRequired`],
     /// [`AuthError::InvalidTotp`].
     pub async fn sign_in(
+        &self,
+        username: &str,
+        password: &str,
+        totp: Option<&str>,
+    ) -> Result<SessionToken, AuthError> {
+        let key = username.trim().to_lowercase();
+        self.throttle.check(&key, self.now())?;
+        let result = self.sign_in_checked(username, password, totp).await;
+        match &result {
+            Err(AuthError::InvalidCredentials | AuthError::InvalidTotp) => {
+                self.throttle.failed(&key, self.now());
+            }
+            Ok(_) => self.throttle.succeeded(&key),
+            Err(_) => {}
+        }
+        result
+    }
+
+    async fn sign_in_checked(
         &self,
         username: &str,
         password: &str,

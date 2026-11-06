@@ -86,6 +86,9 @@ impl From<AuthError> for ApiError {
             AuthError::WeakPassword => {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, "weak_password", msg)
             }
+            AuthError::TooManyAttempts { .. } => {
+                Self::new(StatusCode::TOO_MANY_REQUESTS, "too_many_attempts", msg)
+            }
             AuthError::App(a) => a.into(),
             AuthError::Store(_) | AuthError::Oidc(_) => {
                 tracing::error!(error = %msg, "auth error");

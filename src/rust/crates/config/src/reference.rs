@@ -40,13 +40,16 @@ impl<'a> Ctx<'a> {
     fn type_name(&self, v: &Value) -> String {
         let v = self.resolve(v);
         let consts = |list: &Vec<Value>| -> Vec<String> {
+            // a variant is a `const`, or an `enum` grouping several values with one description
             list.iter()
-                .filter_map(|s| {
-                    s.get("const")
-                        .or_else(|| s.get("enum").and_then(|e| e.get(0)))
-                        .and_then(Value::as_str)
-                        .map(|c| format!("`{c}`"))
-                })
+                .flat_map(
+                    |s| match (s.get("const"), s.get("enum").and_then(Value::as_array)) {
+                        (Some(c), _) => vec![c.clone()],
+                        (None, Some(all)) => all.clone(),
+                        (None, None) => vec![],
+                    },
+                )
+                .filter_map(|c| c.as_str().map(|c| format!("`{c}`")))
                 .collect()
         };
         if let Some(e) = v.get("enum").and_then(Value::as_array) {

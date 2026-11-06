@@ -136,7 +136,7 @@ The `storage` section of the configuration (D-8).
 |===
 |Key |Environment |Type |Default |Description
 
-|`backend` |`APP__STORAGE__BACKEND` |`fs` \| `memory` |`"fs"` |
+|`backend` |`APP__STORAGE__BACKEND` |`fs` \| `s3` \| `memory` |`"fs"` |
 |`fetch_policy` |`APP__STORAGE__FETCH_POLICY` |`lazy` \| `library` \| `eager` |`"library"` |Which images get bytes ahead of being requested (D-8).
 |`formats` |`APP__STORAGE__FORMATS` |list of `avif` \| `webp` |`["avif", "webp"]` |
 |`fs_root` |`APP__STORAGE__FS_ROOT` |string |`"data/blobs"` |Root directory of the fs backend.

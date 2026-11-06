@@ -9,6 +9,7 @@ pub mod ids;
 pub mod kind;
 pub mod library;
 pub mod list;
+pub mod net;
 pub mod progress;
 pub mod review;
 pub mod session;

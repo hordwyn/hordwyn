@@ -835,3 +835,29 @@ async fn notifications_inbox_channels_and_subscriptions() {
     assert_eq!(status, StatusCode::BAD_GATEWAY);
     assert_eq!(err["code"], "channel_error");
 }
+
+#[tokio::test]
+async fn json_bodies_are_limited_but_imports_may_be_large() {
+    let (s, _) = state();
+    let app = api::router(s);
+    let token = signed_up(&app).await;
+    let big = "x".repeat(3 << 20);
+    let (status, _, _) = call(
+        &app,
+        "POST",
+        "/api/v1/companions",
+        Some(&token),
+        Some(serde_json::json!({ "name": big })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    // a 3 MiB import passes the size check (it fails later: no importer in this state)
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/imports?format=generic-jsonl")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::from(big))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_ne!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}

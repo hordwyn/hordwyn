@@ -329,7 +329,9 @@ impl App {
 
     async fn publish_session(&self, s: &Session) -> AppResult<()> {
         let mut audience = vec![s.owner];
-        for p in &s.participants {
+        // linked participants only hear about it if the owner shares sessions (G2-9)
+        let shared = self.shares_sessions(s.owner).await?;
+        for p in s.participants.iter().filter(|_| shared) {
             if let Some(c) = self.repos.companions.get(p.companion_id).await?
                 && let Some(u) = c.linked_user
                 && !audience.contains(&u)
