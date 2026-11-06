@@ -152,6 +152,36 @@ pub fn RatingInput(value: RwSignal<Option<u8>>, on_change: Callback<Option<u8>>)
     }
 }
 
+/// A logged progress event in words (`{"type": "episode", "season": 2, "episode": 5}` ->
+/// "Season 2, episode 5"); unknown types show their name.
+#[must_use]
+pub fn progress_label(i: &crate::i18n::I18n, p: &serde_json::Value) -> String {
+    let n = |field: &str| p[field].as_u64();
+    let num = |v: u64| fluent_bundle::FluentValue::from(v);
+    match p["type"].as_str().unwrap_or_default() {
+        "finished" => i.t("progress-finished"),
+        "episode" => i.t_args(
+            "progress-episode",
+            &[
+                ("season", num(n("season").unwrap_or(0))),
+                ("episode", num(n("episode").unwrap_or(0))),
+            ],
+        ),
+        "paged" => match (n("page"), n("chapter"), n("volume")) {
+            (Some(v), _, _) => i.t_args("progress-page", &[("page", num(v))]),
+            (None, Some(v), _) => i.t_args("progress-chapter", &[("chapter", num(v))]),
+            (None, None, v) => i.t_args("progress-volume", &[("volume", num(v.unwrap_or(0)))]),
+        },
+        "position" => {
+            let s = n("seconds").unwrap_or(0);
+            let time = format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60);
+            i.t_args("progress-position", &[("time", time.into())])
+        }
+        "session" => i.t("progress-session"),
+        other => other.to_string(),
+    }
+}
+
 /// Multi-select of the user's companions (excluding the self-companion).
 #[component]
 pub fn CompanionPicker(
@@ -200,6 +230,27 @@ pub fn CompanionPicker(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use crate::i18n::I18n;
+
+    #[test]
+    fn progress_reads_as_words_in_each_locale() {
+        let (en, de) = (
+            I18n::new("en", BTreeMap::new()),
+            I18n::new("de", BTreeMap::new()),
+        );
+        let ep = serde_json::json!({"type": "episode", "season": 2, "episode": 5});
+        assert_eq!(super::progress_label(&en, &ep), "Season 2, episode 5");
+        assert_eq!(super::progress_label(&de, &ep), "Staffel 2, Folge 5");
+        let done = serde_json::json!({"type": "finished"});
+        assert_eq!(super::progress_label(&de, &done), "Abgeschlossen");
+        let pos = serde_json::json!({"type": "position", "seconds": 3725});
+        assert_eq!(super::progress_label(&en, &pos), "At 1:02:05");
+        let page = serde_json::json!({"type": "paged", "page": 1212});
+        assert_eq!(super::progress_label(&de, &page), "Seite 1.212");
+    }
+
     #[test]
     fn thumbhash_becomes_a_bmp_data_url() {
         // a real thumbhash (from an image encoded by the assets pipeline)

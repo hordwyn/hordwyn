@@ -6,7 +6,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use contracts::{
     AttributionDto, CatalogItemDto, ChannelDto, CompanionDto, DeliveryDto, EventTypeDto,
-    InboxItemDto, InviteDto, LibraryEntryDto, LinkRequestDto, ListDto, LoggedSessionDto,
+    InboxItemDto, InviteDto, LibraryEntryDto, LinkRequestDto, ListDto, LocaleDto, LoggedSessionDto,
     NewChannelDto, NewProgressDto, PrivacyDto, ProgressEventDto, SearchResponseDto, SessionDto,
     ShareLinkDto, SharedListDto, SignInDto, SignUpDto, SubscriptionDto, TemplateOverrideDto,
     UserDto, WebPushKeyDto,
@@ -64,6 +64,7 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(shared_sessions))
         .routes(routes!(claim_session))
         .routes(routes!(set_privacy))
+        .routes(routes!(set_locale))
         .routes(routes!(share_list))
         .routes(routes!(shared_list))
         .routes(routes!(notification_events))
@@ -638,6 +639,17 @@ async fn set_privacy(
     Json(b): Json<PrivacyDto>,
 ) -> ApiResult<Json<UserDto>> {
     Ok(Json(sharing::set_privacy(&s, a, b).await?))
+}
+
+/// The caller's language for pages, notifications and emails; `null` is automatic.
+#[utoipa::path(put, path = "/auth/me/locale", tag = "auth", request_body = LocaleDto,
+    responses((status = 200, body = UserDto), (status = 422, body = contracts::ErrorDto)))]
+async fn set_locale(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Json(b): Json<LocaleDto>,
+) -> ApiResult<Json<UserDto>> {
+    Ok(Json(sharing::set_locale(&s, a, b).await?))
 }
 
 /// Share by link; a new link revokes the previous one.

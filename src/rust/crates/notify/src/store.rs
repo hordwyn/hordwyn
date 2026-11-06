@@ -17,6 +17,8 @@ pub type StoreResult<T> = Result<T, PortError>;
 #[async_trait]
 pub trait NotifyStore: Send + Sync {
     async fn admins(&self) -> StoreResult<Vec<UserId>>;
+    /// The language the user chose (`None`: no choice, DEC-201).
+    async fn user_locale(&self, user: UserId) -> StoreResult<Option<String>>;
 
     async fn channels(&self, user: UserId) -> StoreResult<Vec<Channel>>;
     async fn channel(&self, id: Uuid) -> StoreResult<Option<Channel>>;
@@ -65,6 +67,7 @@ pub trait NotifyStore: Send + Sync {
 #[derive(Default)]
 struct Mem {
     admins: Vec<UserId>,
+    locales: HashMap<UserId, String>,
     channels: HashMap<Uuid, Channel>,
     subscriptions: HashMap<Uuid, Subscription>,
     inbox: Vec<InboxItem>,
@@ -83,12 +86,20 @@ impl MemNotifyStore {
     pub fn add_admin(&self, u: UserId) {
         self.m().admins.push(u);
     }
+
+    pub fn set_locale(&self, u: UserId, locale: &str) {
+        self.m().locales.insert(u, locale.to_string());
+    }
 }
 
 #[async_trait]
 impl NotifyStore for MemNotifyStore {
     async fn admins(&self) -> StoreResult<Vec<UserId>> {
         Ok(self.m().admins.clone())
+    }
+
+    async fn user_locale(&self, user: UserId) -> StoreResult<Option<String>> {
+        Ok(self.m().locales.get(&user).cloned())
     }
 
     async fn channels(&self, user: UserId) -> StoreResult<Vec<Channel>> {

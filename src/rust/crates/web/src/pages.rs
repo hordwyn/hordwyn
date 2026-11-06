@@ -23,6 +23,15 @@ pub(crate) fn go(path: &str) {
     let _ = path;
 }
 
+/// Reload the current page from the server (after a change the server renders, such as the
+/// language).
+pub(crate) fn reload() {
+    #[cfg(feature = "hydrate")]
+    if let Some(w) = web_sys::window() {
+        let _ = w.location().reload();
+    }
+}
+
 pub(crate) fn error_text(e: &ServerFnError) -> String {
     let code = api::error_code(e);
     let key = format!("auth-error-{code}");
@@ -286,7 +295,7 @@ fn ItemView(
                         view! {
                             <ul class="text-sm">
                                 {page.progress.iter().map(|p| view! {
-                                    <li>{p.occurred_at.get(..10).unwrap_or_default().to_string()} " - " {p.progress["type"].as_str().unwrap_or_default().to_string()}</li>
+                                    <li>{i18n.date(&p.occurred_at)} " - " {crate::widgets::progress_label(&i18n, &p.progress)}</li>
                                 }).collect_view()}
                             </ul>
                         }.into_any()
@@ -296,7 +305,8 @@ fn ItemView(
                     {page.sources.iter().map(|s| view! {
                         <p>
                             {i18n.t_args("item-source", &[("name", s.name.clone().into())])} " - "
-                            {s.text.clone()} " " <a href=s.url.clone() class="underline" rel="noopener">{s.url.clone()}</a>
+                            // the attribution text is the provider's own wording, in English
+                            <span lang="en">{s.text.clone()}</span> " " <a href=s.url.clone() class="underline" rel="noopener">{s.url.clone()}</a>
                         </p>
                     }).collect_view()}
                 </footer>
@@ -348,7 +358,7 @@ pub fn Lists() -> impl IntoView {
                         {list.into_iter().map(|l| {
                             let count = use_i18n().t_args("lists-items", &[("count", l.item_ids.len().into())]);
                             let (share_id, row_id) = (l.id.clone(), l.id.clone());
-                            let label = format!("{} {}", t("lists-share"), l.name);
+                            let label = use_i18n().t_args("lists-share-named", &[("name", l.name.clone().into())]);
                             view! {
                                 <li class="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
                                     <span class="flex-1">
@@ -388,8 +398,8 @@ pub fn Sources() -> impl IntoView {
                     {list.into_iter().map(|s| view! {
                         <li class="rounded-md border border-border p-3 text-sm">
                             <p class="font-medium">{s.name.clone()}</p>
-                            <p>{s.text.clone()}</p>
-                            <p class="text-muted-foreground">{s.licence.clone()} " - " <a class="underline" href=s.url.clone() rel="noopener">{s.url.clone()}</a></p>
+                            <p lang="en">{s.text.clone()}</p>
+                            <p class="text-muted-foreground"><span lang="en">{s.licence.clone()}</span> " - " <a class="underline" href=s.url.clone() rel="noopener">{s.url.clone()}</a></p>
                         </li>
                     }).collect_view()}
                 </ul>

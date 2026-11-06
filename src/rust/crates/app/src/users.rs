@@ -45,6 +45,7 @@ impl App {
             role,
             self_companion: self_companion.id,
             share_sessions: true,
+            locale: None,
             created_at: now,
         };
         self.repos
@@ -81,6 +82,17 @@ impl App {
     pub async fn set_privacy(&self, actor: Actor, share_sessions: bool) -> AppResult<User> {
         let mut user = self.user(actor.user_id).await?;
         user.share_sessions = share_sessions;
+        self.repos.users.update(&user).await?;
+        Ok(user)
+    }
+
+    /// Per-user language (`None`: automatic). The caller checks that the locale is supported.
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn set_locale(&self, actor: Actor, locale: Option<String>) -> AppResult<User> {
+        let mut user = self.user(actor.user_id).await?;
+        user.locale = locale;
         self.repos.users.update(&user).await?;
         Ok(user)
     }

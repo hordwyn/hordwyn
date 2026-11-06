@@ -60,6 +60,8 @@ pub struct SegmentedOption {
     pub icon: Option<IconName>,
     /// Id of the panel this tab controls (`SegmentedMode::Tabs` only).
     pub controls: Option<String>,
+    /// Language of the label when it differs from the page (`lang`, WCAG 3.1.2).
+    pub lang: Option<String>,
 }
 
 impl SegmentedOption {
@@ -70,7 +72,16 @@ impl SegmentedOption {
             label: label.into(),
             icon: None,
             controls: None,
+            lang: None,
         }
+    }
+
+    /// The label is in another language than the page (a language picker names each
+    /// language in itself).
+    #[must_use]
+    pub fn lang(mut self, lang: impl Into<String>) -> Self {
+        self.lang = Some(lang.into());
+        self
     }
 
     #[must_use]
@@ -171,6 +182,7 @@ pub fn Segmented(
                         aria-checked=move || (!tabs).then(state)
                         aria-selected=move || tabs.then(state)
                         aria-controls=o.controls.clone()
+                        lang=o.lang.clone()
                         tabindex=move || if tab_stop(i, &v_tab) { "0" } else { "-1" }
                         on:click=move |_| value.set(v_click.clone())
                         class=move || cn(&[

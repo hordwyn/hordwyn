@@ -405,3 +405,40 @@ async fn temporary_failures_retry_and_gone_targets_disable_the_channel() {
     e.engine.emit(e.episode(3)).await;
     assert_eq!(e.store.deliveries(e.user, 10).await.unwrap().len(), 2);
 }
+
+/// Per-user language (DEC-201): texts follow the recipient's choice, else the instance
+/// language; numbers in texts follow the locale.
+#[tokio::test]
+async fn texts_follow_the_recipients_language() {
+    let e = env();
+    let ch = e.channel("phone").await;
+    e.subscribe("release.*", DeliveryMode::Immediate, |_| {})
+        .await;
+    e.store.set_locale(e.user, "de");
+    e.engine.emit(e.episode(2)).await;
+    e.run_due().await;
+    let inbox = e.store.inbox(e.user, 10).await.unwrap();
+    assert_eq!(inbox[0].title, "Neue Folge von Severance");
+    assert_eq!(e.sent()[0].title, "Neue Folge von Severance");
+    let c = e.store.channel(ch).await.unwrap().unwrap();
+    e.deliverer.test(&c).await.unwrap();
+    assert!(
+        e.sent()[1].title.starts_with("Test von"),
+        "{:?}",
+        e.sent()[1]
+    );
+    // another user without a choice gets the instance language
+    let other = UserId(uuid::Uuid::from_u128(8));
+    e.engine
+        .emit(
+            Notification::new("import.finished", Audience::Users(vec![other]), "i:1")
+                .arg("imported", 1200)
+                .arg("errors", 0),
+        )
+        .await;
+    let inbox = e.store.inbox(other, 10).await.unwrap();
+    assert_eq!(
+        inbox[0].body,
+        "1,200 entries imported, 0 rows with problems."
+    );
+}

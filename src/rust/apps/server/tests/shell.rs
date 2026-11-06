@@ -141,3 +141,61 @@ async fn renamed_routes_render_and_old_ones_are_gone() {
         );
     }
 }
+
+/// Per-user language (owner ruling DEC-171, DEC-201): a signed-in user who chose German gets
+/// `<html lang="de">` and the German shell, whatever the browser asks for; going back to
+/// automatic follows `Accept-Language` again.
+#[tokio::test]
+async fn the_page_follows_the_users_language() {
+    if !services() {
+        return;
+    }
+    let app = app().await;
+    let cookie = sign_up(&app, "clara", "Clara").await;
+    let set = |locale: &'static str| {
+        let (app, cookie) = (app.clone(), cookie.clone());
+        let body = format!(r#"{{"locale":{locale}}}"#);
+        async move {
+            let resp = app
+                .oneshot(
+                    axum::http::Request::builder()
+                        .method("PUT")
+                        .uri("/api/v1/auth/me/locale")
+                        .header("cookie", cookie)
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), 200, "set locale {locale}");
+        }
+    };
+    set("\"de\"").await;
+    // `page` asks for English
+    let (status, html) = page(&app, "/", Some(&cookie)).await;
+    assert_eq!(status, 200);
+    assert!(html.contains("<html lang=\"de\""), "lang follows the user");
+    assert!(
+        html.contains("Kontomen\u{fc} von Clara"),
+        "German account menu"
+    );
+    assert!(html.contains(">Bibliothek<"), "German navigation");
+    assert!(
+        html.contains("\"locale_setting\":\"de\""),
+        "picker state for hydration"
+    );
+    let (_, you) = page(&app, "/you", Some(&cookie)).await;
+    assert!(
+        you.contains("id=\"you-language-de\""),
+        "language picker on the You hub"
+    );
+    assert!(
+        you.contains("lang=\"en\""),
+        "the picker names English in English"
+    );
+    set("null").await;
+    let (_, html) = page(&app, "/", Some(&cookie)).await;
+    assert!(html.contains("<html lang=\"en\""), "automatic again");
+    assert!(html.contains(">Library<"));
+}

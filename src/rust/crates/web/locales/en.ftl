@@ -2,10 +2,8 @@
 # under [strings.en].
 
 nav-library = Library
-nav-companions = Companions
 nav-lists = Lists
 nav-sources = Data sources
-nav-search = Search
 nav-sign-in = Sign in
 nav-sign-up = Create account
 nav-sign-out = Sign out
@@ -71,7 +69,6 @@ item-history-empty = Nothing logged yet.
 item-loading-details = Fetching details...
 item-source = Source: { $name }
 item-cover-alt = Cover of { $title }
-item-year = Year
 item-lists = Add to list
 
 search-title = Search
@@ -80,14 +77,11 @@ search-placeholder = Title, author, studio...
 search-empty = No results yet.
 search-local = In your instance
 search-waiting = Asking { $sources }...
-search-hint = Ctrl+K
 
 companions-title = Companions
 companions-lead = People you watch, read and play with. Only you see this list.
 companions-new = Name
 companions-add = Add companion
-companions-you = (you)
-companions-empty = No companions yet.
 
 lists-title = Lists
 lists-new = List name
@@ -105,7 +99,6 @@ theme-dark = Switch to dark theme
 theme-light = Switch to light theme
 dialog-close = Close
 
-nav-sessions = History
 auth-invited = You were invited: your account is linked to the companion who invited you, and you see the sessions you were part of.
 companions-choose = Choose...
 companions-companion = Companion
@@ -233,7 +226,6 @@ integrations-url = Webhook URL:
 integrations-token = Token:
 integrations-example = Example:
 integrations-empty = No integrations yet.
-integrations-last = last call:
 integrations-never = never
 integrations-error = Last call failed
 integrations-revoke = Revoke
@@ -310,7 +302,6 @@ auth-password-too-short = { $count ->
 }
 auth-password-too-long = The password has { $count } characters; use at most { $max }.
 auth-show = Show
-auth-hide = Hide
 auth-error-summary = { $count ->
     [one] There is one problem
    *[other] There are { $count } problems
@@ -322,3 +313,67 @@ auth-totp-lead = Open your authenticator app and type the code it shows for this
 auth-totp-required = Enter the one-time code.
 auth-back = Back
 # ---- end form discipline ----
+
+# ---- UX phase 0: i18n (DEC-171, DEC-200, DEC-201) ----
+# Each locale names itself (the language picker shows every language in its own words).
+locale-name = English
+shell-language = Language
+shell-language-auto = Automatic
+shell-key-esc = Esc
+# Dates: CLDR medium date (en: MMM d, y), short time (h:mm a); times are UTC (DEC-200).
+month-short-1 = Jan
+month-short-2 = Feb
+month-short-3 = Mar
+month-short-4 = Apr
+month-short-5 = May
+month-short-6 = Jun
+month-short-7 = Jul
+month-short-8 = Aug
+month-short-9 = Sep
+month-short-10 = Oct
+month-short-11 = Nov
+month-short-12 = Dec
+time-am = AM
+time-pm = PM
+datetime-utc = { $date }, { $time } UTC
+progress-finished = Completed
+progress-episode = Season { $season }, episode { $episode }
+progress-page = Page { $page }
+progress-chapter = Chapter { $chapter }
+progress-volume = Volume { $volume }
+progress-position = At { $time }
+progress-session = Session logged
+lists-share-named = Share { $name } by link
+companions-name-self = { $name } (you)
+companions-invite-named = Invite { $name }
+companions-unlink-named = Unlink { $name }
+sessions-winner = { $name } (won)
+integrations-last-call = Last call: { $when }
+integrations-revoke-named = Revoke { $name }
+notify-mark-read-named = Mark { $title } as read
+notify-test-named = Test { $name }
+notify-delete-named = Delete { $name }
+notify-mode-digest-at = Daily digest at { $time }
+notify-event-release-item_released = A title is released
+notify-event-release-episode = New episode
+notify-event-release-chapter = New chapter
+notify-event-release-date_changed = Release date changed
+notify-event-library-status_changed = Status changed
+notify-event-library-metadata_changed = Details updated
+notify-event-social-link_request = Link request
+notify-event-social-link_accepted = Link accepted
+notify-event-social-session_shared = Session shared with you
+notify-event-social-list_shared = List shared with you
+notify-event-boardgame-loan_due = Lent game due back
+notify-event-boardgame-loan_overdue = Lent game overdue
+notify-event-boardgame-wishlist_owned = Wishlist game owned by someone you know
+notify-event-integration-play_recorded = Play recorded by a sender
+notify-event-integration-failing = Sender stopped working
+notify-event-import-finished = Import finished
+notify-event-import-failed = Import failed
+notify-event-admin-storage_high = Storage almost full (admin)
+notify-event-admin-storage_full = Storage full (admin)
+notify-event-admin-connector_down = Data source unavailable (admin)
+notify-event-admin-signup = New account (admin)
+notify-event-admin-job_backlog = Jobs piling up (admin)
+# ---- end i18n ----

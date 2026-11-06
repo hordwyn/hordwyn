@@ -2,10 +2,8 @@
 # überschreiben.
 
 nav-library = Bibliothek
-nav-companions = Begleiter
 nav-lists = Listen
 nav-sources = Datenquellen
-nav-search = Suche
 nav-sign-in = Anmelden
 nav-sign-up = Konto erstellen
 nav-sign-out = Abmelden
@@ -71,7 +69,6 @@ item-history-empty = Noch nichts eingetragen.
 item-loading-details = Details werden geladen...
 item-source = Quelle: { $name }
 item-cover-alt = Cover von { $title }
-item-year = Jahr
 item-lists = Zu Liste hinzufügen
 
 search-title = Suche
@@ -80,14 +77,11 @@ search-placeholder = Titel, Autorin, Studio...
 search-empty = Noch keine Treffer.
 search-local = In deiner Instanz
 search-waiting = Frage { $sources } an...
-search-hint = Strg+K
 
 companions-title = Begleiter
 companions-lead = Menschen, mit denen du schaust, liest und spielst. Nur du siehst diese Liste.
 companions-new = Name
 companions-add = Begleiter hinzufügen
-companions-you = (du)
-companions-empty = Noch keine Begleiter.
 
 lists-title = Listen
 lists-new = Name der Liste
@@ -105,7 +99,6 @@ theme-dark = Zum dunklen Design wechseln
 theme-light = Zum hellen Design wechseln
 dialog-close = Schließen
 
-nav-sessions = Verlauf
 auth-invited = Du wurdest eingeladen: Dein Konto wird mit dem Begleiter verknüpft, der dich eingeladen hat, und du siehst die Sitzungen, bei denen du dabei warst.
 companions-choose = Auswählen...
 companions-companion = Begleiter
@@ -233,7 +226,6 @@ integrations-url = Webhook-URL:
 integrations-token = Token:
 integrations-example = Beispiel:
 integrations-empty = Noch keine Integrationen.
-integrations-last = letzter Aufruf:
 integrations-never = nie
 integrations-error = Letzter Aufruf fehlgeschlagen
 integrations-revoke = Widerrufen
@@ -310,7 +302,6 @@ auth-password-too-short = { $count ->
 }
 auth-password-too-long = Das Passwort hat { $count } Zeichen; erlaubt sind höchstens { $max }.
 auth-show = Anzeigen
-auth-hide = Verbergen
 auth-error-summary = { $count ->
     [one] Es gibt ein Problem
    *[other] Es gibt { $count } Probleme
@@ -322,3 +313,67 @@ auth-totp-lead = Öffne deine Authenticator-App und gib den Code ein, den sie f�
 auth-totp-required = Gib den Einmalcode ein.
 auth-back = Zurück
 # ---- end form discipline ----
+
+# ---- UX-Phase 0: i18n (DEC-171, DEC-200, DEC-201) ----
+# Jede Sprache nennt sich selbst (die Sprachauswahl zeigt jede Sprache in ihren eigenen Worten).
+locale-name = Deutsch
+shell-language = Sprache
+shell-language-auto = Automatisch
+shell-key-esc = Esc
+# Datum: CLDR mittleres Datum (de: dd.MM.y), kurze Uhrzeit (HH:mm); Zeiten sind UTC (DEC-200).
+month-short-1 = Jan.
+month-short-2 = Feb.
+month-short-3 = März
+month-short-4 = Apr.
+month-short-5 = Mai
+month-short-6 = Juni
+month-short-7 = Juli
+month-short-8 = Aug.
+month-short-9 = Sept.
+month-short-10 = Okt.
+month-short-11 = Nov.
+month-short-12 = Dez.
+time-am = AM
+time-pm = PM
+datetime-utc = { $date }, { $time } UTC
+progress-finished = Abgeschlossen
+progress-episode = Staffel { $season }, Folge { $episode }
+progress-page = Seite { $page }
+progress-chapter = Kapitel { $chapter }
+progress-volume = Band { $volume }
+progress-position = Bei { $time }
+progress-session = Sitzung eingetragen
+lists-share-named = { $name } per Link teilen
+companions-name-self = { $name } (du)
+companions-invite-named = { $name } einladen
+companions-unlink-named = Verknüpfung mit { $name } lösen
+sessions-winner = { $name } (gewonnen)
+integrations-last-call = Letzter Aufruf: { $when }
+integrations-revoke-named = { $name } widerrufen
+notify-mark-read-named = { $title } als gelesen markieren
+notify-test-named = { $name } testen
+notify-delete-named = { $name } löschen
+notify-mode-digest-at = Tägliche Zusammenfassung um { $time }
+notify-event-release-item_released = Ein Titel ist erschienen
+notify-event-release-episode = Neue Folge
+notify-event-release-chapter = Neues Kapitel
+notify-event-release-date_changed = Erscheinungstermin geändert
+notify-event-library-status_changed = Status geändert
+notify-event-library-metadata_changed = Details aktualisiert
+notify-event-social-link_request = Verknüpfungsanfrage
+notify-event-social-link_accepted = Verknüpfung angenommen
+notify-event-social-session_shared = Sitzung mit dir geteilt
+notify-event-social-list_shared = Liste mit dir geteilt
+notify-event-boardgame-loan_due = Verliehenes Spiel bald fällig
+notify-event-boardgame-loan_overdue = Verliehenes Spiel überfällig
+notify-event-boardgame-wishlist_owned = Spiel von deiner Wunschliste bei jemandem, den du kennst
+notify-event-integration-play_recorded = Partie von einem Sender eingetragen
+notify-event-integration-failing = Sender funktioniert nicht mehr
+notify-event-import-finished = Import abgeschlossen
+notify-event-import-failed = Import fehlgeschlagen
+notify-event-admin-storage_high = Speicher fast voll (Admin)
+notify-event-admin-storage_full = Speicher voll (Admin)
+notify-event-admin-connector_down = Datenquelle nicht erreichbar (Admin)
+notify-event-admin-signup = Neues Konto (Admin)
+notify-event-admin-job_backlog = Aufgaben stauen sich (Admin)
+# ---- Ende i18n ----

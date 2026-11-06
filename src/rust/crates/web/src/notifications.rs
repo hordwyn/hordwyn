@@ -9,7 +9,7 @@ use ui::{
 
 use crate::api;
 use crate::events::use_events;
-use crate::i18n::t;
+use crate::i18n::{t, use_i18n};
 use crate::pages::{PageTitle, go, needs_sign_in};
 
 fn notify_error(e: &ServerFnError) -> String {
@@ -71,15 +71,42 @@ fn fields(kind: &str) -> [Option<&'static str>; 3] {
     }
 }
 
+/// The hour of a daily digest schedule as the form writes it (`0 <hour> * * *`).
+fn digest_hour(cron: &str) -> Option<u32> {
+    let mut parts = cron.split_whitespace();
+    let (min, hour) = (parts.next()?, parts.next()?);
+    let rest: Vec<_> = parts.collect();
+    (min == "0" && rest == ["*", "*", "*"])
+        .then(|| hour.parse().ok())
+        .flatten()
+        .filter(|h| *h < 24)
+}
+
 fn mode_label(s: &SubscriptionDto) -> String {
     match s.mode["mode"].as_str() {
-        Some("digest") => format!(
-            "{} ({})",
-            t("notify-mode-digest"),
-            s.mode["cron"].as_str().unwrap_or_default()
-        ),
+        Some("digest") => {
+            let cron = s.mode["cron"].as_str().unwrap_or_default();
+            let i18n = use_i18n();
+            // other schedules (set through the API) show as written
+            let time = digest_hour(cron).map_or_else(|| cron.to_string(), |h| i18n.time(h, 0));
+            i18n.t_args("notify-mode-digest-at", &[("time", time.into())])
+        }
         _ => t("notify-mode-immediate"),
     }
+}
+
+/// Name of an event or event pattern of a subscription (`*`, `release.*`, `release.episode`);
+/// events without a label show their id.
+fn event_label(id: &str) -> String {
+    if id == "*" {
+        return t("notify-all-events");
+    }
+    let key = match id.strip_suffix(".*") {
+        Some(group) => format!("notify-group-{group}"),
+        None => format!("notify-event-{}", id.replace('.', "-")),
+    };
+    let text = t(&key);
+    if text == key { id.to_string() } else { text }
 }
 
 fn targets_label(s: &SubscriptionDto, channels: &[ChannelDto]) -> String {
@@ -240,7 +267,7 @@ pub fn Notifications() -> impl IntoView {
                     .iter()
                     .map(|g| opt(&format!("{g}.*"), t(&format!("notify-group-{g}")))),
             );
-            v.extend(p.events.iter().map(|e| opt(&e.id, e.id.clone())));
+            v.extend(p.events.iter().map(|e| opt(&e.id, event_label(&e.id))));
         }
         v
     });
@@ -264,8 +291,9 @@ pub fn Notifications() -> impl IntoView {
         ]
     });
     let hour_options = Signal::derive(|| {
+        let i18n = use_i18n();
         (0..24)
-            .map(|h| opt(&h.to_string(), format!("{h:02}:00")))
+            .map(|h| opt(&h.to_string(), i18n.time(h, 0)))
             .collect::<Vec<_>>()
     });
 
@@ -364,10 +392,10 @@ fn Inbox(p: NotificationPageDto, read: Action<String, ()>) -> impl IntoView {
                                         }}
                                     </p>
                                     <p class="text-sm">{i.body.clone()}</p>
-                                    <p class="text-xs text-muted-foreground">{i.created_at.get(..16).unwrap_or_default().replace('T', " ")}</p>
+                                    <p class="text-xs text-muted-foreground">{use_i18n().datetime(&i.created_at)}</p>
                                     {(!i.read).then(|| view! {
                                         <Button size=ButtonSize::Sm variant=ButtonVariant::Ghost
-                                            attr:aria-label=format!("{} {}", t("notify-mark-read"), i.title)
+                                            attr:aria-label=use_i18n().t_args("notify-mark-read-named", &[("title", i.title.clone().into())])
                                             on:click=move |_| { read.dispatch(id.clone()); }>{t("notify-mark-read")}</Button>
                                     })}
                                 </li>
@@ -397,9 +425,9 @@ fn Channels(
                         <li class="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
                             <span class="flex-1">{c.name.clone()} <span class="ml-2 text-sm text-muted-foreground">{t(&format!("notify-kind-{}", c.kind))}</span></span>
                             {(!c.enabled).then(|| view! { <Badge variant=BadgeVariant::Destructive>{t("notify-disabled")}</Badge> })}
-                            <Button size=ButtonSize::Sm variant=ButtonVariant::Outline attr:aria-label=format!("{} {}", t("notify-test"), c.name)
+                            <Button size=ButtonSize::Sm variant=ButtonVariant::Outline attr:aria-label=use_i18n().t_args("notify-test-named", &[("name", c.name.clone().into())])
                                 on:click=move |_| { test.dispatch(a.clone()); }>{t("notify-test")}</Button>
-                            <Button size=ButtonSize::Sm variant=ButtonVariant::Ghost attr:aria-label=format!("{} {}", t("notify-delete"), c.name)
+                            <Button size=ButtonSize::Sm variant=ButtonVariant::Ghost attr:aria-label=use_i18n().t_args("notify-delete-named", &[("name", c.name.clone().into())])
                                 on:click=move |_| { remove.dispatch(b.clone()); }>{t("notify-delete")}</Button>
                         </li>
                     }
@@ -421,11 +449,12 @@ fn Subscriptions(p: NotificationPageDto, remove: Action<String, ()>) -> impl Int
                     let id = s.id.clone().unwrap_or_default();
                     let detail = format!("{} - {}", mode_label(&s), targets_label(&s, &channels));
                     let removable = !s.instance_default;
-                    let label = format!("{} {}", t("notify-delete"), s.event);
+                    let event = event_label(&s.event);
+                    let label = use_i18n().t_args("notify-delete-named", &[("name", event.clone().into())]);
                     view! {
                         <li class="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
                             <span class="flex-1">
-                                <span class="font-mono text-sm">{s.event.clone()}</span>
+                                <span class="text-sm font-medium">{event}</span>
                                 <span class="ml-2 text-sm text-muted-foreground">{detail}</span>
                             </span>
                             {s.instance_default.then(|| view! { <Badge variant=BadgeVariant::Secondary>{t("notify-default")}</Badge> })}
@@ -451,10 +480,11 @@ fn Log(p: NotificationPageDto) -> impl IntoView {
             <ul class="flex flex-col gap-1 text-sm" aria-labelledby="log-title">
                 {p.deliveries.into_iter().map(|d| view! {
                     <li class="flex flex-wrap gap-2">
-                        <span class="text-muted-foreground">{d.created_at.get(..16).unwrap_or_default().replace('T', " ")}</span>
+                        <span class="text-muted-foreground">{use_i18n().datetime(&d.created_at)}</span>
                         <span class="flex-1">{d.title.clone()}</span>
                         <Badge variant=if d.state == "failed" { BadgeVariant::Destructive } else { BadgeVariant::Secondary }>{t(&format!("notify-state-{}", d.state))}</Badge>
-                        {d.last_error.clone().map(|e| view! { <span class="basis-full text-xs text-destructive">{e}</span> })}
+                        // what the channel answered, as it said it (not translated)
+                        {d.last_error.clone().map(|e| view! { <span lang="en" class="basis-full text-xs text-destructive">{e}</span> })}
                     </li>
                 }).collect_view()}
             </ul>

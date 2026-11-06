@@ -106,7 +106,12 @@ impl Deliverer {
         let mut args = serde_json::Map::new();
         args.insert("name".into(), channel.name.clone().into());
         let t = self.engine.templates();
-        let r = t.render("test", channel.config.kind(), self.engine.locale(), &args);
+        let locale = self
+            .engine
+            .locale_for(channel.user)
+            .await
+            .unwrap_or_else(|_| self.engine.locale().to_string());
+        let r = t.render("test", channel.config.kind(), &locale, &args);
         let m = Message {
             id: Uuid::new_v5(&channel.id, self.clock.now().to_rfc3339().as_bytes()),
             event: "test".into(),
@@ -200,6 +205,11 @@ impl Deliverer {
             }
             return Ok(());
         };
+        let locale = self
+            .engine
+            .locale_for(channel.user)
+            .await
+            .map_err(|e| e.to_string())?;
         let t = self.engine.templates();
         let body = items
             .iter()
@@ -216,7 +226,7 @@ impl Deliverer {
         let m = Message {
             id: Uuid::new_v5(&channel_id, until.to_rfc3339().as_bytes()),
             event: "digest".into(),
-            title: t.digest_title(self.engine.locale(), items.len()),
+            title: t.digest_title(&locale, items.len()),
             body,
             link: self.link(Some(&"/notifications".to_string())),
             at: self.clock.now(),

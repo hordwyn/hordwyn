@@ -21,7 +21,7 @@ library-metadata_changed-title = { $title } was updated
 library-metadata_changed-body = The details of { $title } changed.
 
 social-link_request-title = { $from } says you are "{ $companion }"
-social-link_request-body = Confirm on the companions page that { $from }'s companion "{ $companion }" is you.
+social-link_request-body = Confirm on the People page that { $from }'s companion "{ $companion }" is you.
 social-link_accepted-title = { $user } accepted your link
 social-link_accepted-body = Your companion "{ $companion }" is now linked to { $user }.
 social-session_shared-title = { $owner } logged { $title } with you
@@ -42,7 +42,13 @@ integration-failing-title = { $name } is failing
 integration-failing-body = The integration { $name } stopped working: { $error }
 
 import-finished-title = Import finished
-import-finished-body = { $imported } entries imported, { $errors } rows with problems.
+import-finished-body = { $imported ->
+    [one] One entry imported
+   *[other] { $imported } entries imported
+}, { $errors ->
+    [one] one row with problems.
+   *[other] { $errors } rows with problems.
+}
 import-failed-title = Import failed
 import-failed-body = The import stopped: { $error }
 
@@ -55,7 +61,10 @@ admin-connector_down-body = Requests to { $connector } are paused after repeated
 admin-signup-title = New account: { $username }
 admin-signup-body = { $name } ({ $username }) created an account on { $product }.
 admin-job_backlog-title = Jobs are piling up
-admin-job_backlog-body = { $count } jobs are waiting in the { $lane } lane.
+admin-job_backlog-body = { $count ->
+    [one] One job is waiting in the { $lane } lane.
+   *[other] { $count } jobs are waiting in the { $lane } lane.
+}
 
 test-title = Test from { $product }
 test-body = The channel "{ $name }" works.

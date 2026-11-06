@@ -12,8 +12,8 @@ use ui::{
     RuleState, Segmented, SegmentedMode, SegmentedOption, Select, SelectOption, Sheet, SideNav,
     Skeleton, StatusDot, StatusState, Steps, Switch, TabBar, TabBarAction, Table, TableBody,
     TableCaption, TableCell, TableHead, TableHeader, TableRow, Tabs, TabsContent, TabsList,
-    TabsTrigger, TaskItem, TaskList, Textarea, ThemeToggle, ToastVariant, Toaster, Tooltip,
-    disclosure_storage_key, field_described_by, provide_toasts, slug,
+    TabsTrigger, TaskItem, TaskList, Textarea, ThemeToggle, ToastVariant, Tooltip,
+    disclosure_storage_key, field_described_by, slug, use_toasts,
 };
 
 #[component]
@@ -30,7 +30,8 @@ fn Section(#[prop(into)] title: String, children: Children) -> impl IntoView {
 
 #[component]
 pub fn Gallery() -> impl IntoView {
-    let toasts = provide_toasts();
+    // the shell provides the toasts and mounts the one Toaster
+    let toasts = use_toasts();
     let dialog = RwSignal::new(false);
     let sheet = RwSignal::new(false);
     let tab = RwSignal::new("overview".to_string());
@@ -291,7 +292,6 @@ pub fn Gallery() -> impl IntoView {
                 />
             </Section>
         </div>
-        <Toaster dismiss_label="Dismiss"/>
     }
 }
 

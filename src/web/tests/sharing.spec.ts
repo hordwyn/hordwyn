@@ -112,7 +112,7 @@ test("a list shared by link is readable without an account", async ({ page, brow
   await hydrated(page);
   await page.getByLabel("List name").fill("Weekend picks");
   await page.getByRole("button", { name: "Create list" }).click();
-  await page.getByRole("button", { name: "Share by link Weekend picks" }).click();
+  await page.getByRole("button", { name: "Share Weekend picks by link" }).click();
   const link = page.getByTestId("share-link");
   await expect(link).toContainText("/shared/lists/");
   const url = (await link.innerText()).trim();

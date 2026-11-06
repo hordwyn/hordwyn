@@ -14,7 +14,7 @@ use ui::{
 };
 
 use crate::app::ClientConfig;
-use crate::i18n::{t, use_i18n};
+use crate::i18n::{I18n, LOCALES, t, use_i18n};
 use crate::palette::PaletteOpen;
 
 /// `localStorage` key of the theme choice (unchanged; read before paint by `THEME_BOOT`).
@@ -462,6 +462,8 @@ fn AccountMenu() -> impl IntoView {
                         <div role="separator" class=SEPARATOR></div>
                         <ThemeItems theme=theme open=open/>
                         <div role="separator" class=SEPARATOR></div>
+                        <LanguageItems open=open/>
+                        <div role="separator" class=SEPARATOR></div>
                         <button type="button" role="menuitem" tabindex="-1" class=MENU_ITEM
                             on:click=move |_| { open.set(false); sign_out.dispatch(()); }>
                             <Icon name=IconName::LogOut/>
@@ -519,6 +521,103 @@ fn ThemeItems(theme: RwSignal<String>, open: RwSignal<bool>) -> impl IntoView {
             }).collect_view()}
         </div>
     }
+}
+
+/// The value of the "automatic" language choice (no stored locale).
+const LANGUAGE_AUTO: &str = "auto";
+
+/// The language choices (DEC-201): automatic, then every locale named in its own language.
+fn language_options() -> Vec<(&'static str, String, Option<&'static str>)> {
+    std::iter::once((LANGUAGE_AUTO, t("shell-language-auto"), None))
+        .chain(LOCALES.iter().map(|l| {
+            let name = I18n::new(l, std::collections::BTreeMap::new()).t("locale-name");
+            (*l, name, Some(*l))
+        }))
+        .collect()
+}
+
+/// Store the language choice ([`LANGUAGE_AUTO`]: none) and reload, so the server renders the page,
+/// its `lang` and the hydration config in the new language.
+fn language_action() -> Action<String, ()> {
+    Action::new(|l: &String| {
+        let locale = (l != LANGUAGE_AUTO).then(|| l.clone());
+        async move {
+            if crate::api::set_locale(locale).await.is_ok() {
+                crate::pages::reload();
+            }
+        }
+    })
+}
+
+/// The language as a group of `menuitemradio`s; each language is named in itself and
+/// marked with its `lang` (WCAG 3.1.2).
+#[component]
+fn LanguageItems(open: RwSignal<bool>) -> impl IntoView {
+    let cfg = expect_context::<ClientConfig>();
+    let i18n = use_i18n();
+    let current = cfg
+        .locale_setting
+        .clone()
+        .unwrap_or_else(|| LANGUAGE_AUTO.to_string());
+    let choose = language_action();
+    view! {
+        <div role="group" aria-label=i18n.t("shell-language")>
+            <p aria-hidden="true" class="px-2 pb-1 pt-1.5 text-xs font-medium text-muted-foreground">{t("shell-language")}</p>
+            {language_options().into_iter().map(|(value, label, lang)| {
+                let checked = value == current;
+                view! {
+                    <button
+                        type="button"
+                        role="menuitemradio"
+                        tabindex="-1"
+                        aria-checked=if checked { "true" } else { "false" }
+                        on:click=move |_| {
+                            open.set(false);
+                            if !checked {
+                                choose.dispatch(value.to_string());
+                            }
+                        }
+                        class=MENU_ITEM
+                    >
+                        <span class="flex-1" lang=lang>{label}</span>
+                        {checked.then(|| view! { <Icon name=IconName::Check/> })}
+                    </button>
+                }
+            }).collect_view()}
+        </div>
+    }
+}
+
+/// The language on the You hub: a segmented choice like the theme.
+#[component]
+fn LanguageChoice() -> impl IntoView {
+    let cfg = expect_context::<ClientConfig>();
+    let i18n = use_i18n();
+    let value = RwSignal::new(
+        cfg.locale_setting
+            .clone()
+            .unwrap_or_else(|| LANGUAGE_AUTO.to_string()),
+    );
+    let choose = language_action();
+    Effect::new(move |prev: Option<String>| {
+        let v = value.get();
+        // the first run is the stored value; later runs are choices
+        if prev.as_ref().is_some_and(|p| *p != v) {
+            choose.dispatch(v.clone());
+        }
+        v
+    });
+    let options: Vec<SegmentedOption> = language_options()
+        .into_iter()
+        .map(|(value, label, lang)| {
+            let o = SegmentedOption::new(value, label);
+            match lang {
+                Some(l) => o.lang(l),
+                None => o,
+            }
+        })
+        .collect();
+    view! { <Segmented id="you-language" label=i18n.t("shell-language") value=value options=options/> }
 }
 
 /// Mobile bottom navigation: Home, Library, Add, History, You (owner ruling, DEC-171).
@@ -581,7 +680,7 @@ fn ShortcutHelp(open: RwSignal<bool>) -> impl IntoView {
             ),
             (vec!["N".to_string()], t("shell-key-add")),
             (vec!["?".to_string()], t("shell-key-help")),
-            (vec!["Esc".to_string()], t("shell-key-close")),
+            (vec![t("shell-key-esc")], t("shell-key-close")),
         ]
     };
     view! {
@@ -642,6 +741,7 @@ pub fn You() -> impl IntoView {
         <div class="grid max-w-md gap-6">
             <SideNav id="you" label=i18n.t("nav-you") groups=vec![NavGroup::new(items)] current=Signal::derive(move || location.pathname.get())/>
             <Segmented id="you-theme" label=i18n.t("shell-theme") value=theme options=options/>
+            <LanguageChoice/>
             <div class="flex flex-wrap gap-2">
                 <button type="button" class="inline-flex min-h-11 items-center rounded-md border border-input px-4 text-sm font-medium cursor-pointer" on:click=move |_| help.set(true)>
                     {t("shell-shortcuts")}

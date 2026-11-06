@@ -88,6 +88,7 @@ impl Backend for WebBackend {
             display_name: user.display_name,
             is_admin: a.is_admin(),
             unread: u32::try_from(unread).unwrap_or(u32::MAX),
+            locale: user.locale,
         })
     }
 
@@ -270,6 +271,13 @@ impl Backend for WebBackend {
     async fn set_privacy(&self, token: &str, p: PrivacyDto) -> BResult<UserDto> {
         let a = self.actor(token).await?;
         sharing::set_privacy(&self.0, a, p).await.map_err(err)
+    }
+
+    async fn set_locale(&self, token: &str, locale: Option<String>) -> BResult<UserDto> {
+        let a = self.actor(token).await?;
+        sharing::set_locale(&self.0, a, contracts::LocaleDto { locale })
+            .await
+            .map_err(err)
     }
 
     async fn share_list(&self, token: &str, list_id: &str) -> BResult<ShareLinkDto> {

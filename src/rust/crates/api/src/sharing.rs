@@ -3,8 +3,8 @@
 //! Shared by the REST handlers and the web app's server functions.
 
 use contracts::{
-    CompanionDto, InviteDto, LinkRequestDto, LoggedSessionDto, ParticipantDto, PrivacyDto,
-    ShareLinkDto, SharedListDto, UserDto,
+    CompanionDto, InviteDto, LinkRequestDto, LocaleDto, LoggedSessionDto, ParticipantDto,
+    PrivacyDto, ShareLinkDto, SharedListDto, UserDto,
 };
 use domain::ids::{CompanionId, LinkRequestId, ListId, SessionId};
 use domain::session::Session;
@@ -207,6 +207,23 @@ pub async fn claim(s: &ApiState, a: Actor, id: &str) -> ApiResult<LoggedSessionD
 /// Storage errors.
 pub async fn set_privacy(s: &ApiState, a: Actor, p: PrivacyDto) -> ApiResult<UserDto> {
     Ok(dto::user(&s.app.set_privacy(a, p.share_sessions).await?))
+}
+
+/// The caller's language; only locales with built-in texts (`None`: automatic, DEC-201).
+///
+/// # Errors
+/// `invalid` for an unsupported locale; storage errors.
+pub async fn set_locale(s: &ApiState, a: Actor, b: LocaleDto) -> ApiResult<UserDto> {
+    if let Some(l) = &b.locale
+        && !notify::template::LOCALES.contains(&l.as_str())
+    {
+        return Err(crate::error::ApiError::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid",
+            format!("locale: {l} is not supported"),
+        ));
+    }
+    Ok(dto::user(&s.app.set_locale(a, b.locale).await?))
 }
 
 /// Share a list by link (a new link revokes the previous one).

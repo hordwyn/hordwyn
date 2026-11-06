@@ -935,3 +935,42 @@ async fn json_bodies_are_limited_but_imports_may_be_large() {
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_ne!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
+
+/// Per-user language (owner ruling DEC-171, DEC-201): stored on the account, only supported
+/// locales, `null` goes back to the automatic choice.
+#[tokio::test]
+async fn language_preference_is_stored_and_validated() {
+    let (s, _t) = state();
+    let app = api::router(s);
+    let anna = signed_up(&app).await;
+    let (_, _, me) = call(&app, "GET", "/api/v1/auth/me", Some(&anna), None).await;
+    assert_eq!(
+        me["locale"],
+        serde_json::Value::Null,
+        "automatic by default"
+    );
+    let put = |body: serde_json::Value| {
+        let (app, anna) = (app.clone(), anna.clone());
+        async move {
+            call(
+                &app,
+                "PUT",
+                "/api/v1/auth/me/locale",
+                Some(&anna),
+                Some(body),
+            )
+            .await
+        }
+    };
+    let (status, _, me) = put(serde_json::json!({"locale": "de"})).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["locale"], "de");
+    let (_, _, me) = call(&app, "GET", "/api/v1/auth/me", Some(&anna), None).await;
+    assert_eq!(me["locale"], "de", "stored");
+    let (status, _, err) = put(serde_json::json!({"locale": "fr"})).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{err}");
+    assert_eq!(err["code"], "invalid");
+    let (status, _, me) = put(serde_json::json!({"locale": null})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(me["locale"], serde_json::Value::Null);
+}

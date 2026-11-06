@@ -3438,6 +3438,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "chrono-tz",
+ "contracts",
  "croner",
  "domain",
  "fluent-bundle",
@@ -7087,6 +7088,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cargo_metadata",
+ "fluent-syntax",
  "serde_json",
 ]
 

@@ -72,9 +72,21 @@ Atkinson Hyperlegible Next (OFL 1.1, see `config/brand/ICONS.adoc`)
 
 == Messages and locales
 
-Built-in messages live in `src/rust/crates/web/locales/<locale>.ftl` (Fluent); locales `en`
-and `de`. A test checks that every key exists in every locale. The page locale is chosen
-from the browser's `Accept-Language`, falling back to the brand's `default_locale`.
+Built-in messages live in `src/rust/crates/web/locales/<locale>.ftl` (pages) and
+`src/rust/crates/notify/locales/<locale>.ftl` (notifications and emails), both Fluent; locales
+`en` and `de`. Overrides in `[strings.<locale>]` are Fluent too: they may use variables,
+plurals (`{ $count -> [one] ... *[other] ... }`) and `NUMBER()`.
+
+The repository test `xtask/tests/locales.rs` fails when a key exists in one locale only, a
+message uses other variables than its English original, a value is empty, code uses a key
+that does not exist or a key is no longer used, `view!` markup has hard-coded text, or a
+brand override names an unknown key.
+
+The locale is chosen in this order (DEC-201): the signed-in user's language (account menu or
+the You page; stored per account), the browser's `Accept-Language`, the brand's
+`default_locale`. Notifications and emails use the recipient's language, else
+`default_locale`. Numbers and dates follow the locale (`3,5` and `06.11.2026` in German);
+times are shown in UTC (DEC-200).
 
 == Feature toggles per deployment
 

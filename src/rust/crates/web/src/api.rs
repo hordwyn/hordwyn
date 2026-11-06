@@ -300,6 +300,14 @@ pub async fn set_privacy(share_sessions: bool) -> Result<UserDto, ServerFnError>
         .map_err(server::code)
 }
 
+/// The signed-in user's language (`None`: automatic, DEC-201).
+#[server(prefix = "/_fn")]
+pub async fn set_locale(locale: Option<String>) -> Result<UserDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.set_locale(&t, locale).await.map_err(server::code)
+}
+
 #[server(prefix = "/_fn")]
 pub async fn share_list(list_id: String) -> Result<ShareLinkDto, ServerFnError> {
     let b = server::backend()?;

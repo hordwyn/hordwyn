@@ -316,10 +316,8 @@ Changed by the owner:
   mandatory TOTP). Keep the throttle, the audit row and the admin notification; TOTP is used
   if the account has it.
 
-Still open: **OD-12** re-authentication window for sign-in-related admin changes. The owner
-is unsure ("what's best/usual?"): research what established self-hosted apps and platforms
-use (sudo-mode style windows), cite sources, propose a value on the next review page.
-Until then 10 minutes.
+Decided later the same day: **OD-12** 15 minutes, sliding, 1 hour cap, provider round trip with
+`max_age=0` for password-less admins (DEC-191, docs/research/od-12-reauth-window.md).
 
 ### 4.4 Project questions
 
@@ -349,14 +347,13 @@ Until then 10 minutes.
    no redirects, font, logo, OD-10/11/17 changes, Home stats, i18n scope).
 2. Amend rule 6 and rule 8 handling in `docs/DECISIONS.md` (R-P1, R-F3); do not edit
    KICKOFF.md itself.
-3. DEC-008: RustFS licence check and switch.
-4. OD-12: research and propose.
+3. DEC-008: RustFS licence check and switch: done (DEC-202).
+4. OD-12: done (DEC-191).
 5. Attribution page: crate licences (from cargo metadata / cargo-deny), font, icons
    (`config/brand/ICONS.adoc`), data sources and their required notices and logos.
 
 ## 6. Still open for the owner
 
-- OD-12 (section 4.3).
 - The unreviewed DECISIONS entries (section 4.5).
 - Deliveries promised by the owner: BGG docs, terms and token; sample exports.
 - New owner questions that come up go to a review page, never block work (rule 2).
@@ -387,12 +384,12 @@ a tag (`ux0` to `ux4`).
 - **Parallel workstreams (research first):** RustFS (DEC-008); connectors unblocked by R-P1
   (Open Library, MusicBrainz, VNDB, Metron), Radarr/Sonarr read-only and Jellyfin polling;
   Hardcover research (docs need JavaScript); anime/manga sources (R-P3); Trakt importer;
-  web push (R-P5); attribution page; OD-12 research.
+  web push (R-P5); attribution page.
 
 ## 8. Environment notes
 
 - Host: NixOS VM, `nix develop` shell, Rust 1.99.1, no python3 (use perl, sed, node from the
-  dev shell). Local services: `cargo xtask services up` (Postgres 55432, S3 55433,
+  dev shell). Local services: `cargo xtask services up` (Postgres 55432, RustFS S3 55433,
   Meilisearch 55434). Tests that need services run with `TEST_DATABASE_URL` /
   `REQUIRE_SERVICES=1`; `cargo xtask ci` sets them, plain `cargo test` silently skips them.
 - `rtk` rewrites common commands; use `rtk proxy <cmd>` for raw output.

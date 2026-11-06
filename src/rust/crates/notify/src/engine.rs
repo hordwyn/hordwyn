@@ -81,6 +81,20 @@ impl Engine {
             .clone()
     }
 
+    /// The language of texts for `user`: their choice when it has built-in texts, else the
+    /// instance language (DEC-201).
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn locale_for(&self, user: UserId) -> StoreResult<String> {
+        Ok(self
+            .store
+            .user_locale(user)
+            .await?
+            .filter(|l| crate::template::LOCALES.contains(&l.as_str()))
+            .unwrap_or_else(|| self.locale.clone()))
+    }
+
     /// Rebuild the texts after admin overrides changed.
     ///
     /// # Errors
@@ -148,8 +162,9 @@ impl Engine {
 
     async fn for_user(&self, n: &Notification, user: UserId) -> StoreResult<()> {
         let now = self.clock.now();
+        let locale = self.locale_for(user).await?;
         let t = self.templates();
-        let inbox = t.render(&n.event, "inbox", &self.locale, &n.args);
+        let inbox = t.render(&n.event, "inbox", &locale, &n.args);
         let item = InboxItem {
             id: self.ids.new_id(),
             user,
@@ -203,7 +218,7 @@ impl Engine {
                     continue;
                 }
                 let (state, due_at) = self.schedule(sub, ch.id, &n.event, now).await?;
-                let r = t.render(&n.event, ch.config.kind(), &self.locale, &n.args);
+                let r = t.render(&n.event, ch.config.kind(), &locale, &n.args);
                 let d = Delivery {
                     id: self.ids.new_id(),
                     user,

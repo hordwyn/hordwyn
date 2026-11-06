@@ -25,6 +25,10 @@ pub struct User {
     /// Privacy (D-9): sessions this user logged are visible to linked participants.
     #[serde(default = "default_true")]
     pub share_sessions: bool,
+    /// Language for pages, notifications and emails (`en`, `de`); `None` follows the browser
+    /// and then the brand default (DEC-201).
+    #[serde(default)]
+    pub locale: Option<String>,
     pub created_at: Timestamp,
 }
 

@@ -15,6 +15,7 @@ async-trait.workspace = true
 base64.workspace = true
 chrono.workspace = true
 chrono-tz = "0.10.4"
+contracts.workspace = true
 croner.workspace = true
 domain.workspace = true
 fluent-bundle.workspace = true

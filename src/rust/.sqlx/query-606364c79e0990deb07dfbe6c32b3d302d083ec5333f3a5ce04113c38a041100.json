@@ -90,6 +90,17 @@
             "name": "share_sessions"
           }
         }
+      },
+      {
+        "ordinal": 8,
+        "name": "locale",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "locale"
+          }
+        }
       }
     ],
     "parameters": {
@@ -105,7 +116,8 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
   "hash": "606364c79e0990deb07dfbe6c32b3d302d083ec5333f3a5ce04113c38a041100"

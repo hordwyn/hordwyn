@@ -18,7 +18,10 @@ const THEME_BOOT: &str = "try{var t=localStorage.getItem('app-theme');if(t==='da
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClientConfig {
+    /// The locale the page renders in (`<html lang>`).
     pub locale: String,
+    /// The signed-in user's own choice (`None`: automatic), for the language picker.
+    pub locale_setting: Option<String>,
     pub product_name: String,
     /// Brand overrides of message keys for `locale`.
     pub strings: BTreeMap<String, String>,
@@ -41,7 +44,8 @@ impl ClientConfig {
 /// Element id of the JSON config script.
 pub const CONFIG_ID: &str = "app-config";
 
-/// Server side: brand + `Accept-Language` + session -> config.
+/// Server side: brand + `Accept-Language` + session -> config. The locale is the user's
+/// choice, else the browser's, else the brand's default (DEC-201).
 #[cfg(feature = "ssr")]
 fn server_config() -> ClientConfig {
     let brand = use_context::<Arc<brand::Brand>>();
@@ -58,7 +62,8 @@ fn server_config() -> ClientConfig {
     let default = brand
         .as_ref()
         .map_or_else(|| "en".to_string(), |b| b.default_locale.clone());
-    let locale = crate::i18n::negotiate(accept.as_deref(), &default);
+    let setting = session.as_ref().and_then(|s| s.locale.clone());
+    let locale = crate::i18n::effective_locale(setting.as_deref(), accept.as_deref(), &default);
     ClientConfig {
         strings: brand
             .as_ref()
@@ -66,6 +71,7 @@ fn server_config() -> ClientConfig {
             .unwrap_or_default(),
         product_name: brand.as_ref().map(|b| b.name.clone()).unwrap_or_default(),
         locale,
+        locale_setting: setting,
         signed_in: session.is_some(),
         display_name: session
             .as_ref()

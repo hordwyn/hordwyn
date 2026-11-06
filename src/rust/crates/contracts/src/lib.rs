@@ -4,6 +4,7 @@
 #![deny(unsafe_code)]
 
 pub mod auth;
+pub mod locale;
 
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +24,9 @@ pub struct UserDto {
     /// Privacy: linked participants see the sessions this user logs.
     #[serde(default)]
     pub share_sessions: bool,
+    /// Chosen language (`en`, `de`); `null` follows the browser, then the brand default.
+    #[serde(default)]
+    pub locale: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -309,6 +313,13 @@ pub struct LoggedSessionDto {
 pub struct PrivacyDto {
     /// Linked participants see the sessions you log.
     pub share_sessions: bool,
+}
+
+/// The caller's language (`PUT /auth/me/locale`); `null` goes back to the automatic choice.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct LocaleDto {
+    pub locale: Option<String>,
 }
 
 // ---------------------------------------------------------------- sync (D-12)

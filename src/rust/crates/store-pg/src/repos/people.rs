@@ -20,6 +20,7 @@ struct UserRow {
     self_companion: uuid::Uuid,
     created_at: chrono::DateTime<chrono::Utc>,
     share_sessions: bool,
+    locale: Option<String>,
 }
 
 impl TryFrom<UserRow> for User {
@@ -33,6 +34,7 @@ impl TryFrom<UserRow> for User {
             role: role(&r.role)?,
             self_companion: CompanionId(r.self_companion),
             share_sessions: r.share_sessions,
+            locale: r.locale,
             created_at: r.created_at,
         })
     }
@@ -110,8 +112,8 @@ impl UserRepo for PgStore {
         let mut tx = self.begin().await?;
         sqlx::query!(
             "INSERT INTO users (id, username, display_name, email, role, self_companion, created_at,
-                                share_sessions)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                                share_sessions, locale)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             user.id.0,
             user.username,
             user.display_name,
@@ -119,7 +121,8 @@ impl UserRepo for PgStore {
             role_str(user.role),
             user.self_companion.0,
             user.created_at,
-            user.share_sessions
+            user.share_sessions,
+            user.locale
         )
         .execute(&mut *tx)
         .await
@@ -159,13 +162,14 @@ impl UserRepo for PgStore {
         let mut tx = self.begin().await?;
         sqlx::query!(
             "UPDATE users SET username = $2, display_name = $3, email = $4, role = $5,
-                              share_sessions = $6 WHERE id = $1",
+                              share_sessions = $6, locale = $7 WHERE id = $1",
             user.id.0,
             user.username,
             user.display_name,
             user.email,
             role_str(user.role),
-            user.share_sessions
+            user.share_sessions,
+            user.locale
         )
         .execute(&mut *tx)
         .await

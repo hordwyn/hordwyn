@@ -192,19 +192,23 @@ pub fn Companions() -> impl IntoView {
                             view! {
                                 <li class="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
                                     <span class="flex-1">
-                                        {c.name.clone()} {c.is_self.then(|| format!(" {}", t("companions-you")))}
+                                        {if c.is_self {
+                                            use_i18n().t_args("companions-name-self", &[("name", c.name.clone().into())])
+                                        } else {
+                                            c.name.clone()
+                                        }}
                                     </span>
                                     {can_unlink.then(|| view! { <Badge variant=BadgeVariant::Secondary>{t("companions-linked")}</Badge> })}
                                     {can_invite.then(|| view! {
                                         <Button size=ButtonSize::Sm variant=ButtonVariant::Outline
-                                            attr:aria-label=format!("{} {}", t("companions-invite"), c.name)
+                                            attr:aria-label=use_i18n().t_args("companions-invite-named", &[("name", c.name.clone().into())])
                                             on:click=move |_| { invite.dispatch(inv_id.clone()); }>
                                             {t("companions-invite")}
                                         </Button>
                                     })}
                                     {can_unlink.then(|| view! {
                                         <Button size=ButtonSize::Sm variant=ButtonVariant::Outline
-                                            attr:aria-label=format!("{} {}", t("companions-unlink"), c.name)
+                                            attr:aria-label=use_i18n().t_args("companions-unlink-named", &[("name", c.name.clone().into())])
                                             on:click=move |_| { unlink.dispatch(un_id.clone()); }>
                                             {t("companions-unlink")}
                                         </Button>
@@ -290,25 +294,27 @@ fn Privacy() -> impl IntoView {
 }
 
 fn session_row(s: LoggedSessionDto, claim: Option<Action<String, ()>>) -> impl IntoView {
-    let date = s.started_at.get(..10).unwrap_or_default().to_string();
+    let i18n = use_i18n();
+    let date = i18n.date(&s.started_at);
     let names = s
         .participants
         .iter()
         .map(|p| {
-            let mut n = if p.is_me {
-                t("companions-you-short")
+            let n = if p.is_me {
+                i18n.t("companions-you-short")
             } else {
                 p.name.clone()
             };
             if p.winner {
-                n.push_str(" *");
+                i18n.t_args("sessions-winner", &[("name", n.into())])
+            } else {
+                n
             }
-            n
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let by = (!s.mine)
-        .then(|| use_i18n().t_args("sessions-by", &[("name", s.owner_name.clone().into())]));
+    let by =
+        (!s.mine).then(|| i18n.t_args("sessions-by", &[("name", s.owner_name.clone().into())]));
     let id = s.id.clone();
     view! {
         <li class="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">

@@ -38,7 +38,7 @@ test("link requests arrive in the inbox; channels and subscriptions", async ({ p
   const inbox = pia.getByRole("list", { name: "Inbox" });
   await expect(inbox.getByRole("listitem").filter({ hasText: 'Max says you are "P."' })).toBeVisible();
   // (other inbox items may exist: the first account is admin and hears about sign-ups)
-  const markRead = pia.getByRole("button", { name: `Mark as read Max says you are "P."` });
+  const markRead = pia.getByRole("button", { name: `Mark Max says you are "P." as read` });
   await markRead.click();
   await expect(markRead).toHaveCount(0);
 
@@ -57,7 +57,7 @@ test("link requests arrive in the inbox; channels and subscriptions", async ({ p
   await pia.getByRole("button", { name: "Subscribe", exact: true }).click();
   await expect(pia.getByText("Subscribed.")).toBeVisible();
   await expect(
-    pia.getByRole("list", { name: "Subscriptions" }).getByRole("listitem").filter({ hasText: "social.*" }),
-  ).toContainText("Daily digest (0 8 * * *)");
+    pia.getByRole("list", { name: "Subscriptions" }).getByRole("listitem").filter({ hasText: "All social events" }),
+  ).toContainText("Daily digest at 8:00 AM");
   await other.close();
 });

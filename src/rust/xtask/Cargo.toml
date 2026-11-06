@@ -12,4 +12,5 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 cargo_metadata.workspace = true
+fluent-syntax.workspace = true
 serde_json.workspace = true

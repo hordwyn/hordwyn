@@ -173,6 +173,14 @@ impl NotifyStore for PgNotifyStore {
         Ok(ids.into_iter().map(UserId).collect())
     }
 
+    async fn user_locale(&self, user: UserId) -> StoreResult<Option<String>> {
+        let l = sqlx::query_scalar!("SELECT locale FROM users WHERE id = $1", user.0)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(pe)?;
+        Ok(l.flatten())
+    }
+
     async fn channels(&self, user: UserId) -> StoreResult<Vec<Channel>> {
         sqlx::query_as!(
             ChannelRow,

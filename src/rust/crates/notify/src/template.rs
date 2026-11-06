@@ -7,20 +7,48 @@
 
 use std::collections::BTreeMap;
 
+use contracts::locale::{Digits, format_decimal};
 use fluent_bundle::concurrent::FluentBundle;
+use fluent_bundle::types::FluentNumberStyle;
 use fluent_bundle::{FluentArgs, FluentResource, FluentValue};
 use unic_langid::LanguageIdentifier;
 
 use crate::catalogue::message_id;
 
 /// Supported locales; the first is the fallback.
-pub const LOCALES: [&str; 2] = ["en", "de"];
+pub use contracts::locale::LOCALES;
 
 fn source(locale: &str) -> &'static str {
     match locale {
         "de" => include_str!("../locales/de.ftl"),
         _ => include_str!("../locales/en.ftl"),
     }
+}
+
+/// Numbers in texts follow the locale (`1.200` in German, DEC-200); the bundle takes a plain
+/// function, so there is one per locale.
+fn number(locale: &str, v: &FluentValue<'_>) -> Option<String> {
+    let FluentValue::Number(n) = v else {
+        return None;
+    };
+    let o = &n.options;
+    (o.style == FluentNumberStyle::Decimal).then(|| {
+        let digits = Digits {
+            min_integer: o.minimum_integer_digits.unwrap_or(1),
+            min_fraction: o.minimum_fraction_digits.unwrap_or(0),
+            max_fraction: o.maximum_fraction_digits.unwrap_or(3),
+            grouping: o.use_grouping,
+        };
+        format_decimal(locale, n.value, digits)
+    })
+}
+
+fn formatter_en<M>(v: &FluentValue<'_>, _: &M) -> Option<String> {
+    number("en", v)
+}
+
+fn formatter_de<M>(v: &FluentValue<'_>, _: &M) -> Option<String> {
+    number("de", v)
 }
 
 /// `key -> text` overrides per locale.
@@ -61,6 +89,12 @@ impl Templates {
                 let id: LanguageIdentifier = locale.parse().unwrap_or_default();
                 let mut b = FluentBundle::new_concurrent(vec![id]);
                 b.set_use_isolating(false);
+                b.set_formatter(Some(if locale == "de" {
+                    formatter_de
+                } else {
+                    formatter_en
+                }));
+                let _ = b.add_builtins();
                 let res = FluentResource::try_new(source(locale).to_string())
                     .unwrap_or_else(|(res, _errors)| res);
                 let _ = b.add_resource(res);
@@ -155,6 +189,49 @@ mod tests {
             .iter()
             .map(|(k, v)| ((*k).to_string(), serde_json::Value::from(*v)))
             .collect()
+    }
+
+    #[test]
+    fn every_message_belongs_to_an_event_or_the_digest() {
+        // `<event>-title`, `<event>-<channel>-body`, ...; parity across locales is checked by
+        // the repository test (xtask/tests/locales.rs)
+        let events: Vec<String> = CATALOGUE
+            .iter()
+            .map(|e| message_id(e.id))
+            .chain(["digest".to_string(), "test".to_string()])
+            .collect();
+        let keys = source("en")
+            .lines()
+            .filter(|l| l.starts_with(|c: char| c.is_ascii_lowercase()) && l.contains(" ="))
+            .map(|l| l.split(" =").next().unwrap_or_default());
+        for key in keys {
+            let base = key
+                .strip_suffix("-title")
+                .or_else(|| key.strip_suffix("-body"))
+                .unwrap_or_else(|| panic!("{key}: neither -title nor -body"));
+            assert!(
+                events.iter().any(|e| base == e
+                    || base
+                        .strip_prefix(e.as_str())
+                        .is_some_and(|c| c.starts_with('-'))),
+                "{key} belongs to no event"
+            );
+        }
+    }
+
+    #[test]
+    fn numbers_in_texts_follow_the_locale() {
+        let t = Templates::new("Shelf", &Overrides::new(), &Overrides::new());
+        let mut a = serde_json::Map::new();
+        a.insert("imported".into(), 1200.into());
+        a.insert("errors".into(), 1.into());
+        let de = t.render("import.finished", "inbox", "de", &a);
+        assert_eq!(
+            de.body,
+            "1.200 Eintr\u{e4}ge importiert, eine Zeile mit Problemen."
+        );
+        let en = t.render("import.finished", "inbox", "en", &a);
+        assert_eq!(en.body, "1,200 entries imported, one row with problems.");
     }
 
     #[test]

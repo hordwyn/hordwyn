@@ -20,7 +20,7 @@ library-metadata_changed-title = { $title } wurde aktualisiert
 library-metadata_changed-body = Die Angaben zu { $title } haben sich geändert.
 
 social-link_request-title = { $from } sagt, du bist "{ $companion }"
-social-link_request-body = Bestätige auf der Begleiter-Seite, dass der Begleiter "{ $companion }" von { $from } du bist.
+social-link_request-body = Bestätige auf der Seite Personen, dass der Begleiter "{ $companion }" von { $from } du bist.
 social-link_accepted-title = { $user } hat die Verknüpfung angenommen
 social-link_accepted-body = Dein Begleiter "{ $companion }" ist jetzt mit { $user } verknüpft.
 social-session_shared-title = { $owner } hat { $title } mit dir erfasst
@@ -41,7 +41,13 @@ integration-failing-title = { $name } funktioniert nicht
 integration-failing-body = Die Integration { $name } funktioniert nicht mehr: { $error }
 
 import-finished-title = Import abgeschlossen
-import-finished-body = { $imported } Einträge importiert, { $errors } Zeilen mit Problemen.
+import-finished-body = { $imported ->
+    [one] Ein Eintrag importiert
+   *[other] { $imported } Einträge importiert
+}, { $errors ->
+    [one] eine Zeile mit Problemen.
+   *[other] { $errors } Zeilen mit Problemen.
+}
 import-failed-title = Import fehlgeschlagen
 import-failed-body = Der Import wurde abgebrochen: { $error }
 
@@ -54,7 +60,10 @@ admin-connector_down-body = Anfragen an { $connector } pausieren nach wiederholt
 admin-signup-title = Neues Konto: { $username }
 admin-signup-body = { $name } ({ $username }) hat ein Konto bei { $product } angelegt.
 admin-job_backlog-title = Aufgaben stauen sich
-admin-job_backlog-body = { $count } Aufgaben warten in der Spur { $lane }.
+admin-job_backlog-body = { $count ->
+    [one] Eine Aufgabe wartet in der Spur { $lane }.
+   *[other] { $count } Aufgaben warten in der Spur { $lane }.
+}
 
 test-title = Test von { $product }
 test-body = Der Kanal "{ $name }" funktioniert.

@@ -735,8 +735,9 @@ screen can render the badge.
   check, not UI only); a group-to-role rule (section 4) that would remove the acting
   admin's role is refused with "This rule would remove your own admin role".
 - Changing sign-in settings (SSO mode, provider edits, sign-up mode) requires a fresh
-  authentication within the last 10 minutes (password or provider re-auth), like a
-  password change; A-08 3.3.7 allows re-entry "required to ensure the security".
+  authentication within the re-auth window of OD-12 (15 minutes, extended by each
+  confirmed change, at most 1 hour; password then TOTP, or a provider round trip with
+  `max_age=0`), like a password change; A-08 3.3.7 allows re-entry "required to ensure the security".
 - Enabling SSO-only (section 4) requires at least one admin with a password and an
   enrolled authenticator, and `/sign-in/local` always exists.
 - Session length and cookie security are editable in the admin UI (OD-11). Changing cookie
@@ -816,10 +817,11 @@ KICKOFF mission).
   **Owner ruling: editable in the admin UI, same env override rule; a cookie-security change
   applies on the next session, the UI warns when the public URL is not https, and the change
   must not lock the admin out** (owner review 2026-11-06, DEC-172).
-- **OD-12** Re-authentication window for sign-in-related admin changes: 10 minutes.
-  Default: 10 minutes. **Still open** (owner review 2026-11-06, DEC-172): research what established
-  self-hosted apps use for re-authentication windows (sudo-mode style) and propose a value
-  on the next review; 10 minutes applies until then.
+- **OD-12** Re-authentication window for sign-in-related admin changes. Default was 10 minutes.
+  **Owner ruling: 15 minutes, sliding (each confirmed change restarts it), absolute cap 1 hour
+  from the proof; signing in counts as the proof; password-less admins get a provider round
+  trip with `max_age=0` and a checked `auth_time`, never skipped; gated actions and proof as in
+  docs/research/od-12-reauth-window.md** (owner 2026-11-06, DEC-191).
 - **OD-13** Audit retention: 365 days, exportable. Default: 365 days. **Approved as defaulted** (owner review 2026-11-06, DEC-172).
 - **OD-14** Storage and jobs as one page. Default: one page. **Approved as defaulted** (owner review 2026-11-06, DEC-172).
 
@@ -1249,7 +1251,7 @@ authenticator (`cli admin reset-totp <user>`).
 
 ## 5. Consolidated owner decisions
 
-All owner decisions are decided (owner review 2026-11-06, DEC-171/DEC-172), except OD-12.
+All owner decisions are decided (owner review 2026-11-06, DEC-171/DEC-172; OD-12 DEC-191).
 "As defaulted" means the default in the table was approved unchanged. Encrypting secrets at
 rest (section 2) is decided (DEC-171).
 
@@ -1266,7 +1268,7 @@ rest (section 2) is decided (DEC-171).
 | OD-09 | Soft reminder to rotate the KEK after 2 years | yes | Decided: as defaulted (DEC-172) |
 | OD-10 | Storage budget numbers: env/file only or editable | env/file | Decided: editable in the admin UI; env override stays, shown read-only with the variable name (owner review 2026-11-06, DEC-172) |
 | OD-11 | Session length and cookie security: env-only or editable | env-only | Decided: editable in the admin UI, same env rule; cookie-security change applies on the next session; warn when the public URL is not https; must not lock the admin out (DEC-172) |
-| OD-12 | Re-auth window for sign-in-related admin changes | 10 minutes | OPEN: 10 minutes until research proposes a value (DEC-172) |
+| OD-12 | Re-auth window for sign-in-related admin changes | 10 minutes | 15 min sliding, 1 h cap (owner 2026-11-06, DEC-191) |
 | OD-13 | Audit retention | 365 days | Decided: as defaulted (DEC-172) |
 | OD-14 | Storage and jobs on one admin page | one page | Decided: as defaulted (DEC-172) |
 | OD-15 | Auto-link on verified email without password | no | Decided: as defaulted (DEC-172) |

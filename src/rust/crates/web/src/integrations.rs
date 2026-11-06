@@ -5,7 +5,7 @@ use leptos::prelude::*;
 use ui::{Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, FormField, Input, Skeleton};
 
 use crate::api;
-use crate::i18n::t;
+use crate::i18n::{t, use_i18n};
 use crate::pages::{PageTitle, error_text, go, needs_sign_in};
 
 /// An example body for the webhook, shown with a new token.
@@ -74,16 +74,18 @@ pub fn Integrations() -> impl IntoView {
                     <ul class="flex max-w-2xl flex-col gap-2" aria-label=t("integrations-title")>
                         {list.into_iter().map(|i| {
                             let id = i.id.clone();
+                            let i18n = use_i18n();
                             let seen = i.last_seen_at.as_deref().map_or_else(
-                                || t("integrations-never"),
-                                |s| s.get(..16).unwrap_or_default().replace('T', " "),
+                                || i18n.t("integrations-never"),
+                                |s| i18n.datetime(s),
                             );
-                            let label = format!("{} {}", t("integrations-revoke"), i.name);
+                            let seen = i18n.t_args("integrations-last-call", &[("when", seen.into())]);
+                            let label = i18n.t_args("integrations-revoke-named", &[("name", i.name.clone().into())]);
                             view! {
                                 <li class="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
                                     <span class="flex-1">
                                         <span class="font-medium">{i.name.clone()}</span>
-                                        <span class="ml-2 text-sm text-muted-foreground">{t("integrations-last")} " " {seen}</span>
+                                        <span class="ml-2 text-sm text-muted-foreground">{seen}</span>
                                     </span>
                                     {i.last_error.clone().map(|e| view! { <Badge variant=BadgeVariant::Destructive attr:title=e>{t("integrations-error")}</Badge> })}
                                     <Button size=ButtonSize::Sm variant=ButtonVariant::Ghost attr:aria-label=label

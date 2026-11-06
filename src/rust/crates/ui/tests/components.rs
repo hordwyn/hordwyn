@@ -505,3 +505,32 @@ fn disclosure_group_offers_expand_all_from_four_sections() {
     });
     assert!(!three.contains("Expand all"), "{three}");
 }
+
+#[test]
+fn segmented_option_can_carry_its_own_language() {
+    // a language picker names each language in itself (WCAG 3.1.2)
+    let html = render(|| {
+        let v = RwSignal::new("de".to_string());
+        let opts = vec![
+            SegmentedOption::new("en", "English").lang("en"),
+            SegmentedOption::new("de", "Deutsch").lang("de"),
+        ];
+        view! { <Segmented id="lang" label="Language" value=v options=opts/> }
+    });
+    assert!(html.contains("lang=\"de\""), "{html}");
+    assert!(html.contains("lang=\"en\""), "{html}");
+    let plain = render(|| {
+        let v = RwSignal::new("grid".to_string());
+        view! { <Segmented id="v" label="View" value=v options=seg_options()/> }
+    });
+    assert!(!plain.contains("lang="), "{plain}");
+}
+
+#[test]
+fn toaster_sits_above_the_mobile_tab_bar() {
+    let html = render(|| {
+        let _ = provide_toasts();
+        view! { <Toaster dismiss_label="Dismiss"/> }
+    });
+    assert!(html.contains("var(--tab-bar-height)"), "{html}");
+}

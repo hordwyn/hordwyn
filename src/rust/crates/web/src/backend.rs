@@ -19,6 +19,8 @@ pub struct ShellSession {
     pub is_admin: bool,
     /// Unread inbox notifications.
     pub unread: u32,
+    /// The language the user chose (`None`: automatic, DEC-201).
+    pub locale: Option<String>,
 }
 
 /// Value of the cookie `name` in `headers`, if set and not empty.
@@ -118,6 +120,8 @@ pub trait Backend: Send + Sync {
     async fn sessions(&self, token: &str, shared: bool) -> BResult<Vec<LoggedSessionDto>>;
     async fn claim(&self, token: &str, session_id: &str) -> BResult<LoggedSessionDto>;
     async fn set_privacy(&self, token: &str, p: PrivacyDto) -> BResult<UserDto>;
+    /// The user's language (`None`: automatic); `invalid` for an unsupported locale.
+    async fn set_locale(&self, token: &str, locale: Option<String>) -> BResult<UserDto>;
     async fn share_list(&self, token: &str, list_id: &str) -> BResult<ShareLinkDto>;
     /// A link-shared list; `share_token` is the list's token, no session needed.
     async fn shared_list(&self, share_token: &str) -> BResult<SharedListDto>;

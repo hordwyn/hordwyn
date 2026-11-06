@@ -2,17 +2,24 @@
 //! build time (`locales/<lang>.ftl`); the brand can override any key at runtime
 //! (`[strings.<lang>]` in `brand.toml`), which is why this uses Fluent rather than a
 //! compile-time catalogue (DEC-090).
+//!
+//! Numbers and dates follow the locale (DEC-200): fluent-bundle formats numbers without
+//! locale data, so each bundle gets a small formatter for its locale (decimal and grouping
+//! separators, the `NUMBER()` digit options); dates use the CLDR medium patterns of en and
+//! de with month names from the messages.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use contracts::locale::{Digits, format_decimal};
 use fluent_bundle::concurrent::FluentBundle;
+use fluent_bundle::types::{FluentNumber, FluentNumberStyle};
 use fluent_bundle::{FluentArgs, FluentResource, FluentValue};
 use leptos::prelude::*;
 use unic_langid::LanguageIdentifier;
 
 /// Supported locales; the first is the fallback for missing keys.
-pub const LOCALES: [&str; 2] = ["en", "de"];
+pub use contracts::locale::{LOCALES, supported};
 
 fn source(locale: &str) -> &'static str {
     match locale {
@@ -21,22 +28,101 @@ fn source(locale: &str) -> &'static str {
     }
 }
 
-fn bundle(locale: &str) -> FluentBundle<FluentResource> {
+/// A Fluent number in the locale's format with its `NUMBER()` digit options; `None` for
+/// styles the shared formatter does not cover (currency, percent), which then print plain.
+fn format_number(locale: &str, n: &FluentNumber) -> Option<String> {
+    if n.options.style != FluentNumberStyle::Decimal {
+        return None;
+    }
+    let o = &n.options;
+    let digits = Digits {
+        min_integer: o.minimum_integer_digits.unwrap_or(1),
+        min_fraction: o.minimum_fraction_digits.unwrap_or(0),
+        max_fraction: o.maximum_fraction_digits.unwrap_or(3),
+        grouping: o.use_grouping,
+    };
+    Some(format_decimal(locale, n.value, digits))
+}
+
+/// Bundle formatters: a plain function per locale (the bundle takes a function pointer).
+fn formatter_en<M>(v: &FluentValue<'_>, _: &M) -> Option<String> {
+    match v {
+        FluentValue::Number(n) => format_number("en", n),
+        _ => None,
+    }
+}
+
+fn formatter_de<M>(v: &FluentValue<'_>, _: &M) -> Option<String> {
+    match v {
+        FluentValue::Number(n) => format_number("de", n),
+        _ => None,
+    }
+}
+
+/// One brand override as a Fluent resource (`key = text`, continuation lines indented), so
+/// overrides get the same variables, plurals and number formatting as the built-in texts.
+fn override_resource(key: &str, text: &str) -> Option<FluentResource> {
+    let valid = key.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !valid || text.trim().is_empty() {
+        return None;
+    }
+    let body = text.lines().collect::<Vec<_>>().join("\n    ");
+    FluentResource::try_new(format!("{key} =\n    {body}\n")).ok()
+}
+
+fn bundle(locale: &str, overrides: &BTreeMap<String, String>) -> FluentBundle<FluentResource> {
     let id: LanguageIdentifier = locale.parse().unwrap_or_default();
     let mut b = FluentBundle::new_concurrent(vec![id]);
     // no Unicode isolation marks around placeables: output stays plain text
     b.set_use_isolating(false);
+    // NUMBER() for translators and brand overrides
+    let _ = b.add_builtins();
+    b.set_formatter(Some(if locale == "de" {
+        formatter_de
+    } else {
+        formatter_en
+    }));
     let res =
         FluentResource::try_new(source(locale).to_string()).unwrap_or_else(|(res, _errors)| res);
     let _ = b.add_resource(res);
+    for (key, text) in overrides {
+        if let Some(r) = override_resource(key, text) {
+            b.add_resource_overriding(r);
+        }
+    }
     b
+}
+
+/// A UTC timestamp or date as sent by the server (`2026-11-06` or `2026-11-06T21:05:00Z`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    year: u32,
+    month: u32,
+    day: u32,
+    time: Option<(u32, u32)>,
+}
+
+fn parse_stamp(s: &str) -> Option<Stamp> {
+    let num = |r: std::ops::Range<usize>| s.get(r)?.parse::<u32>().ok();
+    let stamp = Stamp {
+        year: num(0..4)?,
+        month: num(5..7).filter(|m| (1..=12).contains(m))?,
+        day: num(8..10).filter(|d| (1..=31).contains(d))?,
+        time: match s.get(10..11) {
+            Some("T" | " ") => Some((num(11..13)?, num(14..16)?)),
+            _ => None,
+        },
+    };
+    (s.get(4..5) == Some("-") && s.get(7..8) == Some("-")).then_some(stamp)
 }
 
 pub struct I18n {
     locale: String,
     bundle: FluentBundle<FluentResource>,
     fallback: FluentBundle<FluentResource>,
-    overrides: BTreeMap<String, String>,
 }
 
 impl I18n {
@@ -44,16 +130,11 @@ impl I18n {
     /// brand's overrides for that locale.
     #[must_use]
     pub fn new(locale: &str, overrides: BTreeMap<String, String>) -> Self {
-        let locale = if LOCALES.contains(&locale) {
-            locale
-        } else {
-            LOCALES[0]
-        };
+        let locale = supported(locale).unwrap_or(LOCALES[0]);
         Self {
             locale: locale.to_string(),
-            bundle: bundle(locale),
-            fallback: bundle(LOCALES[0]),
-            overrides,
+            bundle: bundle(locale, &overrides),
+            fallback: bundle(LOCALES[0], &BTreeMap::new()),
         }
     }
 
@@ -68,23 +149,10 @@ impl I18n {
         self.t_args(key, &[])
     }
 
-    /// Text for `key` with arguments (`{ $name }` in the message).
+    /// Text for `key` with arguments (`{ $name }` in the message). Numbers are formatted for
+    /// the locale and select plural variants by the CLDR rules.
     #[must_use]
     pub fn t_args(&self, key: &str, args: &[(&str, FluentValue<'_>)]) -> String {
-        if let Some(text) = self.overrides.get(key) {
-            let mut out = text.clone();
-            for (k, v) in args {
-                let value = match v {
-                    FluentValue::String(s) => s.to_string(),
-                    FluentValue::Number(n) => n.as_string().to_string(),
-                    _ => String::new(),
-                };
-                out = out
-                    .replace(&format!("{{ ${k} }}"), &value)
-                    .replace(&format!("{{${k}}}"), &value);
-            }
-            return out;
-        }
         let mut fargs = FluentArgs::new();
         for (k, v) in args {
             fargs.set(*k, v.clone());
@@ -97,6 +165,61 @@ impl I18n {
             }
         }
         key.to_string()
+    }
+
+    /// A number for the locale (`3,5` in German).
+    #[must_use]
+    pub fn number(&self, value: f64) -> String {
+        format_decimal(&self.locale, value, Digits::default())
+    }
+
+    /// The date part of a server timestamp in the locale's medium format (CLDR: en
+    /// `MMM d, y`, de `dd.MM.y`); text that is not a timestamp comes back unchanged.
+    #[must_use]
+    pub fn date(&self, stamp: &str) -> String {
+        let Some(s) = parse_stamp(stamp) else {
+            return stamp.to_string();
+        };
+        if self.locale == "de" {
+            format!("{:02}.{:02}.{}", s.day, s.month, s.year)
+        } else {
+            let month = self.t(&format!("month-short-{}", s.month));
+            format!("{month} {}, {}", s.day, s.year)
+        }
+    }
+
+    /// A time of day (CLDR short time: en `h:mm a`, de `HH:mm`).
+    #[must_use]
+    pub fn time(&self, hour: u32, minute: u32) -> String {
+        if self.locale == "de" {
+            format!("{hour:02}:{minute:02}")
+        } else {
+            let period = self.t(if hour < 12 { "time-am" } else { "time-pm" });
+            let h = match hour % 12 {
+                0 => 12,
+                h => h,
+            };
+            format!("{h}:{minute:02} {period}")
+        }
+    }
+
+    /// Date and time of a UTC server timestamp, marked as UTC (there is no per-user time
+    /// zone yet, DEC-200); a bare date shows as [`I18n::date`].
+    #[must_use]
+    pub fn datetime(&self, stamp: &str) -> String {
+        let Some(s) = parse_stamp(stamp) else {
+            return stamp.to_string();
+        };
+        match s.time {
+            Some((h, m)) => self.t_args(
+                "datetime-utc",
+                &[
+                    ("date", self.date(stamp).into()),
+                    ("time", self.time(h, m).into()),
+                ],
+            ),
+            None => self.date(stamp),
+        }
     }
 }
 
@@ -122,6 +245,16 @@ pub fn negotiate(accept_language: Option<&str>, default: &str) -> String {
         .map(|(_, l)| l)
         .find(|l| LOCALES.contains(&l.as_str()))
         .unwrap_or_else(|| default.to_string())
+}
+
+/// The locale a page renders in (DEC-201): the signed-in user's choice, else the browser's
+/// `Accept-Language`, else the brand's default.
+#[must_use]
+pub fn effective_locale(user: Option<&str>, accept_language: Option<&str>, brand: &str) -> String {
+    user.and_then(supported).map_or_else(
+        || negotiate(accept_language, supported(brand).unwrap_or(LOCALES[0])),
+        String::from,
+    )
 }
 
 /// The current request's / page's messages.
@@ -182,16 +315,73 @@ mod tests {
     }
 
     #[test]
-    fn brand_overrides_win() {
+    fn brand_overrides_win_and_keep_plurals_and_numbers() {
         let mut o = BTreeMap::new();
         o.insert("nav-library".to_string(), "Shelf".to_string());
         o.insert("item-source".to_string(), "Data by { $name }".to_string());
+        o.insert(
+            "library-count".to_string(),
+            "{ $count ->\n    [one] One book\n   *[other] { $count } books\n}".to_string(),
+        );
         let en = I18n::new("en", o);
         assert_eq!(en.t("nav-library"), "Shelf");
         assert_eq!(
             en.t_args("item-source", &[("name", "TMDB".into())]),
             "Data by TMDB"
         );
+        assert_eq!(
+            en.t_args("library-count", &[("count", 1.into())]),
+            "One book"
+        );
+        assert_eq!(
+            en.t_args("library-count", &[("count", 1200.into())]),
+            "1,200 books"
+        );
+    }
+
+    #[test]
+    fn numbers_follow_the_locale() {
+        let (en, de) = (
+            I18n::new("en", BTreeMap::new()),
+            I18n::new("de", BTreeMap::new()),
+        );
+        // the owner's bug: German showed "3.5"
+        let de_rate = de.t_args("item-rate", &[("stars", 3.5.into())]);
+        assert!(de_rate.contains("3,5"), "{de_rate}");
+        let en_rate = en.t_args("item-rate", &[("stars", 3.5.into())]);
+        assert!(en_rate.contains("3.5"), "{en_rate}");
+        assert_eq!(en.number(1234.5), "1,234.5");
+        assert_eq!(de.number(1234.5), "1.234,5");
+        assert_eq!(de.number(-0.25), "-0,25");
+        assert_eq!(en.number(3.0), "3");
+        assert_eq!(de.number(1_000_000.0), "1.000.000");
+        let mut n = FluentNumber::from(2.5);
+        n.options.minimum_fraction_digits = Some(2);
+        n.options.minimum_integer_digits = Some(2);
+        n.options.use_grouping = false;
+        assert_eq!(format_number("de", &n).as_deref(), Some("02,50"));
+    }
+
+    #[test]
+    fn dates_and_times_follow_the_locale() {
+        let (en, de) = (
+            I18n::new("en", BTreeMap::new()),
+            I18n::new("de", BTreeMap::new()),
+        );
+        assert_eq!(en.date("2026-11-06"), "Nov 6, 2026");
+        assert_eq!(de.date("2026-11-06T21:05:00Z"), "06.11.2026");
+        assert_eq!(
+            en.datetime("2026-11-06T21:05:00Z"),
+            "Nov 6, 2026, 9:05 PM UTC"
+        );
+        assert_eq!(de.datetime("2026-11-06T21:05:00Z"), "06.11.2026, 21:05 UTC");
+        assert_eq!(en.time(0, 30), "12:30 AM");
+        assert_eq!(de.time(8, 0), "08:00");
+        assert_eq!(en.date("not a date"), "not a date");
+        for m in 1..=12 {
+            let key = format!("month-short-{m}");
+            assert_ne!(en.t(&key), key);
+        }
     }
 
     #[test]
@@ -206,27 +396,21 @@ mod tests {
     }
 
     #[test]
-    fn every_key_exists_in_every_locale() {
-        let keys = |src: &str| -> Vec<String> {
-            src.lines()
-                .filter(|l| !l.starts_with(['#', ' ', '*', '[']) && l.contains(" ="))
-                .map(|l| l.split(" =").next().unwrap_or_default().to_string())
-                .collect()
-        };
-        let en = keys(source("en"));
-        for l in LOCALES {
-            let other = keys(source(l));
-            for k in &en {
-                assert!(other.contains(k), "{l} misses {k}");
-            }
-        }
-    }
-
-    #[test]
     fn negotiates_accept_language() {
         assert_eq!(negotiate(Some("de-AT,de;q=0.9,en;q=0.8"), "en"), "de");
         assert_eq!(negotiate(Some("fr-FR,en;q=0.5"), "de"), "en");
         assert_eq!(negotiate(Some("fr"), "de"), "de");
         assert_eq!(negotiate(None, "en"), "en");
+    }
+
+    #[test]
+    fn the_user_choice_wins_then_the_browser_then_the_brand() {
+        assert_eq!(effective_locale(Some("de"), Some("en"), "en"), "de");
+        assert_eq!(effective_locale(None, Some("de-DE"), "en"), "de");
+        assert_eq!(effective_locale(None, None, "de"), "de");
+        // an unsupported stored or brand locale is ignored
+        assert_eq!(effective_locale(Some("fr"), None, "de"), "de");
+        assert_eq!(effective_locale(None, None, "xx"), "en");
+        assert_eq!(supported("DE-at"), Some("de"));
     }
 }

@@ -96,6 +96,8 @@ futures = "0.3.34"
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "fmt"] }
 fluent-bundle = "0.16.0"
+# AST of .ftl files for the locale parity checks (the version fluent-bundle uses)
+fluent-syntax = "0.12.0"
 unic-langid = "0.9.6"
 meilisearch-sdk = { version = "0.33.0", default-features = false, features = ["reqwest", "tls"] }
 
