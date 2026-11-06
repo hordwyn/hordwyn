@@ -77,6 +77,7 @@ async fn engine_on_postgres_dedupes_and_queues_digests() {
     let inbox = store.inbox(admin.id, 10).await.unwrap();
     assert_eq!(inbox.len(), 1);
     assert_eq!(inbox[0].title, "Neues Konto: carol");
+    assert_eq!(store.count_unread(admin.id).await.unwrap(), 1);
     let log = store.deliveries(admin.id, 10).await.unwrap();
     assert_eq!(log.len(), 1);
     assert_eq!(log[0].state, DeliveryState::Digest);
@@ -108,6 +109,7 @@ async fn engine_on_postgres_dedupes_and_queues_digests() {
             .read_at
             .is_some()
     );
+    assert_eq!(store.count_unread(admin.id).await.unwrap(), 0);
 
     store
         .set_template_override("de", "admin-signup-title", Some("Hallo { $username }"))

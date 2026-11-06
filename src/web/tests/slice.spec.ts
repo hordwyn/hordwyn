@@ -29,7 +29,7 @@ test("sign up, find a movie, watch it with a companion", async ({ page }) => {
   await page.goto("/people");
   await hydrated(page);
   await page.getByLabel("Name", { exact: true }).fill("Ben");
-  await page.getByRole("button", { name: "Add companion" }).click();
+  await page.getByRole("button", { name: "Add person" }).click();
   await expect(page.getByRole("listitem").filter({ hasText: "Ben" })).toBeVisible();
 
   await page.keyboard.press("Control+k");
@@ -48,7 +48,7 @@ test("sign up, find a movie, watch it with a companion", async ({ page }) => {
   await page.getByRole("button", { name: "Add to library" }).click();
   await expect(page.getByText("In your library")).toBeVisible();
   await page.getByLabel("Ben").check();
-  await page.getByRole("button", { name: "Mark as done" }).click();
+  await page.getByRole("button", { name: "Mark as completed" }).click();
   await expect(page.getByText("Logged.")).toBeVisible();
 
   await page.goto("/library");

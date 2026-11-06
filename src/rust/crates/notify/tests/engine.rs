@@ -179,6 +179,7 @@ async fn the_same_episode_released_twice_is_one_notification() {
     let inbox = e.store.inbox(e.user, 10).await.unwrap();
     assert_eq!(inbox.len(), 1);
     assert_eq!(inbox[0].title, "New episode of Severance");
+    assert_eq!(e.store.count_unread(e.user).await.unwrap(), 1);
     let sent = e.sent();
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].body, "Season 1, episode 2 of Severance is out.");

@@ -1,7 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import AxeBuilder from "@axe-core/playwright";
-
-const WCAG_A_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
+import { expectNoA11yViolations } from "./helpers";
 
 async function openGallery(page: Page) {
   await page.goto("/dev/gallery");
@@ -13,15 +11,6 @@ async function openGallery(page: Page) {
   }).toPass({ timeout: 15_000 });
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
-}
-
-async function expectNoA11yViolations(page: Page) {
-  const results = await new AxeBuilder({ page }).withTags(WCAG_A_AA).analyze();
-  expect(
-    results.violations.map(
-      (v) => `${v.id}: ${v.help} -> ${v.nodes.map((n) => `${n.target.join(" ")} ${n.failureSummary ?? ""}`).join("; ")}`,
-    ),
-  ).toEqual([]);
 }
 
 test("gallery has no WCAG A/AA violations in light and dark", async ({ page }) => {
@@ -48,6 +37,13 @@ test("dialog: focus moves in, Escape and close button close it", async ({ page }
   await expect(dialog).toBeFocused();
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toBeHidden();
+  // APG: focus returns to the opener
+  const opener = page.getByRole("button", { name: "Open dialog" });
+  await expect(opener).toBeFocused();
+  await opener.press("Enter");
+  await expect(dialog).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(opener).toBeFocused();
 });
 
 test("tabs: arrow keys move selection and focus", async ({ page }) => {

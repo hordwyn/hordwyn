@@ -121,7 +121,7 @@ pub fn KeyHint(
     view! {
         <kbd class=move || cn(&["inline-flex items-center gap-0.5 font-sans text-xs text-muted-foreground", &class.get().unwrap_or_default()])>
             {keys.into_iter().enumerate().map(|(i, k)| view! {
-                <kbd class="rounded border border-b-2 bg-muted px-1.5 font-mono text-[0.7rem] text-foreground">{k}</kbd>
+                <kbd class="rounded border border-b-2 bg-muted px-1.5 font-mono text-xs text-foreground">{k}</kbd>
                 {(i < last).then(|| sep.clone())}
             }).collect_view()}
         </kbd>

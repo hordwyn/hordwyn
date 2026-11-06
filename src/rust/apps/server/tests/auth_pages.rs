@@ -139,3 +139,41 @@ async fn sign_in_uses_current_password_and_no_rules() {
     assert!(!html.contains("No spaces"));
     assert!(!html.contains("data-state=\"pending\""));
 }
+
+/// UX0-5 (design.md 6.14): the auth card has the brand mark above it and a footer with the
+/// brand's legal links.
+#[tokio::test]
+async fn auth_pages_show_the_brand_mark_and_legal_links() {
+    if !services() {
+        return;
+    }
+    let db = store_pg::testing::fresh_db_url().await.expect("database");
+    let toml = format!(
+        "[database]\nurl = \"{db}\"\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
+         [auth]\nsignup = \"open\"\nsecure_cookies = false\n[brand]\ndir = \"{}\"\n",
+        repo("src/web/tests/brands/sample")
+    );
+    let cfg = config::AppConfig::from_sources(&toml, Vec::new()).unwrap();
+    let srv = Server::build(cfg, config::ServerRole::All, Overrides::default())
+        .await
+        .unwrap();
+    let options = leptos::prelude::LeptosOptions::builder()
+        .output_name("app")
+        .build();
+    let app = srv.app_router(&options);
+    for uri in ["/sign-in", "/sign-up"] {
+        let (status, html) = page(&app, uri, "en").await;
+        assert_eq!(status, 200, "{uri}");
+        assert!(
+            html.contains("data-testid=\"brand-mark\""),
+            "{uri}: brand mark"
+        );
+        assert!(html.contains(">Reading Room<"), "{uri}: brand name");
+        let footer = &html[html.find("<footer").expect("footer")..];
+        assert!(
+            footer.contains("href=\"https://example.org/imprint\"") && footer.contains(">Imprint<"),
+            "{uri}: imprint link"
+        );
+        assert!(footer.contains(">Privacy<"), "{uri}: privacy link");
+    }
+}

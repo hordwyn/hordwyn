@@ -359,6 +359,17 @@ impl NotifyStore for PgNotifyStore {
         .collect())
     }
 
+    async fn count_unread(&self, user: UserId) -> StoreResult<u32> {
+        let n = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) AS "n!" FROM notify_inbox WHERE user_id = $1 AND read_at IS NULL"#,
+            user.0
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(pe)?;
+        Ok(u32::try_from(n).unwrap_or(u32::MAX))
+    }
+
     async fn mark_read(&self, user: UserId, id: Uuid, at: DateTime<Utc>) -> StoreResult<()> {
         sqlx::query!(
             "UPDATE notify_inbox SET read_at = $3

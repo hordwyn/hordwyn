@@ -395,6 +395,34 @@ mod tests {
         }
     }
 
+    /// UX0-6, owner rulings DEC-171: "People" names the page, "Completed" the status.
+    #[test]
+    fn people_and_completed_wording() {
+        let (en, de) = (
+            I18n::new("en", BTreeMap::new()),
+            I18n::new("de", BTreeMap::new()),
+        );
+        assert_eq!(en.t("companions-title"), "People");
+        assert_eq!(de.t("companions-title"), "Personen");
+        assert_eq!(en.t("item-mark-done"), "Mark as completed");
+        assert_eq!(de.t("item-mark-done"), "Als abgeschlossen markieren");
+        for l in LOCALES {
+            let i = I18n::new(l, BTreeMap::new());
+            for key in [
+                "companions-title",
+                "companions-add",
+                "companions-companion",
+                "companions-lead",
+            ] {
+                let text = i.t(key).to_lowercase();
+                assert!(
+                    !text.contains("companion") && !text.contains("begleit"),
+                    "{l} {key}: {text}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn negotiates_accept_language() {
         assert_eq!(negotiate(Some("de-AT,de;q=0.9,en;q=0.8"), "en"), "de");

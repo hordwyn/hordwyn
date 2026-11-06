@@ -16,6 +16,7 @@ pub type BResult<T> = Result<T, ErrorDto>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShellSession {
     pub display_name: String,
+    pub username: String,
     pub is_admin: bool,
     /// Unread inbox notifications.
     pub unread: u32,

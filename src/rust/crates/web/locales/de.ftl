@@ -59,8 +59,8 @@ kind-board_game = Brettspiel
 
 item-add = Zur Bibliothek hinzufügen
 item-in-library = In deiner Bibliothek
-item-mark-done = Als erledigt markieren
-item-mark-done-with = Als erledigt markieren mit
+item-mark-done = Als abgeschlossen markieren
+item-mark-done-with = Als abgeschlossen markieren mit
 item-done-logged = Eingetragen.
 item-rating = Deine Bewertung
 item-rate = Mit { $stars } von 5 bewerten
@@ -78,10 +78,10 @@ search-empty = Noch keine Treffer.
 search-local = In deiner Instanz
 search-waiting = Frage { $sources } an...
 
-companions-title = Begleiter
+companions-title = Personen
 companions-lead = Menschen, mit denen du schaust, liest und spielst. Nur du siehst diese Liste.
 companions-new = Name
-companions-add = Begleiter hinzufügen
+companions-add = Person hinzufügen
 
 lists-title = Listen
 lists-new = Name der Liste
@@ -99,24 +99,24 @@ theme-dark = Zum dunklen Design wechseln
 theme-light = Zum hellen Design wechseln
 dialog-close = Schließen
 
-auth-invited = Du wurdest eingeladen: Dein Konto wird mit dem Begleiter verknüpft, der dich eingeladen hat, und du siehst die Sitzungen, bei denen du dabei warst.
+auth-invited = Du wurdest eingeladen: Dein Konto wird mit der Person verknüpft, die dich eingeladen hat, und du siehst die Sitzungen, bei denen du dabei warst.
 companions-choose = Auswählen...
-companions-companion = Begleiter
+companions-companion = Person
 companions-you-short = du
 companions-linked = Verknüpft
 companions-invite = Einladen
 companions-invite-link = Schicke diesen einmaligen Link:
 companions-unlink = Verknüpfung lösen
 companions-requests = Anfragen an dich
-companions-request-text = { $from } sagt, der Begleiter "{ $name }" bist du.
+companions-request-text = { $from } sagt, "{ $name }" auf der Seite Personen bist du.
 companions-accept = Annehmen
 companions-decline = Ablehnen
 companions-link-title = Mit einem Konto verknüpfen
-companions-link-lead = Hat ein Begleiter hier schon ein Konto, bitte ihn zu bestätigen, dass er es ist. Er sieht dann die Sitzungen, die du mit ihm teilst.
+companions-link-lead = Hat jemand hier schon ein Konto, bitte die Person zu bestätigen, dass sie es ist. Sie sieht dann die Sitzungen, die du mit ihr teilst.
 companions-link-submit = Anfrage senden
 companions-link-sent = Anfrage gesendet.
 companions-merge-title = Doppelte zusammenführen
-companions-merge-lead = Der doppelte Eintrag geht in dem Begleiter auf, den du behältst. Erfasste Sitzungen bleiben unverändert.
+companions-merge-lead = Der doppelte Eintrag geht in der Person auf, die du behältst. Erfasste Sitzungen bleiben unverändert.
 companions-merge-keep = Behalten
 companions-merge-remove = Doppelter Eintrag
 companions-merge-submit = Zusammenführen
@@ -133,7 +133,7 @@ sessions-claimed = In dein Protokoll kopiert.
 lists-share = Per Link teilen
 lists-share-link = Alle mit diesem Link sehen die Liste:
 shared-list-missing = Diese Liste ist nicht (mehr) geteilt.
-sharing-error-conflict = Das geht bei diesem Begleiter nicht.
+sharing-error-conflict = Das geht bei dieser Person nicht.
 sharing-error-not_found = Nicht gefunden. Prüfe den Benutzernamen.
 sharing-error-forbidden = Das darfst du nicht.
 sharing-error-invalid = Bitte prüfe die Felder.
@@ -229,7 +229,7 @@ integrations-empty = Noch keine Integrationen.
 integrations-never = nie
 integrations-error = Letzter Aufruf fehlgeschlagen
 integrations-revoke = Widerrufen
-auth-error-too_many_attempts = Zu viele Fehlversuche. Bitte warte ein paar Minuten.
+auth-error-too_many_attempts = Zu viele fehlgeschlagene Anmeldungen. Bitte warte ein paar Minuten.
 auth-error-username_too_short = Der Benutzername braucht mindestens 3 Zeichen.
 auth-error-username_too_long = Der Benutzername darf höchstens 32 Zeichen haben.
 auth-error-username_space = Der Benutzername enthält ein Leerzeichen. Nimm stattdessen - oder _.
@@ -315,8 +315,6 @@ auth-back = Zurück
 # ---- end form discipline ----
 
 # ---- UX-Phase 0: i18n (DEC-171, DEC-200, DEC-201) ----
-# Jede Sprache nennt sich selbst (die Sprachauswahl zeigt jede Sprache in ihren eigenen Worten).
-locale-name = Deutsch
 shell-language = Sprache
 shell-language-auto = Automatisch
 shell-key-esc = Esc
@@ -346,11 +344,11 @@ progress-session = Sitzung eingetragen
 lists-share-named = { $name } per Link teilen
 companions-name-self = { $name } (du)
 companions-invite-named = { $name } einladen
-companions-unlink-named = Verknüpfung mit { $name } lösen
+companions-unlink-named = Verknüpfung lösen: { $name }
 sessions-winner = { $name } (gewonnen)
 integrations-last-call = Letzter Aufruf: { $when }
 integrations-revoke-named = { $name } widerrufen
-notify-mark-read-named = { $title } als gelesen markieren
+notify-mark-read-named = Als gelesen markieren: { $title }
 notify-test-named = { $name } testen
 notify-delete-named = { $name } löschen
 notify-mode-digest-at = Tägliche Zusammenfassung um { $time }
@@ -377,3 +375,15 @@ notify-event-admin-connector_down = Datenquelle nicht erreichbar (Admin)
 notify-event-admin-signup = Neues Konto (Admin)
 notify-event-admin-job_backlog = Aufgaben stauen sich (Admin)
 # ---- Ende i18n ----
+
+# ---- UX phase 0 review (docs/reviews/2026-11-06-ux0-review.md) ----
+auth-lockout-minutes = { $minutes ->
+    [one] Zu viele fehlgeschlagene Anmeldungen. Versuch es in 1 Minute noch einmal.
+   *[other] Zu viele fehlgeschlagene Anmeldungen. Versuch es in { $minutes } Minuten noch einmal.
+}
+auth-check-throttled = Gerade zu viele Prüfungen; du kannst das Konto trotzdem anlegen.
+auth-offline = Du bist offline
+legal-nav = Rechtliches
+legal-imprint = Impressum
+legal-privacy = Datenschutz
+legal-terms = Nutzungsbedingungen

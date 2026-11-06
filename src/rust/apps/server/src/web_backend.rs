@@ -15,16 +15,14 @@ pub struct WebBackend(pub ApiState);
 
 #[allow(clippy::needless_pass_by_value)]
 fn err(e: ApiError) -> ErrorDto {
-    ErrorDto {
-        code: e.code.into(),
-        message: e.message,
-    }
+    e.into_dto()
 }
 
 fn unauthorized() -> ErrorDto {
     ErrorDto {
         code: "unauthorized".into(),
         message: "sign in first".into(),
+        retry_after_secs: None,
     }
 }
 
@@ -81,13 +79,12 @@ impl Backend for WebBackend {
         let a = self.actor(token).await.ok()?;
         let user = self.0.app.user(a.user_id).await.ok()?;
         // notifications may be disabled on this server: no bell count then
-        let unread = notifications::inbox(&self.0, a)
-            .await
-            .map_or(0, |items| items.iter().filter(|i| !i.read).count());
+        let unread = notifications::unread_count(&self.0, a).await.unwrap_or(0);
         Some(ShellSession {
             display_name: user.display_name,
+            username: user.username,
             is_admin: a.is_admin(),
-            unread: u32::try_from(unread).unwrap_or(u32::MAX),
+            unread,
             locale: user.locale,
         })
     }

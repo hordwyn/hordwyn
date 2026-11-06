@@ -59,8 +59,8 @@ kind-board_game = Board game
 
 item-add = Add to library
 item-in-library = In your library
-item-mark-done = Mark as done
-item-mark-done-with = Mark as done with
+item-mark-done = Mark as completed
+item-mark-done-with = Mark as completed with
 item-done-logged = Logged.
 item-rating = Your rating
 item-rate = Rate { $stars } of 5
@@ -78,10 +78,10 @@ search-empty = No results yet.
 search-local = In your instance
 search-waiting = Asking { $sources }...
 
-companions-title = Companions
+companions-title = People
 companions-lead = People you watch, read and play with. Only you see this list.
 companions-new = Name
-companions-add = Add companion
+companions-add = Add person
 
 lists-title = Lists
 lists-new = List name
@@ -99,24 +99,24 @@ theme-dark = Switch to dark theme
 theme-light = Switch to light theme
 dialog-close = Close
 
-auth-invited = You were invited: your account is linked to the companion who invited you, and you see the sessions you were part of.
+auth-invited = You were invited: your account is linked to the person who invited you, and you see the sessions you were part of.
 companions-choose = Choose...
-companions-companion = Companion
+companions-companion = Person
 companions-you-short = you
 companions-linked = Linked
 companions-invite = Invite
 companions-invite-link = Send this single-use link:
 companions-unlink = Unlink
 companions-requests = Requests for you
-companions-request-text = { $from } says their companion "{ $name }" is you.
+companions-request-text = { $from } says "{ $name }" on their People page is you.
 companions-accept = Accept
 companions-decline = Decline
 companions-link-title = Link to an account
-companions-link-lead = If a companion already has an account here, ask them to confirm it is them. They see the sessions you share with them.
+companions-link-lead = If someone already has an account here, ask them to confirm it is them. They see the sessions you share with them.
 companions-link-submit = Send link request
 companions-link-sent = Link request sent.
 companions-merge-title = Merge duplicates
-companions-merge-lead = The duplicate is folded into the companion you keep. Logged sessions stay as they are.
+companions-merge-lead = The duplicate is folded into the person you keep. Logged sessions stay as they are.
 companions-merge-keep = Keep
 companions-merge-remove = Duplicate
 companions-merge-submit = Merge
@@ -133,7 +133,7 @@ sessions-claimed = Copied to your log.
 lists-share = Share by link
 lists-share-link = Anyone with this link can see the list:
 shared-list-missing = This list is not shared (any more).
-sharing-error-conflict = That is not possible for this companion.
+sharing-error-conflict = That is not possible for this person.
 sharing-error-not_found = Not found. Check the username.
 sharing-error-forbidden = You may not do that.
 sharing-error-invalid = Please check the fields.
@@ -229,7 +229,7 @@ integrations-empty = No integrations yet.
 integrations-never = never
 integrations-error = Last call failed
 integrations-revoke = Revoke
-auth-error-too_many_attempts = Too many failed attempts. Please wait a few minutes.
+auth-error-too_many_attempts = Too many failed sign-ins. Please wait a few minutes.
 auth-error-username_too_short = Use at least 3 characters for the username.
 auth-error-username_too_long = Use at most 32 characters for the username.
 auth-error-username_space = The username has a space. Use - or _ instead.
@@ -315,8 +315,6 @@ auth-back = Back
 # ---- end form discipline ----
 
 # ---- UX phase 0: i18n (DEC-171, DEC-200, DEC-201) ----
-# Each locale names itself (the language picker shows every language in its own words).
-locale-name = English
 shell-language = Language
 shell-language-auto = Automatic
 shell-key-esc = Esc
@@ -343,14 +341,14 @@ progress-chapter = Chapter { $chapter }
 progress-volume = Volume { $volume }
 progress-position = At { $time }
 progress-session = Session logged
-lists-share-named = Share { $name } by link
+lists-share-named = Share by link: { $name }
 companions-name-self = { $name } (you)
 companions-invite-named = Invite { $name }
 companions-unlink-named = Unlink { $name }
 sessions-winner = { $name } (won)
 integrations-last-call = Last call: { $when }
 integrations-revoke-named = Revoke { $name }
-notify-mark-read-named = Mark { $title } as read
+notify-mark-read-named = Mark as read: { $title }
 notify-test-named = Test { $name }
 notify-delete-named = Delete { $name }
 notify-mode-digest-at = Daily digest at { $time }
@@ -377,3 +375,15 @@ notify-event-admin-connector_down = Data source unavailable (admin)
 notify-event-admin-signup = New account (admin)
 notify-event-admin-job_backlog = Jobs piling up (admin)
 # ---- end i18n ----
+
+# ---- UX phase 0 review (docs/reviews/2026-11-06-ux0-review.md) ----
+auth-lockout-minutes = { $minutes ->
+    [one] Too many failed sign-ins. Try again in 1 minute.
+   *[other] Too many failed sign-ins. Try again in { $minutes } minutes.
+}
+auth-check-throttled = Too many checks right now; you can still create the account.
+auth-offline = You are offline
+legal-nav = Legal
+legal-imprint = Imprint
+legal-privacy = Privacy
+legal-terms = Terms

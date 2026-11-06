@@ -20,9 +20,9 @@ library-metadata_changed-title = { $title } wurde aktualisiert
 library-metadata_changed-body = Die Angaben zu { $title } haben sich geändert.
 
 social-link_request-title = { $from } sagt, du bist "{ $companion }"
-social-link_request-body = Bestätige auf der Seite Personen, dass der Begleiter "{ $companion }" von { $from } du bist.
+social-link_request-body = Bestätige auf der Seite Personen, dass du "{ $companion }" bei { $from } bist.
 social-link_accepted-title = { $user } hat die Verknüpfung angenommen
-social-link_accepted-body = Dein Begleiter "{ $companion }" ist jetzt mit { $user } verknüpft.
+social-link_accepted-body = "{ $companion }" auf deiner Seite Personen ist jetzt mit { $user } verknüpft.
 social-session_shared-title = { $owner } hat { $title } mit dir erfasst
 social-session_shared-body = Du findest es in deinem Verlauf und kannst es in dein Protokoll kopieren.
 social-list_shared-title = { $owner } hat eine Liste geteilt

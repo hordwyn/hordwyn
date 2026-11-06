@@ -1,8 +1,12 @@
-//! Modal dialog and side sheet: `role="dialog"`, `aria-modal`, labelled by its title,
-//! Escape and backdrop click close it, focus moves into the panel when it opens.
+//! Modal dialog and side sheet after the APG dialog pattern (design.md 8): `role="dialog"`,
+//! `aria-modal`, labelled by its title; focus moves into the panel when it opens, Tab and
+//! Shift+Tab stay inside it, Escape and backdrop click close it, and focus goes back to the
+//! control that opened it (or to `return_to` when that control is gone, for example a menu
+//! item that unmounted as the dialog opened).
 
 use leptos::html;
 use leptos::prelude::*;
+use leptos::wasm_bindgen::JsCast;
 
 use crate::class::{cn, slug};
 use crate::icon::{Icon, IconName};
@@ -14,6 +18,61 @@ pub enum SheetSide {
     Right,
 }
 
+/// Controls Tab can reach inside the panel.
+const FOCUSABLE: &str = "a[href], button:not([disabled]), input:not([disabled]), \
+    select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+
+fn focusables(panel: &web_sys::HtmlElement) -> Vec<web_sys::HtmlElement> {
+    let Ok(list) = panel.query_selector_all(FOCUSABLE) else {
+        return Vec::new();
+    };
+    (0..list.length())
+        .filter_map(|i| list.item(i))
+        .filter_map(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
+        .collect()
+}
+
+fn active_element() -> Option<web_sys::HtmlElement> {
+    document()
+        .active_element()
+        .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok())
+}
+
+/// Keep Tab inside the panel: wrap from the last control to the first and back.
+fn trap_tab(panel: &web_sys::HtmlElement, ev: &leptos::ev::KeyboardEvent) {
+    let items = focusables(panel);
+    let (Some(first), Some(last)) = (items.first(), items.last()) else {
+        ev.prevent_default();
+        return;
+    };
+    let active = active_element();
+    let at = |el: &web_sys::HtmlElement| active.as_ref().is_some_and(|a| a.is_same_node(Some(el)));
+    let target = if ev.shift_key() {
+        (at(first) || at(panel)).then_some(last)
+    } else {
+        at(last).then_some(first)
+    };
+    if let Some(t) = target {
+        ev.prevent_default();
+        let _ = t.focus();
+    }
+}
+
+/// Focus the opener if it is still in the page, else the element with id `fallback`.
+fn restore_focus(opener: Option<web_sys::HtmlElement>, fallback: Option<&str>) {
+    let body = document().body();
+    let opener = opener
+        .filter(|o| o.is_connected() && !body.as_ref().is_some_and(|b| b.is_same_node(Some(o))));
+    let target = opener.or_else(|| {
+        fallback
+            .and_then(|id| document().get_element_by_id(id))
+            .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok())
+    });
+    if let Some(t) = target {
+        let _ = t.focus();
+    }
+}
+
 #[component]
 fn Panel(
     open: RwSignal<bool>,
@@ -22,18 +81,30 @@ fn Panel(
     close_label: String,
     panel_class: &'static str,
     class: MaybeProp<String>,
+    return_to: Option<String>,
     children: ChildrenFn,
 ) -> impl IntoView {
     let base = slug(&title);
     let title_id = format!("{base}-title");
     let desc_id = description.as_ref().map(|_| format!("{base}-description"));
     let panel = NodeRef::<html::Div>::new();
-    Effect::new(move |_| {
-        if open.get()
-            && let Some(el) = panel.get()
-        {
-            let _ = el.focus();
+    // The element focused when the dialog opened lives in the effect's own state: effects
+    // run only in the browser, so no DOM handle is ever stored on the (multi-threaded) server.
+    Effect::new(move |prev: Option<(bool, Option<web_sys::HtmlElement>)>| {
+        let (was_open, mut opener) = prev.unwrap_or_default();
+        let is_open = open.get();
+        if is_open {
+            if !was_open {
+                opener = active_element();
+            }
+            // tracks the node ref too: the panel mounts after `open` turns true
+            if let Some(el) = panel.get() {
+                let _ = el.focus();
+            }
+        } else if was_open {
+            restore_focus(opener.take(), return_to.as_deref());
         }
+        (is_open, opener)
     });
     let children = StoredValue::new(children);
     view! {
@@ -47,8 +118,17 @@ fn Panel(
                 aria-describedby=desc_id.clone()
                 tabindex="-1"
                 on:keydown=move |ev: leptos::ev::KeyboardEvent| {
-                    if ev.key() == "Escape" {
-                        open.set(false);
+                    match ev.key().as_str() {
+                        "Escape" => {
+                            ev.stop_propagation();
+                            open.set(false);
+                        }
+                        "Tab" => {
+                            if let Some(p) = panel.get_untracked() {
+                                trap_tab(&p, &ev);
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 class=move || cn(&[
@@ -76,7 +156,8 @@ fn Panel(
         </Show>
     }
 }
-
+/// Centered modal dialog. `close_label` is the (translated) label of the close button;
+/// `return_to` is the id of the element that gets focus on close when the opener is gone.
 /// Centered modal dialog. `close_label` is the (translated) label of the close button.
 #[component]
 pub fn Dialog(
@@ -85,6 +166,7 @@ pub fn Dialog(
     #[prop(into)] close_label: String,
     #[prop(into, optional)] description: Option<String>,
     #[prop(into, optional)] class: MaybeProp<String>,
+    #[prop(into, optional)] return_to: Option<String>,
     children: ChildrenFn,
 ) -> impl IntoView {
     view! {
@@ -95,6 +177,7 @@ pub fn Dialog(
             close_label=close_label
             panel_class="left-1/2 top-1/2 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-lg"
             class=class
+            return_to=return_to
             children=children
         />
     }
@@ -109,6 +192,7 @@ pub fn Sheet(
     #[prop(optional)] side: SheetSide,
     #[prop(into, optional)] description: Option<String>,
     #[prop(into, optional)] class: MaybeProp<String>,
+    #[prop(into, optional)] return_to: Option<String>,
     children: ChildrenFn,
 ) -> impl IntoView {
     let panel_class = match side {
@@ -123,6 +207,7 @@ pub fn Sheet(
             close_label=close_label
             panel_class=panel_class
             class=class
+            return_to=return_to
             children=children
         />
     }

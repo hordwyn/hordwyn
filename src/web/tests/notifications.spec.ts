@@ -27,8 +27,8 @@ test("link requests arrive in the inbox; channels and subscriptions", async ({ p
   await page.goto("/people");
   await hydrated(page);
   await page.getByLabel("Name", { exact: true }).fill("P.");
-  await page.getByRole("button", { name: "Add companion" }).click();
-  await page.getByLabel("Companion", { exact: true }).selectOption({ label: "P." });
+  await page.getByRole("button", { name: "Add person" }).click();
+  await page.getByLabel("Person", { exact: true }).selectOption({ label: "P." });
   await page.getByLabel("Username").fill(`pia${stamp}`);
   await page.getByRole("button", { name: "Send link request" }).click();
   await expect(page.getByText("Link request sent.")).toBeVisible();
@@ -38,7 +38,7 @@ test("link requests arrive in the inbox; channels and subscriptions", async ({ p
   const inbox = pia.getByRole("list", { name: "Inbox" });
   await expect(inbox.getByRole("listitem").filter({ hasText: 'Max says you are "P."' })).toBeVisible();
   // (other inbox items may exist: the first account is admin and hears about sign-ups)
-  const markRead = pia.getByRole("button", { name: `Mark Max says you are "P." as read` });
+  const markRead = pia.getByRole("button", { name: `Mark as read: Max says you are "P."` });
   await markRead.click();
   await expect(markRead).toHaveCount(0);
 

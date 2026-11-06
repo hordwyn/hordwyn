@@ -199,3 +199,62 @@ async fn the_page_follows_the_users_language() {
     assert!(html.contains("<html lang=\"en\""), "automatic again");
     assert!(html.contains(">Library<"));
 }
+
+/// UX0-12: a bogus or expired session cookie renders the signed-out shell, not an error.
+#[tokio::test]
+async fn a_bogus_session_cookie_renders_the_signed_out_shell() {
+    if !services() {
+        return;
+    }
+    let app = app().await;
+    let cookie = sign_up(&app, "dora", "Dora").await;
+    let name = cookie.split('=').next().unwrap();
+    let (status, html) = page(&app, "/", Some(&format!("{name}=bogus"))).await;
+    assert_eq!(status, 200);
+    assert!(html.contains(">Sign in<"), "signed-out bar");
+    assert!(html.contains("\"signed_in\":false"));
+    assert!(!html.contains("aria-haspopup=\"menu\""));
+}
+
+/// UX0-12, UX0-10, UX0-11, UX0-13: the unread count reaches the bell and the You tab; the
+/// config names the username; only a signed-in page reserves room for the tab bar.
+#[tokio::test]
+async fn unread_count_username_and_tab_bar_room() {
+    if !services() {
+        return;
+    }
+    let app = app().await;
+    // the first account is the admin and hears about the next sign-up
+    let admin = sign_up(&app, "erin", "Erin E.").await;
+    sign_up(&app, "fred", "Fred").await;
+    let (_, html) = page(&app, "/", Some(&admin)).await;
+    let at = html.find("\"unread\":").expect("unread in the config") + 9;
+    let n: u32 = html[at..]
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>()
+        .parse()
+        .unwrap();
+    assert!(n >= 1, "the new account is in the admin's inbox");
+    assert!(
+        html.contains(&format!("aria-label=\"Notifications, {n} unread\"")),
+        "the bell names the count"
+    );
+    assert!(
+        html.contains(&format!(">{n} unread<")),
+        "the You tab shows the count"
+    );
+    assert!(
+        html.contains("\"username\":\"erin\""),
+        "username for the menu head"
+    );
+    assert!(
+        html.contains("has-tab-bar"),
+        "signed in: room for the tab bar"
+    );
+    let (_, html) = page(&app, "/sign-in", None).await;
+    assert!(
+        !html.contains("has-tab-bar"),
+        "signed out: no tab bar, no room"
+    );
+}

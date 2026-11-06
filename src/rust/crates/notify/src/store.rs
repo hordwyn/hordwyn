@@ -36,6 +36,8 @@ pub trait NotifyStore: Send + Sync {
     /// `false` if the user already has this event with this dedupe key.
     async fn insert_inbox(&self, i: &InboxItem) -> StoreResult<bool>;
     async fn inbox(&self, user: UserId, limit: u32) -> StoreResult<Vec<InboxItem>>;
+    /// Unread inbox items of the user (the bell count, design.md 3.2).
+    async fn count_unread(&self, user: UserId) -> StoreResult<u32>;
     async fn mark_read(&self, user: UserId, id: Uuid, at: DateTime<Utc>) -> StoreResult<()>;
 
     /// `false` if this channel already has this event with this dedupe key.
@@ -185,6 +187,16 @@ impl NotifyStore for MemNotifyStore {
         v.sort_by_key(|i| std::cmp::Reverse((i.created_at, i.id)));
         v.truncate(limit as usize);
         Ok(v)
+    }
+
+    async fn count_unread(&self, user: UserId) -> StoreResult<u32> {
+        let n = self
+            .m()
+            .inbox
+            .iter()
+            .filter(|i| i.user == user && i.read_at.is_none())
+            .count();
+        Ok(u32::try_from(n).unwrap_or(u32::MAX))
     }
 
     async fn mark_read(&self, user: UserId, id: Uuid, at: DateTime<Utc>) -> StoreResult<()> {

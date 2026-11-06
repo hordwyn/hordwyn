@@ -16,9 +16,26 @@ pub fn Avatar(
     #[prop(into)] name: String,
     #[prop(into, optional)] src: MaybeProp<String>,
     #[prop(into, optional)] class: MaybeProp<String>,
+    /// Inside a control that has its own name: hidden from assistive technology.
+    #[prop(optional)]
+    decorative: bool,
 ) -> impl IntoView {
     let alt = name.clone();
     let text = initials(&name);
+    if decorative {
+        // drawn by CSS: no text node, so a labelled button's visible text is its name only
+        return view! {
+            <span
+                aria-hidden="true"
+                data-initials=text
+                class=move || cn(&[
+                    "relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-sm font-medium before:content-[attr(data-initials)]",
+                    &class.get().unwrap_or_default(),
+                ])
+            ></span>
+        }
+        .into_any();
+    }
     view! {
         <span class=move || cn(&[
             "relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-sm font-medium",
@@ -30,6 +47,7 @@ pub fn Avatar(
             }}
         </span>
     }
+    .into_any()
 }
 
 #[cfg(test)]

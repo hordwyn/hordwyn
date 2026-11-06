@@ -14,7 +14,7 @@ use ui::{
 };
 
 use crate::app::ClientConfig;
-use crate::i18n::{I18n, LOCALES, t, use_i18n};
+use crate::i18n::{LOCALES, t, use_i18n};
 use crate::palette::PaletteOpen;
 
 /// `localStorage` key of the theme choice (unchanged; read before paint by `THEME_BOOT`).
@@ -268,6 +268,7 @@ pub fn AppShell(children: Children) -> impl IntoView {
     provide_context(ShortcutsOpen(help));
     let _ = provide_toasts();
     provide_theme();
+    let online = provide_online();
     shortcut_keys(cfg.signed_in, palette, help);
     let location = use_location();
     let current = Signal::derive(move || section_of(&location.pathname.get()).to_string());
@@ -276,7 +277,7 @@ pub fn AppShell(children: Children) -> impl IntoView {
             {t("skip-to-content")}
         </a>
         <TopBar current=current/>
-        <OfflineBanner/>
+        <OfflineBanner online=online/>
         <main id="main" tabindex="-1" class="mx-auto w-full max-w-6xl px-4 pt-6 pb-[calc(1.5rem+var(--tab-bar-height))] focus:outline-none">
             {children()}
         </main>
@@ -381,8 +382,13 @@ const MENU_ITEM: &str = "flex w-full min-h-9 cursor-pointer items-center gap-2 r
 
 const SEPARATOR: &str = "my-1 h-px bg-border";
 
-/// The account menu (APG menu button): pages, theme (system/light/dark), sign out, and help
-/// last (addendum-1 D13).
+/// Element id of the account menu button (the shortcut help returns focus to it).
+const ACCOUNT_TRIGGER: &str = "account-menu-trigger";
+
+/// The account menu (APG menu button): pages, theme (system/light/dark), language, sign out,
+/// and help last (addendum-1 D13). Enter, Space and ArrowDown open it on the first item,
+/// ArrowUp on the last; Escape, Tab and every item that stays on the page close it with focus
+/// back on the button.
 #[component]
 fn AccountMenu() -> impl IntoView {
     let cfg = expect_context::<ClientConfig>();
@@ -390,6 +396,8 @@ fn AccountMenu() -> impl IntoView {
     let theme = expect_context::<ThemeChoice>().0;
     let help = expect_context::<ShortcutsOpen>().0;
     let open = RwSignal::new(false);
+    // the item that takes focus when the menu opens: `Home` (first) or `End` (last)
+    let start = StoredValue::new("Home");
     let trigger = NodeRef::<html::Button>::new();
     let container = NodeRef::<html::Div>::new();
     let menu = NodeRef::<html::Div>::new();
@@ -401,7 +409,7 @@ fn AccountMenu() -> impl IntoView {
     Effect::new(move |_| {
         // tracks the node ref too: the menu mounts after `open` turns true
         if open.get() && menu.get().is_some() {
-            focus_menu(menu, "Home");
+            focus_menu(menu, start.get_value());
         }
     });
     let _ = window_event_listener(leptos::ev::pointerdown, move |ev| {
@@ -409,50 +417,71 @@ fn AccountMenu() -> impl IntoView {
             open.set(false);
         }
     });
-    let close = move || {
+    let close = Callback::new(move |()| {
         open.set(false);
         if let Some(t) = trigger.get_untracked() {
             let _ = t.focus();
         }
-    };
+    });
     let on_key = move |ev: leptos::ev::KeyboardEvent| match ev.key().as_str() {
         "Escape" => {
             ev.prevent_default();
-            close();
+            close.run(());
         }
-        "Tab" => open.set(false),
+        // focus goes to the button first, so Tab moves on from there (APG)
+        "Tab" => close.run(()),
         k => {
             if focus_menu(menu, k) {
                 ev.prevent_default();
             }
         }
     };
+    let open_at = move |at: &'static str| {
+        start.set_value(at);
+        open.set(true);
+    };
     let links = account_links(cfg.is_admin);
     let support = cfg.support_url.clone();
-    let name = cfg.display_name.clone();
+    let (name, username) = (cfg.display_name.clone(), cfg.username.clone());
     view! {
         <div node_ref=container class="relative">
             <button
                 node_ref=trigger
+                id=ACCOUNT_TRIGGER
                 type="button"
                 aria-haspopup="menu"
                 aria-expanded=move || if open.get() { "true" } else { "false" }
                 aria-controls="account-menu"
                 aria-label=label.clone()
-                on:click=move |_| open.update(|o| *o = !*o)
-                on:keydown=move |ev: leptos::ev::KeyboardEvent| {
-                    if ev.key() == "ArrowDown" {
-                        ev.prevent_default();
-                        open.set(true);
+                on:click=move |_| {
+                    if open.get_untracked() {
+                        open.set(false);
+                    } else {
+                        open_at("Home");
                     }
+                }
+                on:keydown=move |ev: leptos::ev::KeyboardEvent| match ev.key().as_str() {
+                    "ArrowDown" => {
+                        ev.prevent_default();
+                        open_at("Home");
+                    }
+                    "ArrowUp" => {
+                        ev.prevent_default();
+                        open_at("End");
+                    }
+                    _ => {}
                 }
                 class=ICON_BTN
             >
-                <Avatar name=cfg.display_name.clone()/>
+                // the button is named by its label; the initials are decoration (WCAG 2.5.3)
+                <Avatar name=cfg.display_name.clone() decorative=true/>
             </button>
             <Show when=move || open.get()>
                 <div class="absolute right-0 z-50 mt-1 w-64 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
-                    <p class="truncate px-2 py-1.5 text-sm font-semibold">{name.clone()}</p>
+                    <div data-testid="account-head" class="px-2 py-1.5">
+                        <p class="truncate text-sm font-semibold">{name.clone()}</p>
+                        <p class="truncate text-small text-muted-foreground">{username.clone()}</p>
+                    </div>
                     <div node_ref=menu id="account-menu" role="menu" aria-label=label.clone() on:keydown=on_key>
                         {links.iter().map(|(href, key)| view! {
                             <a role="menuitem" tabindex="-1" href=*href class=MENU_ITEM on:click=move |_| open.set(false)>
@@ -460,9 +489,9 @@ fn AccountMenu() -> impl IntoView {
                             </a>
                         }).collect_view()}
                         <div role="separator" class=SEPARATOR></div>
-                        <ThemeItems theme=theme open=open/>
+                        <ThemeItems theme=theme close=close/>
                         <div role="separator" class=SEPARATOR></div>
-                        <LanguageItems open=open/>
+                        <LanguageItems close=close/>
                         <div role="separator" class=SEPARATOR></div>
                         <button type="button" role="menuitem" tabindex="-1" class=MENU_ITEM
                             on:click=move |_| { open.set(false); sign_out.dispatch(()); }>
@@ -471,12 +500,13 @@ fn AccountMenu() -> impl IntoView {
                         </button>
                         <div role="separator" class=SEPARATOR></div>
                         <button type="button" role="menuitem" tabindex="-1" class=MENU_ITEM
-                            on:click=move |_| { open.set(false); help.set(true); }>
+                            on:click=move |_| { close.run(()); help.set(true); }>
                             {t("shell-shortcuts")}
                             <KeyHint keys=vec!["?".to_string()] class="ml-auto"/>
                         </button>
                         {support.clone().map(|url| view! {
-                            <a role="menuitem" tabindex="-1" href=url target="_blank" rel="noopener" class=MENU_ITEM>
+                            <a role="menuitem" tabindex="-1" href=url target="_blank" rel="noopener" class=MENU_ITEM
+                                on:click=move |_| close.run(())>
                                 {t("shell-help")}
                             </a>
                         })}
@@ -497,7 +527,7 @@ fn theme_options() -> Vec<(&'static str, &'static str, IconName)> {
 
 /// The theme as a group of three `menuitemradio`s.
 #[component]
-fn ThemeItems(theme: RwSignal<String>, open: RwSignal<bool>) -> impl IntoView {
+fn ThemeItems(theme: RwSignal<String>, close: Callback<()>) -> impl IntoView {
     let i18n = use_i18n();
     view! {
         <div role="group" aria-label=i18n.t("shell-theme")>
@@ -510,7 +540,7 @@ fn ThemeItems(theme: RwSignal<String>, open: RwSignal<bool>) -> impl IntoView {
                     aria-checked=move || if theme.get() == value { "true" } else { "false" }
                     on:click=move |_| {
                         theme.set(value.to_string());
-                        open.set(false);
+                        close.run(());
                     }
                     class=MENU_ITEM
                 >
@@ -529,10 +559,11 @@ const LANGUAGE_AUTO: &str = "auto";
 /// The language choices (DEC-201): automatic, then every locale named in its own language.
 fn language_options() -> Vec<(&'static str, String, Option<&'static str>)> {
     std::iter::once((LANGUAGE_AUTO, t("shell-language-auto"), None))
-        .chain(LOCALES.iter().map(|l| {
-            let name = I18n::new(l, std::collections::BTreeMap::new()).t("locale-name");
-            (*l, name, Some(*l))
-        }))
+        .chain(
+            LOCALES
+                .iter()
+                .map(|l| (*l, contracts::locale::locale_name(l).to_string(), Some(*l))),
+        )
         .collect()
 }
 
@@ -552,7 +583,7 @@ fn language_action() -> Action<String, ()> {
 /// The language as a group of `menuitemradio`s; each language is named in itself and
 /// marked with its `lang` (WCAG 3.1.2).
 #[component]
-fn LanguageItems(open: RwSignal<bool>) -> impl IntoView {
+fn LanguageItems(close: Callback<()>) -> impl IntoView {
     let cfg = expect_context::<ClientConfig>();
     let i18n = use_i18n();
     let current = cfg
@@ -572,7 +603,7 @@ fn LanguageItems(open: RwSignal<bool>) -> impl IntoView {
                         tabindex="-1"
                         aria-checked=if checked { "true" } else { "false" }
                         on:click=move |_| {
-                            open.set(false);
+                            close.run(());
                             if !checked {
                                 choose.dispatch(value.to_string());
                             }
@@ -646,10 +677,12 @@ fn MobileTabs(current: Signal<String>) -> impl IntoView {
     }
 }
 
-/// Offline banner (design.md 6.15), a polite live region that is always in the page so the
-/// change is announced.
-#[component]
-fn OfflineBanner() -> impl IntoView {
+/// Whether the browser is online (`navigator.onLine` and its events); forms disable their
+/// submit button while offline (design.md 5.2).
+#[derive(Clone, Copy)]
+pub struct Online(pub RwSignal<bool>);
+
+fn provide_online() -> RwSignal<bool> {
     let online = RwSignal::new(true);
     Effect::new(move |_| {
         #[cfg(feature = "hydrate")]
@@ -657,6 +690,14 @@ fn OfflineBanner() -> impl IntoView {
     });
     let _ = window_event_listener(leptos::ev::online, move |_| online.set(true));
     let _ = window_event_listener(leptos::ev::offline, move |_| online.set(false));
+    provide_context(Online(online));
+    online
+}
+
+/// Offline banner (design.md 6.15), a polite live region that is always in the page so the
+/// change is announced.
+#[component]
+fn OfflineBanner(online: RwSignal<bool>) -> impl IntoView {
     view! {
         <div role="status" class="mx-auto w-full max-w-6xl px-4 empty:hidden">
             <Show when=move || !online.get()>
@@ -684,7 +725,7 @@ fn ShortcutHelp(open: RwSignal<bool>) -> impl IntoView {
         ]
     };
     view! {
-        <Dialog open=open title=i18n.t("shell-shortcuts") close_label=i18n.t("dialog-close")>
+        <Dialog open=open title=i18n.t("shell-shortcuts") close_label=i18n.t("dialog-close") return_to=ACCOUNT_TRIGGER>
             <dl class="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-sm">
                 {rows().into_iter().map(|(keys, what)| view! {
                     <dt><KeyHint keys=keys/></dt>

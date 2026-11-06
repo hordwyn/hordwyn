@@ -236,3 +236,35 @@ fn shared_rules_agree_with_the_domain() {
         );
     }
 }
+
+/// UX0-9: a closed instance answers `signup_closed` without a lookup, so those calls do not
+/// use up the instance's check budget.
+#[tokio::test]
+async fn closed_sign_up_does_not_count_towards_the_check_limit() {
+    let t = testkit::TestEnv::new();
+    let open = auth(&t, SignupMode::Open);
+    open.sign_up(up("admin")).await.unwrap();
+    let closed = auth(&t, SignupMode::Closed);
+    for i in 0..=USERNAME_CHECKS_PER_MINUTE {
+        assert!(
+            matches!(
+                closed.username_available(&format!("name{i}"), None).await,
+                Err(AuthError::SignupClosed)
+            ),
+            "call {i}"
+        );
+    }
+}
+
+/// UX0-4: the lock-out carries the seconds left, for the client's "try again in N minutes".
+#[test]
+fn too_many_attempts_carries_the_seconds_left() {
+    assert_eq!(
+        AuthError::TooManyAttempts {
+            retry_after_secs: 90
+        }
+        .retry_after_secs(),
+        Some(90)
+    );
+    assert_eq!(AuthError::SignupClosed.retry_after_secs(), None);
+}

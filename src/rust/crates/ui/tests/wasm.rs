@@ -84,7 +84,7 @@ async fn dialog_closes_on_escape() {
     });
     settle().await;
     let panel: HtmlElement = document()
-        .query_selector("[role=dialog]")
+        .query_selector("[aria-labelledby=w-dialog-title]")
         .unwrap()
         .expect("dialog rendered")
         .dyn_into()
@@ -94,7 +94,7 @@ async fn dialog_closes_on_escape() {
     assert!(!open.get_untracked());
     assert!(
         document()
-            .query_selector("[role=dialog]")
+            .query_selector("[aria-labelledby=w-dialog-title]")
             .unwrap()
             .is_none()
     );
@@ -269,4 +269,109 @@ async fn error_summary_takes_focus_when_errors_appear() {
         document().active_element().map(|e| e.id()).as_deref(),
         Some("w-errs-field")
     );
+}
+
+fn key_with_shift(target: &HtmlElement, key: &str) {
+    let init = KeyboardEventInit::new();
+    init.set_key(key);
+    init.set_shift_key(true);
+    init.set_bubbles(true);
+    init.set_cancelable(true);
+    let ev = KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap();
+    target.dispatch_event(&ev).unwrap();
+}
+
+fn active_id() -> String {
+    document()
+        .active_element()
+        .map(|e| e.id())
+        .unwrap_or_default()
+}
+
+/// APG dialog pattern (design.md 8): Tab and Shift+Tab stay inside, Escape returns focus to
+/// the control that opened it.
+#[wasm_bindgen_test]
+async fn dialog_traps_focus_and_returns_it_to_the_opener() {
+    let open = RwSignal::new(false);
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <button id="w-d-opener" on:click=move |_| open.set(true)>"Open"</button>
+            <Dialog open=open title="W trap" close_label="Close W" class="w-d-panel">
+                <input id="w-d-first"/>
+                <button id="w-d-middle">"Middle"</button>
+            </Dialog>
+        }
+    });
+    let opener = el("w-d-opener");
+    opener.focus().unwrap();
+    opener.click();
+    settle().await;
+    let panel: HtmlElement = document()
+        .query_selector(".w-d-panel")
+        .unwrap()
+        .expect("dialog rendered")
+        .dyn_into()
+        .unwrap();
+    assert!(
+        document()
+            .active_element()
+            .is_some_and(|a| a.is_same_node(Some(panel.as_ref()))),
+        "focus moves into the dialog"
+    );
+    let close: HtmlElement = panel
+        .query_selector("[aria-label='Close W']")
+        .unwrap()
+        .unwrap()
+        .dyn_into()
+        .unwrap();
+    close.focus().unwrap();
+    key(&close, "Tab");
+    assert_eq!(
+        active_id(),
+        "w-d-first",
+        "Tab from the last control wraps to the first"
+    );
+    key_with_shift(&el("w-d-first"), "Tab");
+    assert!(
+        document()
+            .active_element()
+            .is_some_and(|a| a.is_same_node(Some(close.as_ref()))),
+        "Shift+Tab from the first control wraps to the last"
+    );
+    key(&close, "Escape");
+    settle().await;
+    assert!(!open.get_untracked());
+    assert_eq!(active_id(), "w-d-opener", "focus returns to the opener");
+}
+
+/// An opener that unmounts as the dialog opens (a menu item): focus goes to `return_to`.
+#[wasm_bindgen_test]
+async fn dialog_returns_focus_to_the_fallback_when_the_opener_is_gone() {
+    let open = RwSignal::new(false);
+    let menu = RwSignal::new(true);
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <button id="w-f-trigger">"Menu"</button>
+            <Show when=move || menu.get()>
+                <button id="w-f-item" on:click=move |_| { menu.set(false); open.set(true); }>"Help"</button>
+            </Show>
+            <Dialog open=open title="W fallback" close_label="Close F" return_to="w-f-trigger">
+                <p>"x"</p>
+            </Dialog>
+        }
+    });
+    let item = el("w-f-item");
+    item.focus().unwrap();
+    item.click();
+    settle().await;
+    assert!(document().get_element_by_id("w-f-item").is_none());
+    let panel: HtmlElement = document()
+        .query_selector("[aria-labelledby='w-fallback-title']")
+        .unwrap()
+        .expect("dialog rendered")
+        .dyn_into()
+        .unwrap();
+    key(&panel, "Escape");
+    settle().await;
+    assert_eq!(active_id(), "w-f-trigger");
 }

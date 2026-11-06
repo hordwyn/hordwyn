@@ -51,9 +51,10 @@
   --tab-bar-height: 0rem;
 }
 
-/* the tab bar exists below 760 px (design.md 3.2) */
+/* the tab bar exists below 760 px (design.md 3.2), and only for a signed-in user: the
+   shell puts `has-tab-bar` on <html> then, so signed-out pages keep no empty room */
 @media (width < 47.5rem) {
-  :root {
+  :root.has-tab-bar {
     --tab-bar-height: 4.5rem;
   }
 }

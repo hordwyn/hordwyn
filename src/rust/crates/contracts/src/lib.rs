@@ -205,6 +205,10 @@ pub struct ErrorDto {
     /// Stable machine-readable code (`not_found`, `forbidden`, `totp_required`, ...).
     pub code: String,
     pub message: String,
+    /// Seconds until a throttled caller may try again (`too_many_attempts`); also sent as
+    /// the `Retry-After` header.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -425,9 +429,17 @@ mod tests {
         let e = ErrorDto {
             code: "not_found".into(),
             message: "item not found".into(),
+            retry_after_secs: None,
         };
-        let back: ErrorDto = serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
+        let json = serde_json::to_string(&e).unwrap();
+        assert!(
+            !json.contains("retry_after_secs"),
+            "omitted when unset: {json}"
+        );
+        let back: ErrorDto = serde_json::from_str(&json).unwrap();
         assert_eq!(back, e);
+        let old: ErrorDto = serde_json::from_str(r#"{"code":"x","message":"y"}"#).unwrap();
+        assert_eq!(old.retry_after_secs, None);
     }
 }
 

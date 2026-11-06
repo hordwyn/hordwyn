@@ -18,9 +18,10 @@ use ui::{
 
 use crate::api;
 use crate::auth::{
-    Placement, SignUpValues, display_name_error, field_id, form_message, password_error,
-    password_hint, password_rules, placement, server_field_message, sign_in_errors, sign_up_errors,
-    summary_title, username_error, username_hint, username_rules, username_saved_as,
+    Placement, SignUpValues, check_throttled_message, display_name_error, field_id, form_message,
+    form_message_after, password_error, password_hint, password_rules, placement,
+    server_field_message, sign_in_errors, sign_up_errors, summary_title, username_error,
+    username_hint, username_rules, username_saved_as,
 };
 use crate::i18n::{I18n, use_i18n};
 use crate::pages::{PageTitle, go};
@@ -69,6 +70,66 @@ fn focus(id: &str) {
     }
     #[cfg(not(feature = "hydrate"))]
     let _ = id;
+}
+
+/// The label of a brand legal link: `legal-<key>` if there is such a message, else the key.
+fn legal_label(i18n: &I18n, key: &str) -> String {
+    let id = format!("legal-{key}");
+    let text = i18n.t(&id);
+    if text == id { key.to_string() } else { text }
+}
+
+/// The frame of the auth pages (design.md 6.14): the brand mark above a centred 28 rem card
+/// and a footer with the brand's legal links.
+#[component]
+fn AuthFrame(children: Children) -> impl IntoView {
+    let cfg = expect_context::<crate::ClientConfig>();
+    let i18n = use_i18n();
+    let legal = cfg.legal.clone();
+    let footer = (!legal.is_empty()).then(|| {
+        let links = legal
+            .into_iter()
+            .map(|(key, url)| {
+                let label = legal_label(&i18n, &key);
+                view! { <li><a href=url class="underline">{label}</a></li> }
+            })
+            .collect_view();
+        view! {
+            <footer class="mt-8 text-small text-muted-foreground">
+                <nav aria-label=i18n.t("legal-nav")>
+                    <ul class="flex flex-wrap justify-center gap-4">{links}</ul>
+                </nav>
+            </footer>
+        }
+    });
+    view! {
+        <div class="mx-auto w-full max-w-md">
+            <p data-testid="brand-mark" class="mb-6 text-center text-h2 font-semibold tracking-tight">
+                {cfg.product_name.clone()}
+            </p>
+            {children()}
+            {footer}
+        </div>
+    }
+}
+
+/// The submit button of an auth form; disabled with "You are offline" under it while the
+/// browser is offline (design.md 5.2).
+#[component]
+fn SubmitButton(#[prop(into)] pending: Signal<bool>, label: String) -> impl IntoView {
+    let online = use_context::<crate::shell::Online>().map_or_else(|| RwSignal::new(true), |o| o.0);
+    let offline_text = use_i18n().t("auth-offline");
+    view! {
+        <div class="grid gap-1">
+            <Button r#type="submit" size=ButtonSize::Lg class="min-h-target-touch" loading=pending
+                disabled=Signal::derive(move || !online.get())>
+                {label}
+            </Button>
+            <Show when=move || !online.get()>
+                <p class="text-small text-muted-foreground">{offline_text.clone()}</p>
+            </Show>
+        </div>
+    }
 }
 
 /// The error summary; rebuilt on every submit with errors, so it takes focus each time.
@@ -131,6 +192,8 @@ fn PasswordInput(
 #[derive(Clone, Copy)]
 struct Availability {
     answer: RwSignal<Option<UsernameAvailability>>,
+    /// The last check was throttled (the instance-wide limit, DEC-184), not the person.
+    throttled: RwSignal<bool>,
     asked: StoredValue<String>,
     timer: StoredValue<Option<TimeoutHandle>>,
     check: Action<String, ()>,
@@ -139,23 +202,29 @@ struct Availability {
 impl Availability {
     fn new(invite: Option<String>, form_error: RwSignal<Option<String>>, i18n: Arc<I18n>) -> Self {
         let answer = RwSignal::new(None::<UsernameAvailability>);
+        let throttled = RwSignal::new(false);
         let check = Action::new(move |name: &String| {
             let (name, invite, i18n) = (name.clone(), invite.clone(), i18n.clone());
             async move {
                 match api::username_available(name, invite).await {
-                    Ok(a) => answer.set(Some(a)),
+                    Ok(a) => {
+                        throttled.set(false);
+                        answer.set(Some(a));
+                    }
                     // closed sign-up or a dead invite: say so before the person submits
                     Err(e) => {
                         let code = api::error_code(&e);
                         if matches!(code.as_str(), "signup_closed" | "invalid_invite") {
                             form_error.set(Some(form_message(&i18n, &code)));
                         }
+                        throttled.set(code == "too_many_attempts");
                     }
                 }
             }
         });
         Self {
             answer,
+            throttled,
             asked: StoredValue::new(String::new()),
             timer: StoredValue::new(None),
             check,
@@ -270,6 +339,9 @@ fn UsernameField(
         let raw = username.get();
         let normalized = normalize_username(&raw);
         let mut parts: Vec<String> = username_saved_as(&status_i, &raw).into_iter().collect();
+        if avail.throttled.get() {
+            parts.push(check_throttled_message(&status_i));
+        }
         if avail.available(&normalized) {
             parts.push(status_i.t_args(
                 "auth-username-available",
@@ -437,7 +509,7 @@ pub fn SignUp() -> impl IntoView {
     let (link, have) = (i18n.t("nav-sign-in"), i18n.t("auth-have-account"));
     let invited_text = i18n.t("auth-invited");
     view! {
-        <div class="mx-auto w-full max-w-md">
+        <AuthFrame>
             <PageTitle text=i18n.t("auth-sign-up-title")/>
             <form class="grid gap-4 rounded-xl border border-border bg-card p-6 shadow-sm" novalidate on:submit=on_submit>
                 {invited.then(|| view! { <p class="text-sm text-muted-foreground">{invited_text}</p> })}
@@ -460,12 +532,12 @@ pub fn SignUp() -> impl IntoView {
                     <PasswordInput value=f.password autocomplete="new-password"
                         invalid=Signal::derive(move || password_err.with(Option::is_some))/>
                 </FormField>
-                <Button r#type="submit" size=ButtonSize::Lg class="min-h-target-touch" loading=submit.pending()>{i18n.t("auth-sign-up-submit")}</Button>
+                <SubmitButton pending=submit.pending() label=i18n.t("auth-sign-up-submit")/>
                 <p class="text-sm text-muted-foreground">
                     {have} " " <A href="/sign-in" attr:class="underline">{link}</A>
                 </p>
             </form>
-        </div>
+        </AuthFrame>
     }
 }
 
@@ -502,7 +574,7 @@ impl SignInForm {
         self.errors.set(errs);
     }
 
-    fn server_error(self, i18n: &I18n, code: &str) {
+    fn server_error(self, i18n: &I18n, code: &str, retry_after_secs: Option<u64>) {
         match placement(code) {
             Placement::TotpStep => {
                 self.need_totp.set(true);
@@ -513,7 +585,8 @@ impl SignInForm {
                 self.show(vec![(field, form_message(i18n, code))]);
             }
             Placement::Form => {
-                self.form_error.set(Some(form_message(i18n, code)));
+                self.form_error
+                    .set(Some(form_message_after(i18n, code, retry_after_secs)));
             }
         }
     }
@@ -550,7 +623,9 @@ pub fn SignIn() -> impl IntoView {
             async move {
                 match api::sign_in(user, pass, Some(code)).await {
                     Ok(_) => go("/library"),
-                    Err(err) => f.server_error(&i18n, &api::error_code(&err)),
+                    Err(err) => {
+                        f.server_error(&i18n, &api::error_code(&err), api::retry_after_secs(&err));
+                    }
                 }
             }
         })
@@ -580,7 +655,7 @@ pub fn SignIn() -> impl IntoView {
     let pass_err = Signal::derive(move || error_of(f.errors, AuthField::Password));
     let (link, have) = (i18n.t("nav-sign-up"), i18n.t("auth-no-account"));
     view! {
-        <div class="mx-auto w-full max-w-md">
+        <AuthFrame>
             <PageTitle text=i18n.t("auth-sign-in-title")/>
             <form class="grid gap-4 rounded-xl border border-border bg-card p-6 shadow-sm" novalidate on:submit=on_submit>
                 <Summary errors=f.summary/>
@@ -598,12 +673,12 @@ pub fn SignIn() -> impl IntoView {
                 <Show when=move || f.need_totp.get()>
                     <TotpStep f=f/>
                 </Show>
-                <Button r#type="submit" size=ButtonSize::Lg class="min-h-target-touch" loading=submit.pending()>{i18n.t("auth-sign-in-submit")}</Button>
+                <SubmitButton pending=submit.pending() label=i18n.t("auth-sign-in-submit")/>
                 <FormAlert error=f.form_error/>
                 <p class="text-sm text-muted-foreground">
                     {have} " " <A href="/sign-up" attr:class="underline">{link}</A>
                 </p>
             </form>
-        </div>
+        </AuthFrame>
     }
 }

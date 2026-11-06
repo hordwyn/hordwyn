@@ -57,6 +57,27 @@ pub(crate) fn form_message(i: &I18n, code: &str) -> String {
     }
 }
 
+/// [`form_message`], with the remaining minutes for a lock-out (`retry_after_secs`).
+#[must_use]
+pub(crate) fn form_message_after(i: &I18n, code: &str, retry_after_secs: Option<u64>) -> String {
+    match retry_after_secs {
+        Some(secs) if AuthErrorCode::from_code(code) == Some(AuthErrorCode::TooManyAttempts) => {
+            let minutes = secs.div_ceil(60).max(1);
+            i.t_args(
+                "auth-lockout-minutes",
+                &[("minutes", FluentValue::from(minutes))],
+            )
+        }
+        _ => form_message(i, code),
+    }
+}
+
+/// The availability check was throttled: the account can still be created.
+#[must_use]
+pub(crate) fn check_throttled_message(i: &I18n) -> String {
+    i.t("auth-check-throttled")
+}
+
 fn n(v: usize) -> FluentValue<'static> {
     FluentValue::from(v)
 }
@@ -545,6 +566,42 @@ mod tests {
             password: "correct horse battery".into(),
         };
         assert_eq!(sign_up_errors(&i, &ok, None).len(), 0);
+    }
+
+    /// UX0-4 (design.md 5.2): the lock-out names the remaining minutes; the availability
+    /// check has its own throttle text (there were no failed attempts).
+    #[test]
+    fn lock_out_names_the_remaining_minutes() {
+        let i = en();
+        assert_eq!(
+            form_message_after(&i, "too_many_attempts", Some(61)),
+            "Too many failed sign-ins. Try again in 2 minutes."
+        );
+        assert_eq!(
+            form_message_after(&i, "too_many_attempts", Some(30)),
+            "Too many failed sign-ins. Try again in 1 minute."
+        );
+        assert_eq!(
+            form_message_after(&de(), "too_many_attempts", Some(600)),
+            "Zu viele fehlgeschlagene Anmeldungen. Versuch es in 10 Minuten noch einmal."
+        );
+        assert_eq!(
+            form_message_after(&de(), "too_many_attempts", Some(60)),
+            "Zu viele fehlgeschlagene Anmeldungen. Versuch es in 1 Minute noch einmal."
+        );
+        assert_eq!(
+            form_message_after(&i, "too_many_attempts", None),
+            form_message(&i, "too_many_attempts")
+        );
+        assert_eq!(
+            form_message_after(&i, "invalid_credentials", Some(5)),
+            "Wrong username or password."
+        );
+        assert_eq!(
+            check_throttled_message(&i),
+            "Too many checks right now; you can still create the account."
+        );
+        assert_ne!(check_throttled_message(&de()), check_throttled_message(&i));
     }
 
     #[test]

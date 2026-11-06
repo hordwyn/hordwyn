@@ -9,3 +9,7 @@ primary = "oklch(0.55 0.2 145)"
 
 [strings.de]
 nav-library = "Regal"
+
+[legal]
+imprint = "https://example.org/imprint"
+privacy = "https://example.org/privacy"

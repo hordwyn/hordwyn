@@ -16,7 +16,8 @@ short_name = "Reading Room"    # cookie names and the outgoing User-Agent use it
 default_locale = "de"          # used when the browser's Accept-Language matches no locale
 support_url = "https://example.org/support"   # added to the User-Agent
 
-[legal]                        # footer links (read, not displayed yet)
+[legal]                        # footer links on the sign-in and sign-up pages; labels from the
+                               # `legal-<key>` messages (imprint, privacy, terms), else the key
 imprint = "https://example.org/imprint"
 privacy = "https://example.org/privacy"
 

@@ -974,3 +974,29 @@ async fn language_preference_is_stored_and_validated() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(me["locale"], serde_json::Value::Null);
 }
+
+/// UX0-4 (design.md 5.2): the lock-out says how long it lasts, in the body and as
+/// `Retry-After`, so the client can show the remaining minutes.
+#[tokio::test]
+async fn lock_out_carries_the_seconds_left() {
+    let (s, _) = state();
+    let app = api::router(s);
+    signed_up(&app).await;
+    let wrong = || Some(serde_json::json!({"username": "anna", "password": "wrong password!!"}));
+    for _ in 0..auth::MAX_FAILED_SIGN_INS {
+        let (status, _, _) = call(&app, "POST", "/api/v1/auth/sign-in", None, wrong()).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    let (status, headers, err) = call(&app, "POST", "/api/v1/auth/sign-in", None, wrong()).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(err["code"], "too_many_attempts");
+    let secs = err["retry_after_secs"].as_u64().expect("retry_after_secs");
+    assert!(secs > 0 && secs <= 15 * 60, "{secs}");
+    assert_eq!(
+        headers[header::RETRY_AFTER].to_str().unwrap(),
+        secs.to_string()
+    );
+    // other errors carry no such field
+    let (_, _, err) = call(&app, "GET", "/api/v1/library", None, None).await;
+    assert!(err.get("retry_after_secs").is_none(), "{err}");
+}

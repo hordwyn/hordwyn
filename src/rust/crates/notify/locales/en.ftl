@@ -21,9 +21,9 @@ library-metadata_changed-title = { $title } was updated
 library-metadata_changed-body = The details of { $title } changed.
 
 social-link_request-title = { $from } says you are "{ $companion }"
-social-link_request-body = Confirm on the People page that { $from }'s companion "{ $companion }" is you.
+social-link_request-body = Confirm on the People page that you are "{ $companion }" for { $from }.
 social-link_accepted-title = { $user } accepted your link
-social-link_accepted-body = Your companion "{ $companion }" is now linked to { $user }.
+social-link_accepted-body = "{ $companion }" on your People page is now linked to { $user }.
 social-session_shared-title = { $owner } logged { $title } with you
 social-session_shared-body = See it in your history and copy it to your log if you like.
 social-list_shared-title = { $owner } shared a list

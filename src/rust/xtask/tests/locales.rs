@@ -62,6 +62,8 @@ const WEB_FAMILIES: &[&str] = &[
     "notify-state-",
     "notify-event-",
     "month-short-",
+    // labels of the brand's legal links (`[legal]` keys)
+    "legal-",
 ];
 
 #[test]

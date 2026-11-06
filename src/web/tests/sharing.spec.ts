@@ -21,7 +21,7 @@ async function signUp(page: Page, path: string, user: string, display: string) {
 
 async function addCompanion(page: Page, name: string) {
   await page.getByLabel("Name", { exact: true }).fill(name);
-  await page.getByRole("button", { name: "Add companion" }).click();
+  await page.getByRole("button", { name: "Add person" }).click();
   await expect(page.getByRole("listitem").filter({ hasText: name })).toBeVisible();
 }
 
@@ -55,7 +55,7 @@ test("promote, accept, see history, demote, merge", async ({ page, browser }) =>
   await expect(page.getByText("In your library")).toBeVisible();
   await page.getByLabel("Carl", { exact: true }).check();
   await page.getByLabel("Karl", { exact: true }).check();
-  await page.getByRole("button", { name: "Mark as done" }).click();
+  await page.getByRole("button", { name: "Mark as completed" }).click();
   await expect(page.getByText("Logged.")).toBeVisible();
 
   const before = await historyRow(page);
@@ -99,7 +99,7 @@ test("promote, accept, see history, demote, merge", async ({ page, browser }) =>
   await page.getByLabel("Duplicate", { exact: true }).selectOption({ label: "Karl" });
   await page.getByRole("button", { name: "Merge", exact: true }).click();
   await expect(
-    page.getByRole("list", { name: "Companions" }).getByRole("listitem").filter({ hasText: "Karl" }),
+    page.getByRole("list", { name: "People" }).getByRole("listitem").filter({ hasText: "Karl" }),
   ).toHaveCount(0);
 
   // history unchanged
@@ -112,7 +112,7 @@ test("a list shared by link is readable without an account", async ({ page, brow
   await hydrated(page);
   await page.getByLabel("List name").fill("Weekend picks");
   await page.getByRole("button", { name: "Create list" }).click();
-  await page.getByRole("button", { name: "Share Weekend picks by link" }).click();
+  await page.getByRole("button", { name: "Share by link: Weekend picks" }).click();
   const link = page.getByTestId("share-link");
   await expect(link).toContainText("/shared/lists/");
   const url = (await link.innerText()).trim();

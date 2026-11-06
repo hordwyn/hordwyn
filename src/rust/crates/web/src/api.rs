@@ -39,10 +39,11 @@ mod server {
             .ok_or_else(|| ServerFnError::new("unauthorized"))
     }
 
-    /// The error code travels to the page, which translates it (`auth-error-<code>`).
+    /// The error code travels to the page, which translates it (`auth-error-<code>`), with
+    /// the seconds of a lock-out ([`super::encode_error`]).
     #[allow(clippy::needless_pass_by_value)]
     pub fn code(e: ErrorDto) -> ServerFnError {
-        ServerFnError::new(e.code)
+        ServerFnError::new(super::encode_error(&e.code, e.retry_after_secs))
     }
 
     pub fn set_session(b: &dyn Backend, token: &str, max_age: i64) {
@@ -411,7 +412,46 @@ pub async fn delete_subscription(id: String) -> Result<(), ServerFnError> {
 #[must_use]
 pub fn error_code(e: &ServerFnError) -> String {
     match e {
-        ServerFnError::ServerError(m) => m.clone(),
+        ServerFnError::ServerError(m) => m.split(';').next().unwrap_or_default().to_string(),
         _ => "generic".into(),
+    }
+}
+
+/// The message of a server function error: the code, then `;retry_after=<secs>` for a
+/// throttled call (server functions carry one string, not the `ErrorDto`).
+#[must_use]
+pub fn encode_error(code: &str, retry_after_secs: Option<u64>) -> String {
+    match retry_after_secs {
+        Some(s) => format!("{code}{RETRY_AFTER}{s}"),
+        None => code.to_string(),
+    }
+}
+
+const RETRY_AFTER: &str = ";retry_after=";
+
+/// Seconds until a throttled call may be tried again (see [`encode_error`]).
+#[must_use]
+pub fn retry_after_secs(e: &ServerFnError) -> Option<u64> {
+    match e {
+        ServerFnError::ServerError(m) => m.split_once(RETRY_AFTER)?.1.parse().ok(),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn errors_carry_the_code_and_the_seconds_left() {
+        let e = ServerFnError::new(encode_error("too_many_attempts", Some(120)));
+        assert_eq!(error_code(&e), "too_many_attempts");
+        assert_eq!(retry_after_secs(&e), Some(120));
+        let e = ServerFnError::new(encode_error("invalid_credentials", None));
+        assert_eq!(error_code(&e), "invalid_credentials");
+        assert_eq!(retry_after_secs(&e), None);
+        let odd = ServerFnError::new("too_many_attempts;retry_after=soon");
+        assert_eq!(retry_after_secs(&odd), None);
+        assert_eq!(error_code(&odd), "too_many_attempts");
     }
 }

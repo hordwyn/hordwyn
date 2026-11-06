@@ -9,6 +9,16 @@
 /// Locales with built-in texts; the first is the fallback for missing keys.
 pub const LOCALES: [&str; 2] = ["en", "de"];
 
+/// The name of a supported locale in its own language, for the language picker.
+#[must_use]
+pub fn locale_name(locale: &str) -> &str {
+    match locale {
+        "en" => "English",
+        "de" => "Deutsch",
+        other => other,
+    }
+}
+
 /// `locale` if it is supported (case-insensitive, region ignored: `de-AT` -> `de`).
 #[must_use]
 pub fn supported(locale: &str) -> Option<&'static str> {
@@ -111,5 +121,14 @@ mod tests {
         assert_eq!(supported("en_GB"), Some("en"));
         assert_eq!(supported("fr"), None);
         assert_eq!(separators("de-CH"), (',', '.'));
+    }
+
+    #[test]
+    fn every_locale_is_named_in_itself() {
+        assert_eq!(locale_name("en"), "English");
+        assert_eq!(locale_name("de"), "Deutsch");
+        for l in LOCALES {
+            assert_ne!(locale_name(l), l, "{l}");
+        }
     }
 }

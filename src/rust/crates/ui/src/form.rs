@@ -229,7 +229,7 @@ pub fn FormField(
     let status_id = format!("{id}-status");
     let rules_view = rules.map(|rules| {
         view! {
-            <ul id=rules_id class="grid gap-0.5 text-xs">
+            <ul id=rules_id class="grid gap-0.5 text-small">
                 {move || rules.get().into_iter().map(|(text, state)| {
                     let (icon, tone, name) = match state {
                         RuleState::Pass => (IconName::Check, "text-success", rule_met_label.get()),

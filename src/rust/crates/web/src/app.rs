@@ -27,11 +27,15 @@ pub struct ClientConfig {
     pub strings: BTreeMap<String, String>,
     pub signed_in: bool,
     pub display_name: String,
+    /// The signed-in user's username (account menu head, design.md 3.2).
+    pub username: String,
     pub is_admin: bool,
     /// Unread inbox notifications at render time.
     pub unread: u32,
     /// The brand's support link (last in the account menu, addendum-1 D13).
     pub support_url: Option<String>,
+    /// The brand's legal links (`imprint` -> URL ...), in the auth pages' footer (6.14).
+    pub legal: Vec<(String, String)>,
 }
 
 impl ClientConfig {
@@ -77,10 +81,28 @@ fn server_config() -> ClientConfig {
             .as_ref()
             .map(|s| s.display_name.clone())
             .unwrap_or_default(),
+        username: session
+            .as_ref()
+            .map(|s| s.username.clone())
+            .unwrap_or_default(),
         is_admin: session.as_ref().is_some_and(|s| s.is_admin),
         unread: session.as_ref().map_or(0, |s| s.unread),
         support_url: brand.as_ref().and_then(|b| b.support_url.clone()),
+        legal: brand
+            .as_ref()
+            .map(|b| b.legal.clone().into_iter().collect())
+            .unwrap_or_default(),
     }
+}
+
+/// The config as JSON for the `<script type="application/json">` block. Every `<` is
+/// escaped as `\u003c` (still valid JSON), so user text such as a display name cannot end
+/// the script or switch the tokenizer into a script-data escape state (`<!--`, `<script`).
+#[must_use]
+pub(crate) fn config_json(cfg: &ClientConfig) -> String {
+    serde_json::to_string(cfg)
+        .unwrap_or_default()
+        .replace('<', "\\u003c")
 }
 
 /// HTML document around the app (server side). Brand theme tokens, product name, locale and
@@ -98,12 +120,11 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
     #[cfg(not(feature = "ssr"))]
     let theme = String::new();
     crate::provide_page_context(&cfg);
-    let json = serde_json::to_string(&cfg)
-        .unwrap_or_default()
-        .replace("</", "<\\/");
+    let json = config_json(&cfg);
     view! {
         <!DOCTYPE html>
-        <html lang=cfg.locale.clone()>
+        // the tab bar (and the room kept for it) exists only for a signed-in user (UX0-13)
+        <html lang=cfg.locale.clone() class=cfg.signed_in.then_some("has-tab-bar")>
             <head>
                 <meta charset="utf-8"/>
                 <meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -183,4 +204,22 @@ fn GalleryPage() -> impl IntoView {
     #[cfg(not(feature = "gallery"))]
     let page = view! { <crate::shell::NotFound/> }.into_any();
     page
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// UX0-8: user text in the hydration config cannot break out of its script block.
+    #[test]
+    fn the_config_json_has_no_angle_bracket() {
+        let cfg = ClientConfig {
+            display_name: "<!--<script></script>".into(),
+            ..ClientConfig::default()
+        };
+        let json = config_json(&cfg);
+        assert!(!json.contains('<'), "{json}");
+        let back: ClientConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, cfg);
+    }
 }

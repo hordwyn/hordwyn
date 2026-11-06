@@ -6,8 +6,7 @@
 //! the same item offline converge once both have pushed and pulled.
 
 use contracts::{
-    ErrorDto, SyncBatchDto, SyncChangeDto, SyncChangesDto, SyncCommandDto, SyncEntryDto,
-    SyncResultDto,
+    SyncBatchDto, SyncChangeDto, SyncChangesDto, SyncCommandDto, SyncEntryDto, SyncResultDto,
 };
 use domain::hlc::Hlc;
 use domain::ids::{EntryId, ItemId};
@@ -123,10 +122,7 @@ pub async fn push(s: &ApiState, a: Actor, batch: SyncBatchDto) -> Vec<SyncResult
         out.push(SyncResultDto {
             op_id: c.op_id,
             ok: r.is_ok(),
-            error: r.err().map(|e| ErrorDto {
-                code: e.code.into(),
-                message: e.message,
-            }),
+            error: r.err().map(ApiError::into_dto),
         });
     }
     out

@@ -1,25 +1,8 @@
-import { test, expect, type Page } from "@playwright/test";
-import AxeBuilder from "@axe-core/playwright";
+import { test, expect } from "@playwright/test";
+import { expectNoA11yViolations, hydrated, PASSWORD } from "./helpers";
 
 // UX phase 0, form discipline (design.md 5.2): rules before typing, live normalisation,
 // availability with suggestions, inline errors plus an error summary that takes focus.
-
-const WCAG_A_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
-
-async function hydrated(page: Page) {
-  await expect(page.locator("body[data-hydrated]")).toBeAttached({ timeout: 20_000 });
-}
-
-async function expectNoA11yViolations(page: Page) {
-  const results = await new AxeBuilder({ page }).withTags(WCAG_A_AA).analyze();
-  expect(
-    results.violations.map(
-      (v) => `${v.id}: ${v.help} -> ${v.nodes.map((n) => `${n.target.join(" ")} ${n.failureSummary ?? ""}`).join("; ")}`,
-    ),
-  ).toEqual([]);
-}
-
-const PASSWORD = "correct horse battery";
 
 test("signing up 'Robin' succeeds as 'robin'", async ({ page }) => {
   const name = `Robin${Date.now()}`;

@@ -1,7 +1,7 @@
 use app::AppError;
 use auth::AuthError;
 use axum::Json;
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use contracts::ErrorDto;
 
@@ -11,6 +11,8 @@ pub struct ApiError {
     pub status: StatusCode,
     pub code: &'static str,
     pub message: String,
+    /// Seconds until a throttled caller may try again (`too_many_attempts`).
+    pub retry_after_secs: Option<u64>,
 }
 
 impl ApiError {
@@ -20,6 +22,7 @@ impl ApiError {
             status,
             code,
             message: message.into(),
+            retry_after_secs: None,
         }
     }
 
@@ -32,18 +35,28 @@ impl ApiError {
     pub fn bad_request(m: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, "bad_request", m)
     }
+
+    /// The body of the answer.
+    #[must_use]
+    pub fn into_dto(self) -> ErrorDto {
+        ErrorDto {
+            code: self.code.into(),
+            message: self.message,
+            retry_after_secs: self.retry_after_secs,
+        }
+    }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (
-            self.status,
-            Json(ErrorDto {
-                code: self.code.into(),
-                message: self.message,
-            }),
-        )
-            .into_response()
+        let status = self.status;
+        let retry = self.retry_after_secs;
+        let mut resp = (status, Json(self.into_dto())).into_response();
+        if let Some(secs) = retry {
+            resp.headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from(secs));
+        }
+        resp
     }
 }
 
@@ -92,7 +105,9 @@ impl From<AuthError> for ApiError {
         };
         // every sign-up / sign-in rule has its own code (contracts::auth::AuthErrorCode)
         if let Some(code) = e.code() {
-            return Self::new(status, code.code(), msg);
+            let mut out = Self::new(status, code.code(), msg);
+            out.retry_after_secs = e.retry_after_secs();
+            return out;
         }
         if let AuthError::App(a) = e {
             return a.into();

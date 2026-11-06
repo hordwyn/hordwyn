@@ -81,6 +81,19 @@ fn inbox_dto(i: &InboxItem) -> InboxItemDto {
     }
 }
 
+/// Unread inbox items: one count query, for the bell on every page (design.md 3.2).
+///
+/// # Errors
+/// Notifications disabled, storage errors.
+pub async fn unread_count(s: &ApiState, a: Actor) -> ApiResult<u32> {
+    api(s)?
+        .engine
+        .store()
+        .count_unread(a.user_id)
+        .await
+        .map_err(port)
+}
+
 /// # Errors
 /// Notifications disabled, storage errors.
 pub async fn inbox(s: &ApiState, a: Actor) -> ApiResult<Vec<InboxItemDto>> {

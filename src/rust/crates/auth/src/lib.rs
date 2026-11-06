@@ -103,6 +103,15 @@ fn username_rule_message(r: UsernameRule) -> &'static str {
 }
 
 impl AuthError {
+    /// Seconds until a throttled caller may try again ([`AuthError::TooManyAttempts`]).
+    #[must_use]
+    pub fn retry_after_secs(&self) -> Option<u64> {
+        match self {
+            Self::TooManyAttempts { retry_after_secs } => u64::try_from(*retry_after_secs).ok(),
+            _ => None,
+        }
+    }
+
     /// The stable code of a sign-up / sign-in error (`None` for internal errors and
     /// wrapped `App` errors).
     #[must_use]
@@ -350,11 +359,12 @@ impl Auth {
         check_password(&s.password)?;
         let first = self.signup_gate(s.invite.as_deref()).await?;
         let invite = if first { None } else { s.invite.as_deref() };
-        // Hash first so a failure leaves no half-created account behind.
-        let hash = hash_password(s.password.clone()).await?;
+        // A taken name answers before the (costly) hash; the `Conflict` mapping below still
+        // covers a lost race. Hash before creating so a failure leaves no half-created account.
         if self.app.user_by_username(&username).await?.is_some() {
             return Err(AuthError::UsernameTaken);
         }
+        let hash = hash_password(s.password.clone()).await?;
         let user = if let Some(token) = invite {
             self.app
                 .accept_invite(token, &username, &display_name)
@@ -424,9 +434,10 @@ impl Auth {
         if let Err(rule) = check_username(&username) {
             return Ok(UsernameAvailability::Invalid { username, rule });
         }
+        // the gate first: a closed instance does no lookup and uses none of the budget
+        self.signup_gate(invite).await?;
         self.username_checks
             .take(self.now(), USERNAME_CHECKS_PER_MINUTE)?;
-        self.signup_gate(invite).await?;
         if self.app.user_by_username(&username).await?.is_none() {
             return Ok(UsernameAvailability::Available { username });
         }

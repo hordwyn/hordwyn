@@ -91,6 +91,11 @@ fn form_field_renders_rule_checklist_and_status_line() {
     assert!(html.contains("id=\"pw-status\"") && html.contains("role=\"status\""));
     assert!(html.contains("Strong password"));
     assert!(html.contains("aria-describedby=\"pw-description pw-rules pw-status pw-error\""));
+    // running text never below 0.8 rem (design.md 2.8, UX0-7)
+    assert!(
+        html.contains("id=\"pw-rules\" class=\"grid gap-0.5 text-small\""),
+        "{html}"
+    );
 }
 
 #[test]
@@ -357,6 +362,10 @@ fn key_hint_renders_nested_kbd() {
     let html = render(|| view! { <KeyHint keys=vec!["Ctrl".to_string(), "K".to_string()]/> });
     assert_eq!(count(&html, "<kbd"), 3, "outer + two keys: {html}");
     assert!(html.contains(">Ctrl<") && html.contains(">K<"));
+    assert!(
+        !html.contains("text-[0.7rem]"),
+        "key caps use the type scale: {html}"
+    );
 }
 
 #[test]
@@ -533,4 +542,20 @@ fn toaster_sits_above_the_mobile_tab_bar() {
         view! { <Toaster dismiss_label="Dismiss"/> }
     });
     assert!(html.contains("var(--tab-bar-height)"), "{html}");
+}
+
+/// UX0-3 (WCAG 2.5.3): inside a labelled button the initials are decoration, drawn by CSS,
+/// so the visible text never contradicts the button's name.
+#[test]
+fn decorative_avatar_has_no_text_of_its_own() {
+    let html = render(|| view! { <Avatar name="Axe Tester" decorative=true/> });
+    assert!(html.contains("aria-hidden=\"true\""), "{html}");
+    assert!(html.contains("data-initials=\"AT\""), "{html}");
+    assert!(!html.contains(">AT<"), "{html}");
+    assert!(!html.contains("role=\"img\""), "{html}");
+    let plain = render(|| view! { <Avatar name="Axe Tester"/> });
+    assert!(
+        plain.contains("role=\"img\"") && plain.contains(">AT<"),
+        "{plain}"
+    );
 }
