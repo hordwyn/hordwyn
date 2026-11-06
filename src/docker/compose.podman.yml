@@ -1,0 +1,22 @@
+# Override for rootless podman when container DNS does not work (DEC-168):
+#   docker compose -f src/docker/compose.yml -f src/docker/compose.podman.yml up
+# The app and Meilisearch join the Postgres container's network namespace, so all three
+# talk over 127.0.0.1 and no container names have to be resolved. Port 3000 is published
+# on the shared namespace (the postgres service owns it).
+services:
+  postgres:
+    ports:
+      - "3000:3000"
+
+  meilisearch:
+    network_mode: "service:postgres"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    network_mode: "service:postgres"
+    ports: !reset []
+    environment:
+      APP__DATABASE__URL: "postgres://app:${POSTGRES_PASSWORD:-app}@127.0.0.1:5432/app"
+      APP__SEARCH__MEILI_URL: "http://127.0.0.1:7700"

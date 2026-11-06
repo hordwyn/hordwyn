@@ -86,3 +86,7 @@ network namespaces (and a DNS server nobody reaches) behind after `down`; the ke
 shows `apparmor="DENIED" ... profile="pasta" ... signal=term`. Allow the signal in the local
 override of the passt profile (`signal (receive) peer=podman,`), reload it with
 `apparmor_parser -r`, stop stray `aardvark-dns`/`pasta` processes and start again.
+
+If container DNS still does not work, start with the override that needs no DNS (the three
+containers share one network namespace and talk over 127.0.0.1):
+`docker compose -f src/docker/compose.yml -f src/docker/compose.podman.yml up`.
