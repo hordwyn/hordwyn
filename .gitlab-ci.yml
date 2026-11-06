@@ -145,7 +145,8 @@ antora:
     name: antora/antora:3.2.2
     entrypoint: [""]
   script:
-    - npm i --no-save asciidoctor-kroki@2.0.0
+    # Antora 3.2 bundles @asciidoctor/core 2.2; kroki 1.x and 2.x need core 4 (DEC-147)
+    - npm i --no-save asciidoctor-kroki@0.18.1
     - antora --fetch --to-dir build/site docs/antora-playbook.yml
   artifacts:
     paths: [build/site]
