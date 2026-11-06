@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data sources and admin setup - mockup</title>
+<!--
+  Static design mockup. Self-contained: inline CSS, system fonts, no scripts, no images.
+  Sample data is invented (no real users). The product name is a placeholder; operators
+  set the real name in config/brand.
+  Icons: Lucide v1.69.0 (ISC, https://lucide.dev) and Tabler Icons v3.50.0 (MIT,
+  https://tabler.io/icons) copied from src/rust/crates/ui/icons/vendor/. Licence texts sit
+  next to the vendored files.
+-->
+<style>
+:root{
+  --radius:.5rem;
+  --background:#ffffff;--foreground:#09090b;
+  --card:#ffffff;--card-foreground:#09090b;
+  --popover:#ffffff;--popover-foreground:#09090b;
+  --primary:#18181b;--primary-foreground:#fafafa;
+  --secondary:#f4f4f5;--secondary-foreground:#18181b;
+  --muted:#f4f4f5;--muted-foreground:#52525c;
+  --accent:#f4f4f5;--accent-foreground:#18181b;
+  --destructive:#c10007;--destructive-foreground:#ffffff;
+  --border:#e4e4e7;--input:#d4d4d8;--ring:#71717b;
+  --success:#007a55;--warning:#bb4d00;--info:#0069a8;
+  --success-soft:#ecfdf5;--warning-soft:#fffbeb;--info-soft:#f0f9ff;--destructive-soft:#fef2f2;
+  --shadow-1:0 1px 2px rgba(9,9,11,.06);
+  --shadow-2:0 4px 12px rgba(9,9,11,.10);
+  --shadow-3:0 16px 40px rgba(9,9,11,.18);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --background:#09090b;--foreground:#fafafa;
+    --card:#18181b;--card-foreground:#fafafa;
+    --popover:#18181b;--popover-foreground:#fafafa;
+    --primary:#fafafa;--primary-foreground:#18181b;
+    --secondary:#27272a;--secondary-foreground:#fafafa;
+    --muted:#27272a;--muted-foreground:#9f9fa9;
+    --accent:#27272a;--accent-foreground:#fafafa;
+    --destructive:#c10007;--destructive-foreground:#ffffff;
+    --border:#27272a;--input:#3f3f46;--ring:#9f9fa9;
+    --success:#00d492;--warning:#ffb900;--info:#00bcff;
+    --success-soft:#052e22;--warning-soft:#2e1a05;--info-soft:#052235;--destructive-soft:#2e0a0a;
+    --shadow-1:0 1px 2px rgba(0,0,0,.5);
+    --shadow-2:0 4px 12px rgba(0,0,0,.5);
+    --shadow-3:0 16px 40px rgba(0,0,0,.6);
+  }
+}
+*{box-sizing:border-box;border-color:var(--border)}
+html{font-size:16px}
+body{margin:0;background:var(--background);color:var(--foreground);
+  font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  line-height:1.5;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.7rem;
+  background:var(--muted);border:1px solid var(--border);border-bottom-width:2px;border-radius:4px;padding:0 .3rem}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.85em;background:var(--muted);padding:.1rem .3rem;border-radius:4px}
+.ic{width:1.25rem;height:1.25rem;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ic.sm{width:1rem;height:1rem}.ic.lg{width:1.75rem;height:1.75rem}.ic.xl{width:2.5rem;height:2.5rem}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+/* ---- mockup chrome (not part of the product) ---- */
+.mock-note{background:var(--info-soft);color:var(--foreground);border-bottom:1px solid var(--border);
+  font-size:.8rem;padding:.5rem 1rem}
+.mock-note b{color:var(--info)}
+.mock-note a{text-decoration:underline}
+.annot{position:relative}
+.annot::after{content:attr(data-n);position:absolute;top:-.6rem;left:-.6rem;width:1.3rem;height:1.3rem;
+  border-radius:999px;background:var(--warning);color:#09090b;font-size:.7rem;font-weight:700;
+  display:flex;align-items:center;justify-content:center;z-index:5;box-shadow:var(--shadow-1)}
+.notes{max-width:72rem;margin:2rem auto;padding:0 1rem 3rem;font-size:.9rem}
+.notes h2{font-size:1rem;margin:0 0 .5rem}
+.notes ol{padding-left:1.25rem;margin:0}
+.notes li{margin:.25rem 0}
+.notes li b{display:inline-block;min-width:1.3rem;height:1.3rem;border-radius:999px;background:var(--warning);color:#09090b;
+  font-size:.7rem;text-align:center;line-height:1.3rem;margin-right:.4rem}
+/* ---- app shell ---- */
+.topbar{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--background) 92%,transparent);
+  backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+.topbar-in{max-width:80rem;margin:0 auto;padding:0 1rem;height:3.5rem;display:flex;align-items:center;gap:.75rem}
+.wordmark{display:flex;align-items:center;gap:.5rem;font-weight:650;letter-spacing:-.01em;margin-right:.5rem}
+.wordmark .mark{width:1.75rem;height:1.75rem;border-radius:.45rem;background:var(--primary);color:var(--primary-foreground);
+  display:flex;align-items:center;justify-content:center}
+.wordmark .mark .ic{width:1rem;height:1rem}
+.nav{display:flex;gap:.125rem;flex:1}
+.nav a{padding:.4rem .7rem;border-radius:var(--radius);font-size:.9rem;color:var(--muted-foreground);font-weight:500}
+.nav a:hover{background:var(--accent);color:var(--accent-foreground)}
+.nav a[aria-current]{color:var(--foreground);background:var(--secondary)}
+.searchpill{display:flex;align-items:center;gap:.5rem;border:1px solid var(--input);border-radius:var(--radius);
+  padding:.35rem .6rem;font-size:.85rem;color:var(--muted-foreground);min-width:13rem;background:var(--background)}
+.searchpill kbd{margin-left:auto}
+.iconbtn{width:2.25rem;height:2.25rem;border-radius:var(--radius);display:inline-flex;align-items:center;justify-content:center;
+  color:var(--foreground);position:relative}
+.iconbtn:hover{background:var(--accent)}
+.iconbtn .dot{position:absolute;top:.45rem;right:.5rem;width:.5rem;height:.5rem;border-radius:999px;background:var(--destructive);border:2px solid var(--background)}
+.avatar{width:2rem;height:2rem;border-radius:999px;background:var(--secondary);color:var(--secondary-foreground);
+  display:inline-flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:600;flex:none}
+.avatar.lg{width:3rem;height:3rem;font-size:1rem}
+.avatar.sm{width:1.5rem;height:1.5rem;font-size:.6rem}
+main{max-width:80rem;margin:0 auto;padding:1.5rem 1rem 5rem}
+h1{font-size:1.5rem;letter-spacing:-.02em;margin:0 0 .25rem;font-weight:650}
+h2{font-size:1.05rem;margin:0;font-weight:600}
+h3{font-size:.95rem;margin:0;font-weight:600}
+.lead{color:var(--muted-foreground);margin:0 0 1.25rem;font-size:.95rem}
+.muted{color:var(--muted-foreground)}
+.small{font-size:.8rem}
+.row{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.between{justify-content:space-between}
+.stack{display:flex;flex-direction:column;gap:.5rem}
+.grid{display:grid;gap:1rem}
+.section{margin:1.75rem 0}
+.section-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:.75rem;gap:1rem}
+.section-head a{font-size:.85rem;color:var(--muted-foreground)}
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;height:2.25rem;padding:0 .9rem;border-radius:var(--radius);
+  font-size:.875rem;font-weight:500;white-space:nowrap;border:1px solid transparent;transition:background .15s}
+.btn.primary{background:var(--primary);color:var(--primary-foreground)}
+.btn.secondary{background:var(--secondary);color:var(--secondary-foreground)}
+.btn.outline{border-color:var(--input);background:var(--background)}
+.btn.outline:hover,.btn.ghost:hover{background:var(--accent)}
+.btn.destructive{background:var(--destructive);color:var(--destructive-foreground)}
+.btn.sm{height:1.9rem;padding:0 .6rem;font-size:.8rem}
+.btn.lg{height:2.75rem;padding:0 1.25rem;font-size:.95rem}
+.btn[disabled]{opacity:.5;pointer-events:none}
+.btn:focus-visible,.iconbtn:focus-visible,input:focus-visible,.card:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+/* cards */
+.card{background:var(--card);color:var(--card-foreground);border:1px solid var(--border);border-radius:calc(var(--radius) + 4px);
+  box-shadow:var(--shadow-1)}
+.card .pad{padding:1rem}
+.card-head{padding:1rem 1rem 0;display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem}
+.card-foot{padding:0 1rem 1rem}
+/* badges and chips */
+.badge{display:inline-flex;align-items:center;gap:.25rem;font-size:.72rem;font-weight:600;border-radius:999px;padding:.1rem .55rem;
+  border:1px solid transparent;line-height:1.4}
+.badge.secondary{background:var(--secondary);color:var(--secondary-foreground)}
+.badge.outline{border-color:var(--border)}
+.badge.success{background:var(--success-soft);color:var(--success)}
+.badge.warning{background:var(--warning-soft);color:var(--warning)}
+.badge.info{background:var(--info-soft);color:var(--info)}
+.badge.destructive{background:var(--destructive-soft);color:var(--destructive)}
+@media (prefers-color-scheme: dark){.badge.destructive{color:#ff6467}}
+.chips{display:flex;gap:.4rem;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:.35rem;height:2rem;padding:0 .75rem;border-radius:999px;border:1px solid var(--input);
+  font-size:.82rem;font-weight:500;background:var(--background)}
+.chip .n{color:var(--muted-foreground);font-weight:400}
+.chip[aria-pressed="true"],.chip.on{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary)}
+.chip[aria-pressed="true"] .n{color:inherit;opacity:.75}
+/* tabs */
+.tabs{display:flex;gap:.25rem;border-bottom:1px solid var(--border);overflow-x:auto}
+.tab{padding:.5rem .75rem;font-size:.875rem;font-weight:500;color:var(--muted-foreground);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tab[aria-selected="true"]{color:var(--foreground);border-bottom-color:var(--foreground)}
+.tab .n{margin-left:.3rem;font-size:.72rem;background:var(--muted);border-radius:999px;padding:0 .4rem}
+.seg{display:inline-flex;background:var(--muted);border-radius:var(--radius);padding:.2rem;gap:.2rem}
+.seg button{padding:.3rem .7rem;border-radius:calc(var(--radius) - 2px);font-size:.82rem;font-weight:500;color:var(--muted-foreground);display:inline-flex;align-items:center;gap:.35rem}
+.seg button[aria-pressed="true"]{background:var(--background);color:var(--foreground);box-shadow:var(--shadow-1)}
+/* forms */
+.field{display:grid;gap:.35rem}
+.field label{font-size:.875rem;font-weight:500}
+.input{height:2.25rem;width:100%;border:1px solid var(--input);border-radius:var(--radius);background:var(--background);color:var(--foreground);
+  padding:0 .7rem;font:inherit;font-size:.9rem}
+.input.area{height:auto;min-height:4.5rem;padding:.5rem .7rem}
+.input[aria-invalid="true"]{border-color:var(--destructive);box-shadow:0 0 0 1px var(--destructive)}
+.hint{font-size:.78rem;color:var(--muted-foreground)}
+.err{font-size:.8rem;color:var(--destructive);font-weight:500;display:flex;gap:.3rem;align-items:flex-start}
+@media (prefers-color-scheme: dark){.err{color:#ff6467}}
+.ok{font-size:.8rem;color:var(--success);font-weight:500;display:flex;gap:.3rem;align-items:center}
+.rules{list-style:none;padding:0;margin:.1rem 0 0;display:grid;gap:.15rem;font-size:.78rem}
+.rules li{display:flex;gap:.35rem;align-items:center;color:var(--muted-foreground)}
+.rules li.pass{color:var(--success)}
+.rules li.fail{color:var(--destructive)}
+@media (prefers-color-scheme: dark){.rules li.fail{color:#ff6467}}
+.switch{width:2.25rem;height:1.25rem;border-radius:999px;background:var(--input);position:relative;flex:none}
+.switch::after{content:"";position:absolute;top:.125rem;left:.125rem;width:1rem;height:1rem;border-radius:999px;background:var(--background);box-shadow:var(--shadow-1)}
+.switch.on{background:var(--primary)}.switch.on::after{left:1.125rem}
+/* alerts */
+.alert{display:flex;gap:.75rem;align-items:flex-start;border:1px solid var(--border);border-radius:calc(var(--radius) + 2px);padding:.75rem 1rem;font-size:.875rem}
+.alert .ic{margin-top:.1rem}
+.alert.warning{background:var(--warning-soft);border-color:color-mix(in srgb,var(--warning) 35%,transparent)}
+.alert.warning .ic{color:var(--warning)}
+.alert.info{background:var(--info-soft);border-color:color-mix(in srgb,var(--info) 35%,transparent)}
+.alert.info .ic{color:var(--info)}
+.alert.destructive{background:var(--destructive-soft);border-color:color-mix(in srgb,var(--destructive) 35%,transparent)}
+.alert.destructive .ic{color:var(--destructive)}
+.alert.success{background:var(--success-soft);border-color:color-mix(in srgb,var(--success) 35%,transparent)}
+.alert.success .ic{color:var(--success)}
+.alert .body{flex:1}
+.alert .body p{margin:.15rem 0 0}
+.alert .actions{display:flex;gap:.5rem;margin-top:.5rem}
+/* posters */
+.posters{display:grid;grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr));gap:1rem}
+.poster{display:flex;flex-direction:column;gap:.4rem;position:relative;border-radius:var(--radius)}
+.poster .cover{aspect-ratio:2/3;border-radius:var(--radius);background:linear-gradient(160deg,var(--c1,#5b6478),var(--c2,#2b2f3a));
+  position:relative;overflow:hidden;box-shadow:var(--shadow-1);display:flex;align-items:flex-end;padding:.4rem}
+.poster .cover.square{aspect-ratio:1/1}
+.poster .cover .st{position:absolute;top:.4rem;left:.4rem;background:rgba(9,9,11,.75);color:#fafafa;font-size:.68rem;font-weight:600;
+  border-radius:999px;padding:.1rem .45rem;display:inline-flex;align-items:center;gap:.25rem}
+.poster .cover .st .ic{width:.8rem;height:.8rem}
+.poster .cover .bar{position:absolute;left:0;right:0;bottom:0;height:4px;background:rgba(255,255,255,.25)}
+.poster .cover .bar i{display:block;height:100%;background:#fafafa;width:var(--p,40%)}
+.poster .t{font-size:.85rem;font-weight:500;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.poster .m{font-size:.75rem;color:var(--muted-foreground)}
+.poster .quick{position:absolute;right:.4rem;top:.4rem;background:var(--background);border-radius:999px;width:1.75rem;height:1.75rem;
+  display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow-2);opacity:0}
+.poster:hover .quick,.poster:focus-within .quick{opacity:1}
+/* continue cards */
+.cont{display:grid;grid-template-columns:4.5rem 1fr;gap:.75rem;align-items:center}
+.cont .cover{aspect-ratio:2/3;border-radius:calc(var(--radius) - 2px);background:linear-gradient(160deg,var(--c1,#5b6478),var(--c2,#2b2f3a))}
+.cont .t{font-weight:600;font-size:.95rem;line-height:1.25}
+.cont .m{font-size:.8rem;color:var(--muted-foreground)}
+.progress{height:.35rem;background:var(--muted);border-radius:999px;overflow:hidden;margin:.4rem 0}
+.progress i{display:block;height:100%;background:var(--foreground);width:var(--p,30%)}
+/* lists */
+.list{list-style:none;margin:0;padding:0}
+.list li{display:flex;gap:.75rem;align-items:center;padding:.65rem 0;border-bottom:1px solid var(--border)}
+.list li:last-child{border-bottom:0}
+.list .grow{flex:1;min-width:0}
+.list .t{font-weight:500;font-size:.9rem}
+.list .m{font-size:.8rem;color:var(--muted-foreground)}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th{text-align:left;font-weight:500;color:var(--muted-foreground);padding:.5rem .6rem;border-bottom:1px solid var(--border)}
+td{padding:.55rem .6rem;border-bottom:1px solid var(--border);vertical-align:middle}
+.status{display:inline-flex;align-items:center;gap:.35rem;font-size:.8rem;font-weight:500}
+.status i{width:.55rem;height:.55rem;border-radius:999px;background:var(--muted-foreground);display:inline-block}
+.status.ok i{background:var(--success)}.status.warn i{background:var(--warning)}.status.bad i{background:var(--destructive)}
+.status.off i{background:var(--input)}
+/* dialog / sheet */
+.backdrop{position:fixed;inset:0;background:rgba(9,9,11,.55);z-index:40;display:flex;align-items:flex-start;justify-content:center;padding:4rem 1rem}
+.dialog{background:var(--popover);color:var(--popover-foreground);border:1px solid var(--border);border-radius:calc(var(--radius) + 6px);
+  box-shadow:var(--shadow-3);width:100%;max-width:38rem;overflow:hidden}
+.dialog .d-head{padding:1rem 1.25rem .5rem;display:flex;justify-content:space-between;align-items:center}
+.dialog .d-body{padding:.5rem 1.25rem 1.25rem}
+.dialog .d-foot{padding:.75rem 1.25rem;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:.5rem;background:var(--muted)}
+/* empty states */
+.empty{border:1px dashed var(--input);border-radius:calc(var(--radius) + 4px);padding:2.5rem 1.5rem;text-align:center;display:grid;gap:.5rem;justify-items:center}
+.empty .ic{color:var(--muted-foreground)}
+.empty h3{font-size:1rem}
+.empty p{margin:0;color:var(--muted-foreground);font-size:.9rem;max-width:30rem}
+/* checklist */
+.check{list-style:none;margin:0;padding:0;display:grid;gap:.5rem}
+.check li{display:flex;gap:.75rem;align-items:center;padding:.7rem .9rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--card)}
+.check li .ic{color:var(--muted-foreground)}
+.check li.done{color:var(--muted-foreground)}
+.check li.done .ic{color:var(--success)}
+.check li .grow{flex:1}
+/* sidebar settings layout */
+.settings{display:grid;grid-template-columns:14rem 1fr;gap:2rem}
+.sidenav{display:flex;flex-direction:column;gap:.1rem;position:sticky;top:5rem;align-self:start}
+.sidenav .h{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted-foreground);padding:.75rem .6rem .25rem}
+.sidenav a{padding:.4rem .6rem;border-radius:var(--radius);font-size:.875rem;color:var(--muted-foreground);display:flex;gap:.5rem;align-items:center}
+.sidenav a[aria-current]{background:var(--secondary);color:var(--foreground);font-weight:500}
+/* steps */
+.steps{display:flex;gap:.5rem;align-items:center;font-size:.8rem;color:var(--muted-foreground);flex-wrap:wrap}
+.steps span{display:inline-flex;align-items:center;gap:.35rem}
+.steps span b{width:1.35rem;height:1.35rem;border-radius:999px;border:1px solid var(--input);display:inline-flex;align-items:center;justify-content:center;font-size:.7rem}
+.steps span.cur{color:var(--foreground);font-weight:600}
+.steps span.cur b{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary)}
+.steps span.done b{background:var(--success);color:#fff;border-color:var(--success)}
+/* mobile frame */
+.phone{width:390px;margin:1rem auto;border:10px solid #18181b;border-radius:2.5rem;overflow:hidden;background:var(--background);box-shadow:var(--shadow-3);position:relative;height:844px}
+.phone main{padding:1rem 1rem 6rem}
+.phone .topbar-in{height:3.25rem}
+.tabbar{position:absolute;left:0;right:0;bottom:0;height:4.5rem;border-top:1px solid var(--border);background:var(--background);display:grid;grid-template-columns:repeat(5,1fr);align-items:center;padding:0 .25rem .75rem}
+.tabbar a{display:flex;flex-direction:column;align-items:center;gap:.15rem;font-size:.65rem;color:var(--muted-foreground);padding:.35rem 0;min-height:3rem;justify-content:center}
+.tabbar a[aria-current]{color:var(--foreground);font-weight:600}
+.tabbar a.fab .ic{width:2.75rem;height:2.75rem;padding:.65rem;border-radius:999px;background:var(--primary);color:var(--primary-foreground);stroke-width:2.5}
+.rail{display:flex;gap:.75rem;overflow-x:auto;padding-bottom:.5rem;scroll-snap-type:x mandatory}
+.rail > *{scroll-snap-align:start;flex:none;width:9rem}
+@media (max-width: 760px){
+  .nav,.searchpill span,.hide-m{display:none}
+  .settings{grid-template-columns:1fr}
+  .sidenav{position:static;flex-direction:row;overflow-x:auto}
+  .sidenav .h{display:none}
+}
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true">
+  <!-- Lucide v1.69.0 (ISC) -->
+  <symbol id="i-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></symbol>
+  <symbol id="i-library" viewBox="0 0 24 24"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-movie" viewBox="0 0 24 24"><path d="m12.296 3.464 3.02 3.956"/><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3z"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m6.18 5.276 3.1 3.899"/></symbol>
+  <symbol id="i-tv" viewBox="0 0 24 24"><path d="m17 2-5 5-5-5"/><rect width="20" height="15" x="2" y="7" rx="2"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/></symbol>
+  <symbol id="i-gamepad" viewBox="0 0 24 24"><line x1="6" x2="10" y1="11" y2="11"/><line x1="8" x2="8" y1="9" y2="13"/><line x1="15" x2="15.01" y1="12" y2="12"/><line x1="18" x2="18.01" y1="10" y2="10"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/></symbol>
+  <symbol id="i-dices" viewBox="0 0 24 24"><rect width="12" height="12" x="2" y="10" rx="2" ry="2"/><path d="m17.92 14 3.5-3.5a2.24 2.24 0 0 0 0-3l-5-4.92a2.24 2.24 0 0 0-3 0L10 6"/><path d="M6 18h.01"/><path d="M10 14h.01"/><path d="M15 6h.01"/><path d="M18 9h.01"/></symbol>
+  <symbol id="i-headphones" viewBox="0 0 24 24"><path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/></symbol>
+  <symbol id="i-disc" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M6 12c0-1.7.7-3.2 1.8-4.2"/><circle cx="12" cy="12" r="2"/><path d="M18 12c0 1.7-.7 3.2-1.8 4.2"/></symbol>
+  <symbol id="i-podcast" viewBox="0 0 24 24"><path d="M12 17v4"/><path d="M18 11a6 6 0 00-3-5.197"/><path d="M2 11a10 10 0 015-8.662"/><path d="M22 11a10 10 0 00-5-8.662"/><path d="M6 11a6 6 0 013-5.197"/><path d="M9 21h6"/><rect x="10" y="9" width="4" height="8" rx="2"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></symbol>
+  <symbol id="i-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 9-5.5 5.5L8 12"/></symbol>
+  <symbol id="i-circle-play" viewBox="0 0 24 24"><path d="M9 9.003a1 1 0 0 1 1.517-.859l4.997 2.997a1 1 0 0 1 0 1.718l-4.997 2.997A1 1 0 0 1 9 14.996z"/><circle cx="12" cy="12" r="10"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  <symbol id="i-warning" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 5h16"/><path d="M4 12h16"/><path d="M4 19h16"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M8 2v3"/><path d="M16 2v3"/><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></symbol>
+  <symbol id="i-spinner" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+  <symbol id="i-trophy" viewBox="0 0 24 24"><path d="M10 14.66V17a1 1 0 0 1-1 1 2 2 0 0 0-2 2v2"/><path d="M14 14.66V17a1 1 0 0 0 1 1 2 2 0 0 1 2 2v2"/><path d="M17.916 10H19.5A2.5 2.5 0 0 0 22 7.5V5a1 1 0 0 0-1-1h-3"/><path d="M4 22h16"/><path d="M6 9a6 6 0 0 0 12 0V3a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1z"/><path d="M6.084 10H4.5A2.5 2.5 0 0 1 2 7.5V5a1 1 0 0 1 1-1h3"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M3 5h.01"/><path d="M3 12h.01"/><path d="M3 19h.01"/><path d="M8 5h13"/><path d="M8 12h13"/><path d="M8 19h13"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></symbol>
+  <symbol id="i-timer" viewBox="0 0 24 24"><line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/></symbol>
+  <!-- Tabler Icons v3.50.0 (MIT) -->
+  <symbol id="i-meeple" viewBox="0 0 24 24"><path d="M9 20h-5a1 1 0 0 1 -1 -1c0 -2 3.378 -4.907 4 -6c-1 0 -4 -.5 -4 -2c0 -2 4 -3.5 6 -4c0 -1.5 .5 -4 3 -4s3 2.5 3 4c2 .5 6 2 6 4c0 1.5 -3 2 -4 2c.622 1.093 4 4 4 6a1 1 0 0 1 -1 1h-5c-1 0 -2 -4 -3 -4s-2 4 -3 4"/></symbol>
+</svg>
+<div class="mock-note"><b>Mockup:</b> Top: first-run wizard, step 3 (data sources). Bottom: the admin "Data sources" page after setup, plus the member view. <a href="index.html">All screens</a></div>
+<header class="topbar">
+  <div class="topbar-in">
+    <a class="wordmark" href="home.html"><span class="mark"><svg class="ic"><use href="#i-library"/></svg></span><span>Brand</span></a>
+    <nav class="nav" aria-label="Main navigation">
+      <a href="home.html" aria-current="page">Home</a>
+      <a href="library.html" >Library</a>
+      <a href="history.html" >History</a>
+      <a href="lists.html" >Lists</a>
+      <a href="companions.html" >People</a>
+    </nav>
+    <button class="searchpill" type="button" aria-label="Search and add (Ctrl+K)"><svg class="ic sm"><use href="#i-search"/></svg><span>Search or add...</span><kbd>Ctrl K</kbd></button>
+    <button class="iconbtn" type="button" aria-label="Add" title="Add (N)"><svg class="ic"><use href="#i-plus"/></svg></button>
+    <a class="iconbtn" href="notifications.html" aria-label="Notifications, 2 unread"><svg class="ic"><use href="#i-bell"/></svg><span class="dot"></span></a>
+    <button class="iconbtn" type="button" aria-label="Account menu" aria-haspopup="menu"><span class="avatar">ST</span></button>
+  </div>
+</header>
+<main>
+  <section class="card" style="max-width:52rem;margin:0 auto 3rem">
+    <div class="pad" style="border-bottom:1px solid var(--border)">
+      <div class="row between"><div class="wordmark"><span class="mark"><svg class="ic"><use href="#i-library"/></svg></span><span>Brand</span> <span class="muted" style="font-weight:400">setup</span></div><span class="small muted">You can change all of this later under Settings</span></div>
+      <div class="steps annot" data-n="1" style="margin-top:.75rem">
+        <span class="done"><b><svg class="ic sm" style="width:.7rem;height:.7rem"><use href="#i-check"/></svg></b> Admin account</span><svg class="ic sm muted"><use href="#i-chevron-right"/></svg>
+        <span class="done"><b><svg class="ic sm" style="width:.7rem;height:.7rem"><use href="#i-check"/></svg></b> How you host</span><svg class="ic sm muted"><use href="#i-chevron-right"/></svg>
+        <span class="cur"><b>3</b> Data sources</span><svg class="ic sm muted"><use href="#i-chevron-right"/></svg>
+        <span><b>4</b> Done</span>
+      </div>
+    </div>
+    <div class="pad stack" style="gap:1rem">
+      <div>
+        <h1>Where should titles and covers come from?</h1>
+        <p class="lead" style="margin:0">Each source needs its own free key. Add the ones you care about now; the rest can wait. Without a source for a kind, people can still add items by hand.</p>
+      </div>
+      <div class="alert info annot" data-n="2"><svg class="ic"><use href="#i-info"/></svg><div class="body">You chose <strong>Home: free, for family and friends</strong>. Keys are entered once here and used by everyone on this instance. Nobody needs their own key.</div></div>
+
+      <div class="card annot" data-n="3">
+        <div class="card-head"><div class="row"><svg class="ic lg"><use href="#i-movie"/></svg><div><h3>TMDB <span class="muted" style="font-weight:400">movies, shows</span></h3><div class="small muted">Free for non-commercial use. Needs an API read access token.</div></div></div><span class="status ok"><i></i> Working</span></div>
+        <div class="pad stack">
+          <div class="field"><label for="tmdb">API read access token</label><div class="row"><input id="tmdb" class="input" type="password" value="xxxxxxxxxxxxxxxxxxxxxxxx" style="flex:1"><button class="btn outline">Test</button></div><span class="ok"><svg class="ic sm"><use href="#i-circle-check"/></svg> Connected. Found "Quiet Orbit (2024)" in 410 ms.</span></div>
+          <ol class="small muted" style="margin:0;padding-left:1.2rem"><li>Create a free account at TMDB and open API settings.</li><li>Copy the "API Read Access Token" (the long one).</li><li>Paste it above and press Test.</li></ol>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="row"><svg class="ic lg"><use href="#i-gamepad"/></svg><div><h3>IGDB <span class="muted" style="font-weight:400">video games</span></h3><div class="small muted">Free for non-commercial use via a Twitch developer application.</div></div></div><span class="status bad"><i></i> Key rejected</span></div>
+        <div class="pad stack">
+          <div class="grid" style="grid-template-columns:1fr 1fr;gap:.75rem">
+            <div class="field"><label for="igdb-id">Client ID</label><input id="igdb-id" class="input" value="abc123"></div>
+            <div class="field"><label for="igdb-s">Client secret</label><input id="igdb-s" class="input" type="password" value="xxxxxxxx" aria-invalid="true" aria-describedby="igdb-err"></div>
+          </div>
+          <span id="igdb-err" class="err" role="alert"><svg class="ic sm"><use href="#i-warning"/></svg> Twitch did not accept this client id and secret (401). Check both values in the Twitch developer console; the secret is only shown once there.</span>
+          <div class="row"><button class="btn outline">Test again</button><button class="btn ghost">Skip for now</button></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="row"><svg class="ic lg"><use href="#i-book"/></svg><div><h3>Open Library <span class="muted" style="font-weight:400">books</span></h3><div class="small muted">No key needed. Identifies this instance with a contact address.</div></div></div><span class="status ok"><i></i> Ready</span></div>
+        <div class="pad"><div class="field" style="max-width:24rem"><label for="ol">Contact email sent with requests</label><input id="ol" class="input" value="admin@example.org"><span class="hint">Open Library asks for this so they can reach you; it raises the allowed request rate.</span></div></div>
+      </div>
+
+      <div class="card annot" data-n="4">
+        <div class="card-head"><div class="row"><svg class="ic lg"><use href="#i-tv"/></svg><div><h3>TheTVDB <span class="muted" style="font-weight:400">shows (optional, TMDB already covers shows)</span></h3><div class="small muted">Needs a project key. With a user-supported key, each person also enters their own subscriber PIN.</div></div></div><span class="status off"><i></i> Not set up</span></div>
+        <div class="pad row"><button class="btn outline sm">Set up</button><span class="small muted">Rarely needed at home.</span></div>
+      </div>
+
+      <details><summary class="small" style="cursor:pointer;font-weight:500">More sources: Podcast Index, MusicBrainz, Hardcover, BoardGameGeek, VNDB, Metron</summary><p class="small muted" style="margin:.5rem 0 0">Same card per source. Sources not compiled into this build are not listed.</p></details>
+    </div>
+    <div class="d-foot" style="justify-content:space-between"><button class="btn ghost">Back</button><div class="row"><button class="btn outline">Skip, add later</button><button class="btn primary">Continue</button></div></div>
+  </section>
+
+  <div class="settings">
+    <nav class="sidenav" aria-label="Settings">
+      <div class="h">You</div>
+      <a href="#"><svg class="ic sm"><use href="#i-user"/></svg> Account</a>
+      <a href="notifications.html"><svg class="ic sm"><use href="#i-bell"/></svg> Notifications</a>
+      <a href="integrations.html"><svg class="ic sm"><use href="#i-link"/></svg> Integrations</a>
+      <a href="#"><svg class="ic sm"><use href="#i-upload"/></svg> Import and export</a>
+      <a href="#"><svg class="ic sm"><use href="#i-heart"/></svg> Privacy</a>
+      <div class="h">Instance (admin)</div>
+      <a href="sources.html" aria-current="page"><svg class="ic sm"><use href="#i-search"/></svg> Data sources</a>
+      <a href="#"><svg class="ic sm"><use href="#i-users"/></svg> Users and sign-up</a>
+      <a href="#"><svg class="ic sm"><use href="#i-settings"/></svg> Instance</a>
+    </nav>
+    <div>
+      <h1>Data sources</h1>
+      <p class="lead">Metadata and covers come from these services. Their terms apply to their data; attribution is shown on every item page.</p>
+      <div class="alert warning annot" data-n="5" style="margin-bottom:1rem"><svg class="ic"><use href="#i-warning"/></svg><div class="body"><strong>Hosting mode: Hosted for paying users.</strong><p>TMDB, IGDB and MusicBrainz allow free use only for non-commercial projects. Record your agreements here so the attribution and the caching limits are set correctly.</p><div class="actions"><button class="btn outline sm">Record agreements</button></div></div></div>
+      <table class="annot" data-n="6">
+        <thead><tr><th>Source</th><th>Kinds</th><th>Credential</th><th>Status</th><th>Last 24 h</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><strong>TMDB</strong></td><td>Movies, shows</td><td>Instance key <span class="muted">(from environment)</span></td><td><span class="status ok"><i></i> Working</span></td><td>1,204 calls - 0 errors</td><td><button class="btn ghost sm">Details</button></td></tr>
+          <tr><td><strong>IGDB</strong></td><td>Video games</td><td>Instance key</td><td><span class="status warn"><i></i> Rate limited</span></td><td>3,900 calls - 212 refused (429)</td><td><button class="btn ghost sm">Details</button></td></tr>
+          <tr><td><strong>Open Library</strong></td><td>Books, audiobooks</td><td>None (contact email)</td><td><span class="status ok"><i></i> Working</span></td><td>640 calls</td><td><button class="btn ghost sm">Details</button></td></tr>
+          <tr><td><strong>Hardcover</strong></td><td>Books</td><td>Per user <span class="muted">(each member connects their account)</span></td><td><span class="status ok"><i></i> 4 members connected</span></td><td>88 calls</td><td><button class="btn ghost sm">Details</button></td></tr>
+          <tr><td><strong>TheTVDB</strong></td><td>Shows</td><td>Instance key + per-user PIN</td><td><span class="status bad"><i></i> Circuit open <span class="muted">(retry in 4 min)</span></span></td><td>52 calls - 40 errors (503)</td><td><button class="btn ghost sm">Details</button></td></tr>
+          <tr><td><strong>BoardGameGeek</strong></td><td>Board games</td><td>Instance token</td><td><span class="status off"><i></i> Not set up</span></td><td class="muted">-</td><td><button class="btn outline sm">Set up</button></td></tr>
+          <tr class="muted"><td><strong>Podcast Index</strong></td><td>Podcasts</td><td>Instance key</td><td><span class="status off"><i></i> Disabled by config</span></td><td>-</td><td></td></tr>
+        </tbody>
+      </table>
+      <div class="card pad annot" data-n="7" style="margin-top:1.25rem;max-width:40rem">
+        <div class="small muted" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem">Member view: Settings &gt; Data sources</div>
+        <ul class="list">
+          <li><div class="grow"><div class="t">Movies, shows, books, video games</div><div class="m">Provided by this instance. Nothing to do.</div></div><span class="status ok"><i></i> Working</span></li>
+          <li><div class="grow"><div class="t">Hardcover</div><div class="m">Connect your own Hardcover account to search its catalog and sync your shelves.</div></div><button class="btn outline sm">Connect</button></li>
+          <li><div class="grow"><div class="t">TheTVDB subscriber PIN</div><div class="m">Optional. Only needed if you want TheTVDB as a second source for shows.</div></div><button class="btn ghost sm">Add PIN</button></li>
+          <li><div class="grow"><div class="t">Board games, podcasts</div><div class="m">No source is set up on this instance. You can add items by hand.</div></div><button class="btn ghost sm">Ask admin</button></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</main>
+<section class="notes">
+  <h2>Annotations</h2>
+  <ol>
+    <li><b>1</b>Four steps, all visible, resumable: the wizard opens until an admin completes it, and only while no admin exists or setup is unfinished. Headless installs skip it by setting the keys in the environment.</li>
+    <li><b>2</b>Step 2 ("How you host") sets defaults, not features: Home = open or invite sign-up, instance keys only, per-user keys hidden. Hosted = invite/closed sign-up, per-user credentials allowed where the provider requires them, licence reminders on.</li>
+    <li><b>3</b>Every source card: what it covers, what the terms say in one line, the credential field(s), a Test that runs a real search and reports time and a sample result, and the three steps to get a key. Errors are specific (401 vs network vs 429) and say where to look.</li>
+    <li><b>4</b>Optional sources are collapsed to a single row so the wizard stays short; nothing here blocks Continue.</li>
+    <li><b>5</b>Commercial hosting banner: the app cannot know the operator's agreements, so it asks once and remembers. Per source: licence type (non-commercial / agreement on file / user-supported), which also decides whether per-user PINs are shown.</li>
+    <li><b>6</b>Status is computed from the governed client: Working, Rate limited (429s in the window), Circuit open (with retry time), Key rejected (401/403), Not set up, Disabled by config. "From environment" marks keys that the UI cannot edit.</li>
+    <li><b>7</b>Members never see keys. They see which kinds work, which need their own account (Hardcover: personal tokens may not be shared, so it is per user by design), and an "Ask admin" that sends an admin notification.</li>
+  </ol>
+</section>
+</body>
+</html>
