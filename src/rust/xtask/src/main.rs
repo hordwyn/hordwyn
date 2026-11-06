@@ -167,15 +167,8 @@ fn e2e() -> Result<()> {
 
 fn dev() -> Result<()> {
     xtask::services::up()?;
-    // cargo-leptos runs the server in the workspace, where the default relative brand
-    // directory does not exist; point it at the repo copy unless the caller set one.
-    let brand = xtask::repo_root().join("config/brand/default");
-    let brand = brand.to_string_lossy();
-    let env: Vec<(&str, &str)> = if std::env::var_os("APP__BRAND__DIR").is_some() {
-        Vec::new()
-    } else {
-        vec![("APP__BRAND__DIR", &brand)]
-    };
+    let env = dev_env();
+    let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
     cargo(
         &[
             "leptos",
@@ -236,4 +229,36 @@ fn run(cmd: &mut Command) -> Result<()> {
         bail!("{shown} exited with {status}");
     }
     Ok(())
+}
+
+/// Settings that point the dev server at the services of `xtask services up` (the config
+/// defaults assume a production layout: Postgres on 5432, Meilisearch on 7700, https
+/// cookies, paths relative to the repo root). A variable the caller already set wins.
+fn dev_env() -> Vec<(&'static str, String)> {
+    let repo = xtask::repo_root();
+    let dev = xtask::workspace_root().join(".dev");
+    let wanted = [
+        ("APP__DATABASE__URL", xtask::services::pg_dev_url()),
+        ("APP__SEARCH__MEILI_URL", xtask::services::meili_url()),
+        (
+            "APP__SEARCH__MEILI_MASTER_KEY",
+            xtask::services::MEILI_KEY.into(),
+        ),
+        ("APP__SERVER__PUBLIC_URL", "http://127.0.0.1:3000".into()),
+        ("APP__AUTH__SECURE_COOKIES", "false".into()),
+        (
+            "APP__BRAND__DIR",
+            repo.join("config/brand/default")
+                .to_string_lossy()
+                .into_owned(),
+        ),
+        (
+            "APP__STORAGE__FS_ROOT",
+            dev.join("blobs").to_string_lossy().into_owned(),
+        ),
+    ];
+    wanted
+        .into_iter()
+        .filter(|(key, _)| std::env::var_os(key).is_none())
+        .collect()
 }
