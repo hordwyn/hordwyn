@@ -9,6 +9,8 @@
 # local state and secrets
 .env
 /config/.env
+# extra CA certificates of the local network (config/certs/README.md)
+/config/certs/*.crt
 /.dev/
 /src/rust/.dev/
 *.local.toml

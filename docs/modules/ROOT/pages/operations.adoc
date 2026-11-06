@@ -69,3 +69,11 @@ product name). Sign in with `POST /api/v1/auth/sign-in` and send the returned to
 requests from other sites are refused (checked with `Origin` and `Sec-Fetch-Site`).
 Sign-in is throttled after 10 failed attempts for a name within 15 minutes. JSON request
 bodies are limited to 2 MiB, import uploads to 64 MiB.
+
+== Behind a TLS-inspecting proxy
+
+If a corporate proxy re-signs HTTPS traffic, the image build fails with certificate errors
+(`curl: (60) unable to get local issuer certificate`). Copy the proxy's root CA certificates
+(PEM, `.crt`) to `config/certs/` before building, e.g.
+`cp /usr/local/share/ca-certificates/*.crt config/certs/`. They are trusted in the build and
+in the running server, and are never committed.

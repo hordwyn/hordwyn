@@ -3,6 +3,9 @@
 FROM rust:1.99.1-slim-trixie AS build
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
       curl ca-certificates pkg-config libssl-dev >/dev/null && rm -rf /var/lib/apt/lists/*
+# extra CA certificates (TLS-inspecting proxies), optional: config/certs/*.crt
+COPY config/certs/ /usr/local/share/ca-certificates/extra/
+RUN update-ca-certificates >/dev/null
 WORKDIR /repo
 COPY src/sh/ci-tools.sh src/sh/ci-tools.sh
 RUN sh src/sh/ci-tools.sh leptos wasm-bindgen tailwind
@@ -23,6 +26,8 @@ FROM debian:trixie-slim AS runtime
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates curl >/dev/null \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --home /data app && mkdir -p /data && chown app /data
+COPY config/certs/ /usr/local/share/ca-certificates/extra/
+RUN update-ca-certificates >/dev/null
 COPY --from=build /out/server /usr/local/bin/server
 COPY --from=build /out/site /srv/site
 COPY config/brand /etc/app/brand
