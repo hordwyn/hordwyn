@@ -20,3 +20,16 @@ services:
     environment:
       APP__DATABASE__URL: "postgres://app:${POSTGRES_PASSWORD:-app}@127.0.0.1:5432/app"
       APP__SEARCH__MEILI_URL: "http://127.0.0.1:7700"
+
+  # Optional RustFS (profile s3): same namespace, so the app uses
+  # APP__STORAGE__S3__ENDPOINT=http://127.0.0.1:9000 with this override.
+  s3:
+    network_mode: "service:postgres"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  s3-init:
+    network_mode: "service:postgres"
+    environment:
+      S3_ENDPOINT: "http://127.0.0.1:9000"

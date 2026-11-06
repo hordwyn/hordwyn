@@ -66,9 +66,9 @@ user-written template; no Jellyfin polling and no Radarr/Sonarr (GPL docs, DEC-1
 == Test results
 
 * `cd src/rust && cargo xtask ci`: fmt, clippy pedantic (native and wasm32), cargo-deny,
-  sqlx offline cache, all tests against local Postgres, Meilisearch and versitygw (S3),
-  wasm tests. Last green run: the commit of tag `m17`; 259 tests passed, 0 failed, 3 ignored
-  (live provider smoke tests, load test), no service-dependent test skipped.
+  sqlx offline cache, all tests against local Postgres, Meilisearch and an S3 server
+  (versitygw at m17, RustFS since DEC-202), wasm tests. Last green run: the commit of tag
+  `m17`; 259 tests passed, 0 failed, 3 ignored (live provider smoke tests, load test), no service-dependent test skipped.
 * `cargo xtask e2e`: 12 Playwright tests green (8 gallery/accessibility tests with axe
   WCAG A/AA, the M07 slice test with the TMDB fixture server, 2 M15 sharing tests, 1 M13
   notifications test).
@@ -109,7 +109,8 @@ user-written template; no Jellyfin polling and no Radarr/Sonarr (GPL docs, DEC-1
 * Reviews (G1) and research were done by this session instead of `claude-fable-5-1`
   subagents (owner instruction, DEC-051); M04, M05, M07 and M08 were therefore
   self-reviewed.
-* S3 tests run against versitygw locally; compose and GitLab CI have no S3 service (DEC-056).
+* S3 tests run against RustFS locally (`cargo xtask services up`) and in GitLab CI; compose
+  has an optional RustFS profile `s3` (DEC-202, replacing versitygw of DEC-056).
 * i18n uses Fluent (DEC-090).
 * Six of ten M09 connectors are not implemented (DEC-106..108, DEC-116).
 * Connectors still hold provider secrets (DEC-115).

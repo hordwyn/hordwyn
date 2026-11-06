@@ -61,6 +61,30 @@ The report also shows the Postgres database size and, with the Meilisearch backe
 document count and database size. Both are reported, not budgeted. See
 xref:storage-budget.adoc[storage budget].
 
+== S3 storage with compose
+
+The compose file uses the `fs` storage backend by default. For an S3 backend it ships an
+optional RustFS service (Apache-2.0) in the profile `s3`; a one-shot `s3-init` service
+creates the bucket `assets`. Set `S3_ACCESS_KEY` and `S3_SECRET_KEY` in `config/.env`, point
+the app at the service there and start with the profile:
+
+[source,shell]
+----
+# config/.env
+S3_ACCESS_KEY=...
+S3_SECRET_KEY=...
+APP__STORAGE__BACKEND=s3
+APP__STORAGE__S3__ENDPOINT=http://s3:9000
+APP__STORAGE__S3__BUCKET=assets
+APP__STORAGE__S3__ACCESS_KEY_ID=...       # same as S3_ACCESS_KEY
+APP__STORAGE__S3__SECRET_ACCESS_KEY=...   # same as S3_SECRET_KEY
+
+docker compose -f src/docker/compose.yml --profile s3 up
+----
+
+With the podman override below the endpoint is `http://127.0.0.1:9000`. Any other
+S3-compatible service works the same way through the `APP__STORAGE__S3__*` settings.
+
 == API
 
 The REST API is described by an OpenAPI document at `/api/v1/openapi.json` (titled with the

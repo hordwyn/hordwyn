@@ -1,5 +1,6 @@
-//! S3 backend against a real S3-compatible server (versitygw in compose or `cargo xtask
-//! services up`). Skipped with a message unless `TEST_S3_ENDPOINT` is set.
+//! S3 backend against a real S3-compatible server (`RustFS` from `cargo xtask services up`,
+//! the compose profile `s3` or the CI service; any S3 server works).
+//! Skipped with a message unless `TEST_S3_ENDPOINT` is set.
 
 use std::sync::Arc;
 
@@ -12,7 +13,7 @@ use testkit::fakes::{FixedClock, RecordingEvents};
 fn s3_config() -> Option<StorageConfig> {
     let Ok(endpoint) = std::env::var("TEST_S3_ENDPOINT") else {
         eprintln!(
-            "skipping S3 test: TEST_S3_ENDPOINT not set (start versitygw: `cargo xtask services up`)"
+            "skipping S3 test: TEST_S3_ENDPOINT not set (start RustFS: `cargo xtask services up`)"
         );
         return None;
     };

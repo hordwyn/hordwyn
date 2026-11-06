@@ -30,8 +30,10 @@
           pkgs.tailwindcss_4
           pkgs.postgresql_18
           pkgs.meilisearch
-          # S3-compatible test server (Apache-2.0), see DEC-008 and DEC-056
-          pkgs.versitygw
+          # S3-compatible test server (RustFS, Apache-2.0), see DEC-008 and DEC-202
+          pkgs.rustfs
+          # signed bucket creation for RustFS (curl --aws-sigv4) in `cargo xtask services`
+          pkgs.curl
           pkgs.playwright-driver
           # browser + driver for wasm-bindgen-test (same nixpkgs, matching versions)
           pkgs.chromium

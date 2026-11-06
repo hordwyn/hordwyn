@@ -82,6 +82,14 @@ test:
       alias: postgres
     - name: getmeili/meilisearch:v1.56.1
       alias: meilisearch
+    # S3-compatible test server (RustFS, DEC-202). The console stays enabled so both exposed
+    # ports (9000, 9001) open and the runner's service readiness wait succeeds.
+    - name: rustfs/rustfs:1.0.4
+      alias: s3
+      variables:
+        RUSTFS_ACCESS_KEY: "test"
+        RUSTFS_SECRET_KEY: "testsecret"
+        RUSTFS_REGION: "us-east-1"
   variables:
     DATABASE_URL: "postgres://app:app@postgres:5432/app_test"
     TEST_DATABASE_URL: "postgres://app:app@postgres:5432/app_test"
@@ -89,7 +97,21 @@ test:
     MEILI_URL: "http://meilisearch:7700"
     TEST_MEILI_URL: "http://meilisearch:7700"
     TEST_MEILI_KEY: "$MEILI_MASTER_KEY"
+    TEST_S3_ENDPOINT: "http://s3:9000"
+    TEST_S3_BUCKET: "assets"
+    TEST_S3_ACCESS_KEY: "test"
+    TEST_S3_SECRET_KEY: "testsecret"
   script:
+    # RustFS has no auto-created buckets: signed PUT, 200 (also when it exists) or 409 is
+    # fine; right after /health turns 200 it can answer 503 for a moment, so retry.
+    - |
+      for i in $(seq 1 60); do
+        code=$(curl -s -o /dev/null -w '%{http_code}' --aws-sigv4 "aws:amz:us-east-1:s3" --user "$TEST_S3_ACCESS_KEY:$TEST_S3_SECRET_KEY" -X PUT "$TEST_S3_ENDPOINT/$TEST_S3_BUCKET")
+        if [ "$code" = 200 ] || [ "$code" = 409 ]; then break; fi
+        sleep 1
+      done
+      echo "s3 bucket $TEST_S3_BUCKET: HTTP $code"
+      case "$code" in 200|409) ;; *) exit 1 ;; esac
     - cargo test --workspace --features "$NATIVE_FEATURES"
 
 wasm-test:

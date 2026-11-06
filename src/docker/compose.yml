@@ -58,7 +58,58 @@ services:
       timeout: 3s
       retries: 20
 
+  # Optional S3-compatible storage: RustFS (Apache-2.0, DEC-008, DEC-202). Not started by
+  # default and not a dependency of the app (the app uses the fs backend unless told
+  # otherwise). Start it with
+  #   docker compose -f src/docker/compose.yml --profile s3 up
+  # and point the app at it in config/.env:
+  #   APP__STORAGE__BACKEND=s3
+  #   APP__STORAGE__S3__ENDPOINT=http://s3:9000
+  #   APP__STORAGE__S3__BUCKET=assets
+  #   APP__STORAGE__S3__REGION=us-east-1
+  #   APP__STORAGE__S3__ACCESS_KEY_ID=<same as S3_ACCESS_KEY>
+  #   APP__STORAGE__S3__SECRET_ACCESS_KEY=<same as S3_SECRET_KEY>
+  s3:
+    image: rustfs/rustfs:1.0.4
+    profiles: [s3]
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: "${S3_ACCESS_KEY:-change-me}"
+      RUSTFS_SECRET_KEY: "${S3_SECRET_KEY:-change-me-please}"
+      RUSTFS_CONSOLE_ENABLE: "false"
+      RUSTFS_REGION: "us-east-1"
+    volumes:
+      - s3-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: creates the bucket with the rc client shipped in the RustFS image.
+  s3-init:
+    image: rustfs/rustfs:1.0.4
+    profiles: [s3]
+    restart: "no"
+    depends_on:
+      s3:
+        condition: service_healthy
+    environment:
+      S3_ENDPOINT: "http://s3:9000"
+      S3_ACCESS_KEY: "${S3_ACCESS_KEY:-change-me}"
+      S3_SECRET_KEY: "${S3_SECRET_KEY:-change-me-please}"
+      # rc keeps its alias file under $HOME
+      HOME: "/tmp"
+      S3_BUCKET: "assets"
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        rc alias set local "$$S3_ENDPOINT" "$$S3_ACCESS_KEY" "$$S3_SECRET_KEY" &&
+        rc bucket create "local/$$S3_BUCKET" --ignore-existing
+
 volumes:
   app-data:
   pg-data:
   meili-data:
+  s3-data:

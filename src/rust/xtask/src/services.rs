@@ -1,5 +1,5 @@
-//! Local development services started as plain processes (KICKOFF Q1): Postgres now,
-//! Meilisearch from M08. Data lives in `src/rust/.dev/` (git-ignored).
+//! Local development services started as plain processes (KICKOFF Q1): Postgres,
+//! Meilisearch and `RustFS` (S3). Data lives in `src/rust/.dev/` (git-ignored).
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -106,12 +106,13 @@ pub fn down() -> Result<()> {
     meili_down()
 }
 
-// ---------------------------------------------------------------- S3 (versitygw)
+// ---------------------------------------------------------------- S3 (RustFS)
 
 pub const S3_PORT: u16 = 55433;
 pub const S3_ACCESS_KEY: &str = "test";
 pub const S3_SECRET_KEY: &str = "testsecret";
 pub const S3_BUCKET: &str = "assets";
+pub const S3_REGION: &str = "us-east-1";
 
 /// Endpoint of the local S3-compatible server.
 #[must_use]
@@ -127,50 +128,85 @@ fn on_path(bin: &str) -> bool {
     Command::new(bin).arg("--version").output().is_ok()
 }
 
-/// Start versitygw (Apache-2.0) with a posix backend if it is installed. Returns whether an
-/// S3 endpoint is available; S3 tests are skipped otherwise.
-///
-/// # Errors
-/// If versitygw is installed but does not come up.
-pub fn s3_up() -> Result<bool> {
-    if port_open(S3_PORT) {
-        return Ok(true);
+/// HTTP status code of a curl call (`000` when the connection failed).
+fn curl_status(args: &[&str]) -> Result<String> {
+    let out = Command::new("curl")
+        .args(["-s", "-o", "/dev/null", "-w", "%{http_code}"])
+        .args(args)
+        .output()
+        .context("curl")?;
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Create the bucket with a SigV4-signed `PUT /<bucket>` and return whether it exists now.
+/// `RustFS` 1.0.4 answers 200 also when the bucket already exists; 409
+/// (`BucketAlreadyOwnedByYou`) is accepted as well. Right after `/health` turns 200 a first
+/// start can still answer 503 for a moment; that means "not yet", not an error.
+fn s3_create_bucket() -> Result<bool> {
+    let sigv4 = format!("aws:amz:{S3_REGION}:s3");
+    let user = format!("{S3_ACCESS_KEY}:{S3_SECRET_KEY}");
+    let url = format!("{}/{S3_BUCKET}", s3_url());
+    match curl_status(&["--aws-sigv4", &sigv4, "--user", &user, "-X", "PUT", &url])?.as_str() {
+        "200" | "409" => Ok(true),
+        "000" | "503" => Ok(false),
+        code => bail!("s3: creating bucket {S3_BUCKET} answered HTTP {code}"),
     }
-    if !on_path("versitygw") {
-        println!("s3: versitygw not installed, S3 tests will be skipped");
-        return Ok(false);
-    }
-    let dir = dev_dir().join("s3");
-    let data = dir.join("data");
-    let iam = dir.join("iam");
-    std::fs::create_dir_all(data.join(S3_BUCKET))?;
-    std::fs::create_dir_all(&iam)?;
-    let log = std::fs::File::create(dir.join("s3.log"))?;
-    let child = Command::new("versitygw")
-        .env("ROOT_ACCESS_KEY", S3_ACCESS_KEY)
-        .env("ROOT_SECRET_KEY", S3_SECRET_KEY)
-        .arg("--port")
-        .arg(format!("127.0.0.1:{S3_PORT}"))
-        .arg("--iam-dir")
-        .arg(&iam)
-        .arg("posix")
-        .arg(&data)
-        .stdout(log.try_clone()?)
-        .stderr(log)
-        .spawn()
-        .context("start versitygw")?;
-    std::fs::write(dir.join("pid"), child.id().to_string())?;
-    for _ in 0..50 {
-        if port_open(S3_PORT) {
-            println!("s3: {}", s3_url());
-            return Ok(true);
+}
+
+/// Wait until `/health` answers 200 and the bucket exists. The first start formats the
+/// volume, so allow more time than for a plain port bind.
+fn s3_wait_ready() -> Result<()> {
+    let health = format!("{}/health", s3_url());
+    for _ in 0..300 {
+        if curl_status(&[&health])? == "200" && s3_create_bucket()? {
+            return Ok(());
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     bail!(
-        "versitygw did not start, see {}",
-        dir.join("s3.log").display()
+        "rustfs did not become ready, see {}",
+        dev_dir().join("s3").join("s3.log").display()
     )
+}
+
+/// Start `RustFS` (Apache-2.0, single node single disk) if it is installed, and create the
+/// bucket. Returns whether an S3 endpoint is available; S3 tests are skipped otherwise.
+///
+/// # Errors
+/// If `RustFS` is installed but does not come up or the bucket cannot be created.
+pub fn s3_up() -> Result<bool> {
+    if port_open(S3_PORT) {
+        return s3_wait_ready().map(|()| true);
+    }
+    if !on_path("rustfs") || !on_path("curl") {
+        println!("s3: rustfs or curl not installed, S3 tests will be skipped");
+        return Ok(false);
+    }
+    let dir = dev_dir().join("s3");
+    // A versitygw posix tree (the S3 server before DEC-008 was reconsidered) is not a
+    // RustFS volume: wipe it once.
+    if dir.join("iam").exists() {
+        std::fs::remove_dir_all(&dir)?;
+    }
+    let data = dir.join("data");
+    std::fs::create_dir_all(&data)?;
+    let log = std::fs::File::create(dir.join("s3.log"))?;
+    let child = Command::new("rustfs")
+        .env("RUSTFS_VOLUMES", &data)
+        .env("RUSTFS_ADDRESS", format!("127.0.0.1:{S3_PORT}"))
+        .env("RUSTFS_ACCESS_KEY", S3_ACCESS_KEY)
+        .env("RUSTFS_SECRET_KEY", S3_SECRET_KEY)
+        .env("RUSTFS_CONSOLE_ENABLE", "false")
+        .env("RUSTFS_REGION", S3_REGION)
+        .env("RUSTFS_SCANNER_SPEED", "slowest")
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        .spawn()
+        .context("start rustfs")?;
+    std::fs::write(dir.join("pid"), child.id().to_string())?;
+    s3_wait_ready()?;
+    println!("s3: {}", s3_url());
+    Ok(true)
 }
 
 fn s3_down() -> Result<()> {

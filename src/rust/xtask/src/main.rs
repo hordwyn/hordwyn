@@ -13,7 +13,7 @@ const USAGE: &str = "usage: cargo xtask <command>
   fmt                format the workspace
   e2e                run the Playwright end-to-end suite
   dev                start the development server
-  services up|down   start or stop local Postgres and versitygw (S3)
+  services up|down   start or stop local Postgres, Meilisearch and RustFS (S3)
   sqlx-prepare       migrate the dev database and refresh the sqlx offline cache
   record <connector> re-record connector fixtures from the live API (needs its key)";
 
