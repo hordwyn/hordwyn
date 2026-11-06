@@ -58,6 +58,11 @@ fn state() -> (ApiState, testkit::TestEnv) {
             deliverer,
             web_push_key: None,
         }),
+        integrations: Some(Arc::new(integrations::Integrations::new(
+            t.app.clone(),
+            Arc::new(integrations::MemIntegrationStore::default()),
+        ))),
+        public_url: "https://shelf.example.org".into(),
         changes: None,
         naming: Naming::from_prefix("shelf", "Shelf"),
         secure_cookies: true,

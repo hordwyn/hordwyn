@@ -570,3 +570,36 @@ pub struct NotificationPageDto {
     pub events: Vec<EventTypeDto>,
     pub deliveries: Vec<DeliveryDto>,
 }
+
+// ---------------------------------------------------------------- integrations (M14)
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct IntegrationDto {
+    pub id: String,
+    pub name: String,
+    pub created_at: String,
+    /// Last webhook call.
+    pub last_seen_at: Option<String>,
+    /// Why the last call was refused, if it was.
+    pub last_error: Option<String>,
+}
+
+/// A new integration with its token, which is shown only here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct IntegrationCreatedDto {
+    pub integration: IntegrationDto,
+    /// Send as `Authorization: Bearer <token>`.
+    pub token: String,
+    /// Absolute URL of the watched webhook.
+    pub webhook_url: String,
+}
+
+/// What a webhook call recorded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct WatchedRecordedDto {
+    pub item_id: String,
+    pub event_id: String,
+}

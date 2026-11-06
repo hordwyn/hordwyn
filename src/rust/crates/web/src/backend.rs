@@ -73,6 +73,15 @@ pub trait Backend: Send + Sync {
     /// A link-shared list; `share_token` is the list's token, no session needed.
     async fn shared_list(&self, share_token: &str) -> BResult<SharedListDto>;
 
+    // integrations (M14)
+    async fn integrations(&self, token: &str) -> BResult<Vec<contracts::IntegrationDto>>;
+    async fn create_integration(
+        &self,
+        token: &str,
+        name: &str,
+    ) -> BResult<contracts::IntegrationCreatedDto>;
+    async fn delete_integration(&self, token: &str, id: &str) -> BResult<()>;
+
     // notifications (D-17)
     async fn notifications(&self, token: &str) -> BResult<contracts::NotificationPageDto>;
     async fn mark_read(&self, token: &str, id: &str) -> BResult<()>;

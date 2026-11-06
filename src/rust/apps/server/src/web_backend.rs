@@ -258,6 +258,25 @@ impl Backend for WebBackend {
             .map_err(err)
     }
 
+    async fn integrations(&self, token: &str) -> BResult<Vec<contracts::IntegrationDto>> {
+        let a = self.actor(token).await?;
+        api::hooks::list(&self.0, a).await.map_err(err)
+    }
+
+    async fn create_integration(
+        &self,
+        token: &str,
+        name: &str,
+    ) -> BResult<contracts::IntegrationCreatedDto> {
+        let a = self.actor(token).await?;
+        api::hooks::create(&self.0, a, name).await.map_err(err)
+    }
+
+    async fn delete_integration(&self, token: &str, id: &str) -> BResult<()> {
+        let a = self.actor(token).await?;
+        api::hooks::delete(&self.0, a, id).await.map_err(err)
+    }
+
     async fn notifications(&self, token: &str) -> BResult<contracts::NotificationPageDto> {
         let a = self.actor(token).await?;
         notifications::page(&self.0, a).await.map_err(err)

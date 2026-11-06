@@ -10,3 +10,24 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+app.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+domain.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx = { workspace = true, optional = true }
+thiserror.workspace = true
+uuid.workspace = true
+
+[features]
+default = []
+pg = ["dep:sqlx"]
+all = ["pg"]
+
+[dev-dependencies]
+kinds.workspace = true
+store-pg.workspace = true
+testkit.workspace = true
+tokio.workspace = true

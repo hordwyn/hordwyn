@@ -8,6 +8,7 @@
 mod dto;
 mod error;
 mod extract;
+pub mod hooks;
 pub mod notifications;
 pub mod ops;
 mod routes;
@@ -76,6 +77,10 @@ pub struct ApiState {
     pub importer: Option<Arc<importers::Importer>>,
     /// Notifications (inbox, channels, subscriptions, delivery log).
     pub notify: Option<NotifyApi>,
+    /// Inbound integrations (the watched webhook).
+    pub integrations: Option<Arc<integrations::Integrations>>,
+    /// Public base URL, for links handed out to other systems.
+    pub public_url: String,
     /// Per-user change feed for sync clients.
     pub changes: Option<Arc<dyn app::ports::ChangeFeed>>,
     pub naming: Naming,

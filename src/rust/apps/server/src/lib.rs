@@ -283,6 +283,11 @@ impl Server {
                 deliverer: deliverer.clone(),
                 web_push_key,
             }),
+            integrations: Some(Arc::new(integrations::Integrations::new(
+                app.clone(),
+                Arc::new(integrations::pg::PgIntegrationStore::new(pool.clone())),
+            ))),
+            public_url: config.server.public_url.clone(),
             importer: Some(Arc::new(importers::Importer::new(
                 app.clone(),
                 Arc::new(importers::pg::PgImportStore::new(pool.clone())),

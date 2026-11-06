@@ -19,7 +19,7 @@ use utoipa_axum::routes;
 
 use crate::error::ApiResult;
 use crate::extract::cookie;
-use crate::{ApiError, ApiState, Authed, dto, notifications, ops, sharing};
+use crate::{ApiError, ApiState, Authed, dto, hooks, notifications, ops, sharing};
 
 #[derive(OpenApi)]
 #[openapi(info(description = "REST API for integrations, scripts and sync clients."))]
@@ -71,6 +71,9 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(deliveries))
         .routes(routes!(templates, set_template))
         .routes(routes!(web_push_key))
+        .routes(routes!(integrations, create_integration))
+        .routes(routes!(delete_integration))
+        .routes(routes!(watched_hook))
         .routes(routes!(sync_changes))
         .routes(routes!(sync_commands))
         .routes(routes!(start_import))
@@ -782,6 +785,63 @@ async fn web_push_key(State(s): State<ApiState>) -> Json<WebPushKeyDto> {
     Json(WebPushKeyDto {
         public_key: s.notify.as_ref().and_then(|n| n.web_push_key.clone()),
     })
+}
+
+// ---------------------------------------------------------------- integrations (M14)
+
+#[utoipa::path(get, path = "/integrations", tag = "integrations",
+    responses((status = 200, body = Vec<contracts::IntegrationDto>)))]
+async fn integrations(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+) -> ApiResult<Json<Vec<contracts::IntegrationDto>>> {
+    Ok(Json(hooks::list(&s, a).await?))
+}
+
+/// Create an integration; the token in the answer is shown only once.
+#[utoipa::path(post, path = "/integrations", tag = "integrations", request_body = NameDto,
+    responses((status = 201, body = contracts::IntegrationCreatedDto)))]
+async fn create_integration(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Json(b): Json<NameDto>,
+) -> ApiResult<(StatusCode, Json<contracts::IntegrationCreatedDto>)> {
+    Ok((
+        StatusCode::CREATED,
+        Json(hooks::create(&s, a, &b.name).await?),
+    ))
+}
+
+#[utoipa::path(delete, path = "/integrations/{id}", tag = "integrations",
+    params(("id" = String, Path)), responses((status = 204)))]
+async fn delete_integration(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    hooks::delete(&s, a, &id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The watched webhook: one finished movie or episode in our JSON format (see the docs,
+/// "Integrations"). Authenticated with an integration token, not a session:
+/// `Authorization: Bearer itk_...`. Posting the same play twice records it once.
+#[utoipa::path(post, path = "/hooks/watched", tag = "integrations",
+    request_body(content = Object, description = "WatchedEvent (JSON Schema in the docs)"),
+    responses((status = 200, body = contracts::WatchedRecordedDto),
+        (status = 401, body = contracts::ErrorDto), (status = 422, body = contracts::ErrorDto)))]
+async fn watched_hook(
+    State(s): State<ApiState>,
+    headers: HeaderMap,
+    Json(b): Json<integrations::WatchedEvent>,
+) -> ApiResult<Json<contracts::WatchedRecordedDto>> {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::trim)
+        .ok_or_else(ApiError::unauthorized)?;
+    Ok(Json(hooks::watched(&s, token, &b).await?))
 }
 
 // ---------------------------------------------------------------- sync

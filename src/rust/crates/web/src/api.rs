@@ -308,6 +308,31 @@ pub async fn shared_list(token: String) -> Result<SharedListDto, ServerFnError> 
         .map_err(server::code)
 }
 
+// ---------------------------------------------------------------- integrations (M14)
+
+#[server(prefix = "/_fn")]
+pub async fn integrations() -> Result<Vec<contracts::IntegrationDto>, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.integrations(&t).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn create_integration(
+    name: String,
+) -> Result<contracts::IntegrationCreatedDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.create_integration(&t, &name).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn delete_integration(id: String) -> Result<(), ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.delete_integration(&t, &id).await.map_err(server::code)
+}
+
 // ---------------------------------------------------------------- notifications (D-17)
 
 #[server(prefix = "/_fn")]

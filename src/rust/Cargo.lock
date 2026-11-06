@@ -84,6 +84,7 @@ dependencies = [
  "domain",
  "http-body-util",
  "importers",
+ "integrations",
  "kinds",
  "notify",
  "realtime",
@@ -2561,6 +2562,22 @@ dependencies = [
 [[package]]
 name = "integrations"
 version = "0.1.0"
+dependencies = [
+ "app",
+ "async-trait",
+ "chrono",
+ "domain",
+ "kinds",
+ "schemars 1.2.3",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "store-pg",
+ "testkit",
+ "thiserror 2.0.21",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "interpolate_name"
@@ -5239,6 +5256,7 @@ dependencies = [
  "futures",
  "getrandom 0.4.3",
  "importers",
+ "integrations",
  "jobs",
  "kinds",
  "leptos",

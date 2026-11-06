@@ -135,6 +135,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/companions") view=crate::sharing::Companions/>
                     <Route path=path!("/sessions") view=crate::sharing::Sessions/>
                     <Route path=path!("/notifications") view=crate::notifications::Notifications/>
+                    <Route path=path!("/integrations") view=crate::integrations::Integrations/>
                     <Route path=path!("/shared/lists/:token") view=crate::sharing::SharedList/>
                     <Route path=path!("/lists") view=crate::pages::Lists/>
                     <Route path=path!("/sources") view=crate::pages::Sources/>
@@ -174,6 +175,7 @@ fn Header() -> impl IntoView {
                                 <A href="/lists">{t("nav-lists")}</A>
                                 <A href="/sessions">{t("nav-sessions")}</A>
                                 <A href="/notifications">{t("nav-notifications")}</A>
+                                <A href="/integrations">{t("nav-integrations")}</A>
                                 <A href="/companions">{t("nav-companions")}</A>
                                 <A href="/sources">{t("nav-sources")}</A>
                             }.into_any(),

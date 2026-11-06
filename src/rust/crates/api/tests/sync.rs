@@ -89,6 +89,8 @@ async fn offline_clients_converge_and_replays_are_no_ops() {
         assets: None,
         importer: None,
         notify: None,
+        integrations: None,
+        public_url: "http://localhost".into(),
         changes: Some(store),
         naming: Naming::from_prefix("app", "App"),
         secure_cookies: true,

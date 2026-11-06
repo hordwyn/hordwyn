@@ -225,3 +225,18 @@ notify-error-not_found = Not found.
 notify-error-unavailable = Notifications are not enabled on this server.
 
 library-more = Show more
+
+nav-integrations = Integrations
+integrations-title = Integrations
+integrations-lead = Media servers and scripts can record what you watched by posting to a webhook. Create a token for each sender; the docs ("Integrations") describe the format and a Jellyfin setup.
+integrations-name = Name, e.g. Jellyfin
+integrations-add = Create token
+integrations-created = New token: copy it now, it is not shown again.
+integrations-url = Webhook URL:
+integrations-token = Token:
+integrations-example = Example:
+integrations-empty = No integrations yet.
+integrations-last = last call:
+integrations-never = never
+integrations-error = Last call failed
+integrations-revoke = Revoke

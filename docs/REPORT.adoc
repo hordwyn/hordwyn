@@ -56,15 +56,19 @@ admin overrides, delivery log, retries and gone handling. Channels: email (SMTP)
 Gotify, Discord, Matrix, Apprise API, signed webhooks (Standard Webhooks) through the
 `HttpFetch` port with an SSRF guard. Web push not built (DEC-141). Emitted so far: social,
 import, sign-up and storage events (DEC-143).
-|M10, M11, M14, M17 |- |Not started (see "Known gaps").
+|M14 Integrations |`m14` |Generic watched webhook in our own JSON format with per-integration
+tokens (movies and episodes, idempotent, stub item + background refresh, notification,
+SSE update); integrations page; end-to-end test. Jellyfin through its webhook plugin with a
+user-written template; no Jellyfin polling and no Radarr/Sonarr (GPL docs, DEC-148/149).
+|M10, M11, M17 |- |Not started or in part (see "Known gaps").
 |===
 
 == Test results
 
 * `cd src/rust && cargo xtask ci`: fmt, clippy pedantic (native and wasm32), cargo-deny,
   sqlx offline cache, all tests against local Postgres, Meilisearch and versitygw (S3),
-  wasm tests. Last green run: the commit of tag `m13`; 249 tests passed, 0 failed, 2 ignored
-  (live provider smoke tests), no service-dependent test skipped.
+  wasm tests. Last green run: the commit of tag `m14`; 252 tests passed, 0 failed, 3 ignored
+  (live provider smoke tests, load test), no service-dependent test skipped.
 * `cargo xtask e2e`: 12 Playwright tests green (8 gallery/accessibility tests with axe
   WCAG A/AA, the M07 slice test with the TMDB fixture server, 2 M15 sharing tests, 1 M13
   notifications test).
@@ -118,8 +122,7 @@ import, sign-up and storage events (DEC-143).
 
 == Known gaps and bugs
 
-* M10 (board-game research), M11 (board games), M14 (integrations),
-  M17 (hardening, load test, image size, G2) not done; M12 and M09 only
+* M10 (board-game research), M11 (board games), M17 (hardening, load test, image size, G2) not done; M12 and M09 only
   in part.
 * Legacy importer fixture (Q4) not present in the repository.
 * Docker image build and compose quick start are only verified by the GitLab kaniko job; no
@@ -137,4 +140,4 @@ import, sign-up and storage events (DEC-143).
 . M16: Tauri desktop spike on a host with more disk.
 . M13 follow-ups: web push on p256 0.14 (DEC-141), release and library event emitters
   (DEC-143), per-user language for texts (DEC-138).
-. M14, M17 and an independent review (G2, and of M04-M08).
+. M17 and an independent review (G2, and of M04-M08).

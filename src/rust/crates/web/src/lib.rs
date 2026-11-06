@@ -20,6 +20,7 @@ mod events;
 #[cfg(feature = "gallery")]
 mod gallery;
 pub mod i18n;
+mod integrations;
 mod notifications;
 mod pages;
 mod palette;

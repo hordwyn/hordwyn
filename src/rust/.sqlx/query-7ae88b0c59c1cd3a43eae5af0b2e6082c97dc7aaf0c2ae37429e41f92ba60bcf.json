@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE integrations SET last_seen_at = $2, last_error = $3 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7ae88b0c59c1cd3a43eae5af0b2e6082c97dc7aaf0c2ae37429e41f92ba60bcf"
+}

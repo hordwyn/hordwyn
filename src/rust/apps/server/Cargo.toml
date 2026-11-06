@@ -28,6 +28,7 @@ connectors.workspace = true
 domain.workspace = true
 getrandom.workspace = true
 jobs.workspace = true
+integrations = { workspace = true, features = ["pg"] }
 serde_json.workspace = true
 notify = { workspace = true, features = ["all"] }
 kinds.workspace = true

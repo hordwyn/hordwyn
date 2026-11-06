@@ -10,3 +10,4 @@
 * xref:sync.adoc[Sync protocol]
 * xref:sharing.adoc[Sharing and companions]
 * xref:notifications.adoc[Notifications]
+* xref:integrations.adoc[Integrations]
