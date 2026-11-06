@@ -1,0 +1,3 @@
+# cargo-leptos watch reads ignore rules from the workspace directory
+/target/
+/.dev/

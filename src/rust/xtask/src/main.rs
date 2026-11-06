@@ -167,6 +167,15 @@ fn e2e() -> Result<()> {
 
 fn dev() -> Result<()> {
     xtask::services::up()?;
+    // cargo-leptos runs the server in the workspace, where the default relative brand
+    // directory does not exist; point it at the repo copy unless the caller set one.
+    let brand = xtask::repo_root().join("config/brand/default");
+    let brand = brand.to_string_lossy();
+    let env: Vec<(&str, &str)> = if std::env::var_os("APP__BRAND__DIR").is_some() {
+        Vec::new()
+    } else {
+        vec![("APP__BRAND__DIR", &brand)]
+    };
     cargo(
         &[
             "leptos",
@@ -176,7 +185,7 @@ fn dev() -> Result<()> {
             "--lib-features",
             "hydrate,gallery",
         ],
-        &[],
+        &env,
     )
 }
 
