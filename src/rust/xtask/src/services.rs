@@ -102,7 +102,8 @@ pub fn down() -> Result<()> {
             .arg(&data)
             .args(["-m", "fast", "stop"]))?;
     }
-    s3_down()
+    s3_down()?;
+    meili_down()
 }
 
 // ---------------------------------------------------------------- S3 (versitygw)
@@ -174,6 +175,72 @@ pub fn s3_up() -> Result<bool> {
 
 fn s3_down() -> Result<()> {
     let pid_file = dev_dir().join("s3").join("pid");
+    if let Ok(pid) = std::fs::read_to_string(&pid_file) {
+        let _ = Command::new("kill").arg(pid.trim()).status();
+        std::fs::remove_file(pid_file)?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------- Meilisearch
+
+pub const MEILI_PORT: u16 = 55434;
+/// Local development/test master key only (never used in deployments).
+pub const MEILI_KEY: &str = "dev-only-master-key-0123456789";
+
+#[must_use]
+pub fn meili_url() -> String {
+    format!("http://127.0.0.1:{MEILI_PORT}")
+}
+
+/// Start Meilisearch (from the dev shell) as a local process.
+///
+/// # Errors
+/// If the binary is missing or the server does not come up.
+pub fn meili_up() -> Result<()> {
+    if port_open(MEILI_PORT) {
+        return Ok(());
+    }
+    if !on_path("meilisearch") {
+        bail!("meilisearch not found; run inside `nix develop`");
+    }
+    let dir = dev_dir().join("meili");
+    std::fs::create_dir_all(&dir)?;
+    let log = std::fs::File::create(dir.join("meili.log"))?;
+    let child = Command::new("meilisearch")
+        .arg("--db-path")
+        .arg(dir.join("data.ms"))
+        .args([
+            "--http-addr",
+            &format!("127.0.0.1:{MEILI_PORT}"),
+            "--master-key",
+            MEILI_KEY,
+            "--env",
+            "development",
+            "--no-analytics",
+            "--max-indexing-memory",
+            "256MiB",
+        ])
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        .spawn()
+        .context("start meilisearch")?;
+    std::fs::write(dir.join("pid"), child.id().to_string())?;
+    for _ in 0..150 {
+        if port_open(MEILI_PORT) {
+            println!("meilisearch: {}", meili_url());
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    bail!(
+        "meilisearch did not start, see {}",
+        dir.join("meili.log").display()
+    )
+}
+
+fn meili_down() -> Result<()> {
+    let pid_file = dev_dir().join("meili").join("pid");
     if let Ok(pid) = std::fs::read_to_string(&pid_file) {
         let _ = Command::new("kill").arg(pid.trim()).status();
         std::fs::remove_file(pid_file)?;

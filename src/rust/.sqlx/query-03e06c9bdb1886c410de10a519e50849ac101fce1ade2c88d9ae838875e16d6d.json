@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, fields AS \"fields!\"\n               FROM search_docs,\n                    websearch_to_tsquery('simple', $3) AS query\n               WHERE index_name = $1\n                 AND ($2::uuid IS NULL OR owner_id = $2)\n                 AND (SELECT bool_and(fields ->> f.key = f.value)\n                      FROM jsonb_each_text($4::jsonb) AS f) IS NOT FALSE\n                 AND ($3 = '' OR tsv @@ query OR body % $3 OR body ILIKE '%' || $3 || '%')\n               ORDER BY ts_rank(tsv, query) + similarity(body, $3) DESC, id\n               LIMIT $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "search_docs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "fields!",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "search_docs",
+            "name": "fields"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Jsonb",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "03e06c9bdb1886c410de10a519e50849ac101fce1ade2c88d9ae838875e16d6d"
+}

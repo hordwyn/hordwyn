@@ -3,3 +3,4 @@
 * xref:provider-pipeline.adoc[Provider pipeline]
 * xref:storage-budget.adoc[Storage budget]
 * xref:configuration.adoc[Configuration reference]
+* xref:operations.adoc[Operations]

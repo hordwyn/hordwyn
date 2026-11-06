@@ -10,3 +10,18 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+app.workspace = true
+async-trait.workspace = true
+blake3.workspace = true
+domain.workspace = true
+meilisearch-sdk.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+store-pg.workspace = true
+testkit.workspace = true

@@ -95,6 +95,7 @@ utoipa-axum = "0.3.0"
 futures = "0.3.34"
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "fmt"] }
+meilisearch-sdk = { version = "0.33.0", default-features = false, features = ["reqwest", "tls"] }
 
 # Small target dirs (DEC-055): line tables for our code (backtraces), no debug info for deps.
 [profile.dev]

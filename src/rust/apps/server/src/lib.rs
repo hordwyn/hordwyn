@@ -38,6 +38,7 @@ pub struct Server {
     pub http: Arc<dyn HttpFetch>,
     pub bus: realtime::Bus,
     pub pool: sqlx::PgPool,
+    pub search: Arc<dyn SearchIndex>,
 }
 
 /// Test and embedding hooks; production uses the defaults.
@@ -47,7 +48,7 @@ pub struct Overrides {
     pub registry: Option<Registry>,
     /// Outgoing HTTP instead of the governed client (tests).
     pub http: Option<Arc<dyn HttpFetch>>,
-    /// Search index (until the search crate is wired, M08).
+    /// Search index instead of the configured backend.
     pub search: Option<Arc<dyn SearchIndex>>,
 }
 
@@ -69,29 +70,6 @@ fn default_registry(cfg: &AppConfig) -> Registry {
     }
     let _ = enabled;
     r
-}
-
-/// Search placeholder until the search crate is wired (M08): no local results.
-struct NoSearch;
-
-#[async_trait::async_trait]
-impl SearchIndex for NoSearch {
-    async fn upsert(
-        &self,
-        _: &str,
-        _: Vec<app::ports::SearchDoc>,
-    ) -> Result<(), app::ports::PortError> {
-        Ok(())
-    }
-    async fn delete(&self, _: &str, _: Vec<String>) -> Result<(), app::ports::PortError> {
-        Ok(())
-    }
-    async fn search(
-        &self,
-        _: app::ports::SearchQuery,
-    ) -> Result<Vec<app::ports::SearchHit>, app::ports::PortError> {
-        Ok(vec![])
-    }
 }
 
 impl Server {
@@ -168,13 +146,17 @@ impl Server {
             auth_settings(&config, &brand),
         );
         let oidc = oidc(&config, http.clone());
+        let search = match o.search {
+            Some(s) => s,
+            None => search_index(&config, &pool).await,
+        };
         let ident = brand.ident();
         let api = api::ApiState {
             app: app.clone(),
             auth,
             oidc,
             bus: bus.clone(),
-            search: o.search.unwrap_or_else(|| Arc::new(NoSearch)),
+            search: search.clone(),
             fanout: SearchFanout::new(app.clone(), registry.clone(), http.clone()),
             registry: registry.clone(),
             assets: Some(assets.clone()),
@@ -194,6 +176,7 @@ impl Server {
             http,
             bus,
             pool,
+            search,
         })
     }
 
@@ -231,8 +214,18 @@ impl Server {
                 }
             })
         };
+        let indexer = {
+            let ix = search::indexer::Indexer::new(
+                self.app.clone(),
+                self.pool.clone(),
+                self.search.clone(),
+            );
+            let stop = stop.clone();
+            tokio::spawn(async move { ix.run(stop).await })
+        };
         self.worker().run(stop).await;
         let _ = ticker.await;
+        let _ = indexer.await;
     }
 
     #[must_use]
@@ -334,4 +327,32 @@ fn oidc(config: &AppConfig, http: Arc<dyn HttpFetch>) -> Option<Arc<auth::oidc::
             http,
         ))
     })
+}
+
+/// The configured search backend. If Meilisearch cannot be reached at start-up the process
+/// uses the Postgres fallback instead of refusing to start (logged as an error).
+async fn search_index(config: &AppConfig, pool: &sqlx::PgPool) -> Arc<dyn SearchIndex> {
+    let pg = || -> Arc<dyn SearchIndex> { Arc::new(search::pg::PgSearch::new(pool.clone())) };
+    match config.search.backend {
+        config::SearchBackend::Postgres => pg(),
+        config::SearchBackend::Meilisearch => {
+            let Some(key) = &config.search.meili_master_key else {
+                tracing::error!("search.meili_master_key is not set; using Postgres search");
+                return pg();
+            };
+            match search::meili::MeiliIndex::connect(
+                &config.search.meili_url,
+                key.expose(),
+                &config.search.index_prefix,
+            )
+            .await
+            {
+                Ok(m) => Arc::new(m),
+                Err(e) => {
+                    tracing::error!(error = %e, "Meilisearch unavailable; using Postgres search");
+                    pg()
+                }
+            }
+        }
+    }
 }

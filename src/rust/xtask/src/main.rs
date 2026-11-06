@@ -25,7 +25,9 @@ fn main() -> Result<()> {
         "e2e" => e2e(),
         "dev" => dev(),
         "services" => match std::env::args().nth(2).as_deref() {
-            Some("up") => xtask::services::up().and_then(|()| xtask::services::s3_up().map(|_| ())),
+            Some("up") => xtask::services::up()
+                .and_then(|()| xtask::services::meili_up())
+                .and_then(|()| xtask::services::s3_up().map(|_| ())),
             Some("down") => xtask::services::down(),
             _ => bail!("usage: cargo xtask services up|down"),
         },
@@ -86,6 +88,12 @@ fn ci() -> Result<()> {
         xtask::services::pg_admin_url()
     };
     // S3 tests run when an S3 endpoint is available, and are skipped with a message otherwise.
+    let meili = if std::env::var_os("TEST_MEILI_URL").is_some() {
+        None
+    } else {
+        step("meilisearch", xtask::services::meili_up)?;
+        Some(xtask::services::meili_url())
+    };
     let s3 = if std::env::var_os("TEST_S3_ENDPOINT").is_some() || !xtask::services::s3_up()? {
         None
     } else {
@@ -98,6 +106,15 @@ fn ci() -> Result<()> {
                 ("TEST_DATABASE_URL", test_db.as_str()),
                 ("REQUIRE_SERVICES", "1"),
                 ("TEST_S3_ENDPOINT", s3.as_deref().unwrap_or("")),
+                ("TEST_MEILI_URL", meili.as_deref().unwrap_or("")),
+                (
+                    "TEST_MEILI_KEY",
+                    if meili.is_some() {
+                        xtask::services::MEILI_KEY
+                    } else {
+                        ""
+                    },
+                ),
             ]
             .into_iter()
             .filter(|(_, v)| !v.is_empty())

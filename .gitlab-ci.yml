@@ -87,6 +87,8 @@ test:
     TEST_DATABASE_URL: "postgres://app:app@postgres:5432/app_test"
     REQUIRE_SERVICES: "1"
     MEILI_URL: "http://meilisearch:7700"
+    TEST_MEILI_URL: "http://meilisearch:7700"
+    TEST_MEILI_KEY: "$MEILI_MASTER_KEY"
   script:
     - cargo test --workspace --features "$NATIVE_FEATURES"
 

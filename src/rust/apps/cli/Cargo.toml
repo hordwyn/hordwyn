@@ -20,4 +20,5 @@ domain.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 store-pg.workspace = true
+search.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }

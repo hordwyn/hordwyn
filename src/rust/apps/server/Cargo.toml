@@ -31,6 +31,7 @@ kinds.workspace = true
 leptos = { workspace = true, features = ["ssr"] }
 leptos_axum.workspace = true
 realtime.workspace = true
+search.workspace = true
 sqlx.workspace = true
 store-pg.workspace = true
 telemetry.workspace = true

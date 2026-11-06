@@ -14,13 +14,16 @@ const USAGE: &str = "usage: cli [--config <file>] <command>
   storage report [--dry-run] [--json]
                                    storage usage, limits, S3 counters and what eviction
                                    would remove now (--dry-run: nothing is changed)
-  storage evict                    run eviction now (normally a background job)";
+  storage evict                    run eviction now (normally a background job)
+  reindex [--clear]                queue every catalog item, library entry and companion for
+                                   the search indexer (--clear: empty the indexes first)";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Cmd {
     Migrate,
     StorageReport { json: bool },
     StorageEvict,
+    Reindex { clear: bool },
     Help,
 }
 
@@ -72,6 +75,12 @@ fn parse(args: &[String]) -> Result<Args> {
         ["storage", "evict"] => {
             known(&[])?;
             Cmd::StorageEvict
+        }
+        ["reindex"] => {
+            known(&["--clear"])?;
+            Cmd::Reindex {
+                clear: flags.contains(&"--clear"),
+            }
         }
         [] | ["help"] => Cmd::Help,
         _ => bail!("unknown command `{}`\n\n{USAGE}", words.join(" ")),
@@ -188,12 +197,22 @@ async fn run(args: Args) -> Result<()> {
             let pg_bytes: i64 = sqlx::query_scalar("SELECT pg_database_size(current_database())")
                 .fetch_one(&pool)
                 .await?;
+            let meili = meili_stats(&cfg).await;
             if json {
                 let mut v = serde_json::to_value(&report)?;
                 v["postgres_bytes"] = pg_bytes.into();
+                if let Some((docs, bytes)) = meili {
+                    v["meilisearch"] = serde_json::json!({ "documents": docs, "bytes": bytes });
+                }
                 println!("{}", serde_json::to_string_pretty(&v)?);
             } else {
                 print_report(&report, pg_bytes);
+                if let Some((docs, bytes)) = meili {
+                    println!(
+                        "meilisearch          {} in {docs} documents (reported, not budgeted)",
+                        human(bytes)
+                    );
+                }
             }
         }
         Cmd::StorageEvict => {
@@ -206,8 +225,60 @@ async fn run(args: Args) -> Result<()> {
                 human(r.after)
             );
         }
+        Cmd::Reindex { clear } => {
+            if clear {
+                clear_indexes(&cfg, &pool).await?;
+            }
+            let n = search::indexer::Indexer::enqueue_all(&pool).await?;
+            println!("queued {n} documents; the worker's indexer picks them up");
+        }
         Cmd::Help => unreachable!(),
     }
+    Ok(())
+}
+
+/// Meilisearch documents and database size, if that backend is configured and reachable.
+async fn meili_stats(cfg: &config::AppConfig) -> Option<(u64, u64)> {
+    if cfg.search.backend != config::SearchBackend::Meilisearch {
+        return None;
+    }
+    let key = cfg.search.meili_master_key.as_ref()?;
+    let m = search::meili::MeiliIndex::connect(
+        &cfg.search.meili_url,
+        key.expose(),
+        &cfg.search.index_prefix,
+    )
+    .await
+    .ok()?;
+    m.stats().await.ok()
+}
+
+async fn clear_indexes(cfg: &config::AppConfig, pool: &sqlx::PgPool) -> Result<()> {
+    match cfg.search.backend {
+        config::SearchBackend::Postgres => {
+            let pg = search::pg::PgSearch::new(pool.clone());
+            for ix in search::INDEXES {
+                pg.clear(ix).await?;
+            }
+        }
+        config::SearchBackend::Meilisearch => {
+            let key = cfg
+                .search
+                .meili_master_key
+                .as_ref()
+                .context("search.meili_master_key is required")?;
+            let m = search::meili::MeiliIndex::connect(
+                &cfg.search.meili_url,
+                key.expose(),
+                &cfg.search.index_prefix,
+            )
+            .await?;
+            for ix in search::INDEXES {
+                m.clear(ix).await?;
+            }
+        }
+    }
+    println!("search indexes cleared");
     Ok(())
 }
 
@@ -248,6 +319,10 @@ mod tests {
             Cmd::StorageReport { json: true }
         );
         assert_eq!(p("migrate").unwrap().cmd, Cmd::Migrate);
+        assert_eq!(
+            p("reindex --clear").unwrap().cmd,
+            Cmd::Reindex { clear: true }
+        );
         assert_eq!(p("").unwrap().cmd, Cmd::Help);
         assert!(p("storage report --force").is_err());
         assert!(p("frobnicate").is_err());
