@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO http_cache (key, entry, fresh_until) VALUES ($1, $2, $3)\n             ON CONFLICT (key) DO UPDATE SET entry = $2, fresh_until = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "62582fe6afb4ede60bbf4861628b507b67d999c19598201dd8f1322678638c09"
+}

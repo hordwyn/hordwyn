@@ -11,16 +11,46 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-web = { workspace = true, features = ["ssr"] }
+api.workspace = true
+app.workspace = true
+assets.workspace = true
+async-trait.workspace = true
+auth.workspace = true
+axum.workspace = true
+base64.workspace = true
+blake3.workspace = true
+brand.workspace = true
+catalog-core.workspace = true
+chrono.workspace = true
+config.workspace = true
+connectors.workspace = true
+domain.workspace = true
+getrandom.workspace = true
+jobs.workspace = true
+kinds.workspace = true
 leptos = { workspace = true, features = ["ssr"] }
 leptos_axum.workspace = true
-axum.workspace = true
+realtime.workspace = true
+sqlx.workspace = true
+store-pg.workspace = true
+telemetry.workspace = true
 tokio = { workspace = true, features = ["net", "signal"] }
+tokio-util.workspace = true
 tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
+web = { workspace = true, features = ["ssr"] }
 
 [features]
 default = []
 gallery = ["web/gallery"]
+tmdb = ["connectors/tmdb"]
+# every compiled-in connector (release builds, CI)
+all-connectors = ["tmdb"]
 
 [dev-dependencies]
+futures.workspace = true
+reqwest = { workspace = true, features = ["json", "stream"] }
+serde_json.workspace = true
+testkit.workspace = true
 tower = { version = "0.5", features = ["util"] }

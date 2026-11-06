@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT entry FROM http_cache WHERE key = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "entry",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "http_cache",
+            "name": "entry"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1238f44b3b3b47431665000926f6920b38d1177a2416cdd99e9e4b760b8c5129"
+}

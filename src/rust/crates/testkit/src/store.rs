@@ -76,6 +76,10 @@ impl UserRepo for MemStore {
             .cloned())
     }
 
+    async fn count(&self) -> RepoResult<u64> {
+        Ok(self.state().users.len() as u64)
+    }
+
     async fn update(&self, user: &User) -> RepoResult<()> {
         self.state().users.insert(user.id, user.clone());
         Ok(())
@@ -245,6 +249,10 @@ impl LibraryRepo for MemStore {
         });
         s.library.insert(entry.id, entry.clone());
         Ok(())
+    }
+
+    async fn any_for_item(&self, item: ItemId) -> RepoResult<bool> {
+        Ok(self.state().library.values().any(|e| e.item_id == item))
     }
 
     async fn by_user(&self, user: UserId) -> RepoResult<Vec<LibraryEntry>> {

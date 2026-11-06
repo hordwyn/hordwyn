@@ -111,6 +111,17 @@ impl LibraryRepo for PgStore {
         tx.commit().await.map_err(be)
     }
 
+    async fn any_for_item(&self, item: ItemId) -> Res<bool> {
+        let found = sqlx::query_scalar!(
+            r#"SELECT EXISTS (SELECT 1 FROM library_entries WHERE item_id = $1) AS "e!""#,
+            item.0
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(be)?;
+        Ok(found)
+    }
+
     async fn by_user(&self, user: UserId) -> Res<Vec<LibraryEntry>> {
         sqlx::query_as!(
             EntryRow,

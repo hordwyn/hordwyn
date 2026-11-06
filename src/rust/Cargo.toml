@@ -83,6 +83,18 @@ rayon = "1.12.0"
 fs4 = "1.1.0"
 proptest = "1.12.0"
 toml = "1.2.0"
+# auth, api, realtime, server (versions checked on crates.io 2026-11-06)
+argon2 = "0.6.0"
+totp-rs = { version = "6.0.0", features = ["otpauth"] }
+openidconnect = { version = "4.1.0", default-features = false }
+http = "1.3"
+getrandom = "0.4.3"
+base64 = "0.22.1"
+utoipa = "6.0.0"
+utoipa-axum = "0.3.0"
+futures = "0.3.34"
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "fmt"] }
 
 # Small target dirs (DEC-055): line tables for our code (backtraces), no debug info for deps.
 [profile.dev]
@@ -116,7 +128,7 @@ end2end-cmd = "npx playwright test"
 end2end-dir = "../web"
 browserquery = "defaults"
 env = "DEV"
-bin-features = []
+bin-features = ["all-connectors"]
 bin-default-features = false
 lib-features = ["hydrate"]
 lib-default-features = false

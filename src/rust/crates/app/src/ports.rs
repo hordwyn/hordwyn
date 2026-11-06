@@ -41,6 +41,8 @@ pub trait UserRepo: Send + Sync {
     async fn insert_with_self(&self, user: &User, self_companion: &Companion) -> RepoResult<()>;
     async fn get(&self, id: UserId) -> RepoResult<Option<User>>;
     async fn by_username(&self, username: &str) -> RepoResult<Option<User>>;
+    /// Number of accounts (the first one becomes admin).
+    async fn count(&self) -> RepoResult<u64>;
     async fn update(&self, user: &User) -> RepoResult<()>;
     /// Delete the user and everything they own. Companions of other users are untouched.
     async fn delete(&self, id: UserId) -> RepoResult<()>;
@@ -95,6 +97,8 @@ pub trait LibraryRepo: Send + Sync {
     /// Insert or replace by `(user, item)`.
     async fn upsert(&self, entry: &LibraryEntry) -> RepoResult<()>;
     async fn by_user(&self, user: UserId) -> RepoResult<Vec<LibraryEntry>>;
+    /// Is the item in anyone's library (pins its cover, D-8)?
+    async fn any_for_item(&self, item: ItemId) -> RepoResult<bool>;
 }
 
 #[async_trait]

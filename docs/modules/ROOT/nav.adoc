@@ -1,4 +1,5 @@
 * xref:index.adoc[Overview]
 * xref:architecture.adoc[Architecture]
+* xref:provider-pipeline.adoc[Provider pipeline]
 * xref:storage-budget.adoc[Storage budget]
 * xref:configuration.adoc[Configuration reference]

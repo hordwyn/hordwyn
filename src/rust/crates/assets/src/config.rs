@@ -330,7 +330,7 @@ pub struct S3Config {
     pub endpoint: Option<String>,
     pub bucket: String,
     pub region: String,
-    /// Access key id; the secret comes from the environment only (`APP__STORAGE__S3__SECRET_KEY`).
+    /// Access key id; the secret comes from the environment only (`APP__STORAGE__S3__SECRET_ACCESS_KEY`).
     pub access_key_id: Option<String>,
     #[serde(skip_serializing)]
     pub secret_access_key: Option<String>,

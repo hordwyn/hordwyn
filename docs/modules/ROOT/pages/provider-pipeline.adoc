@@ -1,0 +1,70 @@
+= Provider pipeline
+
+Rule: no page and no request handler ever waits on a third-party provider (D-6). Handlers
+read what is stored, queue work, and the browser learns about new data over Server-Sent
+Events (`GET /api/v1/events`).
+
+== Item detail (stale-while-revalidate)
+
+[mermaid]
+....
+sequenceDiagram
+  participant B as Browser
+  participant W as Web (api)
+  participant Q as Job queue (Postgres)
+  participant K as Worker
+  participant C as Connector (via governed HTTP)
+  B->>W: GET /api/v1/items/{id}
+  W->>W: load item (stub / partial / full / failed)
+  alt stale or not full
+    W->>Q: enqueue catalog.refresh (lane interactive, dedupe per item)
+  end
+  W-->>B: 200 stored data (no provider call)
+  K->>Q: claim (FOR UPDATE SKIP LOCKED)
+  K->>C: details for every external id
+  C-->>K: snapshots
+  K->>K: merge with field provenance, store, register cover asset
+  K-->>B: SSE entity.updated
+  B->>W: refetch
+....
+
+== Search fan-out
+
+`GET /api/v1/search?q=...&kind=...` answers from the local index right away with a
+`search_id` and the list of connectors it is asking. Each connector runs in the background;
+its results are stored as catalog items (deduplicated by external id, an existing item is
+never overwritten by a sparse search result) and sent to that user as a `search.results`
+event with the same `search_id`, as soon as that connector answers.
+
+== Governed HTTP client
+
+Every outgoing provider request goes through the `HttpFetch` port, implemented by the
+governed client in `catalog-core`:
+
+. Unknown connector or a host that is not on the connector's allowlist: rejected before any
+  network I/O.
+. Fresh HTTP-cache hit: answered from the cache (bodies are content-addressed blobs inside
+  the xref:storage-budget.adoc[storage budget], metadata in table `http_cache`).
+. Singleflight: concurrent identical `GET`s share one upstream call.
+. Circuit breaker: after repeated failures the connector fails fast for a cool-down period.
+. Priority gate and concurrency limit: `interactive` before `user_import` before
+  `background_refresh` before `prefetch`.
+. `Retry-After` pauses the whole connector; short pauses are waited out, long ones fail fast.
+. Token bucket (`governor`) per connector, then the request (conditional when a stale cached
+  copy has an ETag or Last-Modified), with jittered retries for 429, 5xx and network errors.
+
+Each request runs in a `tracing` span with connector id, operation, cache status and HTTP
+status. OIDC discovery and token requests use the same client as connector `oidc`.
+
+== Jobs
+
+The Postgres queue orders strictly by lane, then priority, then due time; dedupe keys keep
+one pending job per key. Handlers: `catalog.refresh`, `assets.fetch`, `storage.evict`.
+With `--role=web` and `--role=worker` in separate processes, events travel over Postgres
+`LISTEN/NOTIFY`, so a worker's `entity.updated` reaches browsers on any web process.
+
+== Measured
+
+The acceptance test (`apps/server/tests/latency.rs`) uses a connector that needs 10 s for
+search and details. Item detail answered in 3 to 5 ms and search in 1 to 2 ms (limit
+200 ms); `entity.updated` arrived after 10.2 s and `search.results` after 10.0 s.

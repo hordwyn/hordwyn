@@ -17,6 +17,8 @@ pub struct NewCatalogItem {
     pub description: Option<String>,
     pub external_ids: Vec<ExternalId>,
     pub attributes: serde_json::Value,
+    /// Provider cover URL (redirect fallback, registered as an asset by the refresh job).
+    pub cover_url: Option<String>,
 }
 
 impl App {
@@ -61,6 +63,7 @@ impl App {
                     }
                 }
                 item.attributes = attributes;
+                item.cover_url = new.cover_url.or(item.cover_url);
                 item
             }
             None => CatalogItem {
@@ -71,7 +74,7 @@ impl App {
                 year: new.year,
                 description: new.description,
                 cover_asset: None,
-                cover_url: None,
+                cover_url: new.cover_url,
                 external_ids: new.external_ids,
                 attributes,
                 provenance: std::collections::BTreeMap::new(),
@@ -202,5 +205,55 @@ impl App {
         self.publish(AppEvent::entity_updated("catalog_item", item.id.0, vec![]))
             .await;
         Ok(item)
+    }
+}
+
+impl App {
+    /// Like [`App::upsert_catalog_item`], but an item that already exists (same external id)
+    /// is returned unchanged except for new external ids and a missing cover URL. Search
+    /// results use this so a sparse result never overwrites a refreshed item.
+    ///
+    /// # Errors
+    /// Unknown kind, invalid attributes or a blank title (for new items).
+    pub async fn ensure_catalog_item(&self, new: NewCatalogItem) -> AppResult<CatalogItem> {
+        for ext in &new.external_ids {
+            if let Some(mut item) = self.repos.catalog.by_external_id(&new.kind, ext).await? {
+                let mut changed = false;
+                for e in &new.external_ids {
+                    if !item.external_ids.contains(e) {
+                        item.external_ids.push(e.clone());
+                        changed = true;
+                    }
+                }
+                if item.cover_url.is_none() && new.cover_url.is_some() {
+                    item.cover_url = new.cover_url;
+                    changed = true;
+                }
+                if changed {
+                    self.repos.catalog.upsert(&item).await?;
+                }
+                return Ok(item);
+            }
+        }
+        self.upsert_catalog_item(new).await
+    }
+
+    /// Attach the processed cover asset to an item.
+    ///
+    /// # Errors
+    /// Unknown item or storage errors.
+    pub async fn set_cover_asset(&self, id: ItemId, asset: String) -> AppResult<CatalogItem> {
+        let mut item = self.catalog_item(id).await?;
+        item.cover_asset = Some(asset);
+        self.repos.catalog.upsert(&item).await?;
+        self.publish(AppEvent::entity_updated("catalog_item", item.id.0, vec![]))
+            .await;
+        Ok(item)
+    }
+
+    /// # Errors
+    /// Storage errors.
+    pub async fn item_in_any_library(&self, id: ItemId) -> AppResult<bool> {
+        Ok(self.repos.library.any_for_item(id).await?)
     }
 }

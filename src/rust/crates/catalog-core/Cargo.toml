@@ -10,6 +10,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+futures.workspace = true
+sqlx.workspace = true
 app.workspace = true
 domain.workspace = true
 async-trait.workspace = true
@@ -28,5 +30,6 @@ chrono = { workspace = true, features = ["clock"] }
 uuid.workspace = true
 
 [dev-dependencies]
+store-pg.workspace = true
 testkit.workspace = true
 wiremock.workspace = true

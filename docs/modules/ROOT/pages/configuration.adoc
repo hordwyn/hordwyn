@@ -135,7 +135,7 @@ S3 settings and daily operation limits.
 |===
 |Key |Environment |Type |Default |Description
 
-|`access_key_id` |`APP__STORAGE__S3__ACCESS_KEY_ID` |string |- |Access key id; the secret comes from the environment only (`APP__STORAGE__S3__SECRET_KEY`).
+|`access_key_id` |`APP__STORAGE__S3__ACCESS_KEY_ID` |string |- |Access key id; the secret comes from the environment only (`APP__STORAGE__S3__SECRET_ACCESS_KEY`).
 |`bucket` |`APP__STORAGE__S3__BUCKET` |string |`""` |
 |`endpoint` |`APP__STORAGE__S3__ENDPOINT` |string |- |
 |`max_egress_bytes_per_day` |`APP__STORAGE__S3__MAX_EGRESS_BYTES_PER_DAY` |string |`"20GiB"` |Estimated bytes served from S3 per day; when exceeded, redirect instead of proxying.

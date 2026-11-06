@@ -94,3 +94,23 @@ impl App {
         Ok(())
     }
 }
+
+impl App {
+    /// # Errors
+    /// Storage errors.
+    pub async fn user_count(&self) -> AppResult<u64> {
+        Ok(self.repos.users.count().await?)
+    }
+
+    /// # Errors
+    /// Storage errors.
+    pub async fn user_by_username(&self, username: &str) -> AppResult<Option<User>> {
+        Ok(self.repos.users.by_username(username).await?)
+    }
+
+    /// # Errors
+    /// Storage errors.
+    pub async fn user_opt(&self, id: UserId) -> AppResult<Option<User>> {
+        Ok(self.repos.users.get(id).await?)
+    }
+}

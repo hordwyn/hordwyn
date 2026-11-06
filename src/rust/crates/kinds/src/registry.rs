@@ -31,6 +31,12 @@ impl Registry {
         Self::default()
     }
 
+    /// Keep only the listed kinds (per-deployment feature toggle, D-10). Unknown ids are ignored.
+    pub fn retain(&mut self, ids: &[String]) {
+        self.kinds
+            .retain(|k, _| ids.iter().any(|i| i == k.as_str()));
+    }
+
     /// Registry with every built-in kind.
     #[must_use]
     pub fn with_builtins() -> Self {

@@ -143,6 +143,14 @@ impl UserRepo for PgStore {
             .transpose()
     }
 
+    async fn count(&self) -> Res<u64> {
+        let n = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "n!" FROM users"#)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(be)?;
+        Ok(u64::try_from(n).unwrap_or(0))
+    }
+
     async fn update(&self, user: &User) -> Res<()> {
         let mut tx = self.begin().await?;
         sqlx::query!(

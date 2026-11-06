@@ -15,8 +15,10 @@ mod gate;
 mod http;
 pub mod merge;
 mod model;
+pub mod pg;
 pub mod refresh;
 mod registry;
+pub mod search;
 mod singleflight;
 
 pub use breaker::Breaker;

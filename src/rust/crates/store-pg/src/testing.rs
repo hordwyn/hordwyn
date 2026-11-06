@@ -12,6 +12,21 @@ use sqlx::postgres::PgPoolOptions;
 /// # Panics
 /// If the server is unreachable, or no URL is set while `REQUIRE_SERVICES=1`.
 pub async fn fresh_db() -> Option<PgPool> {
+    let url = fresh_db_url().await?;
+    Some(
+        PgPoolOptions::new()
+            .max_connections(20)
+            .connect(&url)
+            .await
+            .expect("connect to test database"),
+    )
+}
+
+/// Like [`fresh_db`], but returns the URL of the new, migrated database.
+///
+/// # Panics
+/// If the server is unreachable, or no URL is set while `REQUIRE_SERVICES=1`.
+pub async fn fresh_db_url() -> Option<String> {
     let Ok(admin_url) = std::env::var("TEST_DATABASE_URL") else {
         assert!(
             std::env::var_os("REQUIRE_SERVICES").is_none(),
@@ -39,7 +54,8 @@ pub async fn fresh_db() -> Option<PgPool> {
         .await
         .expect("connect to test database");
     crate::migrate(&pool).await.expect("migrations");
-    Some(pool)
+    pool.close().await;
+    Some(url)
 }
 
 fn replace_db_name(url: &str, name: &str) -> String {

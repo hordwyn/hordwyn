@@ -6,6 +6,7 @@ use app::ports::Lane;
 use async_trait::async_trait;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
 use crate::{Job, PgQueue};
 
@@ -124,8 +125,13 @@ impl Worker {
 }
 
 async fn execute(queue: &PgQueue, handlers: &HashMap<String, Arc<dyn Handler>>, job: Job) {
+    // `instrument`, not `span.enter()`: an entered guard held across `.await` would attach the
+    // span to whatever else runs on this thread meanwhile.
     let span = tracing::info_span!("job", id = %job.id, kind = %job.kind, attempt = job.attempts);
-    let _guard = span.enter();
+    execute_in_span(queue, handlers, job).instrument(span).await;
+}
+
+async fn execute_in_span(queue: &PgQueue, handlers: &HashMap<String, Arc<dyn Handler>>, job: Job) {
     let result = match handlers.get(&job.kind) {
         Some(h) => h.run(&job).await,
         None => Err(format!("no handler for job kind `{}`", job.kind)),

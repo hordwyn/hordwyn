@@ -177,6 +177,7 @@ async fn refresh_turns_a_stub_into_a_full_item() {
             description: None,
             external_ids: vec![ExternalId::new("tmdb", "11")],
             attributes: serde_json::json!({}),
+            cover_url: None,
         })
         .await
         .unwrap();

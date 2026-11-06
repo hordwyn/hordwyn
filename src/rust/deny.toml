@@ -7,7 +7,12 @@ all-features = true
 version = 2
 yanked = "deny"
 # paste is unmaintained (not vulnerable); it comes in through leptos -> either_of (DEC-044).
-ignore = [{ id = "RUSTSEC-2024-0436", reason = "transitive via leptos 0.8; compile-time macro only" }]
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "transitive via leptos 0.8; compile-time macro only" },
+    # rsa via openidconnect: only public-key signature verification of ID tokens, no private
+    # key exists in the process, so the timing side channel has nothing to leak (DEC-082).
+    { id = "RUSTSEC-2023-0071", reason = "rsa used only to verify OIDC ID-token signatures with public keys" },
+]
 
 [licenses]
 version = 2

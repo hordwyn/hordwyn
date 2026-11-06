@@ -39,6 +39,29 @@ pub struct ConnectorPolicy {
 }
 
 impl ConnectorPolicy {
+    /// Policy for OIDC discovery, token and JWKS requests to the issuer.
+    #[must_use]
+    pub fn oidc(host: &str, port: Option<u16>) -> Self {
+        let host = match port {
+            Some(p) => format!("{host}:{p}"),
+            None => host.to_string(),
+        };
+        Self {
+            hosts: vec![host],
+            rate_limit: RateLimit {
+                per_second: 5,
+                burst: 10,
+                max_concurrency: 4,
+            },
+            // discovery documents and keys are cached by the client for its lifetime
+            cache_ttl_secs: 0,
+            breaker_threshold: 5,
+            breaker_cooldown: Duration::from_secs(30),
+            max_retry_wait: Duration::from_secs(5),
+            max_retries: 1,
+        }
+    }
+
     #[must_use]
     pub fn from_info(info: &ConnectorInfo) -> Self {
         Self {
