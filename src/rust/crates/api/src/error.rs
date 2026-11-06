@@ -86,6 +86,14 @@ impl From<AuthError> for ApiError {
             AuthError::WeakPassword => {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, "weak_password", msg)
             }
+            AuthError::InvalidUsername => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_username", msg)
+            }
+            AuthError::InvalidDisplayName => Self::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_display_name",
+                msg,
+            ),
             AuthError::TooManyAttempts { .. } => {
                 Self::new(StatusCode::TOO_MANY_REQUESTS, "too_many_attempts", msg)
             }

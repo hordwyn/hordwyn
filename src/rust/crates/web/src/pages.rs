@@ -153,11 +153,12 @@ pub fn SignUp() -> impl IntoView {
         s("auth-have-account"),
         s("nav-sign-in"),
     );
+    let rules = i18n.t("auth-username-rules");
     view! {
         <PageTitle text=title/>
         <form class="grid max-w-sm gap-4" on:submit=move |ev| { ev.prevent_default(); submit.dispatch(()); }>
-            <FormField id="username" label=l_user>
-                <Input id="username" value=username/>
+            <FormField id="username" label=l_user description=rules>
+                <Input id="username" value=username described_by="username-description"/>
             </FormField>
             <FormField id="display_name" label=l_display>
                 <Input id="display_name" value=display/>

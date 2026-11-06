@@ -1,6 +1,6 @@
 # Design addendum 1: disclosure, secrets at rest, admin area, OIDC and SSO
 
-Status: proposal v1, 2026-11-06. Extends `design.md` (proposal v1) and `research.md`.
+Status: proposal v1, 2026-11-06; owner rulings applied (owner review 2026-11-06, DEC-171, DEC-172; see section 5). Extends `design.md` (proposal v1) and `research.md`.
 Written for the owner and for the developer who implements it. Four requirements from
 the owner's review are covered, each with: research findings (cited, numbered `A-nn`
 so they do not collide with `R-nn`), concrete design decisions, changes to `design.md`
@@ -337,12 +337,12 @@ disclosure with the current value in the summary ("Immediately, no quiet hours")
 ### 1.5 Owner decisions (section 1)
 
 - **OD-01** Density budget numbers (D2): 5 inputs / 7 rows open per page. Default: as
-  stated; may be loosened to 7 / 10 on desktop-only admin pages.
+  stated; may be loosened to 7 / 10 on desktop-only admin pages. **Approved as defaulted** (owner review 2026-11-06, DEC-172). WCAG 2.2 AA is a requirement everywhere together with this budget (DEC-171).
 - **OD-02** Remembered disclosure state per user (D6) vs always closed. Default:
-  remembered (localStorage, no server round trip).
-- **OD-03** Home: Recent activity shortened to 5 rows with a link. Default: yes.
+  remembered (localStorage, no server round trip). **Approved as defaulted** (owner review 2026-11-06, DEC-172).
+- **OD-03** Home: Recent activity shortened to 5 rows with a link. Default: yes. **Approved as defaulted** (owner review 2026-11-06, DEC-172).
 - **OD-04** Library: one "Filters" button instead of four filter buttons in the open
-  row. Default: yes.
+  row. Default: yes. **Approved as defaulted** (owner review 2026-11-06, DEC-172).
 
 ---
 
@@ -671,16 +671,16 @@ future XChaCha switch is a new format byte, not a silent change.
 ### 2.5 Owner decisions (section 2)
 
 - **OD-05** AEAD: AES-256-GCM (NIST/OWASP named, hardware accelerated) or
-  XChaCha20-Poly1305 (random-nonce safe, expired draft). Default: AES-256-GCM.
+  XChaCha20-Poly1305 (random-nonce safe, expired draft). Default: AES-256-GCM. **Approved as defaulted** (owner review 2026-11-06, DEC-172). Encrypting secrets at rest (this whole section) is **decided** (owner review 2026-11-06, DEC-171).
 - **OD-06** First start without a key: auto-generate `secrets.key` in the data
   directory (and tell the admin to back it up) or refuse to start. Default:
-  auto-generate.
+  auto-generate. **Approved as defaulted** (owner review 2026-11-06, DEC-172).
 - **OD-07** Key source precedence: file first, env second, both documented. Default:
-  as stated.
+  as stated. **Approved as defaulted** (owner review 2026-11-06, DEC-172).
 - **OD-08** TOTP recovery codes added with the migration (hashed, shown once).
-  Default: yes.
+  Default: yes. **Approved as defaulted** (owner review 2026-11-06, DEC-172).
 - **OD-09** Soft reminder to rotate the KEK after 2 years. Default: yes, overview
-  line only, no enforcement.
+  line only, no enforcement. **Approved as defaulted** (owner review 2026-11-06, DEC-172).
 
 ---
 
@@ -713,13 +713,14 @@ value ignored while `APP__...` is set" so nobody wonders why a save had no effec
 
 | Setting | Lives in | Why |
 |---|---|---|
-| database URL, listen address, `server.public_url`, brand dir, telemetry, storage backend and S3 credentials, Meilisearch URL and master key, secrets key, cookie `secure`, trusted proxies, `--role` | env / file | needed before the DB is reachable, or per deployment; `public_url` is also a security boundary (redirect URIs, cookies) that should not be editable from a web session |
+| database URL, listen address, `server.public_url`, brand dir, telemetry, storage backend and S3 credentials, Meilisearch URL and master key, secrets key, trusted proxies, `--role` | env / file | needed before the DB is reachable, or per deployment; `public_url` is also a security boundary (redirect URIs, cookies) that should not be editable from a web session |
 | `instance.hosting` (home/hosted), sign-up mode, invites, roles, per-source licence record | DB | policy, changed by admins at runtime (design.md 4.1) |
 | data-source keys and per-user credentials | DB (encrypted), env override | section 2 |
 | OIDC providers (several), SSO mode, group-to-role rules | DB (encrypted secret), env override for one provider as today (`auth.oidc`) | section 4; env keeps the headless path |
 | SMTP (host, port, security, user, password, from) | DB (encrypted password), env override as today (`[mail]`) | runtime, testable from the UI |
-| storage budget numbers (`max_total_bytes`, watermarks, variants) | env / file | capacity is an operator decision tied to the volume; the UI shows the report and "Run eviction now" only |
-| session days, TOTP issuer | env / file (as today) | rarely changed; changing session length from the UI is a lock-out vector |
+| storage budget numbers (`max_total_bytes`, watermarks, variants) | DB, editable in the admin UI; env / file override stays | owner ruling OD-10 (owner review 2026-11-06, DEC-172): editable in the UI; a value set in env shows read-only with the variable name |
+| session days, cookie `secure` | DB, editable in the admin UI; env / file override stays | owner ruling OD-11 (owner review 2026-11-06, DEC-172): same env rule; see 3.3 for the lock-out guards |
+| TOTP issuer | env / file (as today) | rarely changed |
 | notification instance defaults and locks, template overrides | DB | content |
 | audit log, job state, health | DB (read-only in the UI) | records |
 
@@ -738,6 +739,11 @@ screen can render the badge.
   password change; A-08 3.3.7 allows re-entry "required to ensure the security".
 - Enabling SSO-only (section 4) requires at least one admin with a password and an
   enrolled authenticator, and `/sign-in/local` always exists.
+- Session length and cookie security are editable in the admin UI (OD-11). Changing cookie
+  security (`secure`) applies from the **next session**, so the current admin session keeps
+  working; the UI warns when `server.public_url` is not https before `secure` can be turned
+  on (a `secure` cookie over plain http would never be sent back and would lock everyone
+  out). A value set by env is read-only and shows the variable name.
 - The acting admin's own session is never revoked by their own settings change; role
   changes to oneself are refused.
 - CLI escape hatches that need shell access, not a browser: `cli admin promote
@@ -756,7 +762,7 @@ block (only when something needs attention), open set, disclosures" (D2, D5, D14
 | Entry | Open by default | Behind disclosure | Notes |
 |---|---|---|---|
 | Overview | attention block; 8 health rows (database, search, storage, jobs, mail, data sources, identity provider, secrets at rest), each dot + word + one line + one action; Recent admin actions (3); Brand card (read-only) | row detail (last error, timings) | replaces 6.13 "Overview" and "Branding" |
-| Instance | hosting mode, sign-up mode, public address (env, read-only) | Mail (SMTP, Save and send a test), Secrets at rest, Advanced (session length, cookie security, search backend, image variants: all env, read-only) | mockup annotations 4-8 |
+| Instance | hosting mode, sign-up mode, public address (env, read-only) | Mail (SMTP, Save and send a test), Secrets at rest, Advanced (session length and cookie security, editable, env value read-only with the variable name; search backend and image variants as before) | mockup annotations 4-8 |
 | Sign-in and SSO | providers table (name, issuer, linked accounts, status), "Add a provider" | per-provider detail (client id, write-only secret, scopes, Test = discovery + logout capabilities), SSO mode radios, account rules (auto-create, group-to-role) | section 4 |
 | Users | filter, table (person, role, signs in with, last seen), row menu, Invite | invites list ("Open invites (2)" disclosure above the table), disabled users via the filter chip | sign-up policy is on Instance, not here (one place per setting) |
 | Data sources | attention block, table (source, kinds, status, action) | row expands to the source card | design.md 6.10 trimmed as in 1.3 |
@@ -803,13 +809,19 @@ KICKOFF mission).
 
 ### 3.6 Owner decisions (section 3)
 
-- **OD-10** Storage budget numbers stay in env/file (UI read-only) rather than editable
-  in the UI. Default: env/file.
-- **OD-11** Session length and cookie security stay env-only. Default: yes.
+- **OD-10** Storage budget numbers: env/file only, or editable in the UI. Default was
+  env/file. **Owner ruling: editable in the admin UI; the env override stays and shows
+  read-only with the variable name** (owner review 2026-11-06, DEC-172).
+- **OD-11** Session length and cookie security: env-only, or editable. Default was env-only.
+  **Owner ruling: editable in the admin UI, same env override rule; a cookie-security change
+  applies on the next session, the UI warns when the public URL is not https, and the change
+  must not lock the admin out** (owner review 2026-11-06, DEC-172).
 - **OD-12** Re-authentication window for sign-in-related admin changes: 10 minutes.
-  Default: 10 minutes.
-- **OD-13** Audit retention: 365 days, exportable. Default: 365 days.
-- **OD-14** Storage and jobs as one page. Default: one page.
+  Default: 10 minutes. **Still open** (owner review 2026-11-06, DEC-172): research what established
+  self-hosted apps use for re-authentication windows (sudo-mode style) and propose a value
+  on the next review; 10 minutes applies until then.
+- **OD-13** Audit retention: 365 days, exportable. Default: 365 days. **Approved as defaulted** (owner review 2026-11-06, DEC-172).
+- **OD-14** Storage and jobs as one page. Default: one page. **Approved as defaulted** (owner review 2026-11-06, DEC-172).
 
 ---
 
@@ -1152,9 +1164,9 @@ The UI states the consequence in the radio label (mockup `admin.html`, annotatio
 
 **Break-glass local admin login.** `/sign-in/local` always exists and is never
 redirected, is not linked from the normal flow (only from the outage page and the
-docs), and in `auto` mode accepts only accounts with the admin role and TOTP enabled;
-the TOTP step is mandatory there (the second factor compensates for the password path
-being the one an attacker would target). It uses the same throttle (DEC-155) and every
+docs), and in `auto` mode accepts only accounts with the admin role. A **password is enough**
+(owner ruling OD-17, owner review 2026-11-06, DEC-172); the TOTP step is used if the account has TOTP enrolled, but
+is not mandatory. It uses the same throttle (DEC-155) and every
 successful use writes an audit row and sends an admin notification ("Local sign-in
 used by robin from 192.0.2.10"). CLI fallbacks from section 3.3 cover a lost
 authenticator (`cli admin reset-totp <user>`).
@@ -1219,46 +1231,51 @@ authenticator (`cli admin reset-totp <user>`).
 ### 4.7 Owner decisions (section 4)
 
 - **OD-15** Auto-link on verified email match without a password check. Default: no
-  (ask with password; A-18).
+  (ask with password; A-18). **Approved as defaulted** (owner review 2026-11-06, DEC-172).
 - **OD-16** `role_source = provider` recomputes the role at every sign-in and can
   demote humans who were made admin by hand. Default: per provider, off unless
-  `admin_groups` is set.
-- **OD-17** Break-glass path `/sign-in/local` requires TOTP in `auto` mode. Default:
-  yes.
+  `admin_groups` is set. **Approved as defaulted** (owner review 2026-11-06, DEC-172).
+- **OD-17** Break-glass path `/sign-in/local` requires TOTP in `auto` mode. Default was
+  yes. **Owner ruling: password only; TOTP is used if the account has it; the throttle, the
+  audit row and the admin notification are kept** (owner review 2026-11-06, DEC-172).
 - **OD-18** Front-channel logout: not implemented (depends on third-party cookies).
-  Default: not implemented; revisit if an owner-relevant provider offers nothing else.
+  Default: not implemented; revisit if an owner-relevant provider offers nothing else. **Approved as defaulted** (owner review 2026-11-06, DEC-172).
 - **OD-19** Silent probe at Test time decides whether `auto` mode uses `prompt=none`.
-  Default: yes; without a successful probe `auto` goes interactive directly.
-- **OD-20** `/signed-out` does not auto-redirect even in `auto` mode. Default: yes.
-- **OD-21** Keep email in sync from the provider when `email_verified`. Default: off.
+  Default: yes; without a successful probe `auto` goes interactive directly. **Approved as defaulted** (owner review 2026-11-06, DEC-172).
+- **OD-20** `/signed-out` does not auto-redirect even in `auto` mode. Default: yes. **Approved as defaulted** (owner review 2026-11-06, DEC-172).
+- **OD-21** Keep email in sync from the provider when `email_verified`. Default: off. **Approved as defaulted** (owner review 2026-11-06, DEC-172).
 
 ---
 
 ## 5. Consolidated owner decisions
 
-| Id | Question | Default |
-|---|---|---|
-| OD-01 | Density budget: 5 inputs / 7 rows open per page | as stated; 7 / 10 allowed on desktop-only admin pages |
-| OD-02 | Remember disclosure state per user (localStorage) | yes |
-| OD-03 | Home: Recent activity 5 rows + link | yes |
-| OD-04 | Library: one Filters button | yes |
-| OD-05 | AEAD: AES-256-GCM vs XChaCha20-Poly1305 | AES-256-GCM |
-| OD-06 | First start without a key: auto-generate `secrets.key` | auto-generate |
-| OD-07 | Key source: file first, env second | as stated |
-| OD-08 | TOTP recovery codes (hashed, shown once) | yes |
-| OD-09 | Soft reminder to rotate the KEK after 2 years | yes |
-| OD-10 | Storage budget numbers stay env/file | env/file |
-| OD-11 | Session length and cookie security stay env-only | yes |
-| OD-12 | Re-auth window for sign-in-related admin changes | 10 minutes |
-| OD-13 | Audit retention | 365 days |
-| OD-14 | Storage and jobs on one admin page | one page |
-| OD-15 | Auto-link on verified email without password | no |
-| OD-16 | Provider-managed roles recomputed each sign-in | off unless admin groups set |
-| OD-17 | `/sign-in/local` requires TOTP in auto mode | yes |
-| OD-18 | Front-channel logout | not implemented |
-| OD-19 | Silent probe gates `prompt=none` in auto mode | yes |
-| OD-20 | `/signed-out` never auto-redirects | yes |
-| OD-21 | Keep email in sync from provider | off |
+All owner decisions are decided (owner review 2026-11-06, DEC-171/DEC-172), except OD-12.
+"As defaulted" means the default in the table was approved unchanged. Encrypting secrets at
+rest (section 2) is decided (DEC-171).
+
+| Id | Question | Default | Status and ruling |
+|---|---|---|---|
+| OD-01 | Density budget: 5 inputs / 7 rows open per page | as stated; 7 / 10 allowed on desktop-only admin pages | Decided: as defaulted (owner review 2026-11-06, DEC-172) |
+| OD-02 | Remember disclosure state per user (localStorage) | yes | Decided: as defaulted (DEC-172) |
+| OD-03 | Home: Recent activity 5 rows + link | yes | Decided: as defaulted (DEC-172) |
+| OD-04 | Library: one Filters button | yes | Decided: as defaulted (DEC-172) |
+| OD-05 | AEAD: AES-256-GCM vs XChaCha20-Poly1305 | AES-256-GCM | Decided: as defaulted (DEC-172) |
+| OD-06 | First start without a key: auto-generate `secrets.key` | auto-generate | Decided: as defaulted (DEC-172) |
+| OD-07 | Key source: file first, env second | as stated | Decided: as defaulted (DEC-172) |
+| OD-08 | TOTP recovery codes (hashed, shown once) | yes | Decided: as defaulted (DEC-172) |
+| OD-09 | Soft reminder to rotate the KEK after 2 years | yes | Decided: as defaulted (DEC-172) |
+| OD-10 | Storage budget numbers: env/file only or editable | env/file | Decided: editable in the admin UI; env override stays, shown read-only with the variable name (owner review 2026-11-06, DEC-172) |
+| OD-11 | Session length and cookie security: env-only or editable | env-only | Decided: editable in the admin UI, same env rule; cookie-security change applies on the next session; warn when the public URL is not https; must not lock the admin out (DEC-172) |
+| OD-12 | Re-auth window for sign-in-related admin changes | 10 minutes | OPEN: 10 minutes until research proposes a value (DEC-172) |
+| OD-13 | Audit retention | 365 days | Decided: as defaulted (DEC-172) |
+| OD-14 | Storage and jobs on one admin page | one page | Decided: as defaulted (DEC-172) |
+| OD-15 | Auto-link on verified email without password | no | Decided: as defaulted (DEC-172) |
+| OD-16 | Provider-managed roles recomputed each sign-in | off unless admin groups set | Decided: as defaulted (DEC-172) |
+| OD-17 | `/sign-in/local` requires TOTP in auto mode | yes | Decided: password only; TOTP used if the account has it; throttle, audit row and admin notification kept (DEC-172) |
+| OD-18 | Front-channel logout | not implemented | Decided: as defaulted (DEC-172) |
+| OD-19 | Silent probe gates `prompt=none` in auto mode | yes | Decided: as defaulted (DEC-172) |
+| OD-20 | `/signed-out` never auto-redirects | yes | Decided: as defaulted (DEC-172) |
+| OD-21 | Keep email in sync from provider | off | Decided: as defaulted (DEC-172) |
 
 Reading order for the owner: section 5 (this table), then the mockups
 `admin.html` and `signin-sso.html`, then the sections whose defaults you want to

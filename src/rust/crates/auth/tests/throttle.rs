@@ -45,3 +45,33 @@ async fn failed_sign_ins_are_throttled_per_name() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn usernames_are_normalized_and_bad_ones_named() {
+    let t = testkit::TestEnv::new();
+    let a = Auth::new(
+        t.app.clone(),
+        Arc::new(MemAuthStore::default()),
+        AuthSettings {
+            signup: SignupMode::Open,
+            ..AuthSettings::default()
+        },
+    );
+    let up = |name: &str| SignUp {
+        username: name.into(),
+        display_name: String::new(),
+        email: None,
+        password: "correct horse battery".into(),
+        invite: None,
+    };
+    let (u, _) = a.sign_up(up(" Robin ")).await.unwrap();
+    assert_eq!(u.username, "robin");
+    assert_eq!(u.display_name, "robin", "empty display name falls back");
+    a.sign_in("ROBIN", "correct horse battery", None)
+        .await
+        .unwrap();
+    assert!(matches!(
+        a.sign_up(up("me@example.org")).await,
+        Err(AuthError::InvalidUsername)
+    ));
+}

@@ -1,6 +1,6 @@
 # Brand and UX design
 
-Status: proposal v1, 2026-11-06. Companion documents: `research.md` (evidence, cited) and
+Status: proposal v1, 2026-11-06; owner rulings applied (owner review 2026-11-06, DEC-171, DEC-172; see section 10). Companion documents: `research.md` (evidence, cited) and
 `mockups/index.html` (static screens). Written for the owner and for the developer who
 implements it in the Leptos/Tailwind codebase (`src/rust/crates/ui`, `src/rust/crates/web`).
 
@@ -110,7 +110,7 @@ Words we use and avoid (English / German):
 | Watched, read, listened, played / gesehen, gelesen, gehoert, gespielt | consumed, completed (as a verb) |
 | Log, logged / eintragen, eingetragen | submit, record (noun ok) |
 | People / Personen (UI), companion only in docs and API | contacts, friends |
-| Planned, In progress, Done, Paused, Dropped / Geplant, Begonnen, Fertig, Pausiert, Abgebrochen | backlog, consumed, finished (status) |
+| Planned, In progress, Completed, Paused, Dropped / Geplant, Begonnen, Abgeschlossen, Pausiert, Abgebrochen | backlog, consumed, finished, Done (status; owner ruling DEC-171) |
 | Data source / Datenquelle | provider, connector (code only) |
 | Sender / Sender (integrations) | integration token, hook |
 | Something went wrong + what to do | Oops, error 500, invalid |
@@ -256,7 +256,7 @@ UI boundaries (WCAG 1.4.3 and 1.4.11, see research.md R-41).
 | `--success-soft` etc. (new) | emerald-50-like tints | see mockup CSS | semantic text on soft | >= 4.5 by construction (text colour unchanged, background near white) | pass |
 
 Note on `--input`: the current zinc-300 (#d4d4d8) gives 1.48:1 on white, which fails
-WCAG 1.4.11 for a control whose only visual identification is its border. zinc-500 passes.
+WCAG 1.4.11 for a control whose only visual identification is its border. zinc-500 passes. Decided (owner review 2026-11-06, DEC-171): field borders are zinc-500.
 If the owner finds 1 px zinc-500 too heavy, the alternative that still passes is a 1 px
 zinc-400 border (2.63, fails alone) **plus** a `--muted` filled background, so the field is
 identified by its fill; the mockups use the zinc-500 border.
@@ -299,12 +299,18 @@ Rules:
 
 ### 2.8 Typography
 
-Default: the system font stack, no web font. It costs nothing, has no licence, matches the
-OS in both themes and is what the current build already uses via Tailwind's `--font-sans`:
+Default: the default brand ships **Atkinson Hyperlegible Next** (SIL OFL 1.1; files from
+https://github.com/googlefonts/atkinson-hyperlegible-next, not the Braille Institute
+download, which has its own EULA), **self-hosted and never loaded from a CDN**. The licence
+is recorded on the open-source attribution page (see 2.11). Decided (owner review
+2026-11-06, DEC-171). The system font stack stays as the fallback at the end of the
+`font-family` list, so text renders before the font loads and if a file is missing. The
+stack is Tailwind's `--font-sans`:
 `ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"` (Tailwind v4 theme.css, URL above). The mockups use the
 same with explicit fallbacks (`-apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`).
+The resulting list is `"Atkinson Hyperlegible Next", ui-sans-serif, system-ui, sans-serif, ...`.
 
-If an operator wants a web font, these are verified SIL OFL 1.1 and may be self-hosted
+An operator who wants a different web font may use any of these, verified SIL OFL 1.1 and self-hostable
 (research.md R-53):
 
 - Inter, https://github.com/rsms/inter/blob/master/LICENSE.txt (OFL 1.1)
@@ -314,10 +320,9 @@ If an operator wants a web font, these are verified SIL OFL 1.1 and may be self-
   name "Plex")
 - Geist, https://github.com/vercel/geist-font (OFL 1.1)
 - Atkinson Hyperlegible Next from https://github.com/googlefonts/atkinson-hyperlegible-next
-  (OFL 1.1 there; the Braille Institute download uses its own EULA, so take the googlefonts
-  files)
+  (OFL 1.1 there; the default brand font, see above)
 
-The brand config gets an optional `[fonts] sans = "Inter"` with files inside the brand
+The brand config gets `[fonts] sans = "Atkinson Hyperlegible Next"` (default brand) with files inside the brand
 directory; the shell emits `@font-face` with `font-display: swap`. Never load from a CDN.
 
 Scale (rem, line-height), tuned for dense library pages:
@@ -368,6 +373,17 @@ paragraphs (NN/g dark mode guidance, R-42). Titles clamp to two lines in cards.
   (mark all), `inbox`, `history`, `shield` (admin), `key-round`, `plug` (integrations),
   `database` (sources), `wifi-off` (offline), `circle-alert`, `chevrons-up-down`, `hash`.
 
+### 2.11 Required attribution and open-source attribution page
+
+- **TMDB logo:** the attribution logo the TMDB terms require is committed unmodified from
+  TMDB's official source, with the terms noted next to the file (R-F3, DEC-170; supersedes
+  the "operator supplies it" idea). It is shown in the attribution footer and on the data
+  sources page wherever TMDB data appears.
+- **Open-source attribution page** (linked from the footer and Settings): the Rust crates
+  and their licences, the font (Atkinson Hyperlegible Next, OFL 1.1 text), the icon
+  libraries, and the data sources with the attribution each one requires. Generated from
+  the dependency metadata where possible so it cannot drift.
+
 ---
 
 ## 3. Information architecture
@@ -380,7 +396,7 @@ Everything in the product is one of these; the UI never mixes them in one contro
 | Concept | What it is | Cardinality | Where it is edited |
 |---|---|---|---|
 | **Kind** | What something is (movie, book, board game...). Fixed by the kinds crate, grouped into four activity groups. | exactly one per item, never changes | set when added |
-| **Status** | Where you are with it: Planned, In progress, Done, Paused, Dropped, plus kind-specific ones (Endless for games; ownership flags for board games are separate, see below). | exactly one per library entry | status menu, derived from logging |
+| **Status** | Where you are with it: Planned, In progress, Completed, Paused, Dropped, plus kind-specific ones (Endless for games; ownership flags for board games are separate, see below). | exactly one per library entry | status menu, derived from logging |
 | **Progress and history** | Append-only events: watched S2E5, page 212, a play with players. Statuses are derived from them where possible. | many per entry | log sheet, item page, webhooks, imports |
 | **Tags** | Your own flat labels ("cosy", "with Anna", "lent out"). | many per entry | item page, bulk edit |
 | **Lists** | Ordered, named, shareable collections. | many per entry | Lists page, palette |
@@ -441,7 +457,7 @@ Home   Library   [+]   History   You
 ```
 
 - "You" is a hub page: People, Lists, Notifications, Settings, Sign out. The hub pattern
-  keeps the bar at five and avoids the "More" overflow that hides content [R-29].
+  keeps the bar at five (decided, owner review 2026-11-06, DEC-171) and avoids the "More" overflow that hides content [R-29].
 - "+" opens the palette full screen in add mode.
 - Tab bar is 72 px tall including the home indicator inset; targets are at least 48 px
   [R-40]. `scroll-padding-bottom` equals its height so focused elements are never hidden
@@ -459,7 +475,7 @@ Home (Now)                     Library                         History
   continue (in progress)         group: All/Watch/Read/Listen/Play   stream by day
   up next (planned)              kind chips with counts          filters: group, person, year
   recent activity                status tabs                     shared with me (filter)
-  this year (4 numbers)          filters: tags, facets, rating,  stats panel (year, compare)
+  all-time stats               filters: tags, facets, rating,  stats panel (year, compare)
   admin nudge (sources)            owned                         all stats page
                                  sort, view (grid/list)
                                  bulk select (list view)
@@ -488,13 +504,13 @@ Admin (instance)
 ### 3.4 Statuses, derived states and the "next step"
 
 - Core statuses stay as in `domain::kind::Status::CORE`. The UI shows them as Planned,
-  In progress, Done, Paused, Dropped (en) / Geplant, Begonnen, Fertig, Pausiert,
-  Abgebrochen (de). "Completed" becomes "Done" in the UI (shorter, less formal); the key
+  In progress, Completed, Paused, Dropped (en) / Geplant, Begonnen, Abgeschlossen,
+  Pausiert, Abgebrochen (de). Decided (owner review 2026-11-06, DEC-171); the key
   `status-completed` stays.
 - Logging drives status: the first progress event moves Planned -> In progress; the finishing
-  event moves -> Done; Dropped records progress-at-drop and is private by default [R-20].
+  event moves -> Completed; Dropped records progress-at-drop and is private by default [R-20].
   A user can always set a status by hand, and the app never blocks a user state on provider
-  metadata (for example a show that is still airing can be Done) [R-23].
+  metadata (for example a show that is still airing can be Completed) [R-23].
 - "Up to date" (every aired episode watched, show still running) is a derived badge on
   In progress entries, not a status [R-28].
 - Every entry has a computed **next step** used by cards, the home page and `Ctrl+Enter`
@@ -502,13 +518,13 @@ Admin (instance)
 
 | Progress model | Next step | Label |
 |---|---|---|
-| Single | finished | "Watched" (or "Watched again" when Done) |
+| Single | finished | "Watched" (or "Watched again" when Completed) |
 | Episodic | next unwatched episode | "Watched S2 E5" |
 | Paged | update page/chapter | "Update page" (+10 / +25 / finished) |
 | Timed | update position | "Update position" |
 | Sessions | new session | "Log a play" / "Log a session" |
 
-- Rewatch/reread: when an item is Done and the user logs again, the sheet pre-ticks
+- Rewatch/reread: when an item is Completed and the user logs again, the sheet pre-ticks
   "rewatch", history keeps every play, counts show distinct titles and total plays
   separately [R-10].
 - "Mark this and all previous", "Mark season", "Mark show" are visible menu items on the
@@ -528,6 +544,10 @@ Admin (instance)
   kind gets filters without UI changes.
 
 ### 3.6 History, companions, sessions, sharing
+
+Routes are `/history` and `/people`. The product is greenfield, so there are no redirects
+from `/sessions` or `/companions` (DEC-171).
+
 
 - History is one stream for all kinds, grouped by day, written as sentences, with the group
   switcher and a person filter [R-28]. Shared sessions from linked users are rows in the same
@@ -580,7 +600,7 @@ Hardcover account), so it is shown to members only for those sources.
 
 ```toml
 [instance]
-hosting = "home"   # or "hosted"
+hosting = "home"   # default; or "hosted". The wizard asks (DEC-171)
 ```
 
 It changes defaults, not features:
@@ -590,7 +610,7 @@ It changes defaults, not features:
 | sign-up default | invite (first account is admin, as now) | invite; "closed" suggested after onboarding |
 | per-user credential sections | hidden unless a configured source needs them | shown for TheTVDB PIN and Hardcover |
 | licence reminders | off | on: the admin records per source whether an agreement is on file; the data-sources page shows a warning until recorded |
-| attribution footer | as required by terms | as required by terms, plus the TMDB logo slot when the operator supplies it |
+| attribution footer | as required by terms | as required by terms, plus the TMDB logo (committed, 2.11) |
 | admin "ask admin" notifications | on | on |
 | rate-limit protection | shared instance budget; queue priorities already in place | same, plus per-user fair-share on `interactive` lane (phase 4) |
 
@@ -722,7 +742,7 @@ empty states, "Add" on the library page, "Add by hand" everywhere search can fai
 Palette path (fewest clicks): `Ctrl+K`, type, `Enter` on a library hit opens it;
 `Ctrl+Enter` on a provider hit adds it as Planned and keeps the palette open (toast
 "Added to Planned", Undo). Mouse path: hover row, "Add". "Add as..." menu: In progress,
-Done (with date), to list X, with tag.
+Completed (with date), to list X, with tag.
 
 In-page path: Library > "Add" opens the same palette scoped to the current group. Item page
 of a not-yet-added catalog item: "Add to library" button with the same menu.
@@ -771,7 +791,7 @@ code already keeps action state outside the view).
 
 ### 5.5 Rate and review
 
-Entry: item page row, the log sheet, the palette "Add as... Done with rating". Rating
+Entry: item page row, the log sheet, the palette "Add as... Completed with rating". Rating
 control: 5 stars with half steps on pointer (stored 0-100, DEC-018), keyboard arrows move in
 half steps, `0` clears; "no rating" is shown as hollow stars with "Not rated" text. Review:
 the Notes tab has a private note field (always) and a "Publish as review" toggle that makes
@@ -855,7 +875,11 @@ from "stack vertically".
   only while a kind group has no working source, snoozable); **Continue** (up to 6 in-progress
   entries, most recent activity first, each with its next-step button and a secondary link);
   **Up next** (planned, 6 posters, "All planned"); **Recent activity** (10 rows: own
-  events, shares, link requests, import results); **This year** (4 numbers; "Stats" link).
+  events, shares, link requests, import results); **Stats** (all-time totals per kind group as native SVG charts, each with a text
+  equivalent such as a table or sentence; link to the Stats page).
+- Stats page (`/stats`, phase 1): everything over time, with a tab per group (Watch, Read,
+  Listen, Play) and an overall tab; per year, per month, per person. Charts are native SVG
+  with text equivalents (decided, owner review 2026-11-06, DEC-171).
 - Empty (no entries): the empty-state block with "Find something" (palette) and "Import a
   file"; sections do not render as empty boxes (Carbon: one primary action per screen).
 - Keyboard: `J/K` move between continue cards, `Enter` runs the next step.
@@ -936,16 +960,16 @@ from "stack vertically".
   in to add these to your library"; `shared-list-missing` as a friendly 404 ("This list is
   not shared any more").
 
-### 6.6 History (`/history`, was `/sessions`) - `history.html`
+### 6.6 History (`/history`) - `history.html`
 
 - Filters: group, person, year, "Shared with me". Stream by day, rows as sentences with the
   kind icon, source (Jellyfin, import), Edit; shared rows highlighted with "Copy to my log".
 - Side panel: this year vs the same period last year (movies, episodes, books, pages,
   plays, H-index), most played with, unplayed owned games, link to All stats.
-- All stats page (phase 3): per group, per year, per person; opt-in goals.
+- Stats live on the Stats page (6.1, phase 1); this panel links to it.
 - Export button (CSV/JSON, the documented generic format, DEC-118).
 
-### 6.7 People (`/people`, was `/companions`) - `companions.html`
+### 6.7 People (`/people`) - `companions.html`
 
 - Requests for you as cards at the top; tabs All / Linked accounts / Game groups; person
   cards (avatar initials, name, link state, together/plays/win rate, last, History, Log
@@ -1006,7 +1030,11 @@ from "stack vertically".
   disable, delete with the companion-snapshot explanation).
 - Notification defaults: the Rules matrix for instance defaults with a lock per row.
 - Storage: the storage report (budget, watermarks, tiers, S3 counters) as cards and one
-  table; "Run eviction now".
+  table; "Run eviction now". Budget numbers are editable here; a value set in env shows
+  read-only with the variable name (OD-10, DEC-172).
+- Sessions: session length and cookie security, editable with the same env rule; a cookie
+  change applies on the next session and warns when the public URL is not https (OD-11).
+  The full admin area (eight pages) is specified in addendum-1.md section 3, which wins.
 - Branding: read-only summary of `brand.toml` (name, locale, theme swatches with computed
   contrast) and a link to the white-labelling doc.
 
@@ -1103,7 +1131,8 @@ Mapped to `src/rust/crates/ui/src` (generic, no workspace deps, all labels as pr
 
 ## 8. Accessibility requirements
 
-Targets: WCAG 2.2 AA throughout; the Playwright axe check already in M06 is extended to
+Targets: WCAG 2.2 AA is a requirement everywhere, together with the density budget OD-01
+(addendum-1.md 1.2); decided (owner review 2026-11-06, DEC-171). Concretely: WCAG 2.2 AA throughout; the Playwright axe check already in M06 is extended to
 every page in the e2e suite.
 
 - **Keyboard:** everything operable without a mouse (2.1.1). Roving tabindex in grids and
@@ -1126,8 +1155,14 @@ every page in the e2e suite.
   no animation (2.3.3 technique; `prefers-reduced-motion`).
 - **Touch:** minimum 44 x 44 px for primary controls on mobile, 24 px floor with spacing
   for dense secondary icons (2.5.8); destructive actions away from frequent targets.
-- **Language:** `<html lang>` follows the user's locale; German strings are reviewed for
-  length (buttons allow wrapping to two lines on mobile).
+- **Language and i18n scope** (decided, owner review 2026-11-06, DEC-171): every
+  user-visible string lives in Fluent `.ftl` locale files (pages, server errors,
+  notifications, emails); dates and numbers are locale-aware; plurals use Fluent plural
+  rules; each user has a language setting with the brand default as fallback; `<html lang>`
+  follows the user's locale and foreign-language fragments carry their own `lang`; a parity
+  test fails the build when a key exists in one locale only. Right-to-left languages are out
+  of scope. German strings are reviewed for length (buttons allow wrapping to two lines on
+  mobile).
 - **Zoom and reflow:** layouts work at 320 px width and 200% zoom; no horizontal scrolling
   except deliberate rails (1.4.10).
 - **Time limits:** none in the UI; the session is sliding (DEC-069).
@@ -1167,7 +1202,7 @@ without sources, (4) data-source credentials and modes, (5) stale pages, (6) for
 - Next-step derivation (`app::next_step(entry, descriptor, progress)`), `NextStepButton`,
   `ActionBar` per model, `PosterCard` pill and quick menu.
 - Home page rebuilt: continue, up next, activity (new `activity_feed` server fn over the
-  change feed), this-year numbers; empty state; admin nudge (reads source status).
+  change feed), all-time stats charts, Stats page with a tab per group (native SVG with text equivalents); empty state; admin nudge (reads source status).
 - Log sheets: `WatchedSheet` (date chips, people, rating, note, rewatch), `PlaySheet`
   (players, scores, winner, more), inline pages/position; toasts with Undo (new
   `undo_progress(event_id)` use-case that appends a compensating event; append-only is
@@ -1175,7 +1210,9 @@ without sources, (4) data-source credentials and modes, (5) stale pages, (6) for
 - Item page restructure: facts card, action bar, rating/tags/lists row, tabs, episode list
   with bulk marking and the "ask once" preference, notes tab with private note (new
   `entry_note` field with HLC like `notes`).
-- History page (rename from Sessions): day groups, filters, shared rows, side stats.
+- Stats page (`/stats`) with a tab per group and the all-time charts on Home (native SVG
+  with text equivalents).
+- History page (`/history`, new name, no redirect): day groups, filters, shared rows, side stats.
 
 ### Phase 2: why is nothing happening (1-2 weeks)
 
@@ -1206,7 +1243,7 @@ without sources, (4) data-source credentials and modes, (5) stale pages, (6) for
 - Keyboard map (`G then X`, `?` help), roving focus in grids, `Ctrl+Enter` actions in the
   palette, recent items and commands in the empty palette.
 - Bulk bar in list view; saved views if tags and lists prove insufficient.
-- Stats page; opt-in goals; game groups.
+- Opt-in goals on the Stats page; game groups.
 - Per-user fair share on the interactive lane for hosted mode.
 - Instrumentation: count taps and time from "intent" (palette open or next-step click) to
   "logged", and abandonment of sheets, as `tracing` events aggregated per day (no third
@@ -1217,14 +1254,25 @@ without sources, (4) data-source credentials and modes, (5) stale pages, (6) for
 
 ## 10. Decisions for the owner
 
-1. Status label "Done" instead of "Completed" in the UI (keys unchanged). Default: Done.
-2. `--input` border at zinc-500 (passes 1.4.11) or zinc-400 + filled field. Default:
-   zinc-500.
-3. Hosted mode: should the instance ship with `hosting = "home"` by default? Default: yes;
-   the wizard asks anyway.
-4. Rename routes `/sessions` -> `/history` and `/companions` -> `/people` with redirects.
-   Default: yes.
-5. Mobile "You" hub vs a sixth bar item. Default: hub, five items.
-6. Web font: none (system stack) unless the brand supplies one. Default: none.
-7. TMDB logo slot: the terms want the logo; images are not committed (rule 8). The operator
-   supplies it in the brand directory; the default brand shows text attribution only.
+All items below are decided (owner review 2026-11-06, DEC-171/DEC-172). The
+whole design is approved with these rulings.
+
+1. Status label "Completed" (en) / "Abgeschlossen" (de), not "Done"/"Fertig"; keys
+   unchanged. **Decided: Completed / Abgeschlossen** (owner review 2026-11-06, DEC-171).
+2. `--input` border at zinc-500 (passes 1.4.11) or zinc-400 + filled field. **Decided:
+   zinc-500** (owner review 2026-11-06, DEC-171).
+3. Hosting mode default. **Decided: `hosting = "home"` by default; the wizard asks**
+   (owner review 2026-11-06, DEC-171).
+4. Routes `/sessions` -> `/history` and `/companions` -> `/people`. **Decided: rename, with
+   no redirects (greenfield)** (owner review 2026-11-06, DEC-171).
+5. Mobile "You" hub vs a sixth bar item. **Decided: hub, five items** (owner review
+   2026-11-06, DEC-171).
+6. Web font. **Decided: the default brand ships Atkinson Hyperlegible Next (OFL 1.1),
+   self-hosted, never a CDN; system stack as fallback** (owner review 2026-11-06, DEC-171).
+7. TMDB logo. **Decided: the required logo is committed unmodified from TMDB's official
+   source (R-F3, DEC-170), plus an open-source attribution page** (owner review 2026-11-06,
+   DEC-170, DEC-171).
+8. Further rulings (owner review 2026-11-06, DEC-171): secrets encrypted at rest
+   (addendum-1.md section 2); WCAG 2.2 AA required everywhere with the density budget OD-01;
+   i18n with Fluent `.ftl` files (section 8); Home shows all-time stats as native SVG charts
+   and a Stats page shows everything over time (6.1, phase 1).

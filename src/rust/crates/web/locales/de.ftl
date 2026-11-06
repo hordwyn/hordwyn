@@ -241,3 +241,6 @@ integrations-never = nie
 integrations-error = Letzter Aufruf fehlgeschlagen
 integrations-revoke = Widerrufen
 auth-error-too_many_attempts = Zu viele Fehlversuche. Bitte warte ein paar Minuten.
+auth-username-rules = 3 bis 32 Zeichen: Kleinbuchstaben, Ziffern, _ . - (Großbuchstaben werden klein)
+auth-error-invalid_username = Benutzernamen haben 3 bis 32 Zeichen: a-z, 0-9, _ . - (keine Leerzeichen, kein @).
+auth-error-invalid_display_name = Der Anzeigename muss 1 bis 100 Zeichen haben.

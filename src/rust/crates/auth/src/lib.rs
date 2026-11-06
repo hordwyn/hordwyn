@@ -70,6 +70,10 @@ pub enum AuthError {
     InvalidInvite,
     #[error("password must be {MIN_PASSWORD_LEN} to {MAX_PASSWORD_LEN} characters")]
     WeakPassword,
+    #[error("usernames are 3 to 32 characters: a-z, 0-9, _ . -")]
+    InvalidUsername,
+    #[error("display names are 1 to 100 characters")]
+    InvalidDisplayName,
     #[error(transparent)]
     App(#[from] AppError),
     #[error("auth storage: {0}")]
@@ -260,6 +264,15 @@ impl Auth {
     /// Closed sign-up, invalid invite, weak password, taken username.
     pub async fn sign_up(&self, s: SignUp) -> Result<(User, SessionToken), AuthError> {
         check_password(&s.password)?;
+        // usernames are lowercase; "Anna " signs up as "anna" (and signs in as either)
+        let username = s.username.trim().to_lowercase();
+        domain::user::validate_username(&username).map_err(|_| AuthError::InvalidUsername)?;
+        let display_name = match s.display_name.trim() {
+            "" => username.clone(),
+            d => d.to_string(),
+        };
+        domain::companion::validate_companion_name(&display_name)
+            .map_err(|_| AuthError::InvalidDisplayName)?;
         let first = self.app.user_count().await? == 0;
         let invite = if first { None } else { s.invite.as_deref() };
         if !first {
@@ -274,7 +287,7 @@ impl Auth {
         let hash = hash_password(s.password.clone()).await?;
         let user = if let Some(token) = invite {
             self.app
-                .accept_invite(token, &s.username, &s.display_name)
+                .accept_invite(token, &username, &display_name)
                 .await
                 .map_err(|e| match e {
                     AppError::NotFound(_) | AppError::Conflict(_) => AuthError::InvalidInvite,
@@ -283,7 +296,7 @@ impl Auth {
         } else {
             let role = if first { Role::Admin } else { Role::Member };
             self.app
-                .register_user(&s.username, &s.display_name, s.email.clone(), role)
+                .register_user(&username, &display_name, s.email.clone(), role)
                 .await?
         };
         self.store
@@ -329,7 +342,10 @@ impl Auth {
         password: &str,
         totp: Option<&str>,
     ) -> Result<SessionToken, AuthError> {
-        let user = self.app.user_by_username(username).await?;
+        let user = self
+            .app
+            .user_by_username(&username.trim().to_lowercase())
+            .await?;
         let creds = match &user {
             Some(u) => self.store.credentials(u.id).await?,
             None => None,

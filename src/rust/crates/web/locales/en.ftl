@@ -241,3 +241,6 @@ integrations-never = never
 integrations-error = Last call failed
 integrations-revoke = Revoke
 auth-error-too_many_attempts = Too many failed attempts. Please wait a few minutes.
+auth-username-rules = 3 to 32 characters: lowercase letters, digits, _ . - (capitals become lowercase)
+auth-error-invalid_username = Usernames are 3 to 32 characters: a-z, 0-9, _ . - (no spaces or @).
+auth-error-invalid_display_name = The display name must be 1 to 100 characters.
