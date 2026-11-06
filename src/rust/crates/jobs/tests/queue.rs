@@ -119,7 +119,12 @@ async fn interactive_job_overtakes_a_running_bulk_import() {
     let stop = CancellationToken::new();
     let handle = tokio::spawn(worker.run(stop.clone()));
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // poll instead of fixed sleeps (flaky on loaded CI runners)
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while rec.order.lock().unwrap().is_empty() {
+        assert!(std::time::Instant::now() < deadline, "import never started");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
     let done_before = rec.order.lock().unwrap().len();
     assert!(
         done_before > 0 && done_before < 250,
@@ -128,7 +133,13 @@ async fn interactive_job_overtakes_a_running_bulk_import() {
     q.push(job(Lane::Interactive, "interactive", None))
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    while !rec.order.lock().unwrap().iter().any(|k| k == "interactive") {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "interactive job never ran"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
     stop.cancel();
     handle.await.unwrap();
 
@@ -220,13 +231,27 @@ async fn worker_retries_flaky_handler_until_success() {
     );
     let stop = CancellationToken::new();
     let handle = tokio::spawn(worker.run(stop.clone()));
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    assert_eq!(state(&q, id).await.0, "queued");
+    // poll instead of fixed sleeps (they were flaky on loaded CI runners)
+    let wait_until = |want: &'static str, attempts: i32| {
+        let q = q.clone();
+        async move {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            loop {
+                let s = state(&q, id).await;
+                if s.0 == want && s.1 == attempts {
+                    return s;
+                }
+                assert!(std::time::Instant::now() < deadline, "stuck at {s:?}");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    };
+    wait_until("queued", 1).await;
     sqlx::query!("UPDATE jobs SET run_at = now() WHERE id = $1", id)
         .execute(q.pool())
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    wait_until("done", 2).await;
     stop.cancel();
     handle.await.unwrap();
     assert_eq!(
