@@ -27,6 +27,9 @@ pub const SKIPPED_DIRS: &[&str] = &[
     "test-results",
     "playwright-report",
     "pkg",
+    // local Postgres/S3/Meilisearch state (`cargo xtask services`); runtime files contain
+    // the absolute checkout path
+    ".dev",
 ];
 
 /// Return every file under `root` that contains the codename (case-insensitive) outside the
