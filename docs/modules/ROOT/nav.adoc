@@ -4,3 +4,5 @@
 * xref:storage-budget.adoc[Storage budget]
 * xref:configuration.adoc[Configuration reference]
 * xref:operations.adoc[Operations]
+* xref:white-labelling.adoc[White-labelling]
+* xref:connectors.adoc[Connectors]

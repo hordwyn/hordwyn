@@ -1,0 +1,79 @@
+= White-labelling
+
+No product name, logo, colour, domain or support URL is hard-coded. Everything brand
+specific comes from a brand directory; a test fails if the codename appears in code outside
+`config/brand/` and `docs/`.
+
+== Brand directory
+
+Point `APP__BRAND__DIR` (or `brand.dir` in the config file) at a directory containing a
+`brand.toml`:
+
+[source,toml]
+----
+name = "Reading Room"          # product name: page titles, header, OpenAPI title, TOTP issuer
+short_name = "Reading Room"    # cookie names and the outgoing User-Agent use its ASCII letters
+default_locale = "de"          # used when the browser's Accept-Language matches no locale
+support_url = "https://example.org/support"   # added to the User-Agent
+
+[legal]                        # footer links
+imprint = "https://example.org/imprint"
+privacy = "https://example.org/privacy"
+
+[theme]                        # CSS custom properties for the light theme
+primary = "oklch(0.55 0.2 145)"
+primary-foreground = "oklch(0.98 0 0)"
+
+[theme_dark]                   # the same for the dark theme
+primary = "oklch(0.7 0.18 145)"
+
+[logos]                        # files inside the brand directory
+light = "logo-light.svg"
+dark = "logo-dark.svg"
+favicon = "favicon.svg"
+
+[strings.de]                   # override any message key, per locale
+nav-library = "Regal"
+----
+
+Nothing else changes: the same binary renders another brand (`apps/server/tests/brand.rs`
+checks product name, theme tokens, locale, string overrides and cookie names).
+
+== What is derived from the brand
+
+[cols="1,2"]
+|===
+|Session cookie |`<ident>_session`, where `<ident>` is `short_name` reduced to lowercase ASCII
+letters and digits
+|OIDC state cookie |`<ident>_oidc`
+|Outgoing `User-Agent` |`<ident>/<version> (+<support_url>)`
+|OpenAPI title |`<name> API`
+|TOTP issuer |`name`
+|Theme |`[theme]` and `[theme_dark]` become `:root{...}` and `.dark{...}`; values that could
+break out of the style element are dropped
+|Messages |`[strings.<locale>]` wins over the built-in Fluent messages
+|===
+
+== Messages and locales
+
+Built-in messages live in `src/rust/crates/web/locales/<locale>.ftl` (Fluent); locales `en`
+and `de`. A test checks that every key exists in every locale. The page locale is chosen
+from the browser's `Accept-Language`, falling back to the brand's `default_locale`.
+
+== Feature toggles per deployment
+
+* `features.kinds`: enabled media kinds (empty = all).
+* `connectors.<id>.enabled`: turn a data source off.
+* `auth.signup`: `open`, `invite` or `closed`.
+
+== Logos of other services
+
+Operators may hide integrations and data sources, but must not use third-party service logos
+as their own branding. The licence notices page must stay reachable; vendored icon files and
+their licences are listed in `config/brand/ICONS.adoc`.
+
+== Data source terms
+
+Some providers restrict commercial use (for example TMDB requires a commercial agreement for
+paid services). An operator who rebrands and sells this application is responsible for the
+providers' terms, see xref:connectors.adoc[connectors].

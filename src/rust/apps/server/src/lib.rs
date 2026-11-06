@@ -4,6 +4,7 @@
 
 mod handlers;
 pub mod infra;
+pub mod web_backend;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -68,7 +69,44 @@ fn default_registry(cfg: &AppConfig) -> Registry {
         };
         r.register(Arc::new(conn));
     }
-    let _ = enabled;
+    // Connectors that cannot work without credentials are only registered when they have them.
+    let key = |id: &str| {
+        cfg.connectors
+            .get(id)
+            .and_then(|c| c.api_key.as_ref())
+            .map(|k| k.expose().to_string())
+    };
+    #[cfg(feature = "igdb")]
+    if enabled("igdb")
+        && let Some(k) = key("igdb")
+    {
+        r.register(Arc::new(connectors::igdb::Igdb::new(Some(k))));
+    }
+    #[cfg(feature = "podcastindex")]
+    if enabled("podcastindex")
+        && let Some(k) = key("podcastindex")
+    {
+        let c = match cfg
+            .connectors
+            .get("podcastindex")
+            .and_then(|c| c.base_url.clone())
+        {
+            Some(base) => connectors::podcastindex::PodcastIndex::with_base_url(Some(k), &base),
+            None => connectors::podcastindex::PodcastIndex::new(Some(k)),
+        };
+        r.register(Arc::new(c));
+    }
+    #[cfg(feature = "tvdb")]
+    if enabled("tvdb")
+        && let Some(k) = key("tvdb")
+    {
+        let c = match cfg.connectors.get("tvdb").and_then(|c| c.base_url.clone()) {
+            Some(base) => connectors::tvdb::Tvdb::with_base_url(Some(k), &base),
+            None => connectors::tvdb::Tvdb::new(Some(k)),
+        };
+        r.register(Arc::new(c));
+    }
+    let _ = (enabled, key);
     r
 }
 
@@ -354,5 +392,42 @@ async fn search_index(config: &AppConfig, pool: &sqlx::PgPool) -> Arc<dyn Search
                 }
             }
         }
+    }
+}
+
+impl Server {
+    /// Per-request context for the web app: brand and the server-function backend.
+    pub fn web_context(&self) -> impl Fn() + Clone + Send + Sync + 'static {
+        let brand = Arc::new(self.brand.clone());
+        let backend: Arc<dyn web::backend::Backend> =
+            Arc::new(web_backend::WebBackend(self.api.clone()));
+        move || {
+            leptos::prelude::provide_context(brand.clone());
+            leptos::prelude::provide_context(backend.clone());
+        }
+    }
+}
+
+impl Server {
+    /// Everything the web role serves: base routes, server functions and the Leptos pages.
+    pub fn app_router(&self, options: &leptos::prelude::LeptosOptions) -> Router {
+        use leptos_axum::LeptosRoutes;
+        let routes = leptos_axum::generate_route_list(web::App);
+        let context = self.web_context();
+        let pages = Router::new()
+            .route(
+                "/_fn/{*fn_name}",
+                axum::routing::any({
+                    let context = context.clone();
+                    move |req| leptos_axum::handle_server_fns_with_context(context.clone(), req)
+                }),
+            )
+            .leptos_routes_with_context(options, routes, context, {
+                let options = options.clone();
+                move || web::shell(options.clone())
+            })
+            .fallback(leptos_axum::file_and_error_handler(web::shell))
+            .with_state(options.clone());
+        self.base_router().merge(pages)
     }
 }

@@ -104,11 +104,16 @@ wasm-test:
 e2e:
   extends: .rust
   stage: test
+  services:
+    - name: postgres:18.6-alpine
+      alias: postgres
+  variables:
+    E2E_DATABASE_URL: "postgres://app:app@postgres:5432/app_test"
   script:
     - apt-get install -y -qq --no-install-recommends nodejs npm >/dev/null
     - sh ../sh/ci-tools.sh leptos wasm-bindgen tailwind
     - rustup target add wasm32-unknown-unknown
-    - cargo leptos build --bin-features gallery --lib-features hydrate,gallery
+    - cargo leptos build --bin-features gallery,all-connectors --lib-features hydrate,gallery
     - cd ../web && npm ci --no-audit --no-fund && npx playwright install --with-deps chromium
     - CI=1 npx playwright test
   artifacts:

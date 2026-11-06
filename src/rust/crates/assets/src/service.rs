@@ -302,8 +302,19 @@ impl AssetService {
                 body: None,
                 lane: lane_for(a.priority),
             })
-            .await
-            .map_err(|e| AssetError::Fetch(e.to_string()))?;
+            .await;
+        let resp = match resp {
+            Ok(r) => r,
+            // a host outside the connector's allowlist never becomes reachable: stop retrying
+            // and keep redirecting to the source URL
+            Err(app::ports::HttpError::Blocked(why)) => {
+                tracing::info!(asset = %id, %why, "image host not allowed, using the source URL");
+                a.failed = true;
+                self.repo.upsert(&a).await?;
+                return Ok(a);
+            }
+            Err(e) => return Err(AssetError::Fetch(e.to_string())),
+        };
         if !(200..300).contains(&resp.status) {
             if resp.status == 404 {
                 a.failed = true;

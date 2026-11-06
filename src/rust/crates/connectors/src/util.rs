@@ -46,3 +46,36 @@ pub(crate) fn date_of(date: Option<&str>) -> Option<chrono::NaiveDate> {
 pub(crate) fn non_empty(s: Option<String>) -> Option<String> {
     s.filter(|v| !v.trim().is_empty())
 }
+
+/// POST `body` to `url` through the governed HTTP port and decode JSON.
+///
+/// # Errors
+/// As [`get_json`].
+pub async fn post_json<T: DeserializeOwned>(
+    ctx: &Ctx,
+    connector: &str,
+    op: &str,
+    url: &str,
+    headers: Vec<(String, String)>,
+    body: Vec<u8>,
+) -> Result<T, ConnectorError> {
+    let resp = ctx
+        .http
+        .fetch(HttpRequest {
+            connector: connector.into(),
+            op: op.into(),
+            method: "POST".into(),
+            url: url.into(),
+            headers,
+            body: Some(body),
+            lane: ctx.lane,
+        })
+        .await?;
+    match resp.status {
+        200..=299 => {
+            serde_json::from_slice(&resp.body).map_err(|e| ConnectorError::Parse(e.to_string()))
+        }
+        404 => Err(ConnectorError::NotFound),
+        status => Err(ConnectorError::Status { status }),
+    }
+}

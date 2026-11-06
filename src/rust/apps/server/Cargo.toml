@@ -23,6 +23,7 @@ brand.workspace = true
 catalog-core.workspace = true
 chrono.workspace = true
 config.workspace = true
+contracts.workspace = true
 connectors.workspace = true
 domain.workspace = true
 getrandom.workspace = true
@@ -46,8 +47,11 @@ web = { workspace = true, features = ["ssr"] }
 default = []
 gallery = ["web/gallery"]
 tmdb = ["connectors/tmdb"]
+igdb = ["connectors/igdb"]
+podcastindex = ["connectors/podcastindex"]
+tvdb = ["connectors/tvdb"]
 # every compiled-in connector (release builds, CI)
-all-connectors = ["tmdb"]
+all-connectors = ["tmdb", "igdb", "podcastindex", "tvdb"]
 
 [dev-dependencies]
 futures.workspace = true

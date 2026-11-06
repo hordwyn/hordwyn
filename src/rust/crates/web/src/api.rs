@@ -1,0 +1,226 @@
+//! Server functions used by the pages. On the server they call the [`Backend`] from context
+//! with the caller's session cookie; in the browser they are HTTP calls to `/_fn/...`.
+
+// `#[server]` generates the browser side of each function without an `.await` in its body.
+#![allow(clippy::unused_async, clippy::unused_async_trait_impl)]
+
+use contracts::{
+    AttributionDto, CompanionDto, ItemPageDto, LibraryEntryDto, LibraryItemDto, ListDto,
+    NewProgressDto, ProgressEventDto, SearchResponseDto, UserDto,
+};
+use leptos::prelude::*;
+
+#[cfg(feature = "ssr")]
+mod server {
+    use std::sync::Arc;
+
+    use axum::http::header::{COOKIE, SET_COOKIE};
+    use axum::http::{HeaderMap, HeaderValue};
+    use contracts::ErrorDto;
+    use leptos::prelude::*;
+
+    pub use crate::backend::Backend;
+
+    pub fn backend() -> Result<Arc<dyn Backend>, ServerFnError> {
+        use_context::<Arc<dyn Backend>>()
+            .ok_or_else(|| ServerFnError::new("backend missing from context"))
+    }
+
+    pub async fn token(b: &dyn Backend) -> Option<String> {
+        let headers: HeaderMap = leptos_axum::extract().await.ok()?;
+        let name = b.session_cookie();
+        headers
+            .get_all(COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|v| v.split(';'))
+            .filter_map(|kv| kv.trim().split_once('='))
+            .find(|(k, v)| *k == name && !v.is_empty())
+            .map(|(_, v)| v.to_string())
+    }
+
+    pub async fn require_token(b: &dyn Backend) -> Result<String, ServerFnError> {
+        token(b)
+            .await
+            .ok_or_else(|| ServerFnError::new("unauthorized"))
+    }
+
+    /// The error code travels to the page, which translates it (`auth-error-<code>`).
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn code(e: ErrorDto) -> ServerFnError {
+        ServerFnError::new(e.code)
+    }
+
+    pub fn set_session(b: &dyn Backend, token: &str, max_age: i64) {
+        let secure = if b.secure_cookies() { "; Secure" } else { "" };
+        let v = format!(
+            "{}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}",
+            b.session_cookie()
+        );
+        if let (Some(resp), Ok(v)) = (
+            use_context::<leptos_axum::ResponseOptions>(),
+            HeaderValue::from_str(&v),
+        ) {
+            resp.append_header(SET_COOKIE, v);
+        }
+    }
+}
+
+/// The signed-in user, if any.
+#[server(prefix = "/_fn")]
+pub async fn current_user() -> Result<Option<UserDto>, ServerFnError> {
+    let b = server::backend()?;
+    Ok(match server::token(b.as_ref()).await {
+        Some(t) => b.me(&t).await,
+        None => None,
+    })
+}
+
+#[server(prefix = "/_fn")]
+pub async fn sign_in(
+    username: String,
+    password: String,
+    totp: Option<String>,
+) -> Result<UserDto, ServerFnError> {
+    let b = server::backend()?;
+    let s = b
+        .sign_in(contracts::SignInDto {
+            username,
+            password,
+            totp: totp.filter(|t| !t.is_empty()),
+        })
+        .await
+        .map_err(server::code)?;
+    server::set_session(b.as_ref(), &s.token, i64::from(b.session_days()) * 86_400);
+    Ok(s.user)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn sign_up(
+    username: String,
+    display_name: String,
+    password: String,
+    email: Option<String>,
+) -> Result<UserDto, ServerFnError> {
+    let b = server::backend()?;
+    let s = b
+        .sign_up(contracts::SignUpDto {
+            username,
+            display_name,
+            password,
+            email: email.filter(|e| !e.is_empty()),
+            invite: None,
+        })
+        .await
+        .map_err(server::code)?;
+    server::set_session(b.as_ref(), &s.token, i64::from(b.session_days()) * 86_400);
+    Ok(s.user)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn sign_out() -> Result<(), ServerFnError> {
+    let b = server::backend()?;
+    if let Some(t) = server::token(b.as_ref()).await {
+        b.sign_out(&t).await;
+    }
+    server::set_session(b.as_ref(), "", 0);
+    Ok(())
+}
+
+#[server(prefix = "/_fn")]
+pub async fn library() -> Result<Vec<LibraryItemDto>, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.library(&t).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn item_page(id: String) -> Result<ItemPageDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.item(&t, &id).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn search(q: String, kind: Option<String>) -> Result<SearchResponseDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.search(&t, &q, kind).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn add_to_library(item_id: String) -> Result<LibraryEntryDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.add(&t, &item_id).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn log_progress(
+    item_id: String,
+    progress: NewProgressDto,
+) -> Result<ProgressEventDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.log_progress(&t, &item_id, progress)
+        .await
+        .map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn rate(item_id: String, rating: Option<u8>) -> Result<LibraryEntryDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.rate(&t, &item_id, rating).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn companions() -> Result<Vec<CompanionDto>, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.companions(&t).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn create_companion(name: String) -> Result<CompanionDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.create_companion(&t, &name).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn lists() -> Result<Vec<ListDto>, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.lists(&t).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn create_list(name: String) -> Result<ListDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.create_list(&t, &name).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn add_to_list(list_id: String, item_id: String) -> Result<ListDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.add_to_list(&t, &list_id, &item_id)
+        .await
+        .map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn sources() -> Result<Vec<AttributionDto>, ServerFnError> {
+    Ok(server::backend()?.sources().await)
+}
+
+/// Error code carried by a server function error (see `server::code`).
+#[must_use]
+pub fn error_code(e: &ServerFnError) -> String {
+    match e {
+        ServerFnError::ServerError(m) => m.clone(),
+        _ => "generic".into(),
+    }
+}

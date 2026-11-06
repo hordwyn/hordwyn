@@ -27,7 +27,7 @@ async function expectNoA11yViolations(page: Page) {
 test("gallery has no WCAG A/AA violations in light and dark", async ({ page }) => {
   await openGallery(page);
   await expectNoA11yViolations(page);
-  await page.getByRole("button", { name: "Switch to dark theme" }).click();
+  await page.getByRole("main").getByRole("button", { name: "Switch to dark theme" }).click();
   await expect(page.locator("html")).toHaveClass(/dark/);
   await expectNoA11yViolations(page);
 });

@@ -95,11 +95,15 @@ utoipa-axum = "0.3.0"
 futures = "0.3.34"
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "fmt"] }
+fluent-bundle = "0.16.0"
+unic-langid = "0.9.6"
 meilisearch-sdk = { version = "0.33.0", default-features = false, features = ["reqwest", "tls"] }
 
 # Small target dirs (DEC-055): line tables for our code (backtraces), no debug info for deps.
 [profile.dev]
 debug = "line-tables-only"
+# Linked test binaries carry std's debug info (up to 200 MB each); strip it (DEC-091).
+strip = "debuginfo"
 
 [profile.dev.package."*"]
 opt-level = 1

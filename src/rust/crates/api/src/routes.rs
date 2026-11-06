@@ -1,21 +1,14 @@
-use std::collections::HashSet;
-
-use app::ports::{AppEvent, SearchQuery};
+use app::ports::AppEvent;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::header::{LOCATION, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use contracts::{
-    AttributionDto, CatalogItemDto, CompanionDto, LibraryEntryDto, LibraryItemDto, NewProgressDto,
-    ProgressEventDto, SearchResponseDto, SearchResultsEventDto, SessionDto, SignInDto, SignUpDto,
-    UserDto,
+    AttributionDto, CatalogItemDto, CompanionDto, LibraryEntryDto, LibraryItemDto, ListDto,
+    NewProgressDto, ProgressEventDto, SearchResponseDto, SessionDto, SignInDto, SignUpDto, UserDto,
 };
-use domain::ids::{CompanionId, ItemId};
-use domain::kind::Status;
-use domain::library::Rating;
-use domain::progress::Progress;
-use domain::session::Participant;
+use domain::ids::ItemId;
 use serde::Deserialize;
 use utoipa::{IntoParams, OpenApi, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
@@ -23,10 +16,7 @@ use utoipa_axum::routes;
 
 use crate::error::ApiResult;
 use crate::extract::cookie;
-use crate::{ApiError, ApiState, Authed, dto};
-
-/// Topic of streamed connector search results.
-pub const SEARCH_RESULTS: &str = "search.results";
+use crate::{ApiError, ApiState, Authed, dto, ops};
 
 #[derive(OpenApi)]
 #[openapi(info(description = "REST API for integrations, scripts and sync clients."))]
@@ -52,6 +42,8 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(set_rating))
         .routes(routes!(item_progress, log_progress))
         .routes(routes!(companions, create_companion))
+        .routes(routes!(lists, create_list))
+        .routes(routes!(add_to_list))
         .routes(routes!(events))
         .with_state(state)
         .split_for_parts();
@@ -84,12 +76,6 @@ fn with_session(state: &ApiState, token: &str, body: impl IntoResponse) -> Respo
     r.headers_mut()
         .append(SET_COOKIE, session_cookie(state, token, days * 86_400));
     r
-}
-
-fn parse_id<T>(s: &str, wrap: impl FnOnce(uuid::Uuid) -> T) -> ApiResult<T> {
-    uuid::Uuid::parse_str(s)
-        .map(wrap)
-        .map_err(|_| ApiError::bad_request(format!("invalid id `{s}`")))
 }
 
 // ---------------------------------------------------------------- auth
@@ -259,8 +245,7 @@ async fn get_item(
     Authed(_): Authed,
     Path(id): Path<String>,
 ) -> ApiResult<Json<CatalogItemDto>> {
-    let item = s.app.item_detail(parse_id(&id, ItemId)?).await?;
-    Ok(Json(dto::item(&s, &item).await))
+    Ok(Json(ops::item(&s, &id).await?))
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -279,100 +264,13 @@ async fn search(
     Authed(a): Authed,
     Query(p): Query<SearchParams>,
 ) -> ApiResult<Json<SearchResponseDto>> {
-    let text = p.q.trim().to_string();
-    if text.is_empty() {
-        return Err(ApiError::bad_request("empty query"));
-    }
-    let kinds = p.kind.map_or_else(|| s.default_kinds.clone(), |k| vec![k]);
-    let mut filters = Vec::new();
-    if kinds.len() == 1 {
-        filters.push(("kind".to_string(), kinds[0].clone()));
-    }
-    let hits = s
-        .search
-        .search(SearchQuery {
-            index: "catalog".into(),
-            text: text.clone(),
-            viewer: a.user_id,
-            filters,
-            limit: 20,
-        })
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "local search failed");
-            vec![]
-        });
-    let mut items = Vec::new();
-    for h in hits {
-        if let Ok(id) = uuid::Uuid::parse_str(&h.id)
-            && let Ok(item) = s.app.catalog_item(ItemId(id)).await
-        {
-            items.push(dto::item(&s, &item).await);
-        }
-    }
-    let search_id = uuid::Uuid::now_v7().to_string();
-    let pending: Vec<String> = s
-        .fanout
-        .targets(&kinds)
-        .into_iter()
-        .map(|(c, _)| c)
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-    let state = s.clone();
-    let sid = search_id.clone();
-    tokio::spawn(async move {
-        state
-            .fanout
-            .run(&text, &kinds, 20, |r| {
-                let state = state.clone();
-                let sid = sid.clone();
-                async move {
-                    let mut dtos = Vec::new();
-                    for i in &r.items {
-                        dtos.push(dto::item(&state, i).await);
-                    }
-                    let payload = SearchResultsEventDto {
-                        search_id: sid,
-                        connector: r.connector,
-                        items: dtos,
-                        error: r.error,
-                    };
-                    state
-                        .bus_publish(AppEvent {
-                            topic: SEARCH_RESULTS.into(),
-                            entity: None,
-                            audience: vec![a.user_id],
-                            payload: serde_json::to_value(payload).unwrap_or_default(),
-                        })
-                        .await;
-                }
-            })
-            .await;
-    });
-    Ok(Json(SearchResponseDto {
-        search_id,
-        items,
-        pending,
-    }))
+    Ok(Json(ops::search(&s, a, &p.q, p.kind).await?))
 }
 
 #[utoipa::path(get, path = "/sources", tag = "catalog",
     responses((status = 200, body = Vec<AttributionDto>)))]
 async fn sources(State(s): State<ApiState>) -> Json<Vec<AttributionDto>> {
-    Json(
-        s.registry
-            .infos()
-            .into_iter()
-            .map(|i| AttributionDto {
-                connector: i.id,
-                name: i.name,
-                text: i.attribution.text,
-                url: i.attribution.url,
-                licence: i.attribution.licence,
-            })
-            .collect(),
-    )
+    Json(ops::sources(&s))
 }
 
 // ---------------------------------------------------------------- library
@@ -383,15 +281,7 @@ async fn library(
     State(s): State<ApiState>,
     Authed(a): Authed,
 ) -> ApiResult<Json<Vec<LibraryItemDto>>> {
-    let mut out = Vec::new();
-    for e in s.app.library(a).await? {
-        let item = s.app.catalog_item(e.item_id).await?;
-        out.push(LibraryItemDto {
-            entry: dto::entry(&e),
-            item: dto::item(&s, &item).await,
-        });
-    }
-    Ok(Json(out))
+    Ok(Json(ops::library(&s, a).await?))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -407,13 +297,7 @@ async fn add_to_library(
     Authed(a): Authed,
     Json(b): Json<AddDto>,
 ) -> ApiResult<Json<LibraryEntryDto>> {
-    let id = parse_id(&b.item_id, ItemId)?;
-    let e = s
-        .app
-        .add_to_library(a, id, b.status.map(Status::new))
-        .await?;
-    s.pin_cover(id).await;
-    Ok(Json(dto::entry(&e)))
+    Ok(Json(ops::add(&s, a, &b.item_id, b.status).await?))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -429,11 +313,7 @@ async fn set_status(
     Path(item_id): Path<String>,
     Json(b): Json<StatusDto>,
 ) -> ApiResult<Json<LibraryEntryDto>> {
-    let e = s
-        .app
-        .set_status(a, parse_id(&item_id, ItemId)?, Status::new(b.status), None)
-        .await?;
-    Ok(Json(dto::entry(&e)))
+    Ok(Json(ops::set_status(&s, a, &item_id, b.status).await?))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -450,16 +330,7 @@ async fn set_rating(
     Path(item_id): Path<String>,
     Json(b): Json<RatingDto>,
 ) -> ApiResult<Json<LibraryEntryDto>> {
-    let rating = b
-        .rating
-        .map(Rating::new)
-        .transpose()
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let e = s
-        .app
-        .rate(a, parse_id(&item_id, ItemId)?, rating, None)
-        .await?;
-    Ok(Json(dto::entry(&e)))
+    Ok(Json(ops::rate(&s, a, &item_id, b.rating).await?))
 }
 
 #[utoipa::path(get, path = "/items/{id}/progress", tag = "library",
@@ -469,8 +340,7 @@ async fn item_progress(
     Authed(a): Authed,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Vec<ProgressEventDto>>> {
-    let events = s.app.progress(a, parse_id(&id, ItemId)?).await?;
-    Ok(Json(events.iter().map(dto::progress).collect()))
+    Ok(Json(ops::progress(&s, a, &id).await?))
 }
 
 /// Log progress; with `with` (companion ids) a session with those companions and the user's
@@ -483,44 +353,10 @@ async fn log_progress(
     Path(id): Path<String>,
     Json(b): Json<NewProgressDto>,
 ) -> ApiResult<Json<ProgressEventDto>> {
-    let item_id = parse_id(&id, ItemId)?;
-    let progress: Progress = serde_json::from_value(b.progress)
-        .map_err(|e| ApiError::bad_request(format!("progress: {e}")))?;
-    let occurred_at = b
-        .occurred_at
-        .map(|t| {
-            chrono::DateTime::parse_from_rfc3339(&t)
-                .map(|d| d.with_timezone(&chrono::Utc))
-                .map_err(|_| ApiError::bad_request("occurred_at must be RFC 3339"))
-        })
-        .transpose()?;
-    let op = b.client_op_id.map(|o| parse_id(&o, |u| u)).transpose()?;
-    if !b.with.is_empty() {
-        let me = s.app.user(a.user_id).await?;
-        let mut participants = vec![Participant::new(me.self_companion)];
-        for c in &b.with {
-            participants.push(Participant::new(parse_id(c, CompanionId)?));
-        }
-        let mut session = app::NewSession::new(item_id, participants);
-        session.started_at = occurred_at;
-        // Idempotency key of the session, derived from the client op id (replays are no-ops).
-        session.client_op_id = op.map(|o| {
-            let h = blake3::hash(&[o.as_bytes().as_slice(), b"session"].concat());
-            let mut b = [0u8; 16];
-            b.copy_from_slice(&h.as_bytes()[..16]);
-            uuid::Uuid::from_bytes(b)
-        });
-        s.app.log_session(a, session).await?;
-    }
-    let e = s
-        .app
-        .log_progress(a, item_id, progress, occurred_at, op)
-        .await?;
-    s.pin_cover(item_id).await;
-    Ok(Json(dto::progress(&e)))
+    Ok(Json(ops::log_progress(&s, a, &id, b).await?))
 }
 
-// ---------------------------------------------------------------- companions
+// ---------------------------------------------------------------- companions and lists
 
 #[utoipa::path(get, path = "/companions", tag = "companions",
     responses((status = 200, body = Vec<CompanionDto>)))]
@@ -528,30 +364,59 @@ async fn companions(
     State(s): State<ApiState>,
     Authed(a): Authed,
 ) -> ApiResult<Json<Vec<CompanionDto>>> {
-    Ok(Json(
-        s.app
-            .companions(a)
-            .await?
-            .iter()
-            .map(dto::companion)
-            .collect(),
-    ))
+    Ok(Json(ops::companions(&s, a).await?))
 }
 
 #[derive(Deserialize, ToSchema)]
-struct NewCompanionDto {
+struct NameDto {
     name: String,
 }
 
-#[utoipa::path(post, path = "/companions", tag = "companions", request_body = NewCompanionDto,
+#[utoipa::path(post, path = "/companions", tag = "companions", request_body = NameDto,
     responses((status = 201, body = CompanionDto)))]
 async fn create_companion(
     State(s): State<ApiState>,
     Authed(a): Authed,
-    Json(b): Json<NewCompanionDto>,
+    Json(b): Json<NameDto>,
 ) -> ApiResult<(StatusCode, Json<CompanionDto>)> {
-    let c = s.app.create_companion(a, &b.name).await?;
-    Ok((StatusCode::CREATED, Json(dto::companion(&c))))
+    Ok((
+        StatusCode::CREATED,
+        Json(ops::create_companion(&s, a, &b.name).await?),
+    ))
+}
+
+#[utoipa::path(get, path = "/lists", tag = "lists", responses((status = 200, body = Vec<ListDto>)))]
+async fn lists(State(s): State<ApiState>, Authed(a): Authed) -> ApiResult<Json<Vec<ListDto>>> {
+    Ok(Json(ops::lists(&s, a).await?))
+}
+
+#[utoipa::path(post, path = "/lists", tag = "lists", request_body = NameDto,
+    responses((status = 201, body = ListDto)))]
+async fn create_list(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Json(b): Json<NameDto>,
+) -> ApiResult<(StatusCode, Json<ListDto>)> {
+    Ok((
+        StatusCode::CREATED,
+        Json(ops::create_list(&s, a, &b.name).await?),
+    ))
+}
+
+#[derive(Deserialize, ToSchema)]
+struct ListItemBody {
+    item_id: String,
+}
+
+#[utoipa::path(post, path = "/lists/{id}/items", tag = "lists", request_body = ListItemBody,
+    params(("id" = String, Path)), responses((status = 200, body = ListDto)))]
+async fn add_to_list(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+    Json(b): Json<ListItemBody>,
+) -> ApiResult<Json<ListDto>> {
+    Ok(Json(ops::add_to_list(&s, a, &id, &b.item_id).await?))
 }
 
 // ---------------------------------------------------------------- events
@@ -565,13 +430,13 @@ async fn events(State(s): State<ApiState>, Authed(a): Authed) -> impl IntoRespon
 }
 
 impl ApiState {
-    async fn bus_publish(&self, e: AppEvent) {
+    pub(crate) async fn publish(&self, e: AppEvent) {
         use app::ports::EventBus;
         self.bus.publish(e).await;
     }
 
     /// A library reference pins the item's cover (never evicted, D-8).
-    async fn pin_cover(&self, item: ItemId) {
+    pub(crate) async fn pin_cover(&self, item: ItemId) {
         let Some(svc) = &self.assets else { return };
         let Ok(i) = self.app.catalog_item(item).await else {
             return;

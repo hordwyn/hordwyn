@@ -9,7 +9,13 @@
 
 mod util;
 
+#[cfg(feature = "igdb")]
+pub mod igdb;
+#[cfg(feature = "podcastindex")]
+pub mod podcastindex;
 #[cfg(feature = "tmdb")]
 pub mod tmdb;
+#[cfg(feature = "tvdb")]
+pub mod tvdb;
 
-pub use util::get_json;
+pub use util::{get_json, post_json};

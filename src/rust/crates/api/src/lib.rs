@@ -8,6 +8,7 @@
 mod dto;
 mod error;
 mod extract;
+pub mod ops;
 mod routes;
 
 use std::sync::Arc;
@@ -21,6 +22,12 @@ use catalog_core::search::SearchFanout;
 pub use error::ApiError;
 pub use extract::{Authed, session_token};
 pub use routes::router;
+
+/// User DTO (also used by the web backend).
+#[must_use]
+pub fn dto_user(u: &domain::user::User) -> contracts::UserDto {
+    dto::user(u)
+}
 
 /// Cookie and header names, derived from the brand (D-10), never hard-coded.
 #[derive(Debug, Clone)]

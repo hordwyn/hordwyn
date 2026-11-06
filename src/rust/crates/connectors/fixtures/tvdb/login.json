@@ -1,0 +1,7 @@
+{
+  "fixture": "synthetic: shape from the TVDB v4 OpenAPI spec (github.com/thetvdb/v4-api docs/swagger.yml, /login response {data: {token}, status}); values invented",
+  "request": {"method": "POST", "url": "https://api4.thetvdb.com/v4/login"},
+  "status": 200,
+  "headers": [["content-type", "application/json"]],
+  "body": {"data": {"token": "test-jwt"}, "status": "success"}
+}

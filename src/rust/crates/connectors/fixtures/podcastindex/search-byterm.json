@@ -1,0 +1,11 @@
+{
+  "fixture": "synthetic: built from the example values in the Podcast Index API docs (github.com/Podcastindex-org/docs-api, MIT): feed properties id 75075, title, url, author, artwork, language, episodeCount, itunesId, categories",
+  "request": {"method": "GET", "url": "https://api.podcastindex.org/api/1.0/search/byterm?q=batman+university&max=10"},
+  "status": 200,
+  "headers": [["content-type", "application/json"]],
+  "body": {"status": "true", "count": 1, "query": "batman university", "description": "Found matching feeds.",
+    "feeds": [{"id": 75075, "title": "Batman University", "url": "https://feeds.theincomparable.com/batmanuniversity",
+      "author": "Tony Sindelar", "artwork": "https://www.theincomparable.com/imgs/logos/logo-batmanuniversity-3x.jpg?cache-buster=2019-06-11",
+      "description": "Batman University is a seasonal podcast about you know who.", "language": "en-us", "explicit": false,
+      "episodeCount": 19, "itunesId": 1441923632, "categories": {"104": "Tv", "105": "Film", "107": "Reviews"}}]}
+}

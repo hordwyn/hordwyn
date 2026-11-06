@@ -239,9 +239,10 @@ impl Default for BrandConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct ConnectorConfig {
+    /// Compiled-in connectors are on unless switched off here.
     pub enabled: bool,
     /// API key or token. Prefer `APP__CONNECTORS__<ID>__API_KEY`; `KK_<ID>_API_KEY` is read
     /// as a fallback.
@@ -249,6 +250,16 @@ pub struct ConnectorConfig {
     pub api_key: Option<Secret>,
     /// Override of the API base URL (tests, mirrors). Its host is added to the allowlist.
     pub base_url: Option<String>,
+}
+
+impl Default for ConnectorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            api_key: None,
+            base_url: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -474,6 +485,16 @@ mod tests {
             c.connectors["tmdb"].api_key.as_ref().map(Secret::expose),
             Some("secret")
         );
+    }
+
+    #[test]
+    fn configuring_a_key_keeps_the_connector_enabled() {
+        let c =
+            AppConfig::from_sources("", env(&[("APP__CONNECTORS__TMDB__API_KEY", "k")])).unwrap();
+        assert!(c.connectors["tmdb"].enabled);
+        let off =
+            AppConfig::from_sources("[connectors.tmdb]\nenabled = false\n", env(&[])).unwrap();
+        assert!(!off.connectors["tmdb"].enabled);
     }
 
     #[test]

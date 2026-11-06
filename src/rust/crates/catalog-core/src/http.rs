@@ -415,7 +415,12 @@ impl HttpFetch for GovernedHttp {
             let url = url::Url::parse(&req.url)
                 .map_err(|e| HttpError::Blocked(format!("bad url: {e}")))?;
             if !g.allows_host(&url) {
-                tracing::warn!(url = %req.url, "blocked request to a host outside the allowlist");
+                // host and path only: query strings may carry credentials
+                tracing::warn!(
+                    host = url.host_str().unwrap_or_default(),
+                    path = url.path(),
+                    "blocked request to a host outside the allowlist"
+                );
                 return Err(HttpError::Blocked(format!(
                     "host of {} is not allowed for connector `{}`",
                     req.url, req.connector

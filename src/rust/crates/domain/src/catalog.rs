@@ -40,7 +40,7 @@ pub struct CatalogItem {
     pub original_title: Option<String>,
     pub year: Option<i32>,
     pub description: Option<String>,
-    /// blake3 hash of the cover asset, if one is stored.
+    /// Id of the cover asset (assets crate), once the image has been registered.
     pub cover_asset: Option<String>,
     /// Provider URL of the cover, used until (or instead of) a stored asset (D-7 redirect).
     pub cover_url: Option<String>,
@@ -59,9 +59,52 @@ impl CatalogItem {
     #[must_use]
     pub fn needs_refresh(&self, now: Timestamp) -> bool {
         match self.state {
-            EntityState::Stub | EntityState::Partial => true,
+            // a failed refresh sets `fresh_until` to its retry time; until then, do not retry
+            // (otherwise every page view queues a refresh that fails again, DEC-114)
+            EntityState::Stub | EntityState::Partial | EntityState::Full => {
+                self.fresh_until.is_none_or(|t| t <= now)
+            }
             EntityState::Failed => false,
-            EntityState::Full => self.fresh_until.is_none_or(|t| t <= now),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Duration, TimeZone, Utc};
+
+    fn item(state: EntityState, fresh_until: Option<Timestamp>) -> CatalogItem {
+        CatalogItem {
+            id: crate::ids::ItemId(uuid::Uuid::nil()),
+            kind: crate::kind::KindId::new("movie").unwrap(),
+            title: "x".into(),
+            original_title: None,
+            year: None,
+            description: None,
+            cover_asset: None,
+            cover_url: None,
+            external_ids: vec![],
+            attributes: serde_json::Value::Null,
+            provenance: std::collections::BTreeMap::new(),
+            state,
+            fetched_at: None,
+            fresh_until,
+        }
+    }
+
+    #[test]
+    fn refresh_waits_for_the_retry_time_after_a_failure() {
+        let now = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let later = Some(now + Duration::hours(1));
+        assert!(item(EntityState::Partial, None).needs_refresh(now));
+        assert!(
+            !item(EntityState::Partial, later).needs_refresh(now),
+            "retry pending"
+        );
+        assert!(item(EntityState::Partial, later).needs_refresh(now + Duration::hours(2)));
+        assert!(item(EntityState::Stub, None).needs_refresh(now));
+        assert!(!item(EntityState::Full, later).needs_refresh(now));
+        assert!(!item(EntityState::Failed, None).needs_refresh(now));
     }
 }

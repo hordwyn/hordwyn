@@ -223,3 +223,51 @@ async fn pinning_moves_variants_out_of_the_cache_tier() {
     e.svc.unpin(a.id).await.unwrap();
     assert!(e.index.all().iter().all(|o| o.tier == Tier::Cache));
 }
+
+struct BlockingHttp;
+
+#[async_trait::async_trait]
+impl app::ports::HttpFetch for BlockingHttp {
+    async fn fetch(
+        &self,
+        _req: app::ports::HttpRequest,
+    ) -> Result<app::ports::HttpResponse, app::ports::HttpError> {
+        Err(app::ports::HttpError::Blocked("host not allowed".into()))
+    }
+}
+
+#[tokio::test]
+async fn blocked_image_hosts_fail_permanently_and_keep_redirecting() {
+    let budget = StorageBudget::open(
+        StorageConfig {
+            backend: Backend::Memory,
+            ..StorageConfig::default()
+        },
+        Arc::new(MemObjectIndex::default()),
+        Arc::new(FixedClock::default()),
+        Arc::new(RecordingEvents::default()),
+    )
+    .unwrap();
+    let svc = AssetService::new(
+        Arc::new(budget),
+        Arc::new(MemAssetRepo::default()),
+        Arc::new(BlockingHttp),
+        Arc::new(MemJobs::default()),
+        CpuPool::new(1).unwrap(),
+    );
+    let a = svc
+        .register(
+            AssetKind::Cover,
+            URL,
+            "podcastindex",
+            FetchPriority::Visible,
+        )
+        .await
+        .unwrap();
+    let a = svc
+        .fetch(a.id)
+        .await
+        .expect("not an error: the job must not retry");
+    assert!(a.failed);
+    assert!(a.hash.is_none());
+}

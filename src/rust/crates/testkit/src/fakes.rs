@@ -268,6 +268,9 @@ impl Notifier for RecordingNotifier {
 #[derive(Default)]
 pub struct ReplayHttp {
     responses: Mutex<HashMap<String, HttpResponse>>,
+    /// Responses that also require a request-body substring (`request.body_contains`), for
+    /// APIs that POST different queries to one URL.
+    by_body: Mutex<Vec<(String, String, HttpResponse)>>,
     requests: Mutex<Vec<HttpRequest>>,
 }
 
@@ -293,7 +296,17 @@ impl ReplayHttp {
 impl HttpFetch for ReplayHttp {
     async fn fetch(&self, req: HttpRequest) -> Result<HttpResponse, HttpError> {
         let key = format!("{} {}", req.method, req.url);
+        let body = String::from_utf8_lossy(req.body.as_deref().unwrap_or_default()).to_string();
         self.requests.lock().expect("lock").push(req);
+        if let Some((_, _, resp)) = self
+            .by_body
+            .lock()
+            .expect("lock")
+            .iter()
+            .find(|(k, needle, _)| *k == key && body.contains(needle.as_str()))
+        {
+            return Ok(resp.clone());
+        }
         self.responses
             .lock()
             .expect("lock")
@@ -340,14 +353,24 @@ impl ReplayHttp {
                 serde_json::Value::String(s) => s.clone().into_bytes(),
                 other => serde_json::to_vec(other).expect("body"),
             };
-            replay.responses.lock().expect("lock").insert(
-                format!("{method} {url}"),
-                HttpResponse {
-                    status,
-                    headers,
-                    body,
-                },
-            );
+            let resp = HttpResponse {
+                status,
+                headers,
+                body,
+            };
+            let key = format!("{method} {url}");
+            match f["request"]["body_contains"].as_str() {
+                Some(needle) => {
+                    replay
+                        .by_body
+                        .lock()
+                        .expect("lock")
+                        .push((key, needle.to_string(), resp));
+                }
+                None => {
+                    replay.responses.lock().expect("lock").insert(key, resp);
+                }
+            }
         }
         replay
     }

@@ -1,0 +1,11 @@
+{
+  "fixture": "synthetic: fields of SearchResult in the TVDB v4 OpenAPI spec; values written for the test",
+  "request": {"method": "GET", "url": "https://api4.thetvdb.com/v4/search?query=breaking+bad&type=series&limit=10"},
+  "status": 200,
+  "headers": [["content-type", "application/json"]],
+  "body": {"status": "success", "data": [
+    {"objectID": "series-81189", "tvdb_id": "81189", "type": "series", "name": "Breaking Bad", "year": "2008",
+     "first_air_time": "2008-01-20", "primary_language": "eng", "network": "AMC", "status": "Ended",
+     "genres": ["Drama", "Crime"], "overview": "A chemistry teacher turns to crime.",
+     "image_url": "https://artworks.thetvdb.com/banners/posters/81189-10.jpg"}]}
+}

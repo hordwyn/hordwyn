@@ -1,0 +1,18 @@
+{
+  "fixture": "synthetic: fields from the IGDB API docs (games, involved_companies, game_modes field reference); values written for the test",
+  "request": {"method": "POST", "url": "https://api.igdb.com/v4/games", "body_contains": "where id = 740;"},
+  "status": 200,
+  "headers": [["content-type", "application/json"]],
+  "body": [
+    {"id": 740, "name": "Halo: Combat Evolved", "first_release_date": 1005782400,
+     "summary": "A first-person shooter.", "url": "https://www.igdb.com/games/halo-combat-evolved",
+     "cover": {"id": 1, "image_id": "co2r2r"},
+     "genres": [{"id": 5, "name": "Shooter"}],
+     "platforms": [{"id": 11, "name": "Xbox"}],
+     "game_modes": [{"id": 1, "name": "Single player"}, {"id": 2, "name": "Multiplayer"}],
+     "involved_companies": [
+       {"id": 1, "company": {"id": 1, "name": "Bungie"}, "developer": true, "publisher": false},
+       {"id": 2, "company": {"id": 2, "name": "Microsoft Game Studios"}, "developer": false, "publisher": true}
+     ]}
+  ]
+}

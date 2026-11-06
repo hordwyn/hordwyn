@@ -4,7 +4,7 @@
 use anyhow::{Context, bail};
 use config::{AppConfig, ServerRole};
 use leptos::prelude::*;
-use leptos_axum::{LeptosRoutes, generate_route_list};
+
 use server::{Overrides, Server};
 use tokio_util::sync::CancellationToken;
 
@@ -82,15 +82,7 @@ async fn main() -> anyhow::Result<()> {
         let conf = get_configuration(None).context("leptos configuration")?;
         let mut options = conf.leptos_options;
         options.site_addr = server.config.server.bind.parse().context("server.bind")?;
-        let routes = generate_route_list(web::App);
-        let pages = axum::Router::new()
-            .leptos_routes(&options, routes, {
-                let options = options.clone();
-                move || web::shell(options.clone())
-            })
-            .fallback(leptos_axum::file_and_error_handler(web::shell))
-            .with_state(options.clone());
-        let app = server.base_router().merge(pages);
+        let app = server.app_router(&options);
         let listener = tokio::net::TcpListener::bind(options.site_addr)
             .await
             .with_context(|| format!("bind {}", options.site_addr))?;

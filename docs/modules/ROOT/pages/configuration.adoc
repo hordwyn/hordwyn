@@ -48,7 +48,7 @@ they are never written back or logged.
 
 |`api_key` |`APP__CONNECTORS__<ID>__API_KEY` |string |- |API key or token. Prefer `APP__CONNECTORS__<ID>__API_KEY`; `KK_<ID>_API_KEY` is read as a fallback.
 |`base_url` |`APP__CONNECTORS__<ID>__BASE_URL` |string |- |Override of the API base URL (tests, mirrors). Its host is added to the allowlist.
-|`enabled` |`APP__CONNECTORS__<ID>__ENABLED` |boolean |- |
+|`enabled` |`APP__CONNECTORS__<ID>__ENABLED` |boolean |- |Compiled-in connectors are on unless switched off here.
 |===
 
 == `[database]`

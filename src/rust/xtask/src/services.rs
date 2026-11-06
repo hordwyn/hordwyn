@@ -247,3 +247,49 @@ fn meili_down() -> Result<()> {
     }
     Ok(())
 }
+
+// ---------------------------------------------------------------- databases
+
+/// Create a new, empty database for an e2e run (the server migrates it) and return its URL.
+///
+/// # Errors
+/// If `psql` fails.
+pub fn fresh_e2e_db() -> Result<String> {
+    let name = format!(
+        "e2e_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs())
+    );
+    drop_dbs("e2e\\_%")?;
+    run(Command::new("psql").args([&pg_admin_url(), "-c", &format!("CREATE DATABASE {name}")]))?;
+    Ok(format!("postgres://app@127.0.0.1:{PG_PORT}/{name}"))
+}
+
+/// Drop leftover databases whose name matches the `LIKE` pattern (`test\_%` from test runs,
+/// `e2e\_%` from end-to-end runs), so local runs do not fill the disk.
+///
+/// # Errors
+/// If `psql` fails.
+pub fn drop_dbs(like: &str) -> Result<()> {
+    let out = Command::new("psql")
+        .args([
+            &pg_admin_url(),
+            "-tAc",
+            &format!("SELECT datname FROM pg_database WHERE datname LIKE '{like}'"),
+        ])
+        .output()
+        .context("psql")?;
+    for name in String::from_utf8_lossy(&out.stdout).lines() {
+        let name = name.trim();
+        if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !name.is_empty() {
+            run(Command::new("psql").args([
+                &pg_admin_url(),
+                "-q",
+                "-c",
+                &format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"),
+            ]))?;
+        }
+    }
+    Ok(())
+}

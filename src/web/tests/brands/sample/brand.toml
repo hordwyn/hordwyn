@@ -1,0 +1,11 @@
+# A second brand for the brand-swap test (M07): nothing in code changes, only this file.
+name = "Reading Room"
+short_name = "Reading Room"
+default_locale = "de"
+support_url = "https://example.org/support"
+
+[theme]
+primary = "oklch(0.55 0.2 145)"
+
+[strings.de]
+nav-library = "Regal"

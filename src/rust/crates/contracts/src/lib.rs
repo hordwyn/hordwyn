@@ -197,6 +197,29 @@ pub struct AttributionDto {
     pub licence: String,
 }
 
+/// Everything the item page shows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct ItemPageDto {
+    pub item: CatalogItemDto,
+    /// The viewer's library entry, if the item is in their library.
+    pub entry: Option<LibraryEntryDto>,
+    pub progress: Vec<ProgressEventDto>,
+    /// Attribution of the connectors that supplied data for this item.
+    pub sources: Vec<AttributionDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct ListDto {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    /// `private`, `instance` or `link`.
+    pub visibility: String,
+    pub item_ids: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

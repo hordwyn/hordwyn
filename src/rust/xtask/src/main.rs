@@ -85,6 +85,7 @@ fn ci() -> Result<()> {
         url
     } else {
         step("services", xtask::services::up)?;
+        xtask::services::drop_dbs("test\\_%")?;
         xtask::services::pg_admin_url()
     };
     // S3 tests run when an S3 endpoint is available, and are skipped with a message otherwise.
@@ -134,12 +135,19 @@ fn ci() -> Result<()> {
 /// Build the site with the dev gallery and run the Playwright suite against it.
 fn e2e() -> Result<()> {
     let web = xtask::repo_root().join("src/web");
+    // a fresh database per run, unless the caller provides one (GitLab CI service)
+    let db = if let Ok(url) = std::env::var("E2E_DATABASE_URL") {
+        url
+    } else {
+        xtask::services::up()?;
+        xtask::services::fresh_e2e_db()?
+    };
     cargo(
         &[
             "leptos",
             "build",
             "--bin-features",
-            "gallery",
+            "gallery,all-connectors",
             "--lib-features",
             "hydrate,gallery",
         ],
@@ -152,6 +160,7 @@ fn e2e() -> Result<()> {
     }
     run(Command::new("npx")
         .args(["playwright", "test"])
+        .env("E2E_DATABASE_URL", db)
         .current_dir(web))
 }
 
@@ -162,7 +171,7 @@ fn dev() -> Result<()> {
             "leptos",
             "watch",
             "--bin-features",
-            "gallery",
+            "gallery,all-connectors",
             "--lib-features",
             "hydrate,gallery",
         ],

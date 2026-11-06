@@ -1,0 +1,17 @@
+{
+  "fixture": "synthetic: fields from the IGDB API docs (games endpoint field reference, expander syntax); values written for the test",
+  "request": {"method": "POST", "url": "https://api.igdb.com/v4/games", "body_contains": "search \"halo\""},
+  "status": 200,
+  "headers": [["content-type", "application/json"]],
+  "body": [
+    {"id": 740, "name": "Halo: Combat Evolved", "first_release_date": 1005782400,
+     "summary": "A first-person shooter.", "url": "https://www.igdb.com/games/halo-combat-evolved",
+     "cover": {"id": 1, "image_id": "co2r2r"},
+     "genres": [{"id": 5, "name": "Shooter"}],
+     "platforms": [{"id": 11, "name": "Xbox"}, {"id": 6, "name": "PC (Microsoft Windows)"}]},
+    {"id": 986, "name": "Halo 2", "first_release_date": 1099958400,
+     "cover": {"id": 2, "image_id": "co2r2s"},
+     "genres": [{"id": 5, "name": "Shooter"}],
+     "platforms": [{"id": 11, "name": "Xbox"}]}
+  ]
+}

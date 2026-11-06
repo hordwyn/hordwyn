@@ -1,0 +1,117 @@
+= Build report
+:toc:
+
+Status of the autonomous build as of 2026-11-06. Two sessions contributed: an earlier run on
+API credits (M00-M03, M06; assessed in `docs/reviews/2026-11-06-prior-run-assessment.md`)
+and this session (everything else listed here). The decisions log is `docs/DECISIONS.md`.
+
+== What was built
+
+[cols="1,1,4"]
+|===
+|Milestone |Tag |Content
+
+|M00 Bootstrap |`m00` |Workspace, Nix flake, xtask, CI, cargo-deny, architecture and
+white-label tests, Antora skeleton (earlier run). Fixed here: white-label scan false
+positive, Docker build, CI caches.
+|M01 Domain and app core |`m01` |Domain types, kinds with JSON Schema, use-cases, testkit
+fakes (earlier run). Fixed here: refresh loop for partial items (DEC-114), attribute
+overwrite by search results (DEC-079).
+|M02 Persistence and jobs |`m02` |store-pg, outbox, change feed, Postgres job queue (earlier
+run). Fixed here: flaky shutdown test, tracing span misuse.
+|M03 Catalog core + TMDB |`m03` |Governed HTTP client, singleflight, HTTP cache, merge,
+TMDB (earlier run).
+|M04 Assets and storage budget |`m04` |Storage budget with every D-8 setting, opendal fs/S3,
+image pipeline (AVIF/WebP, thumbhash, dominant colour) on a rayon pool, asset service,
+`cli storage report --dry-run`.
+|M05 Auth, API, realtime, server |`m05` |argon2 sessions, TOTP, OIDC (PKCE), REST
+`/api/v1` with OpenAPI, SSE, `--role=all\|web\|worker`, config crate with generated
+reference, telemetry.
+|M06 UI library |`m06` |Components, icons, gallery, axe tests (earlier run).
+|M07 Web vertical slice |`m07` |Sign-up/in, library grid with thumbhash placeholders, item
+page (add, mark done with companions, rating, lists, attribution), Ctrl-K palette with
+streamed connector results, companions, lists, data sources, Fluent i18n (en, de), brand
+applied.
+|M08 Search |`m08` |Meilisearch and Postgres FTS adapters, outbox indexer, tenant filters,
+scoped keys, `cli reindex`.
+|G1 Architecture review |- |`docs/reviews/2026-11-06-architecture-g1.md`, decisions
+DEC-098..105. Self-review for M04+ (see "Reviews").
+|M09 Connectors (partial) |- (not complete) |IGDB, Podcast Index, TheTVDB with docs, fixtures and tests.
+Blocked: AniList (terms), BGG (docs unreachable), Open Library, MusicBrainz, VNDB, Metron
+(KICKOFF rule 6), Hardcover (not researched).
+|M10-M17 |- |Not started (see "Known gaps").
+|===
+
+== Test results
+
+* `cd src/rust && cargo xtask ci`: fmt, clippy pedantic (native and wasm32), cargo-deny,
+  sqlx offline cache, all tests against local Postgres, Meilisearch and versitygw (S3),
+  wasm tests. Last green run: see the commit of tag `m07`/`m09`; about 190 tests, 0 failed,
+  1 ignored (live TMDB smoke test), no service-dependent test skipped.
+* `cargo xtask e2e`: 9 Playwright tests green (8 gallery/accessibility tests with axe
+  WCAG A/AA, 1 M07 slice test with the TMDB fixture server).
+* Latency (M05 acceptance, `apps/server/tests/latency.rs`): with a connector that takes 10 s,
+  item detail 3-5 ms, search 1-2 ms (limit 200 ms); `entity.updated` after 10.2 s,
+  `search.results` after 10.0 s.
+* Storage budget property tests (eviction never removes pinned objects, always ends at or
+  below the low watermark) and mutation checks (removing the pinned filter or the hard cap
+  makes them fail).
+* Search suite: the same tests pass for Meilisearch 1.56 and the Postgres fallback; a
+  mutation check (dropping the owner filter) makes the tenant test fail.
+* GitLab: pipelines run on every push; the earlier run never had a fully green pipeline
+  (Docker build and cache problems, fixed here). Docker image size not yet measured.
+* Coverage: not measured.
+
+== Most important decisions
+
+. DEC-050/051: continue on the earlier run's history; reviews and research done by this
+  session on the owner's instruction.
+. DEC-106: four mandated connectors are GPL-family services; their docs were not read.
+. DEC-108: AniList's terms forbid tracker apps; not implemented.
+. DEC-054/058/059: storage accounting in `stored_objects`, weighted LRU, per-process
+  admission.
+. DEC-067..072: auth design (session hashes, argon2 on the blocking pool, TOTP replay
+  protection, OIDC through the governed client).
+. DEC-084/085: Meilisearch master key only at start-up, adapters enforce tenant filters.
+. DEC-090: Fluent instead of leptos_i18n (runtime brand overrides).
+. DEC-092: server functions over a `Backend` trait, sharing `api::ops` with REST.
+. DEC-055/091: lean dev profile; the 20 GB build host filled up three times.
+. DEC-114/109/079: bugs found by end-to-end tests in earlier code.
+
+== Deviations from DESIGN.md and KICKOFF
+
+* Reviews (G1) and research were done by this session instead of `claude-fable-5-1`
+  subagents (owner instruction, DEC-051); M04, M05, M07 and M08 were therefore
+  self-reviewed.
+* S3 tests run against versitygw locally; compose and GitLab CI have no S3 service (DEC-056).
+* i18n uses Fluent (DEC-090).
+* Six of ten M09 connectors are not implemented (DEC-106..108, DEC-116).
+* Connectors still hold provider secrets (DEC-115).
+
+== Reviews
+
+* Prior run assessment: kept as-is; seven defects found and fixed.
+* G1: eight findings; applied G1-1; decided G1-2..G1-7 (DEC-098..104).
+* G2: not run (M17 not reached).
+
+== Known gaps and bugs
+
+* M10 (board-game research), M11 (board games), M12 (importers), M13 (notifications), M14
+  (integrations), M15 (sharing flows), M16 (sync protocol), M17 (hardening, load test, image
+  size, G2) not done.
+* Legacy importer fixture (Q4) not present in the repository.
+* Docker image build and compose quick start are only verified by the GitLab kaniko job; no
+  Docker on the build host.
+* OIDC code exchange is not covered by a test (DEC-072).
+* Library documents are not re-indexed when a catalog title changes (DEC-087).
+* Multi-process budget admission can overshoot by one object per process (DEC-059).
+
+== Next steps, by value
+
+. Owner decisions: rule 6 for public API docs of GPL-licensed services (DEC-106), anime/manga
+  source (DEC-108), BGG docs and token (DEC-107).
+. M12 importers (Trakt, Goodreads, generic JSON) - most value for moving an existing library.
+. M10/M11 board games once BGG is unblocked.
+. M15 sharing flows (the companion/user model already supports them in `app`).
+. M16 sync endpoints (change feed and HLC fields exist).
+. M13, M14, M17 and an independent review (G2, and of M04-M08).
