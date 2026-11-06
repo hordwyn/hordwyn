@@ -35,7 +35,7 @@ async fn social_events_reach_the_right_people() {
     assert_eq!(asked.audience, Audience::Users(vec![bob_user.id]));
     assert_eq!(asked.args["from"], "ALICE");
     assert_eq!(asked.args["companion"], "B.");
-    assert_eq!(asked.link.as_deref(), Some("/companions"));
+    assert_eq!(asked.link.as_deref(), Some("/people"));
     let accepted = find("social.link_accepted");
     assert_eq!(accepted.audience, Audience::Users(vec![alice_user.id]));
     assert_eq!(accepted.args["user"], "BOB");

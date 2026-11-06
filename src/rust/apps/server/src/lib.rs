@@ -211,6 +211,7 @@ impl Server {
     pub async fn build(config: AppConfig, role: ServerRole, o: Overrides) -> anyhow::Result<Self> {
         let brand = brand::Brand::load(std::path::Path::new(&config.brand.dir))
             .with_context(|| format!("brand directory {}", config.brand.dir))?;
+        log_contrast(&brand);
         // in containers the database name may resolve only a moment after start-up
         let pool = store_pg::connect_with_retry(
             &config.database.url,
@@ -333,6 +334,10 @@ impl Server {
                 "/assets/{hash}/{file}",
                 get(serve_asset).with_state(self.assets.clone()),
             )
+            .route(
+                "/brand/fonts/{fingerprint}/{file}",
+                get(serve_font).with_state(Arc::new(self.brand.clone())),
+            )
             .merge(api::router(self.api.clone()));
         self.guarded(r)
     }
@@ -390,6 +395,48 @@ impl Server {
     #[must_use]
     pub fn events(&self) -> Arc<dyn EventBus> {
         Arc::new(self.bus.clone())
+    }
+}
+
+/// design.md 7.4: warn when the brand accent pair is below WCAG AA (4.5:1).
+fn log_contrast(brand: &brand::Brand) {
+    for f in brand.contrast_findings() {
+        if let Some(ratio) = f.ratio {
+            tracing::warn!(
+                theme = f.theme,
+                primary = %f.primary,
+                foreground = %f.foreground,
+                ratio = format!("{ratio:.2}"),
+                "brand primary/primary-foreground contrast is below 4.5:1 (WCAG 1.4.3)"
+            );
+        } else {
+            tracing::warn!(
+                theme = f.theme,
+                primary = %f.primary,
+                foreground = %f.foreground,
+                "brand primary/primary-foreground contrast cannot be checked: use hex, rgb() or oklch()"
+            );
+        }
+    }
+}
+
+/// `/brand/fonts/{fingerprint}/{file}`: the brand's self-hosted fonts (design.md 2.8). Only
+/// files declared in `brand.toml` are served; the fingerprint changes with the content.
+async fn serve_font(
+    State(brand): State<Arc<brand::Brand>>,
+    Path((fingerprint, file)): Path<(String, String)>,
+) -> Response {
+    let url = format!("{}{fingerprint}/{file}", brand::FONT_ROUTE);
+    match brand.font_asset(&url) {
+        Some(font) => (
+            [
+                (header::CONTENT_TYPE, brand::FontAsset::CONTENT_TYPE),
+                (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
+            ],
+            axum::body::Bytes::from_owner(font.bytes.clone()),
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
@@ -512,11 +559,14 @@ async fn search_index(config: &AppConfig, pool: &sqlx::PgPool) -> Arc<dyn Search
 }
 
 impl Server {
+    fn web_backend(&self) -> Arc<dyn web::backend::Backend> {
+        Arc::new(web_backend::WebBackend(self.api.clone()))
+    }
+
     /// Per-request context for the web app: brand and the server-function backend.
     pub fn web_context(&self) -> impl Fn() + Clone + Send + Sync + 'static {
         let brand = Arc::new(self.brand.clone());
-        let backend: Arc<dyn web::backend::Backend> =
-            Arc::new(web_backend::WebBackend(self.api.clone()));
+        let backend = self.web_backend();
         move || {
             leptos::prelude::provide_context(brand.clone());
             leptos::prelude::provide_context(backend.clone());
@@ -526,6 +576,8 @@ impl Server {
 
 impl Server {
     /// Everything the web role serves: base routes, server functions and the Leptos pages.
+    /// Pages (and the 404 page) get the session resolved before rendering, so the app shell
+    /// is right on the first render (design.md 3.2).
     pub fn app_router(&self, options: &leptos::prelude::LeptosOptions) -> Router {
         use leptos_axum::LeptosRoutes;
         let routes = leptos_axum::generate_route_list(web::App);
@@ -538,12 +590,19 @@ impl Server {
                     move |req| leptos_axum::handle_server_fns_with_context(context.clone(), req)
                 }),
             )
-            .leptos_routes_with_context(options, routes, context, {
+            .leptos_routes_with_context(options, routes, context.clone(), {
                 let options = options.clone();
                 move || web::shell(options.clone())
             })
-            .fallback(leptos_axum::file_and_error_handler(web::shell))
-            .with_state(options.clone());
+            .fallback(leptos_axum::file_and_error_handler_with_context(
+                context,
+                web::shell,
+            ))
+            .with_state(options.clone())
+            .layer(axum::middleware::from_fn_with_state(
+                self.web_backend(),
+                web::backend::resolve_shell_session,
+            ));
         let pages = self.guarded(pages);
         self.base_router().merge(pages)
     }

@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 
 use crate::class::{cn, cva};
+use crate::icon::{Icon, IconName};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ButtonVariant {
@@ -59,11 +60,15 @@ const BASE: &str = "inline-flex items-center justify-center gap-2 whitespace-now
 
 /// Button. Event handlers (`on:click`) and attributes added at the call site are forwarded
 /// to the `<button>` element.
+///
+/// `loading` shows a spinner in front of the unchanged label, sets `aria-busy` and disables
+/// the button so a pending request cannot be sent twice (design.md 7.1).
 #[component]
 pub fn Button(
     #[prop(optional)] variant: ButtonVariant,
     #[prop(optional)] size: ButtonSize,
     #[prop(into, optional)] disabled: Signal<bool>,
+    #[prop(into, optional)] loading: Signal<bool>,
     #[prop(into, optional)] class: MaybeProp<String>,
     /// `button` (default), `submit` or `reset`.
     #[prop(into, optional)]
@@ -73,9 +78,11 @@ pub fn Button(
     view! {
         <button
             type=r#type.unwrap_or("button")
-            disabled=disabled
+            disabled=move || disabled.get() || loading.get()
+            aria-busy=move || loading.get().then_some("true")
             class=move || cn(&[&cva(BASE, &[variant.classes(), size.classes()]), &class.get().unwrap_or_default()])
         >
+            {move || loading.get().then(|| view! { <Icon name=IconName::Spinner class="animate-spin"/> })}
             {children()}
         </button>
     }

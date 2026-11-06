@@ -34,6 +34,14 @@ favicon = "favicon.svg"
 
 [strings.de]                   # override any message key, per locale
 nav-library = "Regal"
+
+[fonts]                        # optional UI font, self-hosted from the brand directory
+sans = "Inter"                 # family name, put in front of the system stack
+
+[[fonts.files]]                # WOFF2 only; weight is one value or a variable range
+file = "fonts/Inter.woff2"
+weight = "100 900"
+style = "normal"               # normal or italic
 ----
 
 Nothing else changes: the same binary renders another brand (`apps/server/tests/brand.rs`
@@ -49,8 +57,16 @@ letters and digits
 |Outgoing `User-Agent` |`<ident>/<version> (+<support_url>)`
 |OpenAPI title |`<name> API`
 |TOTP issuer |`name`
-|Theme |`[theme]` and `[theme_dark]` become `:root{...}` and `.dark{...}`; values that could
-break out of the style element are dropped
+|Theme |`[theme]` and `[theme_dark]` become `:root:not(.dark){...}` and `:root.dark{...}`, which
+outrank the stylesheet defaults; a theme without values keeps the defaults; values that could
+break out of the style element are dropped. At start-up the server logs a warning when
+`primary` on `primary-foreground` is below 4.5:1 (WCAG 1.4.3) or cannot be checked (use hex,
+`rgb()` or `oklch()`)
+|Font |`[fonts]` becomes `@font-face` rules (`font-display: swap`) with URLs below
+`/brand/fonts/<fingerprint>/` on the same origin (cached as immutable) and `--font-sans`
+= the brand font, then the system stack. Files must exist and be WOFF2, or start-up fails.
+Ship the font licence (for example `OFL.txt`) in the brand directory. The default brand ships
+Atkinson Hyperlegible Next (OFL 1.1, see `config/brand/ICONS.adoc`)
 |Messages |`[strings.<locale>]` wins over the built-in Fluent messages
 |===
 

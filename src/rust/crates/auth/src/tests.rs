@@ -105,7 +105,7 @@ async fn weak_passwords_are_refused() {
     s.password = "short".into();
     assert!(matches!(
         auth.sign_up(s).await,
-        Err(AuthError::WeakPassword)
+        Err(AuthError::PasswordTooShort)
     ));
 }
 

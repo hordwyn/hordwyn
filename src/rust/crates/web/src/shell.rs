@@ -1,0 +1,707 @@
+//! The app shell (design.md 3.2, 6.15, 7.3; replaces the old `Header`): skip link, top bar
+//! with the five sections, search pill, Add, bell and account menu; the mobile tab bar with
+//! the You hub; the offline banner; toaster, search palette and shortcut help mounted once.
+//! What the bar shows comes from [`ClientConfig`], filled from the session on the server, so
+//! there is no Suspense gap and no "Create account" after sign-in.
+
+use leptos::html;
+use leptos::prelude::*;
+use leptos_router::hooks::use_location;
+use ui::{
+    Alert, AlertRole, AlertVariant, Avatar, Dialog, Icon, IconName, KeyHint, NavGroup, NavItem,
+    Segmented, SegmentedOption, SideNav, TabBar, TabBarAction, ThemeToggle, Toaster,
+    provide_toasts,
+};
+
+use crate::app::ClientConfig;
+use crate::i18n::{t, use_i18n};
+use crate::palette::PaletteOpen;
+
+/// `localStorage` key of the theme choice (unchanged; read before paint by `THEME_BOOT`).
+pub const THEME_KEY: &str = "app-theme";
+
+/// The theme choice: `system`, `light` or `dark`.
+#[derive(Clone, Copy)]
+pub struct ThemeChoice(pub RwSignal<String>);
+
+/// Whether the keyboard shortcut help is open.
+#[derive(Clone, Copy)]
+pub struct ShortcutsOpen(pub RwSignal<bool>);
+
+/// The section a path belongs to; its links get `aria-current="page"`. Pages reached from
+/// the account menu or the You hub belong to `/you` (the mobile tab).
+#[must_use]
+pub fn section_of(path: &str) -> &'static str {
+    match path
+        .trim_start_matches('/')
+        .split('/')
+        .next()
+        .unwrap_or_default()
+    {
+        "" => "/",
+        "library" | "items" => "/library",
+        "history" => "/history",
+        "lists" | "shared" => "/lists",
+        "people" => "/people",
+        "you" | "notifications" | "integrations" | "sources" => "/you",
+        _ => "",
+    }
+}
+
+/// Where the admin entry points until the admin area exists: the data sources page is the
+/// only instance-level page so far (design.md 6.10).
+const ADMIN_HREF: &str = "/sources";
+
+/// The five sections of the top bar (design.md 3.2, 3.3); all routes exist.
+fn sections() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("/", "nav-home"),
+        ("/library", "nav-library"),
+        ("/history", "nav-history"),
+        ("/lists", "nav-lists"),
+        ("/people", "nav-people"),
+    ]
+}
+
+/// Account pages that are not top-level sections (no settings area yet).
+fn account_links(is_admin: bool) -> Vec<(&'static str, &'static str)> {
+    let mut links = vec![
+        ("/notifications", "nav-notifications"),
+        ("/integrations", "nav-integrations"),
+    ];
+    links.push(if is_admin {
+        (ADMIN_HREF, "shell-admin")
+    } else {
+        ("/sources", "nav-sources")
+    });
+    links
+}
+
+// ---------------------------------------------------------------- browser helpers
+
+#[cfg(feature = "hydrate")]
+fn stored_theme() -> Option<String> {
+    web_sys::window()?
+        .local_storage()
+        .ok()??
+        .get_item(THEME_KEY)
+        .ok()?
+        .filter(|v| v == "light" || v == "dark")
+}
+
+/// Store the choice (`system` removes the key) and set the `dark` class accordingly.
+#[cfg(feature = "hydrate")]
+fn apply_theme(choice: &str) {
+    let Some(w) = web_sys::window() else {
+        return;
+    };
+    if let Ok(Some(s)) = w.local_storage() {
+        let _ = if choice == "system" {
+            s.remove_item(THEME_KEY)
+        } else {
+            s.set_item(THEME_KEY, choice)
+        };
+    }
+    let dark = match choice {
+        "dark" => true,
+        "light" => false,
+        _ => w
+            .match_media("(prefers-color-scheme: dark)")
+            .ok()
+            .flatten()
+            .is_some_and(|m| m.matches()),
+    };
+    if let Some(root) = w.document().and_then(|d| d.document_element()) {
+        let _ = if dark {
+            root.class_list().add_1("dark")
+        } else {
+            root.class_list().remove_1("dark")
+        };
+    }
+}
+
+#[cfg(not(feature = "hydrate"))]
+fn apply_theme(_: &str) {}
+
+#[cfg(feature = "hydrate")]
+fn is_online() -> bool {
+    web_sys::window().is_none_or(|w| w.navigator().on_line())
+}
+
+/// Is the key press meant for a text field (single-key shortcuts stay off there)?
+#[cfg(feature = "hydrate")]
+fn typing(ev: &leptos::ev::KeyboardEvent) -> bool {
+    use wasm_bindgen::JsCast;
+    ev.target()
+        .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
+        .is_some_and(|el| {
+            matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+                || el.is_content_editable()
+        })
+}
+
+#[cfg(not(feature = "hydrate"))]
+fn typing(_: &leptos::ev::KeyboardEvent) -> bool {
+    false
+}
+
+/// Move focus between the menu's items for an arrow, Home or End key; `false` for others.
+#[cfg(feature = "hydrate")]
+fn focus_menu(menu: NodeRef<html::Div>, key: &str) -> bool {
+    use wasm_bindgen::JsCast;
+    let Some(menu) = menu.get_untracked() else {
+        return false;
+    };
+    let Ok(list) = menu.query_selector_all("[role^=menuitem]") else {
+        return false;
+    };
+    let items: Vec<web_sys::HtmlElement> = (0..list.length())
+        .filter_map(|i| list.item(i))
+        .filter_map(|n| n.dyn_into().ok())
+        .collect();
+    let n = items.len();
+    if n == 0 {
+        return false;
+    }
+    let active = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.active_element());
+    let at = items.iter().position(|el| {
+        active
+            .as_ref()
+            .is_some_and(|a| a.is_same_node(Some(el.as_ref())))
+    });
+    let next = match key {
+        "Home" => 0,
+        "End" => n - 1,
+        "ArrowDown" => at.map_or(0, |i| (i + 1) % n),
+        "ArrowUp" => at.map_or(n - 1, |i| (i + n - 1) % n),
+        _ => return false,
+    };
+    let _ = items[next].focus();
+    true
+}
+
+#[cfg(not(feature = "hydrate"))]
+fn focus_menu(_: NodeRef<html::Div>, _: &str) -> bool {
+    false
+}
+
+/// Did the pointer go down outside `container`?
+#[cfg(feature = "hydrate")]
+fn outside(container: NodeRef<html::Div>, ev: &leptos::ev::PointerEvent) -> bool {
+    use wasm_bindgen::JsCast;
+    let target = ev.target().and_then(|t| t.dyn_into::<web_sys::Node>().ok());
+    container
+        .get_untracked()
+        .is_some_and(|c| !c.contains(target.as_ref()))
+}
+
+#[cfg(not(feature = "hydrate"))]
+fn outside(_: NodeRef<html::Div>, _: &leptos::ev::PointerEvent) -> bool {
+    false
+}
+
+// ---------------------------------------------------------------- shell
+
+fn provide_theme() -> ThemeChoice {
+    let choice = RwSignal::new("system".to_string());
+    // read the stored choice once in the browser (the server cannot know it)
+    Effect::new(move |_| {
+        #[cfg(feature = "hydrate")]
+        if let Some(v) = stored_theme() {
+            choice.set(v);
+        }
+    });
+    // apply later changes (the first run is the initial value, already applied before paint)
+    Effect::new(move |prev: Option<()>| {
+        let v = choice.get();
+        if prev.is_some() {
+            apply_theme(&v);
+        }
+    });
+    let theme = ThemeChoice(choice);
+    provide_context(theme);
+    theme
+}
+
+fn sign_out_action() -> Action<(), ()> {
+    Action::new(|(): &()| async {
+        let _ = crate::api::sign_out().await;
+        crate::pages::go("/");
+    })
+}
+
+/// Global single-key shortcuts (design.md 3.2): `?` help, `N` add; never while typing.
+fn shortcut_keys(signed_in: bool, palette: RwSignal<bool>, help: RwSignal<bool>) {
+    let _ = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.ctrl_key()
+            || ev.meta_key()
+            || ev.alt_key()
+            || palette.get_untracked()
+            || help.get_untracked()
+            || typing(&ev)
+        {
+            return;
+        }
+        match ev.key().as_str() {
+            "?" => {
+                ev.prevent_default();
+                help.set(true);
+            }
+            "n" | "N" if signed_in => {
+                ev.prevent_default();
+                palette.set(true);
+            }
+            _ => {}
+        }
+    });
+}
+
+/// Everything around the routes. Must sit inside the `Router`.
+#[component]
+pub fn AppShell(children: Children) -> impl IntoView {
+    let cfg = expect_context::<ClientConfig>();
+    let i18n = use_i18n();
+    let palette = expect_context::<PaletteOpen>().0;
+    let help = RwSignal::new(false);
+    provide_context(ShortcutsOpen(help));
+    let _ = provide_toasts();
+    provide_theme();
+    shortcut_keys(cfg.signed_in, palette, help);
+    let location = use_location();
+    let current = Signal::derive(move || section_of(&location.pathname.get()).to_string());
+    view! {
+        <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded focus:bg-background focus:p-2 focus:ring-2 focus:ring-ring">
+            {t("skip-to-content")}
+        </a>
+        <TopBar current=current/>
+        <OfflineBanner/>
+        <main id="main" tabindex="-1" class="mx-auto w-full max-w-6xl px-4 pt-6 pb-[calc(1.5rem+var(--tab-bar-height))] focus:outline-none">
+            {children()}
+        </main>
+        {cfg.signed_in.then(|| view! { <MobileTabs current=current/> })}
+        <crate::palette::SearchPalette/>
+        <ShortcutHelp open=help/>
+        <Toaster dismiss_label=i18n.t("shell-dismiss")/>
+    }
+}
+
+const ICON_BTN: &str = "relative inline-flex size-11 shrink-0 items-center justify-center rounded-md \
+    hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring \
+    min-[47.5rem]:size-9 cursor-pointer";
+
+/// The desktop-only Add button (the tab bar has its own on mobile).
+const ADD_BTN: &str = "relative hidden size-9 shrink-0 items-center justify-center rounded-md \
+    hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring \
+    min-[47.5rem]:inline-flex cursor-pointer";
+
+const NAV_LINK: &str = "rounded-md px-3 py-2 text-sm font-medium text-muted-foreground \
+    hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 \
+    focus-visible:ring-ring aria-[current=page]:bg-secondary aria-[current=page]:text-foreground";
+
+#[component]
+fn TopBar(current: Signal<String>) -> impl IntoView {
+    let cfg = expect_context::<ClientConfig>();
+    view! {
+        <header class="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
+            <div class="mx-auto flex h-[var(--top-bar-height)] max-w-6xl items-center gap-2 px-4">
+                <a href="/" class="mr-2 rounded-md text-lg font-semibold tracking-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    {cfg.product_name.clone()}
+                </a>
+                {if cfg.signed_in {
+                    view! { <SignedInBar current=current/> }.into_any()
+                } else {
+                    view! { <SignedOutBar/> }.into_any()
+                }}
+            </div>
+        </header>
+    }
+}
+
+#[component]
+fn SignedOutBar() -> impl IntoView {
+    let i18n = use_i18n();
+    view! {
+        <span class="flex-1"></span>
+        <ThemeToggle dark_label=i18n.t("theme-dark") light_label=i18n.t("theme-light") storage_key=THEME_KEY/>
+        <a href="/sign-in" class=NAV_LINK>{t("nav-sign-in")}</a>
+        <a href="/sign-up" class="inline-flex min-h-11 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-[47.5rem]:min-h-9">{t("nav-sign-up")}</a>
+    }
+}
+
+#[component]
+fn SignedInBar(current: Signal<String>) -> impl IntoView {
+    let cfg = expect_context::<ClientConfig>();
+    let i18n = use_i18n();
+    let palette = expect_context::<PaletteOpen>().0;
+    let bell = i18n.t_args("shell-notifications", &[("count", cfg.unread.into())]);
+    view! {
+        <nav aria-label=i18n.t("nav-main") class="hidden flex-1 items-center gap-0.5 min-[47.5rem]:flex">
+            {sections().into_iter().map(|(href, key)| view! {
+                <a href=href class=NAV_LINK aria-current=move || (current.get() == href).then_some("page")>
+                    {t(key)}
+                </a>
+            }).collect_view()}
+        </nav>
+        <span class="flex-1 min-[47.5rem]:hidden"></span>
+        <button
+            type="button"
+            on:click=move |_| palette.set(true)
+            class="inline-flex size-11 items-center justify-center gap-2 rounded-md text-sm text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer \
+                   min-[47.5rem]:h-9 min-[47.5rem]:w-auto min-[47.5rem]:min-w-52 min-[47.5rem]:justify-start min-[47.5rem]:border min-[47.5rem]:border-input min-[47.5rem]:px-3"
+        >
+            <Icon name=IconName::Search/>
+            <span class="sr-only min-[47.5rem]:not-sr-only">{t("shell-search")}</span>
+            <span class="ml-auto hidden min-[47.5rem]:inline"><KeyHint keys=vec![t("shell-ctrl"), "K".to_string()]/></span>
+        </button>
+        <button
+            type="button"
+            aria-label=i18n.t("shell-add")
+            title=i18n.t("shell-add")
+            on:click=move |_| palette.set(true)
+            class=ADD_BTN
+        >
+            <Icon name=IconName::Plus class="size-5"/>
+        </button>
+        <a href="/notifications" aria-label=bell class=ICON_BTN>
+            <Icon name=IconName::Bell class="size-5"/>
+            {(cfg.unread > 0).then(|| view! {
+                <span class="absolute right-2 top-2 size-2 rounded-full border-2 border-background bg-destructive"></span>
+            })}
+        </a>
+        <div class="hidden min-[47.5rem]:block">
+            <AccountMenu/>
+        </div>
+    }
+}
+
+const MENU_ITEM: &str = "flex w-full min-h-9 cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 \
+    text-left text-sm outline-none hover:bg-accent focus:bg-accent focus:text-accent-foreground";
+
+const SEPARATOR: &str = "my-1 h-px bg-border";
+
+/// The account menu (APG menu button): pages, theme (system/light/dark), sign out, and help
+/// last (addendum-1 D13).
+#[component]
+fn AccountMenu() -> impl IntoView {
+    let cfg = expect_context::<ClientConfig>();
+    let i18n = use_i18n();
+    let theme = expect_context::<ThemeChoice>().0;
+    let help = expect_context::<ShortcutsOpen>().0;
+    let open = RwSignal::new(false);
+    let trigger = NodeRef::<html::Button>::new();
+    let container = NodeRef::<html::Div>::new();
+    let menu = NodeRef::<html::Div>::new();
+    let sign_out = sign_out_action();
+    let label = i18n.t_args(
+        "shell-account",
+        &[("name", cfg.display_name.clone().into())],
+    );
+    Effect::new(move |_| {
+        // tracks the node ref too: the menu mounts after `open` turns true
+        if open.get() && menu.get().is_some() {
+            focus_menu(menu, "Home");
+        }
+    });
+    let _ = window_event_listener(leptos::ev::pointerdown, move |ev| {
+        if open.get_untracked() && outside(container, &ev) {
+            open.set(false);
+        }
+    });
+    let close = move || {
+        open.set(false);
+        if let Some(t) = trigger.get_untracked() {
+            let _ = t.focus();
+        }
+    };
+    let on_key = move |ev: leptos::ev::KeyboardEvent| match ev.key().as_str() {
+        "Escape" => {
+            ev.prevent_default();
+            close();
+        }
+        "Tab" => open.set(false),
+        k => {
+            if focus_menu(menu, k) {
+                ev.prevent_default();
+            }
+        }
+    };
+    let links = account_links(cfg.is_admin);
+    let support = cfg.support_url.clone();
+    let name = cfg.display_name.clone();
+    view! {
+        <div node_ref=container class="relative">
+            <button
+                node_ref=trigger
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded=move || if open.get() { "true" } else { "false" }
+                aria-controls="account-menu"
+                aria-label=label.clone()
+                on:click=move |_| open.update(|o| *o = !*o)
+                on:keydown=move |ev: leptos::ev::KeyboardEvent| {
+                    if ev.key() == "ArrowDown" {
+                        ev.prevent_default();
+                        open.set(true);
+                    }
+                }
+                class=ICON_BTN
+            >
+                <Avatar name=cfg.display_name.clone()/>
+            </button>
+            <Show when=move || open.get()>
+                <div class="absolute right-0 z-50 mt-1 w-64 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+                    <p class="truncate px-2 py-1.5 text-sm font-semibold">{name.clone()}</p>
+                    <div node_ref=menu id="account-menu" role="menu" aria-label=label.clone() on:keydown=on_key>
+                        {links.iter().map(|(href, key)| view! {
+                            <a role="menuitem" tabindex="-1" href=*href class=MENU_ITEM on:click=move |_| open.set(false)>
+                                {t(key)}
+                            </a>
+                        }).collect_view()}
+                        <div role="separator" class=SEPARATOR></div>
+                        <ThemeItems theme=theme open=open/>
+                        <div role="separator" class=SEPARATOR></div>
+                        <button type="button" role="menuitem" tabindex="-1" class=MENU_ITEM
+                            on:click=move |_| { open.set(false); sign_out.dispatch(()); }>
+                            <Icon name=IconName::LogOut/>
+                            {t("nav-sign-out")}
+                        </button>
+                        <div role="separator" class=SEPARATOR></div>
+                        <button type="button" role="menuitem" tabindex="-1" class=MENU_ITEM
+                            on:click=move |_| { open.set(false); help.set(true); }>
+                            {t("shell-shortcuts")}
+                            <KeyHint keys=vec!["?".to_string()] class="ml-auto"/>
+                        </button>
+                        {support.clone().map(|url| view! {
+                            <a role="menuitem" tabindex="-1" href=url target="_blank" rel="noopener" class=MENU_ITEM>
+                                {t("shell-help")}
+                            </a>
+                        })}
+                    </div>
+                </div>
+            </Show>
+        </div>
+    }
+}
+
+fn theme_options() -> Vec<(&'static str, &'static str, IconName)> {
+    vec![
+        ("system", "shell-theme-system", IconName::Settings),
+        ("light", "shell-theme-light", IconName::Sun),
+        ("dark", "shell-theme-dark", IconName::Moon),
+    ]
+}
+
+/// The theme as a group of three `menuitemradio`s.
+#[component]
+fn ThemeItems(theme: RwSignal<String>, open: RwSignal<bool>) -> impl IntoView {
+    let i18n = use_i18n();
+    view! {
+        <div role="group" aria-label=i18n.t("shell-theme")>
+            <p aria-hidden="true" class="px-2 pb-1 pt-1.5 text-xs font-medium text-muted-foreground">{t("shell-theme")}</p>
+            {theme_options().into_iter().map(|(value, key, icon)| view! {
+                <button
+                    type="button"
+                    role="menuitemradio"
+                    tabindex="-1"
+                    aria-checked=move || if theme.get() == value { "true" } else { "false" }
+                    on:click=move |_| {
+                        theme.set(value.to_string());
+                        open.set(false);
+                    }
+                    class=MENU_ITEM
+                >
+                    <Icon name=icon/>
+                    <span class="flex-1">{t(key)}</span>
+                    {move || (theme.get() == value).then(|| view! { <Icon name=IconName::Check/> })}
+                </button>
+            }).collect_view()}
+        </div>
+    }
+}
+
+/// Mobile bottom navigation: Home, Library, Add, History, You (owner ruling, DEC-171).
+#[component]
+fn MobileTabs(current: Signal<String>) -> impl IntoView {
+    let cfg = expect_context::<ClientConfig>();
+    let i18n = use_i18n();
+    let palette = expect_context::<PaletteOpen>().0;
+    let mut you = NavItem::new("/you", i18n.t("nav-you")).icon(IconName::User);
+    if cfg.unread > 0 {
+        you = you.count(i18n.t_args("shell-unread", &[("count", cfg.unread.into())]));
+    }
+    let items = vec![
+        NavItem::new("/", i18n.t("nav-home")).icon(IconName::Home),
+        NavItem::new("/library", i18n.t("nav-library")).icon(IconName::Grid),
+        NavItem::new("/history", i18n.t("nav-history")).icon(IconName::History),
+        you,
+    ];
+    view! {
+        <TabBar
+            label=i18n.t("nav-main")
+            items=items
+            current=current
+            action=TabBarAction::new(i18n.t("shell-add"), IconName::Plus, Callback::new(move |()| palette.set(true)))
+        />
+    }
+}
+
+/// Offline banner (design.md 6.15), a polite live region that is always in the page so the
+/// change is announced.
+#[component]
+fn OfflineBanner() -> impl IntoView {
+    let online = RwSignal::new(true);
+    Effect::new(move |_| {
+        #[cfg(feature = "hydrate")]
+        online.set(is_online());
+    });
+    let _ = window_event_listener(leptos::ev::online, move |_| online.set(true));
+    let _ = window_event_listener(leptos::ev::offline, move |_| online.set(false));
+    view! {
+        <div role="status" class="mx-auto w-full max-w-6xl px-4 empty:hidden">
+            <Show when=move || !online.get()>
+                <Alert variant=AlertVariant::Warning role=AlertRole::None class="mt-4">
+                    {t("shell-offline")}
+                </Alert>
+            </Show>
+        </div>
+    }
+}
+
+/// `?`: the keyboard shortcuts that exist.
+#[component]
+fn ShortcutHelp(open: RwSignal<bool>) -> impl IntoView {
+    let i18n = use_i18n();
+    let rows = move || {
+        vec![
+            (
+                vec![t("shell-ctrl"), "K".to_string()],
+                t("shell-key-search"),
+            ),
+            (vec!["N".to_string()], t("shell-key-add")),
+            (vec!["?".to_string()], t("shell-key-help")),
+            (vec!["Esc".to_string()], t("shell-key-close")),
+        ]
+    };
+    view! {
+        <Dialog open=open title=i18n.t("shell-shortcuts") close_label=i18n.t("dialog-close")>
+            <dl class="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-sm">
+                {rows().into_iter().map(|(keys, what)| view! {
+                    <dt><KeyHint keys=keys/></dt>
+                    <dd>{what}</dd>
+                }).collect_view()}
+            </dl>
+        </Dialog>
+    }
+}
+
+/// The You hub (mobile tab, design.md 3.2): people, lists, notifications and the account
+/// pages, theme, help and sign out.
+#[component]
+pub fn You() -> impl IntoView {
+    let cfg = expect_context::<ClientConfig>();
+    let i18n = use_i18n();
+    if !cfg.signed_in {
+        return view! {
+            <crate::pages::PageTitle text=i18n.t("nav-you")/>
+            <p class="flex gap-4">
+                <a href="/sign-in" class="underline">{t("nav-sign-in")}</a>
+                <a href="/sign-up" class="underline">{t("nav-sign-up")}</a>
+            </p>
+        }
+        .into_any();
+    }
+    let theme = expect_context::<ThemeChoice>().0;
+    let help = expect_context::<ShortcutsOpen>().0;
+    let sign_out = sign_out_action();
+    let mut notifications =
+        NavItem::new("/notifications", i18n.t("nav-notifications")).icon(IconName::Bell);
+    if cfg.unread > 0 {
+        notifications =
+            notifications.count(i18n.t_args("shell-unread", &[("count", cfg.unread.into())]));
+    }
+    let mut items = vec![
+        NavItem::new("/people", i18n.t("nav-people")).icon(IconName::Users),
+        NavItem::new("/lists", i18n.t("nav-lists")).icon(IconName::List),
+        notifications,
+    ];
+    items.extend(
+        account_links(cfg.is_admin)
+            .into_iter()
+            .skip(1)
+            .map(|(href, key)| NavItem::new(href, i18n.t(key))),
+    );
+    let location = use_location();
+    let options: Vec<SegmentedOption> = theme_options()
+        .into_iter()
+        .map(|(value, key, icon)| SegmentedOption::new(value, i18n.t(key)).icon(icon))
+        .collect();
+    view! {
+        <crate::pages::PageTitle text=cfg.display_name.clone()/>
+        <div class="grid max-w-md gap-6">
+            <SideNav id="you" label=i18n.t("nav-you") groups=vec![NavGroup::new(items)] current=Signal::derive(move || location.pathname.get())/>
+            <Segmented id="you-theme" label=i18n.t("shell-theme") value=theme options=options/>
+            <div class="flex flex-wrap gap-2">
+                <button type="button" class="inline-flex min-h-11 items-center rounded-md border border-input px-4 text-sm font-medium cursor-pointer" on:click=move |_| help.set(true)>
+                    {t("shell-shortcuts")}
+                </button>
+                {cfg.support_url.clone().map(|url| view! {
+                    <a href=url target="_blank" rel="noopener" class="inline-flex min-h-11 items-center rounded-md border border-input px-4 text-sm font-medium">
+                        {t("shell-help")}
+                    </a>
+                })}
+            </div>
+            <button type="button" class="inline-flex min-h-11 w-fit items-center gap-2 rounded-md border border-input px-4 text-sm font-medium cursor-pointer" on:click=move |_| { sign_out.dispatch(()); }>
+                <Icon name=IconName::LogOut/>
+                {t("nav-sign-out")}
+            </button>
+        </div>
+    }
+    .into_any()
+}
+
+/// 404 (design.md 6.15), inside the shell.
+#[component]
+pub fn NotFound() -> impl IntoView {
+    let cfg = expect_context::<ClientConfig>();
+    view! {
+        <section class="mx-auto max-w-xl py-16 text-center">
+            <crate::pages::PageTitle text=t("notfound-title")/>
+            <p class="text-muted-foreground">{t("notfound-lead")}</p>
+            <p class="mt-6 flex justify-center gap-4">
+                <a href="/" class="underline">{t("nav-home")}</a>
+                {cfg.signed_in.then(|| view! { <a href="/library" class="underline">{t("nav-library")}</a> })}
+            </p>
+        </section>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths_map_to_their_section() {
+        assert_eq!(section_of("/"), "/");
+        assert_eq!(section_of("/library"), "/library");
+        assert_eq!(section_of("/items/abc"), "/library");
+        assert_eq!(section_of("/history"), "/history");
+        assert_eq!(section_of("/shared/lists/x"), "/lists");
+        assert_eq!(section_of("/people"), "/people");
+        assert_eq!(section_of("/notifications"), "/you");
+        assert_eq!(section_of("/sessions"), "");
+    }
+
+    #[test]
+    fn five_sections_and_an_admin_entry_only_for_admins() {
+        let hrefs: Vec<_> = sections().into_iter().map(|(h, _)| h).collect();
+        assert_eq!(hrefs, ["/", "/library", "/history", "/lists", "/people"]);
+        assert!(account_links(true).iter().any(|(_, k)| *k == "shell-admin"));
+        assert!(
+            !account_links(false)
+                .iter()
+                .any(|(_, k)| *k == "shell-admin")
+        );
+    }
+}

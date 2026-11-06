@@ -1,5 +1,6 @@
 /* Tailwind v4 entry. Theme values are CSS variables (shadcn-style); the brand config
-   overrides the variables, components only reference them (D-10). */
+   overrides the variables, components only reference them (D-10). Values and contrast
+   ratios: docs/design/ux/design.md 2.7 (colour), 2.8 (type), 2.9 (elevation, motion), 7.4. */
 @import "tailwindcss";
 
 @source "../../rust/crates/ui/src";
@@ -25,9 +26,36 @@
   --accent-foreground: var(--color-zinc-900);
   --destructive: var(--color-red-700);
   --destructive-foreground: var(--color-white);
+  /* destructive as text on the page (6.42:1 on white) */
+  --destructive-text: var(--color-red-700);
   --border: var(--color-zinc-200);
-  --input: var(--color-zinc-300);
+  /* field borders identify the control: zinc-500 is 4.83:1 on white (WCAG 1.4.11) */
+  --input: var(--color-zinc-500);
   --ring: var(--color-zinc-500);
+  --success: var(--color-emerald-700);
+  --warning: var(--color-amber-700);
+  --info: var(--color-sky-700);
+  /* soft tints behind semantic text (badges, alerts); values of the mockups */
+  --success-soft: var(--color-emerald-50);
+  --warning-soft: var(--color-amber-50);
+  --info-soft: var(--color-sky-50);
+  --destructive-soft: var(--color-red-50);
+  /* elevation: 1 cards, 2 popovers and menus, 3 dialogs and sheets */
+  --shadow-1: 0 1px 2px rgb(9 9 11 / 0.06);
+  --shadow-2: 0 4px 12px rgb(9 9 11 / 0.1);
+  --shadow-3: 0 16px 40px rgb(9 9 11 / 0.18);
+  /* sticky bars (addendum-1 D11): focused elements scroll clear of them */
+  --top-bar-height: 3.5rem;
+  /* mobile tab bar, 72 px including the home indicator inset (design.md 3.2); 0 where
+     there is no tab bar. Pages pad their bottom by this much. */
+  --tab-bar-height: 0rem;
+}
+
+/* the tab bar exists below 760 px (design.md 3.2) */
+@media (width < 47.5rem) {
+  :root {
+    --tab-bar-height: 4.5rem;
+  }
 }
 
 .dark {
@@ -47,9 +75,21 @@
   --accent-foreground: var(--color-zinc-50);
   --destructive: var(--color-red-700);
   --destructive-foreground: var(--color-white);
+  --destructive-text: var(--color-red-400);
   --border: var(--color-zinc-800);
-  --input: var(--color-zinc-700);
+  --input: var(--color-zinc-500);
   --ring: var(--color-zinc-400);
+  --success: var(--color-emerald-400);
+  --warning: var(--color-amber-400);
+  --info: var(--color-sky-400);
+  --success-soft: #052e22;
+  --warning-soft: #2e1a05;
+  --info-soft: #052235;
+  --destructive-soft: #2e0a0a;
+  /* dark: shadows go to 50-60% black, borders carry the edge */
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.5);
+  --shadow-2: 0 4px 12px rgb(0 0 0 / 0.5);
+  --shadow-3: 0 16px 40px rgb(0 0 0 / 0.6);
 }
 
 @theme inline {
@@ -69,17 +109,86 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-text: var(--destructive-text);
+  --color-destructive-soft: var(--destructive-soft);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  /* dialogs (design.md 2.9) */
+  --radius-2xl: calc(var(--radius) + 6px);
+  /* utilities shadow-elevation-1..3 */
+  --shadow-elevation-1: var(--shadow-1);
+  --shadow-elevation-2: var(--shadow-2);
+  --shadow-elevation-3: var(--shadow-3);
+}
+
+@theme {
+  /* system stack (design.md 2.8); a brand [fonts] section puts its font in front of it */
+  --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+    "Segoe UI Symbol", "Noto Color Emoji";
+  /* type scale (design.md 2.8): text-display, text-h1 ... text-code */
+  --text-display: 1.5rem;
+  --text-display--line-height: 1.2;
+  --text-display--font-weight: 650;
+  --text-display--letter-spacing: -0.02em;
+  --text-h1: 1.5rem;
+  --text-h1--line-height: 1.2;
+  --text-h1--font-weight: 650;
+  --text-h2: 1.05rem;
+  --text-h2--line-height: 1.3;
+  --text-h2--font-weight: 600;
+  --text-h3: 0.95rem;
+  --text-h3--line-height: 1.3;
+  --text-h3--font-weight: 600;
+  /* body: 1.0 in forms and long text, 0.9 in dense lists */
+  --text-body: 1rem;
+  --text-body--line-height: 1.5;
+  --text-dense: 0.9rem;
+  --text-dense--line-height: 1.5;
+  /* meta lines, hints; never smaller for running text */
+  --text-small: 0.8rem;
+  --text-small--line-height: 1.4;
+  /* badges, uppercase section labels (add `uppercase`) */
+  --text-caption: 0.72rem;
+  --text-caption--line-height: 1.4;
+  --text-caption--font-weight: 600;
+  --text-caption--letter-spacing: 0.06em;
+  --text-code: 0.8rem;
+  /* targets (addendum-1 D10, WCAG 2.5.8): size-target / min-h-target-touch etc. */
+  --spacing-target: 1.5rem;
+  --spacing-target-touch: 2.75rem;
 }
 
 @layer base {
   * {
     border-color: var(--color-border);
+  }
+
+  /* sticky bars never cover the focused element (WCAG 2.4.11, addendum-1 D11) */
+  html {
+    scroll-padding-top: var(--top-bar-height);
+    scroll-padding-bottom: var(--tab-bar-height);
+  }
+}
+
+/* WCAG 2.3.3 technique (design.md 2.9, 8): no movement, the pulse stops. Outside the
+   layers and important, so utilities cannot override it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
   }
 }

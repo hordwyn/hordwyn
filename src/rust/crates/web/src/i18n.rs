@@ -195,6 +195,17 @@ mod tests {
     }
 
     #[test]
+    fn every_auth_error_code_has_a_message() {
+        for l in LOCALES {
+            let i = I18n::new(l, BTreeMap::new());
+            for c in contracts::auth::AuthErrorCode::ALL {
+                let key = format!("auth-error-{}", c.code());
+                assert_ne!(i.t(&key), key, "{l} misses {key}");
+            }
+        }
+    }
+
+    #[test]
     fn every_key_exists_in_every_locale() {
         let keys = |src: &str| -> Vec<String> {
             src.lines()

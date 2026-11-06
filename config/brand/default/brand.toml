@@ -2,3 +2,18 @@
 name = "kithkeep"
 short_name = "kithkeep"
 default_locale = "en"
+
+# UI font, self-hosted from this directory (design.md 2.8, DEC-171). Source, commit and
+# licence: config/brand/ICONS.adoc and fonts/OFL.txt.
+[fonts]
+sans = "Atkinson Hyperlegible Next"
+
+[[fonts.files]]
+file = "fonts/AtkinsonHyperlegibleNext-wght.woff2"
+weight = "200 800"
+style = "normal"
+
+[[fonts.files]]
+file = "fonts/AtkinsonHyperlegibleNext-Italic-wght.woff2"
+weight = "200 800"
+style = "italic"

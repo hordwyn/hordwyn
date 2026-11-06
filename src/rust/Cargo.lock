@@ -286,6 +286,7 @@ dependencies = [
  "base64 0.22.1",
  "blake3",
  "chrono",
+ "contracts",
  "domain",
  "getrandom 0.4.3",
  "http",

@@ -9,7 +9,7 @@ use contracts::{
     SearchResponseDto, SessionDto, ShareLinkDto, SharedListDto, SignInDto, SignUpDto, UserDto,
 };
 use domain::user::Actor;
-use web::backend::{BResult, Backend};
+use web::backend::{BResult, Backend, ShellSession};
 
 pub struct WebBackend(pub ApiState);
 
@@ -77,6 +77,20 @@ impl Backend for WebBackend {
             .map(|u| api::dto_user(&u))
     }
 
+    async fn shell_session(&self, token: &str) -> Option<ShellSession> {
+        let a = self.actor(token).await.ok()?;
+        let user = self.0.app.user(a.user_id).await.ok()?;
+        // notifications may be disabled on this server: no bell count then
+        let unread = notifications::inbox(&self.0, a)
+            .await
+            .map_or(0, |items| items.iter().filter(|i| !i.read).count());
+        Some(ShellSession {
+            display_name: user.display_name,
+            is_admin: a.is_admin(),
+            unread: u32::try_from(unread).unwrap_or(u32::MAX),
+        })
+    }
+
     async fn sign_in(&self, b: SignInDto) -> BResult<SessionDto> {
         let t = self
             .0
@@ -105,6 +119,17 @@ impl Backend for WebBackend {
 
     async fn sign_out(&self, token: &str) {
         let _ = self.0.auth.sign_out(token).await;
+    }
+
+    async fn username_available(
+        &self,
+        b: contracts::auth::UsernameCheckDto,
+    ) -> BResult<contracts::auth::UsernameAvailability> {
+        self.0
+            .auth
+            .username_available(&b.username, b.invite.as_deref())
+            .await
+            .map_err(|e| err(e.into()))
     }
 
     async fn library(&self, token: &str, limit: u32) -> BResult<contracts::LibraryPageDto> {

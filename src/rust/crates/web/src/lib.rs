@@ -14,6 +14,8 @@
 
 pub mod api;
 mod app;
+mod auth;
+mod auth_pages;
 #[cfg(feature = "ssr")]
 pub mod backend;
 mod events;
@@ -25,6 +27,7 @@ mod notifications;
 mod pages;
 mod palette;
 mod sharing;
+mod shell;
 pub mod widgets;
 
 pub use app::{App, CONFIG_ID, ClientConfig, shell};

@@ -5,6 +5,7 @@ use base64::engine::general_purpose::STANDARD;
 use contracts::{CatalogItemDto, CompanionDto, ImageDto};
 use leptos::prelude::*;
 use leptos_router::components::A;
+use ui::Rating;
 
 use crate::i18n::{t, use_i18n};
 
@@ -129,43 +130,25 @@ pub fn PosterCard(
     }
 }
 
-/// Five-star rating stored as 0..=100 (DEC-018): star n = n * 20.
+/// The person's rating as five stars in half steps over `ui::Rating`, stored as 0..=100
+/// (DEC-018): 3.5 stars = 70. This wrapper only maps the scale and the translated labels.
 #[component]
 pub fn RatingInput(value: RwSignal<Option<u8>>, on_change: Callback<Option<u8>>) -> impl IntoView {
     let i18n = use_i18n();
     let label = i18n.t("item-rating");
+    let option_label = Callback::new(move |v: u8| {
+        i18n.t_args("item-rate", &[("stars", (f64::from(v) / 20.0).into())])
+    });
     view! {
-        <div role="radiogroup" aria-label=label.clone() class="flex gap-1">
-            {(1u8..=5)
-                .map(|n| {
-                    let i18n = i18n.clone();
-                    let aria = i18n.t_args("item-rate", &[("stars", n.into())]);
-                    let checked = move || value.get().is_some_and(|v| v >= n * 20);
-                    view! {
-                        <button
-                            type="button"
-                            role="radio"
-                            aria-checked=move || if value.get() == Some(n * 20) { "true" } else { "false" }
-                            aria-label=aria
-                            on:click=move |_| {
-                                let v = if value.get_untracked() == Some(n * 20) { None } else { Some(n * 20) };
-                                value.set(v);
-                                on_change.run(v);
-                            }
-                            class=move || {
-                                if checked() {
-                                    "h-8 w-8 rounded text-xl leading-none text-primary"
-                                } else {
-                                    "h-8 w-8 rounded text-xl leading-none text-muted-foreground"
-                                }
-                            }
-                        >
-                            {move || if checked() { "\u{2605}" } else { "\u{2606}" }}
-                        </button>
-                    }
-                })
-                .collect_view()}
-        </div>
+        <Rating
+            id="item-rating"
+            label=label
+            value=value
+            stars=5
+            half_steps=true
+            option_label=option_label
+            on_change=on_change
+        />
     }
 }
 

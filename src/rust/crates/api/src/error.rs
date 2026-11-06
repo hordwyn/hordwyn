@@ -75,38 +75,34 @@ impl From<AppError> for ApiError {
 impl From<AuthError> for ApiError {
     fn from(e: AuthError) -> Self {
         let msg = e.to_string();
-        match e {
-            AuthError::InvalidCredentials => {
-                Self::new(StatusCode::UNAUTHORIZED, "invalid_credentials", msg)
+        let status = match &e {
+            AuthError::InvalidCredentials | AuthError::TotpRequired | AuthError::InvalidTotp => {
+                StatusCode::UNAUTHORIZED
             }
-            AuthError::TotpRequired => Self::new(StatusCode::UNAUTHORIZED, "totp_required", msg),
-            AuthError::InvalidTotp => Self::new(StatusCode::UNAUTHORIZED, "invalid_totp", msg),
-            AuthError::SignupClosed => Self::new(StatusCode::FORBIDDEN, "signup_closed", msg),
-            AuthError::InvalidInvite => Self::new(StatusCode::FORBIDDEN, "invalid_invite", msg),
-            AuthError::WeakPassword => {
-                Self::new(StatusCode::UNPROCESSABLE_ENTITY, "weak_password", msg)
+            AuthError::SignupClosed | AuthError::InvalidInvite => StatusCode::FORBIDDEN,
+            AuthError::UsernameTaken => StatusCode::CONFLICT,
+            AuthError::PasswordTooShort
+            | AuthError::PasswordTooLong
+            | AuthError::InvalidUsername(_)
+            | AuthError::DisplayNameTooLong => StatusCode::UNPROCESSABLE_ENTITY,
+            AuthError::TooManyAttempts { .. } => StatusCode::TOO_MANY_REQUESTS,
+            AuthError::App(_) | AuthError::Store(_) | AuthError::Oidc(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
             }
-            AuthError::InvalidUsername => {
-                Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_username", msg)
-            }
-            AuthError::InvalidDisplayName => Self::new(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "invalid_display_name",
-                msg,
-            ),
-            AuthError::TooManyAttempts { .. } => {
-                Self::new(StatusCode::TOO_MANY_REQUESTS, "too_many_attempts", msg)
-            }
-            AuthError::App(a) => a.into(),
-            AuthError::Store(_) | AuthError::Oidc(_) => {
-                tracing::error!(error = %msg, "auth error");
-                Self::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "internal",
-                    "internal error",
-                )
-            }
+        };
+        // every sign-up / sign-in rule has its own code (contracts::auth::AuthErrorCode)
+        if let Some(code) = e.code() {
+            return Self::new(status, code.code(), msg);
         }
+        if let AuthError::App(a) = e {
+            return a.into();
+        }
+        tracing::error!(error = %msg, "auth error");
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal",
+            "internal error",
+        )
     }
 }
 

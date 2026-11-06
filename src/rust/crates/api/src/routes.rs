@@ -36,6 +36,7 @@ pub fn router(state: ApiState) -> axum::Router {
     let (router, mut doc) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(sign_up))
         .routes(routes!(sign_in))
+        .routes(routes!(username_available))
         .routes(routes!(sign_out))
         .routes(routes!(me))
         .routes(routes!(totp_begin))
@@ -169,6 +170,23 @@ async fn sign_in(State(s): State<ApiState>, Json(b): Json<SignInDto>) -> ApiResu
         user: dto::user(&user),
     };
     Ok(with_session(&s, &token.0, Json(body)))
+}
+
+/// Is a username free? Normalised like sign-up; answers only when sign-up is possible
+/// (first account, open sign-up or a valid invite) and is rate limited (DEC-184).
+#[utoipa::path(post, path = "/auth/username-available", tag = "auth",
+    request_body = contracts::auth::UsernameCheckDto,
+    responses((status = 200, body = contracts::auth::UsernameAvailability),
+        (status = 403, body = contracts::ErrorDto), (status = 429, body = contracts::ErrorDto)))]
+async fn username_available(
+    State(s): State<ApiState>,
+    Json(b): Json<contracts::auth::UsernameCheckDto>,
+) -> ApiResult<Json<contracts::auth::UsernameAvailability>> {
+    Ok(Json(
+        s.auth
+            .username_available(&b.username, b.invite.as_deref())
+            .await?,
+    ))
 }
 
 #[utoipa::path(post, path = "/auth/sign-out", tag = "auth", responses((status = 204)))]

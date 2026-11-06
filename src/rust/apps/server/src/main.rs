@@ -62,8 +62,19 @@ async fn shutdown_signal(stop: CancellationToken) {
     stop.cancel();
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+/// Worker stack size: server-side rendering of the deepest pages needs just over the 2 MiB
+/// default in debug builds (DEC-188).
+const STACK_SIZE: usize = 8 * 1024 * 1024;
+
+fn main() -> anyhow::Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(STACK_SIZE)
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> anyhow::Result<()> {
     let args = parse_args()?;
     let cfg = AppConfig::load(args.config.as_deref())?;
     telemetry::init(&cfg.telemetry);

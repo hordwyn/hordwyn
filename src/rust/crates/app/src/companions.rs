@@ -185,7 +185,7 @@ impl App {
                 companion: Some(c.id),
                 ..Subject::default()
             })
-            .link("/companions"),
+            .link("/people"),
         )
         .await;
         Ok(req)
@@ -248,7 +248,7 @@ impl App {
                 companion: Some(c.id),
                 ..Subject::default()
             })
-            .link("/companions"),
+            .link("/people"),
         )
         .await;
         Ok(c)
@@ -385,6 +385,27 @@ impl App {
         self.repos.invites.update(&invite).await?;
         self.publish_companion(&c).await;
         Ok(user)
+    }
+
+    /// Would [`App::accept_invite`] accept this token now (pending, not expired, companion
+    /// active and not linked)? Lets sign-up refuse a bad invite before anything else.
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn invite_is_valid(&self, token: &str) -> AppResult<bool> {
+        let Some(invite) = self
+            .repos
+            .invites
+            .by_token_hash(&self.ids.hash_token(token))
+            .await?
+        else {
+            return Ok(false);
+        };
+        if invite.state != RequestState::Pending || invite.expires_at <= self.now() {
+            return Ok(false);
+        }
+        let c = self.repos.companions.get(invite.companion_id).await?;
+        Ok(c.is_some_and(|c| c.is_active() && c.linked_user.is_none()))
     }
 
     async fn publish_companion(&self, c: &Companion) {

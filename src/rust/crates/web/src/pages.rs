@@ -8,6 +8,7 @@ use leptos_router::hooks::use_params_map;
 use ui::{Button, ButtonVariant, FormField, Input, Skeleton};
 
 use crate::api;
+pub use crate::auth_pages::{SignIn, SignUp};
 use crate::events::{mentions, use_events};
 use crate::i18n::{t, use_i18n};
 use crate::widgets::{CompanionPicker, Cover, PosterCard, RatingInput};
@@ -44,138 +45,19 @@ pub(crate) fn PageTitle(#[prop(into)] text: String) -> impl IntoView {
 
 #[component]
 pub fn Home() -> impl IntoView {
+    // owner bug: no "Create account" once signed in (the shell config knows the session)
+    let signed_in = expect_context::<crate::app::ClientConfig>().signed_in;
     view! {
         <section class="mx-auto max-w-2xl py-16 text-center">
             <h1 class="text-3xl font-semibold tracking-tight">{t("home-title")}</h1>
             <p class="mt-4 text-muted-foreground">{t("home-lead")}</p>
             <div class="mt-8 flex justify-center gap-4">
                 <A href="/library" attr:class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">{t("nav-library")}</A>
-                <A href="/sign-up" attr:class="rounded-md border border-input px-4 py-2 text-sm font-medium">{t("nav-sign-up")}</A>
+                {(!signed_in).then(|| view! {
+                    <A href="/sign-up" attr:class="rounded-md border border-input px-4 py-2 text-sm font-medium">{t("nav-sign-up")}</A>
+                })}
             </div>
         </section>
-    }
-}
-
-#[component]
-pub fn SignIn() -> impl IntoView {
-    let i18n = use_i18n();
-    let username = RwSignal::new(String::new());
-    let password = RwSignal::new(String::new());
-    let totp = RwSignal::new(String::new());
-    let error = RwSignal::new(None::<String>);
-    let need_totp = RwSignal::new(false);
-    let submit = Action::new(move |(): &()| {
-        let (u, p, c) = (
-            username.get_untracked(),
-            password.get_untracked(),
-            totp.get_untracked(),
-        );
-        async move {
-            match api::sign_in(u, p, Some(c)).await {
-                Ok(_) => go("/library"),
-                Err(e) => {
-                    if api::error_code(&e) == "totp_required" {
-                        need_totp.set(true);
-                    }
-                    error.set(Some(error_text(&e)));
-                }
-            }
-        }
-    });
-    let s = |k: &str| i18n.t(k);
-    let (title, l_user, l_pass, l_submit, no_acc, l_signup) = (
-        s("auth-sign-in-title"),
-        s("auth-username"),
-        s("auth-password"),
-        s("auth-sign-in-submit"),
-        s("auth-no-account"),
-        s("nav-sign-up"),
-    );
-    view! {
-        <PageTitle text=title/>
-        <form class="grid max-w-sm gap-4" on:submit=move |ev| { ev.prevent_default(); submit.dispatch(()); }>
-            <FormField id="username" label=l_user>
-                <Input id="username" value=username/>
-            </FormField>
-            <FormField id="password" label=l_pass>
-                <Input id="password" r#type="password" value=password/>
-            </FormField>
-            <Show when=move || need_totp.get()>
-                <FormField id="totp" label=t("auth-totp")>
-                    <Input id="totp" value=totp/>
-                </FormField>
-            </Show>
-            <p role="alert" class="text-sm text-destructive">{move || error.get()}</p>
-            <Button r#type="submit" disabled=Signal::derive(move || submit.pending().get())>{l_submit}</Button>
-            <p class="text-sm text-muted-foreground">
-                {no_acc} " " <A href="/sign-up" attr:class="underline">{l_signup}</A>
-            </p>
-        </form>
-    }
-}
-
-#[component]
-pub fn SignUp() -> impl IntoView {
-    let i18n = use_i18n();
-    // `/invite/:token`: promotion of a companion (D-9); the account is linked on creation
-    let params = use_params_map();
-    let invite = move || params.with_untracked(|p| p.get("token"));
-    let invited = invite().is_some();
-    let username = RwSignal::new(String::new());
-    let display = RwSignal::new(String::new());
-    let email = RwSignal::new(String::new());
-    let password = RwSignal::new(String::new());
-    let error = RwSignal::new(None::<String>);
-    let submit = Action::new(move |(): &()| {
-        let (u, d, e, p) = (
-            username.get_untracked(),
-            display.get_untracked(),
-            email.get_untracked(),
-            password.get_untracked(),
-        );
-        let inv = invite();
-        async move {
-            let d = if d.trim().is_empty() { u.clone() } else { d };
-            match api::sign_up(u, d, p, Some(e), inv).await {
-                Ok(_) => go("/library"),
-                Err(e) => error.set(Some(error_text(&e))),
-            }
-        }
-    });
-    let s = |k: &str| i18n.t(k);
-    let (title, l_user, l_display, l_email, l_pass, l_submit, have, l_signin) = (
-        s("auth-sign-up-title"),
-        s("auth-username"),
-        s("auth-display-name"),
-        s("auth-email"),
-        s("auth-password"),
-        s("auth-sign-up-submit"),
-        s("auth-have-account"),
-        s("nav-sign-in"),
-    );
-    let rules = i18n.t("auth-username-rules");
-    view! {
-        <PageTitle text=title/>
-        <form class="grid max-w-sm gap-4" on:submit=move |ev| { ev.prevent_default(); submit.dispatch(()); }>
-            <FormField id="username" label=l_user description=rules>
-                <Input id="username" value=username described_by="username-description"/>
-            </FormField>
-            <FormField id="display_name" label=l_display>
-                <Input id="display_name" value=display/>
-            </FormField>
-            <FormField id="email" label=l_email>
-                <Input id="email" r#type="email" value=email/>
-            </FormField>
-            <FormField id="password" label=l_pass>
-                <Input id="password" r#type="password" value=password/>
-            </FormField>
-            <p role="alert" class="text-sm text-destructive">{move || error.get()}</p>
-            {invited.then(|| view! { <p class="text-sm text-muted-foreground">{t("auth-invited")}</p> })}
-            <Button r#type="submit" disabled=Signal::derive(move || submit.pending().get())>{l_submit}</Button>
-            <p class="text-sm text-muted-foreground">
-                {have} " " <A href="/sign-in" attr:class="underline">{l_signin}</A>
-            </p>
-        </form>
     }
 }
 

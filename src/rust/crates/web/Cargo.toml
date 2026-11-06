@@ -27,7 +27,7 @@ fluent-bundle.workspace = true
 unic-langid.workspace = true
 console_error_panic_hook = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true, optional = true }
-web-sys = { workspace = true, optional = true, features = ["EventSource", "MessageEvent", "Location", "Window", "Document", "Element", "HtmlElement"] }
+web-sys = { workspace = true, optional = true, features = ["EventSource", "MessageEvent", "Location", "Window", "Document", "Element", "HtmlElement", "Storage", "MediaQueryList", "DomTokenList", "Navigator", "Node", "NodeList", "EventTarget", "KeyboardEvent", "PointerEvent"] }
 # server side only
 brand = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }

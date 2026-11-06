@@ -19,15 +19,19 @@ use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Duration, Utc};
+use contracts::auth::{
+    AuthErrorCode, DISPLAY_NAME_MAX_LEN, UsernameAvailability, UsernameRule, check_username,
+    normalize_display_name, normalize_username,
+};
 use domain::ids::UserId;
 use domain::user::{Actor, Role, User};
 use thiserror::Error;
 
 pub use store::{AuthStore, Credentials, MemAuthStore, OidcIdentity, Session};
 
-/// Minimum password length (NIST SP 800-63B recommends at least 8; we ask for 10).
-pub const MIN_PASSWORD_LEN: usize = 10;
-pub const MAX_PASSWORD_LEN: usize = 1024;
+/// Minimum password length (from the shared rules in `contracts::auth`).
+pub const MIN_PASSWORD_LEN: usize = contracts::auth::PASSWORD_MIN_LEN;
+pub const MAX_PASSWORD_LEN: usize = contracts::auth::PASSWORD_MAX_LEN;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SignupMode {
@@ -68,12 +72,16 @@ pub enum AuthError {
     SignupClosed,
     #[error("invalid invite")]
     InvalidInvite,
-    #[error("password must be {MIN_PASSWORD_LEN} to {MAX_PASSWORD_LEN} characters")]
-    WeakPassword,
-    #[error("usernames are 3 to 32 characters: a-z, 0-9, _ . -")]
-    InvalidUsername,
-    #[error("display names are 1 to 100 characters")]
-    InvalidDisplayName,
+    #[error("passwords need at least {MIN_PASSWORD_LEN} characters")]
+    PasswordTooShort,
+    #[error("passwords have at most {MAX_PASSWORD_LEN} characters")]
+    PasswordTooLong,
+    #[error("{}", username_rule_message(*.0))]
+    InvalidUsername(UsernameRule),
+    #[error("that username is taken")]
+    UsernameTaken,
+    #[error("display names have at most {DISPLAY_NAME_MAX_LEN} characters")]
+    DisplayNameTooLong,
     #[error(transparent)]
     App(#[from] AppError),
     #[error("auth storage: {0}")]
@@ -83,6 +91,69 @@ pub enum AuthError {
     /// Too many failed sign-ins for this name; try again later (G2-4).
     #[error("too many failed attempts, try again in {retry_after_secs} s")]
     TooManyAttempts { retry_after_secs: i64 },
+}
+
+fn username_rule_message(r: UsernameRule) -> &'static str {
+    match r {
+        UsernameRule::TooShort => "usernames need at least 3 characters",
+        UsernameRule::TooLong => "usernames have at most 32 characters",
+        UsernameRule::Space => "usernames cannot contain spaces",
+        UsernameRule::InvalidChars => "usernames use only a-z, 0-9 and _ . -",
+    }
+}
+
+impl AuthError {
+    /// The stable code of a sign-up / sign-in error (`None` for internal errors and
+    /// wrapped `App` errors).
+    #[must_use]
+    pub fn code(&self) -> Option<AuthErrorCode> {
+        Some(match self {
+            Self::InvalidCredentials => AuthErrorCode::InvalidCredentials,
+            Self::TotpRequired => AuthErrorCode::TotpRequired,
+            Self::InvalidTotp => AuthErrorCode::InvalidTotp,
+            Self::SignupClosed => AuthErrorCode::SignupClosed,
+            Self::InvalidInvite => AuthErrorCode::InvalidInvite,
+            Self::PasswordTooShort => AuthErrorCode::PasswordTooShort,
+            Self::PasswordTooLong => AuthErrorCode::PasswordTooLong,
+            Self::InvalidUsername(r) => r.error(),
+            Self::UsernameTaken => AuthErrorCode::UsernameTaken,
+            Self::DisplayNameTooLong => AuthErrorCode::DisplayNameTooLong,
+            Self::TooManyAttempts { .. } => AuthErrorCode::TooManyAttempts,
+            Self::App(_) | Self::Store(_) | Self::Oidc(_) => return None,
+        })
+    }
+}
+
+/// Username availability lookups allowed per minute for the whole instance (DEC-184): the
+/// check needs no session, so a per-name limit would not stop enumeration.
+pub const USERNAME_CHECKS_PER_MINUTE: u32 = 30;
+/// Free variants checked at most for a taken name.
+const SUGGESTION_TRIES: u32 = 10;
+
+/// A fixed one-minute window counter, per process.
+#[derive(Default)]
+struct Window(std::sync::Mutex<Option<(DateTime<Utc>, u32)>>);
+
+impl Window {
+    fn take(&self, now: DateTime<Utc>, limit: u32) -> Result<(), AuthError> {
+        let len = Duration::minutes(1);
+        let mut w = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match w.as_mut() {
+            Some((start, n)) if now < *start + len => {
+                if *n >= limit {
+                    return Err(AuthError::TooManyAttempts {
+                        retry_after_secs: (*start + len - now).num_seconds().max(1),
+                    });
+                }
+                *n += 1;
+            }
+            _ => *w = Some((now, 1)),
+        }
+        Ok(())
+    }
 }
 
 /// Failed sign-ins per username allowed within [`THROTTLE_WINDOW_MINUTES`].
@@ -202,10 +273,12 @@ async fn verify_password(password: String, hash: String) -> bool {
 
 fn check_password(p: &str) -> Result<(), AuthError> {
     let n = p.chars().count();
-    if (MIN_PASSWORD_LEN..=MAX_PASSWORD_LEN).contains(&n) {
-        Ok(())
+    if n < MIN_PASSWORD_LEN {
+        Err(AuthError::PasswordTooShort)
+    } else if n > MAX_PASSWORD_LEN {
+        Err(AuthError::PasswordTooLong)
     } else {
-        Err(AuthError::WeakPassword)
+        Ok(())
     }
 }
 
@@ -233,6 +306,7 @@ pub struct Auth {
     clock: Arc<dyn Clock>,
     settings: AuthSettings,
     throttle: Arc<Throttle>,
+    username_checks: Arc<Window>,
 }
 
 impl Auth {
@@ -245,6 +319,7 @@ impl Auth {
             clock,
             settings,
             throttle: Arc::default(),
+            username_checks: Arc::default(),
         }
     }
 
@@ -259,32 +334,27 @@ impl Auth {
 
     /// Create an account. The very first account is always allowed and becomes admin;
     /// afterwards the sign-up mode decides (an invite always works unless sign-up is closed).
+    /// The username is normalised first (`contracts::auth::normalize_username`).
     ///
     /// # Errors
-    /// Closed sign-up, invalid invite, weak password, taken username.
+    /// One error per field rule (username, display name, password), then closed sign-up or
+    /// an invalid invite, then a taken username.
     pub async fn sign_up(&self, s: SignUp) -> Result<(User, SessionToken), AuthError> {
-        check_password(&s.password)?;
         // usernames are lowercase; "Anna " signs up as "anna" (and signs in as either)
-        let username = s.username.trim().to_lowercase();
-        domain::user::validate_username(&username).map_err(|_| AuthError::InvalidUsername)?;
-        let display_name = match s.display_name.trim() {
-            "" => username.clone(),
-            d => d.to_string(),
-        };
-        domain::companion::validate_companion_name(&display_name)
-            .map_err(|_| AuthError::InvalidDisplayName)?;
-        let first = self.app.user_count().await? == 0;
-        let invite = if first { None } else { s.invite.as_deref() };
-        if !first {
-            match (self.settings.signup, invite) {
-                (SignupMode::Closed, _) | (SignupMode::Invite, None) => {
-                    return Err(AuthError::SignupClosed);
-                }
-                _ => {}
-            }
+        let username = normalize_username(&s.username);
+        check_username(&username).map_err(AuthError::InvalidUsername)?;
+        let display_name = normalize_display_name(&s.display_name, &username);
+        if display_name.chars().count() > DISPLAY_NAME_MAX_LEN {
+            return Err(AuthError::DisplayNameTooLong);
         }
+        check_password(&s.password)?;
+        let first = self.signup_gate(s.invite.as_deref()).await?;
+        let invite = if first { None } else { s.invite.as_deref() };
         // Hash first so a failure leaves no half-created account behind.
         let hash = hash_password(s.password.clone()).await?;
+        if self.app.user_by_username(&username).await?.is_some() {
+            return Err(AuthError::UsernameTaken);
+        }
         let user = if let Some(token) = invite {
             self.app
                 .accept_invite(token, &username, &display_name)
@@ -297,7 +367,12 @@ impl Auth {
             let role = if first { Role::Admin } else { Role::Member };
             self.app
                 .register_user(&username, &display_name, s.email.clone(), role)
-                .await?
+                .await
+                .map_err(|e| match e {
+                    // lost a race for the name
+                    AppError::Conflict(_) => AuthError::UsernameTaken,
+                    e => AuthError::App(e),
+                })?
         };
         self.store
             .put_credentials(&Credentials {
@@ -312,6 +387,72 @@ impl Auth {
         Ok((user, token))
     }
 
+    /// May an account be created now: the first account, open sign-up, or a valid invite.
+    /// Returns whether it is the first account. Runs before anything reveals whether a
+    /// username exists.
+    async fn signup_gate(&self, invite: Option<&str>) -> Result<bool, AuthError> {
+        if self.app.user_count().await? == 0 {
+            return Ok(true);
+        }
+        match (self.settings.signup, invite) {
+            (SignupMode::Closed, _) | (SignupMode::Invite, None) => Err(AuthError::SignupClosed),
+            (_, Some(token)) => {
+                if self.app.invite_is_valid(token).await? {
+                    Ok(false)
+                } else {
+                    Err(AuthError::InvalidInvite)
+                }
+            }
+            (SignupMode::Open, None) => Ok(false),
+        }
+    }
+
+    /// Is `raw` (normalised like [`Auth::sign_up`]) free? Answers only when sign-up is
+    /// possible for the caller, so it reveals no more than a sign-up attempt; lookups are
+    /// limited to [`USERNAME_CHECKS_PER_MINUTE`] per instance (DEC-184). A taken name comes
+    /// with up to three free variants.
+    ///
+    /// # Errors
+    /// [`AuthError::TooManyAttempts`], [`AuthError::SignupClosed`],
+    /// [`AuthError::InvalidInvite`] or storage errors.
+    pub async fn username_available(
+        &self,
+        raw: &str,
+        invite: Option<&str>,
+    ) -> Result<UsernameAvailability, AuthError> {
+        let username = normalize_username(raw);
+        if let Err(rule) = check_username(&username) {
+            return Ok(UsernameAvailability::Invalid { username, rule });
+        }
+        self.username_checks
+            .take(self.now(), USERNAME_CHECKS_PER_MINUTE)?;
+        self.signup_gate(invite).await?;
+        if self.app.user_by_username(&username).await?.is_none() {
+            return Ok(UsernameAvailability::Available { username });
+        }
+        let mut suggestions = Vec::new();
+        for n in 2..2 + SUGGESTION_TRIES {
+            let suffix = n.to_string();
+            let base: String = username
+                .chars()
+                .take(contracts::auth::USERNAME_MAX_LEN - suffix.len())
+                .collect();
+            let candidate = format!("{base}{suffix}");
+            if check_username(&candidate).is_ok()
+                && self.app.user_by_username(&candidate).await?.is_none()
+            {
+                suggestions.push(candidate);
+                if suggestions.len() == 3 {
+                    break;
+                }
+            }
+        }
+        Ok(UsernameAvailability::Taken {
+            username,
+            suggestions,
+        })
+    }
+
     /// Password (+ TOTP if enabled) sign-in.
     ///
     /// # Errors
@@ -323,7 +464,7 @@ impl Auth {
         password: &str,
         totp: Option<&str>,
     ) -> Result<SessionToken, AuthError> {
-        let key = username.trim().to_lowercase();
+        let key = normalize_username(username);
         self.throttle.check(&key, self.now())?;
         let result = self.sign_in_checked(username, password, totp).await;
         match &result {
@@ -344,7 +485,7 @@ impl Auth {
     ) -> Result<SessionToken, AuthError> {
         let user = self
             .app
-            .user_by_username(&username.trim().to_lowercase())
+            .user_by_username(&normalize_username(username))
             .await?;
         let creds = match &user {
             Some(u) => self.store.credentials(u.id).await?,

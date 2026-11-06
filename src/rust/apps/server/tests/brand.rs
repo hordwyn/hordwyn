@@ -87,3 +87,81 @@ async fn a_second_brand_renders_without_code_changes() {
     assert!(cookie.starts_with("readingroom_session="), "{cookie}");
     assert!(!default_cookie.starts_with("readingroom_session="));
 }
+
+async fn get(app: &axum::Router, uri: &str) -> axum::response::Response {
+    app.clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .uri(uri)
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+/// design.md 2.8 / DEC-171: the default brand's font is declared in the head and served from
+/// our own origin with a font media type and an immutable cache header.
+#[tokio::test]
+async fn brand_font_is_self_hosted() {
+    if std::env::var_os("TEST_DATABASE_URL").is_none() {
+        assert!(std::env::var_os("REQUIRE_SERVICES").is_none());
+        eprintln!("skipping: TEST_DATABASE_URL not set");
+        return;
+    }
+    let db = store_pg::testing::fresh_db_url().await.expect("database");
+    let toml = format!(
+        "[database]\nurl = \"{db}\"\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
+         [brand]\ndir = \"{}\"\n",
+        repo("config/brand/default")
+    );
+    let cfg = config::AppConfig::from_sources(&toml, Vec::new()).unwrap();
+    let srv = Server::build(cfg, config::ServerRole::All, Overrides::default())
+        .await
+        .unwrap();
+    let options = leptos::prelude::LeptosOptions::builder()
+        .output_name("app")
+        .build();
+    let app = srv.app_router(&options);
+    let resp = get(&app, "/").await;
+    let html = String::from_utf8(
+        axum::body::to_bytes(resp.into_body(), 1 << 22)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("@font-face{"), "font face in the head");
+    assert!(html.contains("font-display:swap"));
+    // the brand style comes after the stylesheet, so its tokens win
+    let link = html.find("/pkg/app.css").expect("stylesheet link");
+    assert!(html.find("id=\"brand-theme\"").expect("brand style") > link);
+    let start = html.find("src:url(\"").expect("font url") + "src:url(\"".len();
+    let url = &html[start..start + html[start..].find('"').unwrap()];
+    assert!(url.starts_with("/brand/fonts/"), "same origin: {url}");
+
+    let resp = get(&app, url).await;
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.headers()["content-type"], "font/woff2");
+    let cache = resp.headers()["cache-control"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        cache.contains("immutable") && cache.contains("max-age=31536000"),
+        "{cache}"
+    );
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 22)
+        .await
+        .unwrap();
+    assert_eq!(&body[..4], b"wOF2");
+
+    assert_eq!(
+        get(&app, "/brand/fonts/0000/missing.woff2").await.status(),
+        404
+    );
+    assert_eq!(
+        get(&app, "/brand/fonts/0000/../brand.toml").await.status(),
+        404
+    );
+}

@@ -247,7 +247,7 @@ pub struct Notification {
     /// Template arguments.
     pub args: serde_json::Map<String, Value>,
     pub subject: Subject,
-    /// App path to open, e.g. `/sessions`.
+    /// App path to open, e.g. `/history`.
     pub link: Option<String>,
 }
 

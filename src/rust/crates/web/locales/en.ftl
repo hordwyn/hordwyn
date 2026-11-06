@@ -16,7 +16,7 @@ home-title = Track what you watch, read and play
 home-lead = Movies, shows, books, games and more, with the people you share them with.
 
 auth-username = Username
-auth-display-name = Display name
+auth-display-name = Display name (optional)
 auth-password = Password
 auth-email = Email (optional)
 auth-totp = One-time code
@@ -31,9 +31,6 @@ auth-error-totp_required = Enter the one-time code from your authenticator app.
 auth-error-invalid_totp = That one-time code is not valid.
 auth-error-signup_closed = Sign-up is not open on this instance.
 auth-error-invalid_invite = This invite is not valid any more.
-auth-error-weak_password = Use at least 10 characters for the password.
-auth-error-conflict = That username is taken.
-auth-error-invalid = Please check the fields.
 error-generic = Something went wrong. Please try again.
 
 library-title = Library
@@ -241,6 +238,87 @@ integrations-never = never
 integrations-error = Last call failed
 integrations-revoke = Revoke
 auth-error-too_many_attempts = Too many failed attempts. Please wait a few minutes.
-auth-username-rules = 3 to 32 characters: lowercase letters, digits, _ . - (capitals become lowercase)
-auth-error-invalid_username = Usernames are 3 to 32 characters: a-z, 0-9, _ . - (no spaces or @).
-auth-error-invalid_display_name = The display name must be 1 to 100 characters.
+auth-error-username_too_short = Use at least 3 characters for the username.
+auth-error-username_too_long = Use at most 32 characters for the username.
+auth-error-username_space = The username has a space. Use - or _ instead.
+auth-error-username_invalid_chars = Use only a-z, 0-9 and _ . - in the username.
+auth-error-username_taken = That username is already taken.
+auth-error-display_name_too_long = Use at most 100 characters for the display name.
+auth-error-password_too_short = Use at least 10 characters for the password.
+auth-error-password_too_long = Use at most 1024 characters for the password.
+
+# ---- UX phase 0: app shell (design.md 3.2, 6.15) ----
+nav-home = Home
+nav-history = History
+nav-people = People
+nav-you = You
+shell-search = Search or add...
+shell-ctrl = Ctrl
+shell-add = Add
+shell-notifications = { $count ->
+    [0] Notifications
+   *[other] Notifications, { $count } unread
+}
+shell-unread = { $count } unread
+shell-account = Account menu for { $name }
+shell-admin = Admin
+shell-theme = Theme
+shell-theme-system = System
+shell-theme-light = Light
+shell-theme-dark = Dark
+shell-shortcuts = Keyboard shortcuts
+shell-help = Help and support
+shell-key-search = Search or add
+shell-key-add = Add something
+shell-key-help = Show the keyboard shortcuts
+shell-key-close = Close a dialog or menu
+shell-offline = You are offline. Changes are kept and sent when you are back.
+shell-dismiss = Dismiss
+notfound-title = There is nothing at this address
+notfound-lead = The link may be old or mistyped.
+# ---- end app shell ----
+
+# ---- UX phase 0: form discipline on sign-up and sign-in (design.md 5.2, 2.4) ----
+auth-username-hint = Used in links and for sign-in. { $min } to { $max } characters.
+auth-username-rule-length = { $min } to { $max } characters
+auth-username-rule-space = No spaces
+auth-username-rule-chars = Only a-z, 0-9 and _ . -
+auth-rule-met = Met
+auth-rule-unmet = Not met
+auth-username-saved-as = Will be saved as { $username } (capitals become lowercase)
+auth-username-saved-as-trimmed = Will be saved as { $username } (spaces at the start and end are removed)
+auth-username-available = '{ $username }' is available.
+auth-username-required = Enter a username.
+auth-username-too-short = '{ $value }' is too short: use at least { $min } characters.
+auth-username-too-long = '{ $value }' has { $count } characters; use at most { $max }.
+auth-username-space = '{ $value }' has a space. Try '{ $dash }' or '{ $underscore }'.
+auth-username-invalid-chars = '{ $value }' contains characters that are not allowed: { $chars }. Use only a-z, 0-9 and _ . -
+auth-username-taken = { $count ->
+    [0] '{ $username }' is already taken.
+   *[other] '{ $username }' is already taken. Free: { $suggestions }.
+}
+auth-username-suggestions = Suggestions
+auth-username-use = Use { $username }
+auth-display-name-hint = How others see you. Leave it empty to use your username.
+auth-display-name-too-long = The display name has { $count } characters; use at most { $max }.
+auth-password-hint = At least { $min } characters. No other rules; a long phrase is best. Pasting is fine.
+auth-password-rule-length = At least { $min } characters ({ $count } so far)
+auth-password-required = Enter a password.
+auth-password-too-short = { $count ->
+    [one] The password has 1 character; it needs at least { $min }.
+   *[other] The password has { $count } characters; it needs at least { $min }.
+}
+auth-password-too-long = The password has { $count } characters; use at most { $max }.
+auth-show = Show
+auth-hide = Hide
+auth-error-summary = { $count ->
+    [one] There is one problem
+   *[other] There are { $count } problems
+}
+auth-sign-in-username-required = Enter your username.
+auth-sign-in-password-required = Enter your password.
+auth-totp-title = Enter your one-time code
+auth-totp-lead = Open your authenticator app and type the code it shows for this account.
+auth-totp-required = Enter the one-time code.
+auth-back = Back
+# ---- end form discipline ----

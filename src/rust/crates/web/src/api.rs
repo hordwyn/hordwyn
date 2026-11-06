@@ -16,7 +16,7 @@ use leptos::server_fn::codec::Json;
 mod server {
     use std::sync::Arc;
 
-    use axum::http::header::{COOKIE, SET_COOKIE};
+    use axum::http::header::SET_COOKIE;
     use axum::http::{HeaderMap, HeaderValue};
     use contracts::ErrorDto;
     use leptos::prelude::*;
@@ -30,15 +30,7 @@ mod server {
 
     pub async fn token(b: &dyn Backend) -> Option<String> {
         let headers: HeaderMap = leptos_axum::extract().await.ok()?;
-        let name = b.session_cookie();
-        headers
-            .get_all(COOKIE)
-            .iter()
-            .filter_map(|v| v.to_str().ok())
-            .flat_map(|v| v.split(';'))
-            .filter_map(|kv| kv.trim().split_once('='))
-            .find(|(k, v)| *k == name && !v.is_empty())
-            .map(|(_, v)| v.to_string())
+        crate::backend::session_token(&headers, &b.session_cookie())
     }
 
     pub async fn require_token(b: &dyn Backend) -> Result<String, ServerFnError> {
@@ -118,6 +110,22 @@ pub async fn sign_up(
         .map_err(server::code)?;
     server::set_session(b.as_ref(), &s.token, i64::from(b.session_days()) * 86_400);
     Ok(s.user)
+}
+
+/// Is `username` free? The answer carries the normalised name (`contracts::auth`); errors
+/// are `signup_closed`, `invalid_invite` and `too_many_attempts`.
+#[server(prefix = "/_fn")]
+pub async fn username_available(
+    username: String,
+    invite: Option<String>,
+) -> Result<contracts::auth::UsernameAvailability, ServerFnError> {
+    let b = server::backend()?;
+    b.username_available(contracts::auth::UsernameCheckDto {
+        username,
+        invite: invite.filter(|i| !i.is_empty()),
+    })
+    .await
+    .map_err(server::code)
 }
 
 #[server(prefix = "/_fn")]

@@ -3,6 +3,8 @@
 //! the REST API's OpenAPI document.
 #![deny(unsafe_code)]
 
+pub mod auth;
+
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "openapi")]

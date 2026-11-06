@@ -72,6 +72,8 @@ async fn usernames_are_normalized_and_bad_ones_named() {
         .unwrap();
     assert!(matches!(
         a.sign_up(up("me@example.org")).await,
-        Err(AuthError::InvalidUsername)
+        Err(AuthError::InvalidUsername(
+            contracts::auth::UsernameRule::InvalidChars
+        ))
     ));
 }

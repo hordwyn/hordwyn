@@ -146,6 +146,80 @@ async fn sign_up_sign_in_and_me() {
     assert_eq!(err["code"], "unauthorized");
 }
 
+/// UX phase 0: each sign-up rule answers with its own code; the availability check
+/// normalises like sign-up.
+#[tokio::test]
+async fn sign_up_errors_name_the_field_and_rule() {
+    let (s, _) = state();
+    let app = api::router(s);
+    let sign_up = |username: &str, password: &str| {
+        Some(serde_json::json!({
+            "username": username, "display_name": "", "password": password
+        }))
+    };
+    for (name, pw, status, code) in [
+        ("ab", "correct horse battery", 422, "username_too_short"),
+        ("anna k", "correct horse battery", 422, "username_space"),
+        (
+            "me@x.org",
+            "correct horse battery",
+            422,
+            "username_invalid_chars",
+        ),
+        ("anna", "short", 422, "password_too_short"),
+    ] {
+        let (st, _, err) = call(
+            &app,
+            "POST",
+            "/api/v1/auth/sign-up",
+            None,
+            sign_up(name, pw),
+        )
+        .await;
+        assert_eq!(st.as_u16(), status, "{name}: {err}");
+        assert_eq!(err["code"], code);
+    }
+    signed_up(&app).await;
+    let (st, _, err) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/sign-up",
+        None,
+        sign_up(" Anna ", "correct horse battery"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CONFLICT);
+    assert_eq!(err["code"], "username_taken");
+
+    let (st, _, v) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/username-available",
+        None,
+        Some(serde_json::json!({"username": "ANNA"})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    assert_eq!(
+        v,
+        serde_json::json!({
+            "status": "taken", "username": "anna", "suggestions": ["anna2", "anna3", "anna4"]
+        })
+    );
+    let (_, _, v) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/username-available",
+        None,
+        Some(serde_json::json!({"username": "Ben"})),
+    )
+    .await;
+    assert_eq!(
+        v,
+        serde_json::json!({"status": "available", "username": "ben"})
+    );
+}
+
 #[tokio::test]
 async fn library_flow_with_a_companion() {
     let (s, t) = state();

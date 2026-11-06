@@ -4,12 +4,16 @@
 use leptos::prelude::*;
 use leptos_meta::Title;
 use ui::{
-    Avatar, Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, Card, CardContent,
-    CardDescription, CardFooter, CardHeader, CardTitle, Checkbox, Column, Combobox, Command,
-    CommandItem, DataGrid, Dialog, DropdownMenu, FormField, Icon, IconName, Input, Label, MenuItem,
-    Select, SelectOption, Sheet, Skeleton, Switch, Table, TableBody, TableCaption, TableCell,
-    TableHead, TableHeader, TableRow, Tabs, TabsContent, TabsList, TabsTrigger, Textarea,
-    ThemeToggle, ToastVariant, Toaster, Tooltip, provide_toasts, slug,
+    Alert, AlertRole, AlertVariant, Avatar, Badge, BadgeVariant, Button, ButtonSize, ButtonVariant,
+    Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle, Checkbox, Chip, Column,
+    Combobox, Command, CommandItem, CopyField, DataGrid, Dialog, Disclosure, DisclosureGroup,
+    DisclosureMode, DropdownMenu, EmptyState, ErrorLink, ErrorSummary, FormField, Icon, IconName,
+    Input, KeyHint, Label, MenuItem, NavGroup, NavItem, ProgressBar, ProgressSize, Rating,
+    RuleState, Segmented, SegmentedMode, SegmentedOption, Select, SelectOption, Sheet, SideNav,
+    Skeleton, StatusDot, StatusState, Steps, Switch, TabBar, TabBarAction, Table, TableBody,
+    TableCaption, TableCell, TableHead, TableHeader, TableRow, Tabs, TabsContent, TabsList,
+    TabsTrigger, TaskItem, TaskList, Textarea, ThemeToggle, ToastVariant, Toaster, Tooltip,
+    disclosure_storage_key, field_described_by, provide_toasts, slug,
 };
 
 #[component]
@@ -222,6 +226,12 @@ pub fn Gallery() -> impl IntoView {
                 </Tabs>
             </Section>
 
+            <FeedbackSections/>
+            <ChoiceSections/>
+            <FormPatternSections/>
+            <NavSections/>
+            <DisclosureSections/>
+
             <Section title="Overlays">
                 <Button on:click=move |_| dialog.set(true)>"Open dialog"</Button>
                 <Dialog open=dialog title="Log a play" close_label="Close" description="Record who played and who won.">
@@ -282,5 +292,288 @@ pub fn Gallery() -> impl IntoView {
             </Section>
         </div>
         <Toaster dismiss_label="Dismiss"/>
+    }
+}
+
+#[component]
+fn FeedbackSections() -> impl IntoView {
+    let saving = RwSignal::new(false);
+    view! {
+        <Section title="Alerts and status">
+            <div class="grid w-full gap-3">
+                <Alert variant=AlertVariant::Info role=AlertRole::None title="Search uses your library only">
+                    "Add a movie source to search everything."
+                </Alert>
+                <Alert variant=AlertVariant::Success title="Source connected">"Posters arrive within a minute."</Alert>
+                <Alert variant=AlertVariant::Warning title="Key expires in 7 days"
+                    actions=|| view! { <Button size=ButtonSize::Sm variant=ButtonVariant::Outline>"Replace key"</Button> }>
+                    "Replace it before it stops working."
+                </Alert>
+                <Alert variant=AlertVariant::Destructive role=AlertRole::None title="Sync failed">
+                    "The server did not answer. We try again in 10 minutes."
+                </Alert>
+            </div>
+            <div class="flex flex-wrap items-center gap-4">
+                <StatusDot state=StatusState::Ok label="Connected"/>
+                <StatusDot state=StatusState::Warn label="Expiring soon"/>
+                <StatusDot state=StatusState::Bad label="Failing"/>
+                <StatusDot state=StatusState::Off label="Off"/>
+                <Badge variant=BadgeVariant::Success>"Completed"</Badge>
+                <Badge variant=BadgeVariant::Warning>"Paused"</Badge>
+                <Badge variant=BadgeVariant::Info>"New"</Badge>
+            </div>
+            <div class="flex flex-wrap items-center gap-4">
+                <Button loading=saving on:click=move |_| saving.update(|s| *s = !*s)>"Save"</Button>
+                <span class="text-sm text-muted-foreground">"Click to toggle the loading state."</span>
+            </div>
+        </Section>
+
+        <Section title="Empty state">
+            <EmptyState
+                class="w-full"
+                icon=IconName::Inbox
+                level=3
+                title="No notifications yet"
+                body="When a new episode airs or a friend shares a list, it shows up here."
+                primary=|| view! { <Button size=ButtonSize::Sm>"Set up notifications"</Button> }
+                secondary=|| view! { <Button size=ButtonSize::Sm variant=ButtonVariant::Ghost>"Learn more"</Button> }
+            />
+        </Section>
+
+        <Section title="Progress and rating">
+            <div class="grid w-72 gap-3">
+                <ProgressBar label="Season 2" value=40u32 value_text="4 of 10 episodes"/>
+                <ProgressBar label="Book" value=120u32 max=300u32 size=ProgressSize::Thin value_text="Page 120 of 300"/>
+            </div>
+            <GalleryRating/>
+        </Section>
+    }
+}
+
+#[component]
+fn GalleryRating() -> impl IntoView {
+    let rating = RwSignal::new(Some(70u8));
+    let label = Callback::new(|v: u8| format!("Rate {} of 5", f64::from(v) / 20.0));
+    view! {
+        <div class="grid gap-1">
+            <Rating id="g-rating" label="Your rating" value=rating half_steps=true option_label=label/>
+            <span class="text-sm text-muted-foreground" data-testid="rating-value">
+                {move || rating.get().map(|v| v.to_string()).unwrap_or_default()}
+            </span>
+        </div>
+    }
+}
+
+#[component]
+fn ChoiceSections() -> impl IntoView {
+    let movies = RwSignal::new(true);
+    let books = RwSignal::new(false);
+    let anna = RwSignal::new(false);
+    let view_mode = RwSignal::new("grid".to_string());
+    let group = RwSignal::new("media".to_string());
+    let view_options = vec![
+        SegmentedOption::new("grid", "Grid").icon(IconName::Grid),
+        SegmentedOption::new("list", "List").icon(IconName::List),
+    ];
+    let group_options = vec![
+        SegmentedOption::new("media", "Media").controls("g-group-panel-media"),
+        SegmentedOption::new("games", "Board games").controls("g-group-panel-games"),
+    ];
+    view! {
+        <Section title="Chips and segmented controls">
+            <div class="flex flex-wrap gap-2">
+                <Chip pressed=movies icon=IconName::KindMovie count="12">"Movies"</Chip>
+                <Chip pressed=books icon=IconName::KindBook count="3">"Books"</Chip>
+                <Chip pressed=anna>"Anna"</Chip>
+            </div>
+            <Segmented id="g-view" label="View" value=view_mode options=view_options/>
+            <div class="grid gap-2">
+                <Segmented id="g-group" label="Group" value=group options=group_options mode=SegmentedMode::Tabs/>
+                <div id="g-group-panel-media" role="tabpanel" aria-labelledby="g-group-media" hidden=move || group.get() != "media">
+                    <p class="text-sm">"Media panel"</p>
+                </div>
+                <div id="g-group-panel-games" role="tabpanel" aria-labelledby="g-group-games" hidden=move || group.get() != "games">
+                    <p class="text-sm">"Board games panel"</p>
+                </div>
+            </div>
+        </Section>
+    }
+}
+
+#[component]
+fn FormPatternSections() -> impl IntoView {
+    let username = RwSignal::new(String::new());
+    let password = RwSignal::new(String::new());
+    let show = RwSignal::new(false);
+    let errors = RwSignal::new(Vec::<ErrorLink>::new());
+    let rules = Signal::derive(move || {
+        let p = password.get();
+        let state = |ok: bool| match (p.is_empty(), ok) {
+            (true, _) => RuleState::Pending,
+            (false, true) => RuleState::Pass,
+            (false, false) => RuleState::Fail,
+        };
+        vec![
+            (
+                "At least 12 characters".to_string(),
+                state(p.chars().count() >= 12),
+            ),
+            (
+                "Not only numbers".to_string(),
+                state(!p.chars().all(|c| c.is_ascii_digit())),
+            ),
+        ]
+    });
+    let available =
+        Signal::derive(move || (username.get().len() >= 3).then(|| "Available".to_string()));
+    let pw_type = Signal::derive(move || {
+        if show.get() {
+            "text".to_string()
+        } else {
+            "password".to_string()
+        }
+    });
+    let check = move |_| {
+        let mut e = Vec::new();
+        if username.get_untracked().len() < 3 {
+            e.push(ErrorLink::new(
+                "g-username",
+                "Enter a username with at least 3 characters",
+            ));
+        }
+        if password.get_untracked().chars().count() < 12 {
+            e.push(ErrorLink::new(
+                "g-password",
+                "Enter a password with at least 12 characters",
+            ));
+        }
+        errors.set(e);
+    };
+    view! {
+        <Section title="Form patterns">
+            <div class="grid w-96 gap-4">
+                <ErrorSummary id="g-errors" title="There is a problem" level=3 errors=errors/>
+                <FormField id="g-username" label="Username" status=available>
+                    <Input id="g-username" value=username autocomplete="username" described_by=field_described_by("g-username")/>
+                </FormField>
+                <FormField id="g-password" label="Password" rules=rules rule_met_label="met" rule_unmet_label="not met">
+                    <Input
+                        id="g-password"
+                        value=password
+                        r#type=pw_type
+                        autocomplete="new-password"
+                        described_by=field_described_by("g-password")
+                        trailing=move || view! {
+                            <Button variant=ButtonVariant::Outline size=ButtonSize::Sm class="h-9"
+                                attr:aria-pressed=move || if show.get() { "true" } else { "false" }
+                                on:click=move |_| show.update(|s| *s = !*s)>
+                                "Show"
+                            </Button>
+                        }
+                    />
+                </FormField>
+                <FormField id="g-pin" label="PIN" description="Digits only.">
+                    <Input id="g-pin" value=RwSignal::new(String::new()) inputmode="numeric" autocomplete="one-time-code"
+                        described_by=field_described_by("g-pin")/>
+                </FormField>
+                <Button on:click=check>"Check form"</Button>
+            </div>
+            <div class="grid w-96 gap-4">
+                <FormField id="g-token" label="Integration token">
+                    <CopyField id="g-token" value="whk_3f9a2c7e51" copy_label="Copy" copied_label="Copied"
+                        failed_label="Press Ctrl+C to copy" shown_once="Shown once. Copy it now; it is not shown again."/>
+                </FormField>
+                <p class="flex items-center gap-2 text-sm text-muted-foreground">
+                    "Search"
+                    <KeyHint keys=vec!["Ctrl".to_string(), "K".to_string()]/>
+                    "or"
+                    <KeyHint keys=vec!["/".to_string()]/>
+                </p>
+            </div>
+        </Section>
+    }
+}
+
+#[component]
+fn NavSections() -> impl IntoView {
+    let steps = vec![
+        "Account".to_string(),
+        "Data sources".to_string(),
+        "Finish".to_string(),
+    ];
+    let tasks = Signal::derive(|| {
+        vec![
+            TaskItem::new("admin", "Create the admin account").done(true),
+            TaskItem::new("tmdb", "Add a movie source")
+                .hint("Needed for search and posters")
+                .href("#g-tasks"),
+            TaskItem::new("invite", "Invite a companion"),
+        ]
+    });
+    let groups = vec![
+        NavGroup::new(vec![
+            NavItem::new("#g-nav-profile", "Profile").icon(IconName::User),
+            NavItem::new("#g-nav-security", "Sign-in").icon(IconName::Lock),
+        ])
+        .heading("Account"),
+        NavGroup::new(vec![
+            NavItem::new("#g-nav-notifications", "Notifications")
+                .icon(IconName::Bell)
+                .count("2 unread"),
+            NavItem::new("#g-nav-sources", "Data sources").icon(IconName::Database),
+            NavItem::new("#g-nav-integrations", "Integrations").icon(IconName::Plug),
+        ])
+        .heading("Connections"),
+    ];
+    let tabs = vec![
+        NavItem::new("#g-tab-home", "Home").icon(IconName::Home),
+        NavItem::new("#g-tab-library", "Library").icon(IconName::Library),
+        NavItem::new("#g-tab-history", "History").icon(IconName::History),
+        NavItem::new("#g-tab-you", "You").icon(IconName::User),
+    ];
+    let added = RwSignal::new(0u32);
+    view! {
+        <Section title="Steps and tasks">
+            <Steps label="Setup progress" steps=steps current=1usize done_label="completed"/>
+            <TaskList class="w-full" label="Setup checklist" items=tasks done_label="Done" todo_label="To do"/>
+        </Section>
+
+        <Section title="Navigation">
+            <SideNav id="g-sidenav" class="w-56" label="Settings" groups=groups current="#g-nav-notifications"/>
+            <div class="grid w-80 gap-2">
+                <TabBar inline=true class="rounded-lg border" label="Main" items=tabs current="#g-tab-library"
+                    action=TabBarAction::new("Add", IconName::Plus, Callback::new(move |()| added.update(|n| *n += 1)))/>
+                <span class="text-sm text-muted-foreground" data-testid="tabbar-added">{move || added.get()}</span>
+            </div>
+        </Section>
+    }
+}
+
+#[component]
+fn DisclosureSections() -> impl IntoView {
+    view! {
+        <Section title="Disclosure">
+            <DisclosureGroup class="w-full" expand_label="Expand all" collapse_label="Collapse all">
+                <Disclosure id="g-dis-mail" title="Mail" summary="Server, sender address"
+                    storage_key=disclosure_storage_key("gallery", "mail")
+                    status=|| view! { <StatusDot state=StatusState::Ok label="Working"/> }>
+                    <p class="text-sm">"Needed for password resets and email notifications."</p>
+                </Disclosure>
+                <Disclosure id="g-dis-advanced" title="Advanced" summary="Rarely needed at home">
+                    <p class="text-sm">"Proxy headers and trusted networks."</p>
+                </Disclosure>
+                <Disclosure id="g-dis-secrets" title="Secrets at rest" summary="Key v2, 14 secrets on v1"
+                    mode=DisclosureMode::Button level=3
+                    status=|| view! { <StatusDot state=StatusState::Warn label="Re-encryption pending"/> }>
+                    <FormField id="g-dis-key" label="Key label">
+                        <Input id="g-dis-key" value=RwSignal::new(String::new())/>
+                    </FormField>
+                </Disclosure>
+                <Disclosure id="g-dis-errors" title="Sign-in" summary="Session length, cookies"
+                    mode=DisclosureMode::Button level=3 force_open=true>
+                    <p class="text-sm">"Opened on render because a field here needs attention."</p>
+                </Disclosure>
+            </DisclosureGroup>
+        </Section>
     }
 }

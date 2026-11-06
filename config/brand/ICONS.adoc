@@ -1,6 +1,6 @@
-= Vendored icons and logos
+= Vendored icons, logos and fonts
 
-Every icon or logo file shipped with the application is listed here with its source and
+Every icon, logo or font file shipped with the application is listed here with its source and
 licence (KICKOFF rule 11, DESIGN D-10). The research behind the choice is in
 `docs/research/icons.md`; the decision is DEC-043.
 
@@ -28,12 +28,54 @@ to the icons and are copied into the Docker image (`/usr/share/doc/app/icons`).
 Neither licence requires per-use attribution; keeping the licence texts with the files and in
 the image satisfies them.
 
+UX phase 0 (design.md 2.10, DEC-183) added these Lucide files from the same 1.69.0 tarball,
+unmodified: `tag`, `tags`, `filter`, `arrow-up-down`, `lock`, `copy`, `clock`, `repeat`,
+`check-check`, `inbox`, `history`, `shield`, `key-round`, `plug`, `database`, `wifi-off`,
+`circle-alert`, `chevrons-up-down`, `hash`, `circle` and `house`. `icons.toml` maps each to
+its semantic name.
+
 == Service logos
 
 None vendored yet. Until they are, integrations and data sources are identified by name
 (text) only. When added, they come from Simple Icons (CC0-1.0) and, for gaps, selfh.st/icons
 (CC-BY-4.0, credit on the About page), are shown only to identify the service, and are listed
 here.
+
+== Fonts
+
+Vendored under `config/brand/default/fonts/` and served by the application from its own
+origin (`/brand/fonts/...`, never a CDN; design.md 2.8, DEC-171). The licence text sits next
+to the files, unaltered, as `fonts/OFL.txt`, and is copied into the Docker image with the
+brand directory (`/etc/app/brand/default/fonts/OFL.txt`).
+
+[cols="1,1,1,2"]
+|===
+| Font | Version | Licence | Source
+
+| Atkinson Hyperlegible Next, variable upright and italic (weights 200 to 800)
+| 2.001 (README changelog), git commit `7925f50f649b3813257faf2f4c0b381011f434f1` (2025-02-21)
+| SIL Open Font License 1.1 (no Reserved Font Name declared),
+  Copyright 2020-2024 The Atkinson Hyperlegible Next Project Authors
+| https://github.com/googlefonts/atkinson-hyperlegible-next, files
+  `fonts/webfonts/AtkinsonHyperlegibleNext[wght].woff2` and
+  `fonts/webfonts/AtkinsonHyperlegibleNext-Italic[wght].woff2` (renamed to
+  `AtkinsonHyperlegibleNext-wght.woff2` and `AtkinsonHyperlegibleNext-Italic-wght.woff2`,
+  contents unchanged), `OFL.txt`
+|===
+
+SHA-256 of the vendored files:
+
+----
+abde1ad5cf78b9ac575ef90d991f2e9101eb0b3b6668bde9a00e2e1e27d99afd  AtkinsonHyperlegibleNext-wght.woff2
+34491c5a87f711d314637962f69267d28c7df3ed498082c990cdfbbc02ebf3f2  AtkinsonHyperlegibleNext-Italic-wght.woff2
+aca6a428580965d2297d1b718042dd427c2a9443ece3b0d02d758e161e0c4030  OFL.txt
+----
+
+The OFL allows bundling and redistribution with software, including commercial, as long as
+the licence and copyright notice travel with the font and the font is not sold by itself.
+Take the files from the googlefonts repository only: the Braille Institute download is under
+its own EULA (design.md 2.8). The open-source attribution page (owner ruling R-F3) lists this
+font.
 
 == Brand logo
 

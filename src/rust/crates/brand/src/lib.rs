@@ -10,6 +10,11 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod contrast;
+mod fonts;
+
+pub use fonts::{FONT_ROUTE, FontAsset, FontFile, Fonts, SYSTEM_SANS};
+
 #[derive(Debug, Error)]
 pub enum BrandError {
     #[error("reading {0}: {1}")]
@@ -48,12 +53,18 @@ pub struct Brand {
     /// i18n key -> text overrides (per locale: `[strings.en]`).
     #[serde(default)]
     pub strings: BTreeMap<String, BTreeMap<String, String>>,
+    /// Optional self-hosted UI font (design.md 2.8).
+    #[serde(default)]
+    pub fonts: Option<Fonts>,
     /// Desktop bundle identifier (Tauri), reverse-DNS.
     #[serde(default)]
     pub bundle_id: Option<String>,
     /// Directory the brand was loaded from (not part of the file).
     #[serde(skip)]
     pub dir: PathBuf,
+    /// Font files read by [`Brand::load`] (not part of the file).
+    #[serde(skip)]
+    font_assets: Vec<FontAsset>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -78,6 +89,9 @@ impl Brand {
         let text = std::fs::read_to_string(&path)
             .map_err(|e| BrandError::Read(path.display().to_string(), e))?;
         let mut b = Self::parse(&text)?;
+        if let Some(f) = &b.fonts {
+            b.font_assets = f.load(dir)?;
+        }
         b.dir = dir.to_path_buf();
         Ok(b)
     }
@@ -95,6 +109,9 @@ impl Brand {
             return Err(BrandError::Invalid(
                 "short_name needs at least one ASCII letter or digit".into(),
             ));
+        }
+        if let Some(f) = &b.fonts {
+            f.validate()?;
         }
         Ok(b)
     }
@@ -129,7 +146,11 @@ impl Brand {
             .map(String::as_str)
     }
 
-    /// CSS that sets the brand's theme tokens (`:root { ... } .dark { ... }`).
+    /// CSS that sets the brand's theme tokens (`:root:not(.dark) { ... } :root.dark { ... }`).
+    ///
+    /// The selectors outrank `:root` and `.dark` of the stylesheet, so the brand wins whatever
+    /// the order of the style elements in the head, and light values never leak into the dark
+    /// theme (a theme without values keeps the stylesheet defaults).
     #[must_use]
     pub fn theme_css(&self) -> String {
         let block = |sel: &str, vars: &BTreeMap<String, String>| {
@@ -147,9 +168,44 @@ impl Brand {
         };
         format!(
             "{}{}",
-            block(":root", &self.theme),
-            block(".dark", &self.theme_dark)
+            block(":root:not(.dark)", &self.theme),
+            block(":root.dark", &self.theme_dark)
         )
+    }
+
+    /// `@font-face` rules for the brand font (same-origin URLs) and `--font-sans`; empty without
+    /// a `[fonts]` section.
+    #[must_use]
+    pub fn font_css(&self) -> String {
+        self.fonts
+            .as_ref()
+            .map(|f| f.css(&self.font_assets))
+            .unwrap_or_default()
+    }
+
+    /// Everything the page head needs from the brand: fonts, then theme tokens.
+    #[must_use]
+    pub fn head_css(&self) -> String {
+        format!("{}{}", self.font_css(), self.theme_css())
+    }
+
+    /// Font files to serve, read at load.
+    #[must_use]
+    pub fn font_assets(&self) -> &[FontAsset] {
+        &self.font_assets
+    }
+
+    /// The font served at `url` (a path below [`FONT_ROUTE`]).
+    #[must_use]
+    pub fn font_asset(&self, url: &str) -> Option<&FontAsset> {
+        self.font_assets.iter().find(|a| a.url == url)
+    }
+
+    /// Accent pairs (`primary` / `primary-foreground`) below WCAG AA (4.5:1) or not checkable,
+    /// per theme. The server logs them as warnings at start-up (design.md 7.4).
+    #[must_use]
+    pub fn contrast_findings(&self) -> Vec<contrast::ContrastFinding> {
+        contrast::findings(&self.theme, &self.theme_dark)
     }
 }
 
@@ -190,7 +246,21 @@ mod tests {
         )
         .unwrap();
         let css = b.theme_css();
-        assert_eq!(css, ":root{--primary:oklch(0.5 0.2 250);}");
+        assert_eq!(css, ":root:not(.dark){--primary:oklch(0.5 0.2 250);}");
+    }
+
+    #[test]
+    fn theme_css_beats_the_stylesheet_defaults() {
+        // `:root:not(.dark)` and `:root.dark` outrank `:root` and `.dark` of app.css whatever
+        // the order of the style elements; light values do not leak into the dark theme
+        let b = Brand::parse(
+            "name = \"A\"\nshort_name = \"a\"\n[theme]\nprimary = \"#7008e7\"\n[theme_dark]\nprimary = \"#a684ff\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            b.theme_css(),
+            ":root:not(.dark){--primary:#7008e7;}:root.dark{--primary:#a684ff;}"
+        );
     }
 
     #[test]

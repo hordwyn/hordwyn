@@ -18,8 +18,15 @@ test("sign up, find a movie, watch it with a companion", async ({ page }) => {
   await expect(page).toHaveURL(/\/library$/);
   await hydrated(page);
   await expect(page.getByText("Your library is empty")).toBeVisible();
+  // the shell knows the session (owner bug: "Create account" after sign-in)
+  await expect(page.getByRole("link", { name: "Create account" })).toHaveCount(0);
+  const account = page.getByRole("button", { name: "Account menu for E2E User" });
+  await account.click();
+  await expect(page.getByRole("menuitemradio", { name: "System" })).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  await expect(account).toBeFocused();
 
-  await page.goto("/companions");
+  await page.goto("/people");
   await hydrated(page);
   await page.getByLabel("Name", { exact: true }).fill("Ben");
   await page.getByRole("button", { name: "Add companion" }).click();

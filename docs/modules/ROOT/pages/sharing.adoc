@@ -1,6 +1,7 @@
 = Sharing and companions
 
-People you watch, read and play with are *companions* in your own address book. Sessions
+People you watch, read and play with are *companions* in your own address book (the
+_People_ page, `/people`, in the web app). Sessions
 ("watched with", plays) always reference companions, so the history never has to be
 rewritten when people get accounts, leave or turn out to be duplicates.
 
@@ -20,7 +21,7 @@ Merge:: Fold a duplicate into the companion you keep (`POST /api/v1/companions/{
 == Shared sessions
 
 A linked user sees the sessions of others in which they took part
-(`GET /api/v1/sessions/shared`, _History_ in the web app), read-only. _Copy to my log_
+(`GET /api/v1/sessions/shared`, _History_ at `/history` in the web app), read-only. _Copy to my log_
 (`POST /api/v1/sessions/{id}/claim`) copies one into their own history once: their own
 score and result come along; the owner's notes, location and other participants do not.
 

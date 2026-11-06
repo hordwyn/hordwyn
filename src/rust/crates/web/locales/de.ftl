@@ -16,7 +16,7 @@ home-title = Halte fest, was du schaust, liest und spielst
 home-lead = Filme, Serien, Bücher, Spiele und mehr, zusammen mit den Menschen, mit denen du sie teilst.
 
 auth-username = Benutzername
-auth-display-name = Anzeigename
+auth-display-name = Anzeigename (optional)
 auth-password = Passwort
 auth-email = E-Mail (optional)
 auth-totp = Einmalcode
@@ -31,9 +31,6 @@ auth-error-totp_required = Gib den Einmalcode aus deiner Authenticator-App ein.
 auth-error-invalid_totp = Dieser Einmalcode ist ungültig.
 auth-error-signup_closed = Registrierung ist auf dieser Instanz nicht offen.
 auth-error-invalid_invite = Diese Einladung ist nicht mehr gültig.
-auth-error-weak_password = Das Passwort braucht mindestens 10 Zeichen.
-auth-error-conflict = Dieser Benutzername ist vergeben.
-auth-error-invalid = Bitte prüfe die Felder.
 error-generic = Etwas ist schiefgelaufen. Bitte versuche es erneut.
 
 library-title = Bibliothek
@@ -241,6 +238,87 @@ integrations-never = nie
 integrations-error = Letzter Aufruf fehlgeschlagen
 integrations-revoke = Widerrufen
 auth-error-too_many_attempts = Zu viele Fehlversuche. Bitte warte ein paar Minuten.
-auth-username-rules = 3 bis 32 Zeichen: Kleinbuchstaben, Ziffern, _ . - (Großbuchstaben werden klein)
-auth-error-invalid_username = Benutzernamen haben 3 bis 32 Zeichen: a-z, 0-9, _ . - (keine Leerzeichen, kein @).
-auth-error-invalid_display_name = Der Anzeigename muss 1 bis 100 Zeichen haben.
+auth-error-username_too_short = Der Benutzername braucht mindestens 3 Zeichen.
+auth-error-username_too_long = Der Benutzername darf höchstens 32 Zeichen haben.
+auth-error-username_space = Der Benutzername enthält ein Leerzeichen. Nimm stattdessen - oder _.
+auth-error-username_invalid_chars = Im Benutzernamen gehen nur a-z, 0-9 und _ . -.
+auth-error-username_taken = Dieser Benutzername ist schon vergeben.
+auth-error-display_name_too_long = Der Anzeigename darf höchstens 100 Zeichen haben.
+auth-error-password_too_short = Das Passwort braucht mindestens 10 Zeichen.
+auth-error-password_too_long = Das Passwort darf höchstens 1024 Zeichen haben.
+
+# ---- UX phase 0: app shell (design.md 3.2, 6.15) ----
+nav-home = Start
+nav-history = Verlauf
+nav-people = Personen
+nav-you = Du
+shell-search = Suchen oder hinzufügen...
+shell-ctrl = Strg
+shell-add = Hinzufügen
+shell-notifications = { $count ->
+    [0] Benachrichtigungen
+   *[other] Benachrichtigungen, { $count } ungelesen
+}
+shell-unread = { $count } ungelesen
+shell-account = Kontomenü von { $name }
+shell-admin = Verwaltung
+shell-theme = Design
+shell-theme-system = System
+shell-theme-light = Hell
+shell-theme-dark = Dunkel
+shell-shortcuts = Tastenkürzel
+shell-help = Hilfe und Support
+shell-key-search = Suchen oder hinzufügen
+shell-key-add = Etwas hinzufügen
+shell-key-help = Tastenkürzel anzeigen
+shell-key-close = Dialog oder Menü schliessen
+shell-offline = Du bist offline. Änderungen werden gespeichert und später gesendet.
+shell-dismiss = Ausblenden
+notfound-title = Unter dieser Adresse gibt es nichts
+notfound-lead = Der Link ist vielleicht veraltet oder falsch geschrieben.
+# ---- end app shell ----
+
+# ---- UX phase 0: form discipline on sign-up and sign-in (design.md 5.2, 2.4) ----
+auth-username-hint = Für Links und zum Anmelden. { $min } bis { $max } Zeichen.
+auth-username-rule-length = { $min } bis { $max } Zeichen
+auth-username-rule-space = Keine Leerzeichen
+auth-username-rule-chars = Nur a-z, 0-9 und _ . -
+auth-rule-met = Erfüllt
+auth-rule-unmet = Nicht erfüllt
+auth-username-saved-as = Wird als { $username } gespeichert (Großbuchstaben werden klein)
+auth-username-saved-as-trimmed = Wird als { $username } gespeichert (Leerzeichen am Anfang und Ende fallen weg)
+auth-username-available = '{ $username }' ist frei.
+auth-username-required = Gib einen Benutzernamen ein.
+auth-username-too-short = '{ $value }' ist zu kurz: Nimm mindestens { $min } Zeichen.
+auth-username-too-long = '{ $value }' hat { $count } Zeichen; erlaubt sind höchstens { $max }.
+auth-username-space = '{ $value }' enthält ein Leerzeichen. Versuch '{ $dash }' oder '{ $underscore }'.
+auth-username-invalid-chars = '{ $value }' enthält Zeichen, die nicht erlaubt sind: { $chars }. Erlaubt sind nur a-z, 0-9 und _ . -
+auth-username-taken = { $count ->
+    [0] '{ $username }' ist schon vergeben.
+   *[other] '{ $username }' ist schon vergeben. Frei: { $suggestions }.
+}
+auth-username-suggestions = Vorschläge
+auth-username-use = { $username } nehmen
+auth-display-name-hint = So sehen dich andere. Leer lassen, um deinen Benutzernamen zu verwenden.
+auth-display-name-too-long = Der Anzeigename hat { $count } Zeichen; erlaubt sind höchstens { $max }.
+auth-password-hint = Mindestens { $min } Zeichen. Keine weiteren Regeln; ein langer Satz ist am besten. Einfügen ist erlaubt.
+auth-password-rule-length = Mindestens { $min } Zeichen (bisher { $count })
+auth-password-required = Gib ein Passwort ein.
+auth-password-too-short = { $count ->
+    [one] Das Passwort hat 1 Zeichen; es braucht mindestens { $min }.
+   *[other] Das Passwort hat { $count } Zeichen; es braucht mindestens { $min }.
+}
+auth-password-too-long = Das Passwort hat { $count } Zeichen; erlaubt sind höchstens { $max }.
+auth-show = Anzeigen
+auth-hide = Verbergen
+auth-error-summary = { $count ->
+    [one] Es gibt ein Problem
+   *[other] Es gibt { $count } Probleme
+}
+auth-sign-in-username-required = Gib deinen Benutzernamen ein.
+auth-sign-in-password-required = Gib dein Passwort ein.
+auth-totp-title = Einmalcode eingeben
+auth-totp-lead = Öffne deine Authenticator-App und gib den Code ein, den sie für dieses Konto zeigt.
+auth-totp-required = Gib den Einmalcode ein.
+auth-back = Zurück
+# ---- end form discipline ----

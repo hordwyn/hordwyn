@@ -26,7 +26,7 @@ async function addCompanion(page: Page, name: string) {
 }
 
 async function historyRow(page: Page) {
-  await page.goto("/sessions");
+  await page.goto("/history");
   await hydrated(page);
   const row = page.getByRole("list", { name: "Your sessions" }).getByRole("listitem").first();
   await expect(row).toContainText("Fight Club");
@@ -37,7 +37,7 @@ test("promote, accept, see history, demote, merge", async ({ page, browser }) =>
   const stamp = Date.now();
   await signUp(page, "/sign-up", `own${stamp}`, "Olive");
 
-  await page.goto("/companions");
+  await page.goto("/people");
   await hydrated(page);
   await addCompanion(page, "Carl");
   await addCompanion(page, "Karl");
@@ -63,7 +63,7 @@ test("promote, accept, see history, demote, merge", async ({ page, browser }) =>
   expect(before).toContain("Karl");
 
   // promote Carl: an invite link
-  await page.goto("/companions");
+  await page.goto("/people");
   await hydrated(page);
   await page.getByRole("button", { name: "Invite Carl" }).click();
   const link = page.getByTestId("invite-link");
@@ -74,7 +74,7 @@ test("promote, accept, see history, demote, merge", async ({ page, browser }) =>
   const carlContext = await browser.newContext();
   const carl = await carlContext.newPage();
   await signUp(carl, inviteUrl, `carl${stamp}`, "Carl C.");
-  await carl.goto("/sessions");
+  await carl.goto("/history");
   await hydrated(carl);
   const shared = carl.getByRole("list", { name: "Shared with you" }).getByRole("listitem").first();
   await expect(shared).toContainText("Fight Club");
@@ -87,7 +87,7 @@ test("promote, accept, see history, demote, merge", async ({ page, browser }) =>
   await carlContext.close();
 
   // the owner sees Carl linked, then demotes (unlinks) him
-  await page.goto("/companions");
+  await page.goto("/people");
   await hydrated(page);
   const carlRow = page.getByRole("listitem").filter({ hasText: /^Carl/ });
   await expect(carlRow.getByText("Linked")).toBeVisible();

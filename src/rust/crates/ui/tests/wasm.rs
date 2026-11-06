@@ -134,3 +134,139 @@ async fn command_selects_active_option_with_enter() {
     settle().await;
     assert_eq!(chosen.get_untracked(), "Arrival");
 }
+
+#[wasm_bindgen_test]
+async fn rating_arrow_keys_move_in_half_steps_and_focus_follows() {
+    let v = RwSignal::new(Some(60u8));
+    let label = Callback::new(|v: u8| format!("{v}"));
+    leptos::mount::mount_to_body(move || {
+        view! { <Rating id="w-rating" label="R" value=v half_steps=true option_label=label/> }
+    });
+    let start = el("w-rating-60");
+    start.focus().unwrap();
+    key(&start, "ArrowRight");
+    settle().await;
+    assert_eq!(v.get_untracked(), Some(70));
+    let now = el("w-rating-70");
+    assert_eq!(now.get_attribute("aria-checked").as_deref(), Some("true"));
+    assert_eq!(now.get_attribute("tabindex").as_deref(), Some("0"));
+    assert_eq!(
+        document().active_element().map(|e| e.id()).as_deref(),
+        Some("w-rating-70")
+    );
+    key(&now, "Delete");
+    settle().await;
+    assert_eq!(v.get_untracked(), None);
+    el("w-rating-40").click();
+    settle().await;
+    assert_eq!(v.get_untracked(), Some(40));
+    el("w-rating-40").click();
+    settle().await;
+    assert_eq!(v.get_untracked(), None, "clicking the checked step clears");
+}
+
+#[wasm_bindgen_test]
+async fn segmented_radio_follows_arrow_keys() {
+    let v = RwSignal::new("a".to_string());
+    leptos::mount::mount_to_body(move || {
+        let opts = vec![
+            SegmentedOption::new("a", "A"),
+            SegmentedOption::new("b", "B"),
+        ];
+        view! { <Segmented id="w-seg" label="S" value=v options=opts/> }
+    });
+    let a = el("w-seg-a");
+    a.focus().unwrap();
+    key(&a, "ArrowRight");
+    settle().await;
+    assert_eq!(v.get_untracked(), "b");
+    assert_eq!(
+        el("w-seg-b").get_attribute("aria-checked").as_deref(),
+        Some("true")
+    );
+    assert_eq!(
+        document().active_element().map(|e| e.id()).as_deref(),
+        Some("w-seg-b")
+    );
+}
+
+#[wasm_bindgen_test]
+async fn chip_toggles_aria_pressed() {
+    let on = RwSignal::new(false);
+    leptos::mount::mount_to_body(move || {
+        view! { <Chip pressed=on attr:id="w-chip">"Movies"</Chip> }
+    });
+    let chip = el("w-chip");
+    chip.click();
+    settle().await;
+    assert!(on.get_untracked());
+    assert_eq!(chip.get_attribute("aria-pressed").as_deref(), Some("true"));
+}
+
+#[wasm_bindgen_test]
+async fn button_disclosure_toggles_and_remembers() {
+    let key_name = disclosure_storage_key("wasm", "sec");
+    let storage = window().local_storage().unwrap().unwrap();
+    storage.set_item(&key_name, "1").unwrap();
+    let k = key_name.clone();
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <Disclosure id="w-dis" title="Sec" mode=DisclosureMode::Button storage_key=k.clone()>
+                <p>"content"</p>
+            </Disclosure>
+        }
+    });
+    settle().await;
+    let button: HtmlElement = document()
+        .query_selector("#w-dis button")
+        .unwrap()
+        .expect("header button")
+        .dyn_into()
+        .unwrap();
+    assert_eq!(
+        button.get_attribute("aria-expanded").as_deref(),
+        Some("true"),
+        "restored from localStorage"
+    );
+    assert!(!el("w-dis-content").has_attribute("hidden"));
+    button.click();
+    settle().await;
+    assert_eq!(
+        button.get_attribute("aria-expanded").as_deref(),
+        Some("false")
+    );
+    assert!(el("w-dis-content").has_attribute("hidden"));
+    assert_eq!(storage.get_item(&key_name).unwrap().as_deref(), Some("0"));
+    storage.remove_item(&key_name).unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn error_summary_takes_focus_when_errors_appear() {
+    let errors = RwSignal::new(Vec::<ErrorLink>::new());
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <ErrorSummary id="w-errs" title="Problem" errors=errors/>
+            <input id="w-errs-field"/>
+        }
+    });
+    settle().await;
+    assert!(document().get_element_by_id("w-errs").is_none());
+    errors.set(vec![ErrorLink::new("w-errs-field", "Fix this")]);
+    settle().await;
+    assert_eq!(
+        document().active_element().map(|e| e.id()).as_deref(),
+        Some("w-errs")
+    );
+    let link: HtmlElement = document()
+        .query_selector("#w-errs a")
+        .unwrap()
+        .expect("link")
+        .dyn_into()
+        .unwrap();
+    link.click();
+    settle().await;
+    assert_eq!(
+        document().active_element().map(|e| e.id()).as_deref(),
+        Some("w-errs-field")
+    );
+}

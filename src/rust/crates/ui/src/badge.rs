@@ -9,6 +9,10 @@ pub enum BadgeVariant {
     Secondary,
     Outline,
     Destructive,
+    /// Soft tint with semantic text; pair with a word, never colour alone (WCAG 1.4.1).
+    Success,
+    Warning,
+    Info,
 }
 
 impl BadgeVariant {
@@ -19,6 +23,9 @@ impl BadgeVariant {
             Self::Secondary => "border-transparent bg-secondary text-secondary-foreground",
             Self::Outline => "text-foreground",
             Self::Destructive => "border-transparent bg-destructive text-destructive-foreground",
+            Self::Success => "border-transparent bg-success-soft text-success",
+            Self::Warning => "border-transparent bg-warning-soft text-warning",
+            Self::Info => "border-transparent bg-info-soft text-info",
         }
     }
 }

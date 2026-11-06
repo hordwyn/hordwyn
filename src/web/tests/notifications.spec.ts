@@ -24,7 +24,7 @@ test("link requests arrive in the inbox; channels and subscriptions", async ({ p
   await signUp(pia, `pia${stamp}`, "Pia");
 
   await signUp(page, `max${stamp}`, "Max");
-  await page.goto("/companions");
+  await page.goto("/people");
   await hydrated(page);
   await page.getByLabel("Name", { exact: true }).fill("P.");
   await page.getByRole("button", { name: "Add companion" }).click();

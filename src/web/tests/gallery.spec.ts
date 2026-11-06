@@ -96,5 +96,83 @@ test("combobox picks an option", async ({ page }) => {
 test("toast is announced in a live region", async ({ page }) => {
   await openGallery(page);
   await page.getByRole("button", { name: "Show toast" }).click();
-  await expect(page.getByRole("status")).toContainText("Your play was logged.");
+  await expect(page.getByRole("status").filter({ hasText: "Your play was logged." })).toBeVisible();
+});
+
+test("error summary takes focus, links move to the field, no violations", async ({ page }) => {
+  await openGallery(page);
+  await page.getByRole("button", { name: "Check form" }).click();
+  const summary = page.locator("#g-errors");
+  await expect(summary).toBeFocused();
+  await expect(summary.getByRole("heading", { name: "There is a problem" })).toBeVisible();
+  await expectNoA11yViolations(page);
+  await summary.getByRole("link", { name: /username/ }).click();
+  await expect(page.locator("#g-username")).toBeFocused();
+});
+
+test("form field shows live rules, ok line and a reactive Show button", async ({ page }) => {
+  await openGallery(page);
+  await page.locator("#g-username").fill("anna");
+  await expect(page.locator("#g-username-status")).toContainText("Available");
+  const pw = page.locator("#g-password");
+  await pw.fill("123");
+  await expect(page.locator("#g-password-rules li[data-state=fail]")).toHaveCount(2);
+  await pw.fill("correct horse battery");
+  await expect(page.locator("#g-password-rules li[data-state=pass]")).toHaveCount(2);
+  await expect(pw).toHaveAttribute("type", "password");
+  await page.getByRole("button", { name: "Show", exact: true }).click();
+  await expect(pw).toHaveAttribute("type", "text");
+});
+
+test("disclosures open, expand all opens every section, no violations", async ({ page }) => {
+  await openGallery(page);
+  const advanced = page.locator("#g-dis-advanced");
+  await expect(advanced).not.toHaveAttribute("open", /.*/);
+  await advanced.locator("summary").click();
+  await expect(advanced).toHaveAttribute("open", /.*/);
+  const secrets = page.getByRole("button", { name: /Secrets at rest/ });
+  await expect(secrets).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator("#g-dis-secrets-content")).toBeHidden();
+  await secrets.click();
+  await expect(secrets).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByLabel("Key label")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Sign-in/ })).toHaveAttribute("aria-expanded", "true");
+  await page.getByRole("button", { name: "Expand all" }).click();
+  await expect(page.locator("#g-dis-mail")).toHaveAttribute("open", /.*/);
+  await expect(page.getByRole("button", { name: "Collapse all" })).toBeVisible();
+  await expectNoA11yViolations(page);
+});
+
+test("rating: arrow keys move in half steps", async ({ page }) => {
+  await openGallery(page);
+  const group = page.getByRole("radiogroup", { name: "Your rating" });
+  const checked = group.getByRole("radio", { name: "Rate 3.5 of 5" });
+  await expect(checked).toHaveAttribute("aria-checked", "true");
+  await checked.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(group.getByRole("radio", { name: "Rate 4 of 5" })).toBeFocused();
+  await expect(page.getByTestId("rating-value")).toHaveText("80");
+  await page.keyboard.press("Home");
+  await expect(page.getByTestId("rating-value")).toHaveText("10");
+});
+
+test("chips, segmented control, tab bar action and copy field", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await openGallery(page);
+  const books = page.getByRole("button", { name: /Books/ });
+  await expect(books).toHaveAttribute("aria-pressed", "false");
+  await books.click();
+  await expect(books).toHaveAttribute("aria-pressed", "true");
+  const grid = page.getByRole("radiogroup", { name: "View" }).getByRole("radio", { name: "Grid" });
+  await grid.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("radio", { name: "List" })).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("tab", { name: "Board games" }).click();
+  await expect(page.getByRole("tabpanel", { name: "Board games" })).toBeVisible();
+  await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Add" }).click();
+  await expect(page.getByTestId("tabbar-added")).toHaveText("1");
+  await page.getByRole("button", { name: "Copy" }).click();
+  await expect(page.locator("#g-token").locator("..").locator("..").getByRole("status")).toHaveText(
+    /Copied|Press Ctrl\+C to copy/,
+  );
 });

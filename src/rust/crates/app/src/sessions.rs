@@ -123,7 +123,7 @@ impl App {
                 item: Some(item.id),
                 ..Subject::default()
             })
-            .link("/sessions"),
+            .link("/history"),
         )
         .await;
         Ok(())

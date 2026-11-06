@@ -3,3 +3,8 @@ xtask = "run --quiet --package xtask --"
 
 [target.wasm32-unknown-unknown]
 runner = "wasm-bindgen-test-runner"
+
+# Test threads render whole pages server-side; debug builds need more than the 2 MiB
+# default (DEC-188). The server binary sets the same size on its runtime.
+[env]
+RUST_MIN_STACK = "8388608"
