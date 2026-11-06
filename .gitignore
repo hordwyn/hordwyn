@@ -17,3 +17,5 @@
 # nix
 /result
 /.direnv/
+# files the owner hands over (specs, exports); reviewed before anything is committed
+/owner-inbox/
