@@ -19,6 +19,7 @@ blake3.workspace = true
 catalog-core.workspace = true
 chrono.workspace = true
 contracts = { workspace = true, features = ["openapi"] }
+importers = { workspace = true, features = ["generic"] }
 domain.workspace = true
 realtime.workspace = true
 serde.workspace = true
@@ -33,3 +34,5 @@ uuid.workspace = true
 http-body-util = "0.1.5"
 testkit.workspace = true
 tower = { version = "0.5", features = ["util"] }
+uuid.workspace = true
+kinds.workspace = true

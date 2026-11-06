@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO import_rows (user_id, format, source_id, item_id) VALUES ($1, $2, $3, $4)\n             ON CONFLICT (user_id, format, source_id) DO UPDATE SET item_id = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6041387f1c78cf74ba5c5995eee00f0c8a03923ed8555e07a3cda21d80268648"
+}

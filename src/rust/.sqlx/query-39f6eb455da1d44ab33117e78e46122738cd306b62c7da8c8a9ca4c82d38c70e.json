@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT record FROM imports WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "record",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "imports",
+            "name": "record"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "39f6eb455da1d44ab33117e78e46122738cd306b62c7da8c8a9ca4c82d38c70e"
+}

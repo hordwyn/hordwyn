@@ -10,3 +10,29 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+app.workspace = true
+async-trait.workspace = true
+blake3.workspace = true
+chrono.workspace = true
+csv = { version = "1.4.0", optional = true }
+domain.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt"] }
+uuid.workspace = true
+
+[features]
+default = []
+# our own documented format (JSON Lines and CSV), also used by the export
+generic = ["dep:csv"]
+all = ["generic"]
+
+[dev-dependencies]
+store-pg.workspace = true
+testkit.workspace = true
+kinds.workspace = true
+sqlx.workspace = true
+tokio.workspace = true

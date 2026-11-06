@@ -44,6 +44,9 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(companions, create_companion))
         .routes(routes!(lists, create_list))
         .routes(routes!(add_to_list))
+        .routes(routes!(start_import))
+        .routes(routes!(import_status))
+        .routes(routes!(export))
         .routes(routes!(events))
         .with_state(state)
         .split_for_parts();
@@ -51,13 +54,16 @@ pub fn router(state: ApiState) -> axum::Router {
     let json = doc.to_pretty_json().unwrap_or_default();
     axum::Router::new().nest(
         "/api/v1",
-        router.route(
-            "/openapi.json",
-            axum::routing::get(move || {
-                let json = json.clone();
-                async move { ([("content-type", "application/json")], json) }
-            }),
-        ),
+        // imports upload whole files; the upload quota limits what is kept
+        router
+            .layer(axum::extract::DefaultBodyLimit::max(64 << 20))
+            .route(
+                "/openapi.json",
+                axum::routing::get(move || {
+                    let json = json.clone();
+                    async move { ([("content-type", "application/json")], json) }
+                }),
+            ),
     )
 }
 
@@ -417,6 +423,51 @@ async fn add_to_list(
     Json(b): Json<ListItemBody>,
 ) -> ApiResult<Json<ListDto>> {
     Ok(Json(ops::add_to_list(&s, a, &id, &b.item_id).await?))
+}
+
+// ---------------------------------------------------------------- import and export
+
+#[derive(Deserialize, IntoParams)]
+struct ImportParams {
+    /// `generic-jsonl`, `generic-csv` or `legacy-json`.
+    format: String,
+    #[serde(default)]
+    dry_run: bool,
+}
+
+/// Upload a file to import (body: the raw file). Runs as a background job; progress arrives as
+/// `import.progress` events, the report at `GET /imports/{id}`.
+#[utoipa::path(post, path = "/imports", tag = "import", params(ImportParams),
+    request_body(content = String, content_type = "application/octet-stream"),
+    responses((status = 202, body = serde_json::Value)))]
+async fn start_import(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Query(p): Query<ImportParams>,
+    body: axum::body::Bytes,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(ops::start_import(&s, a, &p.format, body.to_vec(), p.dry_run).await?),
+    ))
+}
+
+#[utoipa::path(get, path = "/imports/{id}", tag = "import", params(("id" = String, Path)),
+    responses((status = 200, body = serde_json::Value)))]
+async fn import_status(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    Ok(Json(ops::import_status(&s, a, &id).await?))
+}
+
+/// The library as JSON Lines in the generic format (re-importable).
+#[utoipa::path(get, path = "/export", tag = "import",
+    responses((status = 200, content_type = "application/x-ndjson", body = String)))]
+async fn export(State(s): State<ApiState>, Authed(a): Authed) -> ApiResult<Response> {
+    let body = ops::export(&s, a).await?;
+    Ok(([("content-type", "application/x-ndjson")], body).into_response())
 }
 
 // ---------------------------------------------------------------- events

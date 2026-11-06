@@ -45,7 +45,7 @@ fn main() -> Result<()> {
 
 /// Features enabled for workspace-wide native checks. `--all-features` is not usable because
 /// `web`'s `ssr`, `hydrate` and `csr` are mutually exclusive.
-const NATIVE_FEATURES: &str = "connectors/all,server/gallery,server/all-connectors";
+const NATIVE_FEATURES: &str = "connectors/all,importers/all,server/gallery,server/all-connectors";
 /// Features for the browser (wasm32) build of the web app.
 const WASM_FEATURES: &str = "web/hydrate,web/gallery";
 const PEDANTIC: [&str; 5] = ["--", "-D", "warnings", "-W", "clippy::pedantic"];

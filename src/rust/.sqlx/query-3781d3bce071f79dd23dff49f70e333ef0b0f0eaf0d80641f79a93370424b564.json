@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO imports (id, user_id, record, updated_at) VALUES ($1, $2, $3, $4)\n             ON CONFLICT (id) DO UPDATE SET record = $3, updated_at = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3781d3bce071f79dd23dff49f70e333ef0b0f0eaf0d80641f79a93370424b564"
+}

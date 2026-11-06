@@ -1,0 +1,62 @@
+= Import and export format
+
+The generic format (version 1) is this application's own: the export produces it and every
+import accepts it. It exists as JSON Lines and as CSV.
+
+== JSON Lines (`generic-jsonl`)
+
+The first line is a header, then one entry per line:
+
+[source,json]
+----
+{"format":"library-export","version":1}
+{"source_id":"m1","kind":"movie","title":"Heat","year":1995,"external_ids":{"tmdb":"949"},"status":"completed","rating":90,"notes":"with dad","history":[{"date":"2024-05-01"}]}
+----
+
+[cols="1,1,3"]
+|===
+|Field |Type |Meaning
+
+|`source_id` |string, required |Stable id of the entry in the source. Re-importing the same
+file (or another file with the same ids) updates instead of duplicating.
+|`kind` |string, required |Media kind id (`movie`, `show`, `book`, `video_game`, ...).
+|`title` |string, required |Title used when no catalog item matches.
+|`year` |integer |Release year.
+|`external_ids` |object |Provider ids (`tmdb`, `imdb`, `igdb`, ...). Matching uses these
+first; unmatched entries become catalog stubs that are refreshed in the background.
+|`status` |string |A status of the kind (`planned`, `in_progress`, `completed`, `paused`,
+`dropped`, plus kind-specific ones).
+|`rating` |integer 0..100 |Rating (stars x 20 in the UI).
+|`notes` |string |Private notes.
+|`history` |list |Progress events: `date` (RFC 3339 or `YYYY-MM-DD`) and optional
+`progress` in the API's tagged form (`{"type": "episode", "season": 1, "episode": 3}`);
+without `progress` a single-step kind (movie) records "finished".
+|===
+
+The JSON Schema of an entry is published as
+link:{attachmentsdir}/library-export-row.schema.json[library-export-row.schema.json] and is
+generated from the code (a test keeps it current).
+
+== CSV (`generic-csv`)
+
+Header row `source_id,kind,title,year,status,rating,notes,external_ids,finished_dates`;
+`external_ids` as `ns:value;ns:value`, `finished_dates` as `date;date`.
+
+== Running an import
+
+[source,shell]
+----
+curl -X POST -H "Authorization: Bearer $TOKEN" --data-binary @library.jsonl \
+  "$BASE/api/v1/imports?format=generic-jsonl&dry_run=true"
+curl -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/imports/<id>"
+curl -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/export" > library.jsonl
+----
+
+Imports run as jobs in the `user_import` lane, so they never slow down interactive work.
+Progress arrives as `import.progress` events; the report lists every row that failed with
+its line number. A dry run parses and matches without writing anything. If the worker stops
+in the middle, the job is claimed again and continues at its last checkpoint. The uploaded
+file counts against the user's upload quota.
+
+Importing your own export back into the same account updates entries, ratings and notes, but
+may add history events a second time (exported events carry no idempotency key yet).

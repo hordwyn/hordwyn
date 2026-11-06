@@ -61,6 +61,7 @@ pub struct ApiState {
     pub fanout: SearchFanout,
     pub registry: Registry,
     pub assets: Option<Arc<assets::AssetService>>,
+    pub importer: Option<Arc<importers::Importer>>,
     pub naming: Naming,
     pub secure_cookies: bool,
     /// Enabled kinds searched when the client does not name one.

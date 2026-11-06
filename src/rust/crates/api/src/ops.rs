@@ -360,3 +360,112 @@ pub async fn add_to_list(
     .await;
     Ok(list_dto(&l))
 }
+
+/// The user's library in the generic format (JSON Lines), importable again.
+///
+/// # Errors
+/// Storage errors.
+pub async fn export(s: &ApiState, a: Actor) -> ApiResult<String> {
+    let mut out = importers::generic::header_line();
+    out.push('\n');
+    for e in s.app.library(a).await? {
+        let item = s.app.catalog_item(e.item_id).await?;
+        let history = s
+            .app
+            .progress(a, e.item_id)
+            .await?
+            .into_iter()
+            .map(|p| importers::row::HistoryEntry {
+                date: p.occurred_at.to_rfc3339(),
+                progress: serde_json::to_value(&p.progress).ok(),
+            })
+            .collect();
+        let row = importers::ImportRow {
+            source_id: e.id.0.to_string(),
+            kind: e.kind.to_string(),
+            title: item.title,
+            year: item.year,
+            external_ids: item
+                .external_ids
+                .into_iter()
+                .map(|x| (x.namespace, x.value))
+                .collect(),
+            status: Some(e.status.value.as_str().to_string()),
+            rating: e.rating.value.map(Rating::value),
+            notes: e.notes.value,
+            history,
+        };
+        out.push_str(&serde_json::to_string(&row).unwrap_or_default());
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+fn importer(s: &ApiState) -> ApiResult<&std::sync::Arc<importers::Importer>> {
+    s.importer.as_ref().ok_or_else(|| {
+        ApiError::new(
+            axum::http::StatusCode::NOT_FOUND,
+            "not_found",
+            "imports are not enabled",
+        )
+    })
+}
+
+fn import_error(e: importers::ImportError) -> ApiError {
+    use axum::http::StatusCode;
+    match e {
+        importers::ImportError::UnknownFormat(f) => {
+            ApiError::bad_request(format!("unknown import format `{f}`"))
+        }
+        importers::ImportError::Unknown(_) => {
+            ApiError::new(StatusCode::NOT_FOUND, "not_found", "import not found")
+        }
+        importers::ImportError::Forbidden => {
+            ApiError::new(StatusCode::FORBIDDEN, "forbidden", "forbidden")
+        }
+        importers::ImportError::App(a) => a.into(),
+        other => {
+            let msg = other.to_string();
+            if msg.contains("UploadQuota") {
+                ApiError::new(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "quota",
+                    "upload quota exceeded",
+                )
+            } else {
+                tracing::error!(error = %msg, "import failed");
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal",
+                    "internal error",
+                )
+            }
+        }
+    }
+}
+
+/// Queue an import of `bytes` in `format`.
+///
+/// # Errors
+/// Unknown format, quota.
+pub async fn start_import(
+    s: &ApiState,
+    a: Actor,
+    format: &str,
+    bytes: Vec<u8>,
+    dry_run: bool,
+) -> ApiResult<serde_json::Value> {
+    let r = importer(s)?
+        .start(a, format, bytes, dry_run)
+        .await
+        .map_err(import_error)?;
+    Ok(serde_json::to_value(r).unwrap_or_default())
+}
+
+/// # Errors
+/// Unknown import or not the owner.
+pub async fn import_status(s: &ApiState, a: Actor, id: &str) -> ApiResult<serde_json::Value> {
+    let id = parse_id(id, |u| u)?;
+    let r = importer(s)?.status(a, id).await.map_err(import_error)?;
+    Ok(serde_json::to_value(r).unwrap_or_default())
+}

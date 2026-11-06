@@ -13,7 +13,7 @@ variables:
   # compile-checked queries use the committed .sqlx cache (cargo xtask sqlx-prepare)
   SQLX_OFFLINE: "true"
   # web's ssr/hydrate/csr features are exclusive, so no --all-features (DEC-045)
-  NATIVE_FEATURES: "connectors/all,server/gallery,server/all-connectors"
+  NATIVE_FEATURES: "connectors/all,importers/all,server/gallery,server/all-connectors"
   WASM_FEATURES: "web/hydrate,web/gallery"
   POSTGRES_DB: "app_test"
   POSTGRES_USER: "app"

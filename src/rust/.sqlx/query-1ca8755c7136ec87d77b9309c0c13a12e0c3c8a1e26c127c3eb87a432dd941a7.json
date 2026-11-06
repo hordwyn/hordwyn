@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT item_id FROM import_rows WHERE user_id = $1 AND format = $2 AND source_id = $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "item_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "import_rows",
+            "name": "item_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1ca8755c7136ec87d77b9309c0c13a12e0c3c8a1e26c127c3eb87a432dd941a7"
+}

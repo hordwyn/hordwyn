@@ -96,6 +96,16 @@ impl Handler for FetchAsset {
     }
 }
 
+struct Import(Arc<importers::Importer>);
+
+#[async_trait]
+impl Handler for Import {
+    async fn run(&self, job: &Job) -> Result<(), String> {
+        let id = uuid_field(job, "import_id")?;
+        self.0.run(id).await.map(|_| ()).map_err(|e| e.to_string())
+    }
+}
+
 struct Evict(Arc<assets::StorageBudget>);
 
 #[async_trait]
@@ -123,4 +133,8 @@ pub fn worker(s: &Server) -> Worker {
         )
         .handle(assets::FETCH_JOB, Arc::new(FetchAsset(s.assets.clone())))
         .handle(assets::EVICT_JOB, Arc::new(Evict(s.budget.clone())))
+        .handle(
+            importers::IMPORT_JOB,
+            Arc::new(Import(s.api.importer.clone().expect("importer is wired"))),
+        )
 }

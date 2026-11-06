@@ -33,6 +33,7 @@ fn state() -> (ApiState, testkit::TestEnv) {
         ),
         registry: Registry::default(),
         assets: None,
+        importer: None,
         naming: Naming::from_prefix("shelf", "Shelf"),
         secure_cookies: true,
         default_kinds: vec!["movie".into()],
@@ -230,4 +231,110 @@ async fn openapi_document_uses_the_brand_and_lists_paths() {
         assert!(doc["paths"].get(p).is_some(), "missing path {p}");
     }
     assert!(doc["components"]["schemas"]["CatalogItemDto"].is_object());
+}
+
+#[tokio::test]
+async fn export_then_import_moves_a_library_to_another_account() {
+    let t = testkit::TestEnv::with_kinds(Arc::new(kinds::Registry::with_builtins()));
+    let importer = Arc::new(importers::Importer::new(
+        t.app.clone(),
+        Arc::new(importers::MemImportStore::default()),
+        Arc::new(testkit::fakes::MemBlobs::default()),
+        t.jobs.clone(),
+    ));
+    let (mut s, _) = state();
+    s.app = t.app.clone();
+    s.auth = auth::Auth::new(
+        t.app.clone(),
+        Arc::new(auth::MemAuthStore::default()),
+        auth::AuthSettings {
+            signup: auth::SignupMode::Open,
+            ..auth::AuthSettings::default()
+        },
+    );
+    s.importer = Some(importer.clone());
+    let item = t
+        .app
+        .upsert_catalog_item(app::NewCatalogItem {
+            kind: domain::kind::KindId::new("movie").unwrap(),
+            title: "Heat".into(),
+            original_title: None,
+            year: Some(1995),
+            description: None,
+            external_ids: vec![domain::catalog::ExternalId::new("tmdb", "949")],
+            attributes: serde_json::json!({}),
+            cover_url: None,
+        })
+        .await
+        .unwrap();
+    let app = api::router(s);
+    let anna = signed_up(&app).await;
+    call(
+        &app,
+        "POST",
+        &format!("/api/v1/items/{}/progress", item.id.0),
+        Some(&anna),
+        Some(serde_json::json!({"progress": {"type": "finished"}})),
+    )
+    .await;
+    let req = Request::builder()
+        .uri("/api/v1/export")
+        .header(header::AUTHORIZATION, format!("Bearer {anna}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.headers()["content-type"], "application/x-ndjson");
+    let file = resp.into_body().collect().await.unwrap().to_bytes();
+    let text = String::from_utf8(file.to_vec()).unwrap();
+    assert!(text.lines().next().unwrap().contains("library-export"));
+    assert!(text.contains("\"tmdb\":\"949\""));
+
+    let (_, _, ben) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/sign-up",
+        None,
+        Some(serde_json::json!({"username": "ben", "display_name": "Ben", "password": "correct horse battery"})),
+    )
+    .await;
+    let ben = ben["token"].as_str().unwrap().to_string();
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/imports?format=generic-jsonl")
+        .header(header::AUTHORIZATION, format!("Bearer {ben}"))
+        .body(Body::from(text))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    let started: serde_json::Value =
+        serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let id = uuid::Uuid::parse_str(started["id"].as_str().unwrap()).unwrap();
+    // the worker would run the queued job; run it directly here
+    importer.run(id).await.unwrap();
+    let (_, _, report) = call(
+        &app,
+        "GET",
+        &format!("/api/v1/imports/{id}"),
+        Some(&ben),
+        None,
+    )
+    .await;
+    assert_eq!(report["state"], "done");
+    assert_eq!(
+        report["matched"], 1,
+        "matched the existing item by its TMDB id"
+    );
+    let (_, _, lib) = call(&app, "GET", "/api/v1/library", Some(&ben), None).await;
+    assert_eq!(lib[0]["item"]["id"], item.id.0.to_string());
+    assert_eq!(lib[0]["entry"]["status"], "completed");
+    // anna cannot read ben's import
+    let (status, _, _) = call(
+        &app,
+        "GET",
+        &format!("/api/v1/imports/{id}"),
+        Some(&anna),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }

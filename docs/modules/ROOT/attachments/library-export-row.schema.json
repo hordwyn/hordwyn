@@ -1,0 +1,94 @@
+{
+  "$defs": {
+    "HistoryEntry": {
+      "additionalProperties": false,
+      "description": "A progress event of an entry (watched, read, played...).",
+      "properties": {
+        "date": {
+          "description": "RFC 3339 timestamp or `YYYY-MM-DD`.",
+          "type": "string"
+        },
+        "progress": {
+          "default": null,
+          "description": "Progress in the tagged form of the API, e.g. `{\"type\": \"finished\"}`; default finished."
+        }
+      },
+      "required": [
+        "date"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One library entry.",
+  "properties": {
+    "external_ids": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {},
+      "description": "Provider ids, e.g. `{\"tmdb\": \"550\", \"imdb\": \"tt0137523\"}`; used to match the catalog.",
+      "type": "object"
+    },
+    "history": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/HistoryEntry"
+      },
+      "type": "array"
+    },
+    "kind": {
+      "description": "Media kind id (`movie`, `book`, ...).",
+      "type": "string"
+    },
+    "notes": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "rating": {
+      "default": null,
+      "description": "0..=100.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "source_id": {
+      "description": "Stable id of the row in the source; re-importing the same source id updates instead\nof duplicating.",
+      "type": "string"
+    },
+    "status": {
+      "default": null,
+      "description": "Status id of the kind (`planned`, `in_progress`, `completed`, ...).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "title": {
+      "type": "string"
+    },
+    "year": {
+      "default": null,
+      "format": "int32",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "source_id",
+    "kind",
+    "title"
+  ],
+  "title": "ImportRow",
+  "type": "object"
+}

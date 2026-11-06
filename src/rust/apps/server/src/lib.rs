@@ -123,19 +123,7 @@ impl Server {
             .context("connect to Postgres")?;
         store_pg::migrate(&pool).await.context("migrations")?;
 
-        let store = Arc::new(store_pg::PgStore::new(pool.clone()));
-        let repos = Repos {
-            users: store.clone(),
-            companions: store.clone(),
-            link_requests: store.clone(),
-            invites: store.clone(),
-            catalog: store.clone(),
-            library: store.clone(),
-            progress: store.clone(),
-            reviews: store.clone(),
-            lists: store.clone(),
-            sessions: store,
-        };
+        let repos = pg_repos(&pool);
         // Web and worker in separate processes need cross-process events (LISTEN/NOTIFY).
         let bus = if role == ServerRole::All {
             realtime::Bus::local()
@@ -198,6 +186,12 @@ impl Server {
             fanout: SearchFanout::new(app.clone(), registry.clone(), http.clone()),
             registry: registry.clone(),
             assets: Some(assets.clone()),
+            importer: Some(Arc::new(importers::Importer::new(
+                app.clone(),
+                Arc::new(importers::pg::PgImportStore::new(pool.clone())),
+                budget.clone(),
+                Arc::new(queue.clone()),
+            ))),
             naming: api::Naming::from_prefix(&ident, &brand.name),
             secure_cookies: config.auth.secure_cookies,
             default_kinds: kind_ids,
@@ -429,5 +423,22 @@ impl Server {
             .fallback(leptos_axum::file_and_error_handler(web::shell))
             .with_state(options.clone());
         self.base_router().merge(pages)
+    }
+}
+
+/// Every repository port on Postgres.
+fn pg_repos(pool: &sqlx::PgPool) -> Repos {
+    let store = Arc::new(store_pg::PgStore::new(pool.clone()));
+    Repos {
+        users: store.clone(),
+        companions: store.clone(),
+        link_requests: store.clone(),
+        invites: store.clone(),
+        catalog: store.clone(),
+        library: store.clone(),
+        progress: store.clone(),
+        reviews: store.clone(),
+        lists: store.clone(),
+        sessions: store,
     }
 }

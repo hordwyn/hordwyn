@@ -41,6 +41,12 @@ pub struct MemStore {
 }
 
 impl MemStore {
+    /// Number of catalog items (tests).
+    #[must_use]
+    pub fn catalog_len(&self) -> usize {
+        self.state().catalog.len()
+    }
+
     /// Direct access for assertions.
     ///
     /// # Panics
