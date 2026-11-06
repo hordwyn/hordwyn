@@ -88,6 +88,7 @@ dependencies = [
  "realtime",
  "serde",
  "serde_json",
+ "store-pg",
  "testkit",
  "tokio",
  "tower",

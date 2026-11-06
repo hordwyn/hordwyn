@@ -42,6 +42,12 @@ impl Clock for SystemClock {
         *h = h.tick(now_ms);
         *h
     }
+
+    fn observe(&self, remote: Hlc) {
+        let now_ms = u64::try_from(Utc::now().timestamp_millis()).unwrap_or(0);
+        let mut h = self.hlc.lock().expect("hlc");
+        *h = h.receive(remote, now_ms);
+    }
 }
 
 /// `UUIDv7` ids, 256-bit random tokens, blake3 token hashes.

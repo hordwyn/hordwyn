@@ -36,17 +36,19 @@ async fn library_progress_rating_review_roundtrip() {
     assert_eq!(e1.id, e2.id);
     assert_eq!(app.progress(me, movie.id).await.unwrap(), vec![e1]);
 
+    // LWW on the stamp, not on arrival order: a newer server write, then an older offline
+    // edit that arrives later and loses
+    app.rate(me, movie.id, Some(Rating::new(80).unwrap()), None)
+        .await
+        .unwrap();
     app.rate(
         me,
         movie.id,
-        Some(Rating::new(80).unwrap()),
-        Some(Hlc::new(u64::MAX >> 1, 0, 1)),
+        Some(Rating::new(5).unwrap()),
+        Some(Hlc::new(1, 0, 1)),
     )
     .await
     .unwrap();
-    app.rate(me, movie.id, Some(Rating::new(5).unwrap()), None)
-        .await
-        .unwrap();
     let entry = app.entry(me, movie.id).await.unwrap().unwrap();
     assert_eq!(entry.rating.value, Some(Rating::new(80).unwrap()));
     assert_eq!(entry.status.value, Status::completed());

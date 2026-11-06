@@ -2,6 +2,8 @@
 //! `csr`). Generic components come from `ui`; data comes from server functions backed by
 //! [`backend::Backend`], implemented by the server binary.
 #![deny(unsafe_code)]
+// Deeply nested view types exceed the default query depth in release wasm builds.
+#![recursion_limit = "256"]
 // Leptos `#[component]` props are owned by design, and `view!` bodies are long markup.
 // Components return views that are always used; `must_use` on them adds nothing.
 #![allow(

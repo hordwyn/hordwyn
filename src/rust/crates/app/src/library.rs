@@ -30,15 +30,22 @@ impl App {
         if let Some(entry) = self.repos.library.get(actor.user_id, item_id).await? {
             return Ok(entry);
         }
-        let stamp = self.stamp(None);
+        // Defaults carry the smallest stamp, so any real write (also an older offline edit
+        // synced later) wins over "not set yet" (DEC-128).
+        let unset = Hlc::new(0, 0, 0);
+        let status_stamp = if status.is_some() {
+            self.stamp(None)
+        } else {
+            unset
+        };
         let entry = LibraryEntry {
             id: EntryId(self.uuid()),
             user_id: actor.user_id,
             item_id,
             kind: item.kind,
-            status: Lww::new(status.unwrap_or_else(Status::planned), stamp),
-            rating: Lww::new(None, stamp),
-            notes: Lww::new(None, stamp),
+            status: Lww::new(status.unwrap_or_else(Status::planned), status_stamp),
+            rating: Lww::new(None, unset),
+            notes: Lww::new(None, unset),
             added_at: self.now(),
         };
         self.save_entry(&entry).await?;

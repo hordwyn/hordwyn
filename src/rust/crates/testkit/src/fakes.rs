@@ -44,6 +44,12 @@ impl Clock for FixedClock {
         self.state.lock().expect("lock").0
     }
 
+    fn observe(&self, remote: Hlc) {
+        let mut s = self.state.lock().expect("lock");
+        let now_ms = u64::try_from(s.0.timestamp_millis()).unwrap_or(0);
+        s.1 = s.1.receive(remote, now_ms);
+    }
+
     fn hlc(&self) -> Hlc {
         let mut s = self.state.lock().expect("lock");
         let now_ms = u64::try_from(s.0.timestamp_millis()).unwrap_or(0);

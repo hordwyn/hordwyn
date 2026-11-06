@@ -36,3 +36,5 @@ testkit.workspace = true
 tower = { version = "0.5", features = ["util"] }
 uuid.workspace = true
 kinds.workspace = true
+store-pg.workspace = true
+chrono.workspace = true

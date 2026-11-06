@@ -157,6 +157,8 @@ pub trait Clock: Send + Sync {
     fn now(&self) -> Timestamp;
     /// Next hybrid logical clock stamp of this node.
     fn hlc(&self) -> Hlc;
+    /// Merge a stamp received from a client (sync), so later local stamps sort after it.
+    fn observe(&self, _remote: Hlc) {}
 }
 
 pub trait IdGen: Send + Sync {
@@ -332,4 +334,27 @@ pub enum HttpError {
 #[async_trait]
 pub trait HttpFetch: Send + Sync {
     async fn fetch(&self, req: HttpRequest) -> Result<HttpResponse, HttpError>;
+}
+
+// ---------------------------------------------------------------- sync
+
+/// One row of a user's change feed (D-12).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ChangeRef {
+    pub seq: i64,
+    pub entity: String,
+    pub id: uuid::Uuid,
+    /// `upsert` or `delete`.
+    pub op: String,
+}
+
+/// Per-user change sequence for sync clients ("changes since cursor").
+#[async_trait]
+pub trait ChangeFeed: Send + Sync {
+    async fn changes_since(
+        &self,
+        user: UserId,
+        cursor: i64,
+        limit: i64,
+    ) -> RepoResult<Vec<ChangeRef>>;
 }

@@ -151,3 +151,49 @@ async fn item_detail_returns_immediately_and_enqueues_one_refresh() {
     assert_eq!(jobs[0].kind, app::REFRESH_JOB);
     assert_eq!(jobs[0].lane, app::ports::Lane::Interactive);
 }
+
+#[tokio::test]
+async fn client_stamps_from_the_far_future_do_not_lock_a_field() {
+    let env = TestEnv::new();
+    let (_, me) = common::user(&env, "alice").await;
+    let movie = common::item(&env.app, "movie", "Heat").await;
+    let now_ms = u64::try_from(env.clock.now_for_tests().timestamp_millis()).unwrap();
+    // a device whose clock is a day ahead
+    env.app
+        .rate(
+            me,
+            movie.id,
+            Some(Rating::new(10).unwrap()),
+            Some(Hlc::new(now_ms + 86_400_000, 0, 7)),
+        )
+        .await
+        .unwrap();
+    // a normal later write still wins
+    env.app
+        .rate(me, movie.id, Some(Rating::new(90).unwrap()), None)
+        .await
+        .unwrap();
+    let e = env.app.entry(me, movie.id).await.unwrap().unwrap();
+    assert_eq!(e.rating.value, Some(Rating::new(90).unwrap()));
+    // a stamp within the allowed drift is taken as is, and later server writes sort after it
+    let soon = Hlc::new(now_ms + 60_000, 0, 7);
+    env.app
+        .rate(me, movie.id, Some(Rating::new(70).unwrap()), Some(soon))
+        .await
+        .unwrap();
+    let e = env.app.entry(me, movie.id).await.unwrap().unwrap();
+    assert_eq!(
+        (e.rating.value, e.rating.stamp),
+        (Some(Rating::new(70).unwrap()), soon)
+    );
+    env.app
+        .rate(me, movie.id, Some(Rating::new(50).unwrap()), None)
+        .await
+        .unwrap();
+    let e = env.app.entry(me, movie.id).await.unwrap().unwrap();
+    assert_eq!(
+        e.rating.value,
+        Some(Rating::new(50).unwrap()),
+        "server clock observed the client stamp"
+    );
+}

@@ -44,6 +44,8 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(companions, create_companion))
         .routes(routes!(lists, create_list))
         .routes(routes!(add_to_list))
+        .routes(routes!(sync_changes))
+        .routes(routes!(sync_commands))
         .routes(routes!(start_import))
         .routes(routes!(import_status))
         .routes(routes!(export))
@@ -423,6 +425,43 @@ async fn add_to_list(
     Json(b): Json<ListItemBody>,
 ) -> ApiResult<Json<ListDto>> {
     Ok(Json(ops::add_to_list(&s, a, &id, &b.item_id).await?))
+}
+
+// ---------------------------------------------------------------- sync
+
+#[derive(Deserialize, IntoParams)]
+struct ChangesParams {
+    /// Last `seq` the client has seen (0 for everything).
+    #[serde(default)]
+    cursor: i64,
+    #[serde(default = "default_limit")]
+    limit: i64,
+}
+
+const fn default_limit() -> i64 {
+    crate::sync::MAX_CHANGES
+}
+
+/// Changes since `cursor` for this user (D-12).
+#[utoipa::path(get, path = "/sync/changes", tag = "sync", params(ChangesParams),
+    responses((status = 200, body = contracts::SyncChangesDto)))]
+async fn sync_changes(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Query(p): Query<ChangesParams>,
+) -> ApiResult<Json<contracts::SyncChangesDto>> {
+    Ok(Json(crate::sync::pull(&s, a, p.cursor, p.limit).await?))
+}
+
+/// Apply a batch of offline commands (idempotent by `op_id`).
+#[utoipa::path(post, path = "/sync/commands", tag = "sync", request_body = contracts::SyncBatchDto,
+    responses((status = 200, body = Vec<contracts::SyncResultDto>)))]
+async fn sync_commands(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Json(b): Json<contracts::SyncBatchDto>,
+) -> Json<Vec<contracts::SyncResultDto>> {
+    Json(crate::sync::push(&s, a, b).await)
 }
 
 // ---------------------------------------------------------------- import and export

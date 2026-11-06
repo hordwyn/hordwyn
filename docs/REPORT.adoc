@@ -39,7 +39,13 @@ DEC-098..105. Self-review for M04+ (see "Reviews").
 |M09 Connectors (partial) |- (not complete) |IGDB, Podcast Index, TheTVDB with docs, fixtures and tests.
 Blocked: AniList (terms), BGG (docs unreachable), Open Library, MusicBrainz, VNDB, Metron
 (KICKOFF rule 6), Hardcover (not researched).
-|M10-M17 |- |Not started (see "Known gaps").
+|M12 Importers (partial) |- (not complete) |Import engine (streaming rows, idempotent,
+dry run, resumable, per-row report, SSE progress, `user_import` lane, queued matching),
+generic JSON Lines/CSV format with published JSON Schema, export, REST endpoints. Legacy
+importer stub (fixture missing). Trakt, Goodreads, BG Stats, BGG not built (DEC-122).
+|M16 Sync protocol |`m16` |`GET /sync/changes`, `POST /sync/commands`, HLC per field with
+server clock merge and drift cap; convergence and replay test. Tauri spike not done.
+|M10, M11, M13, M14, M15, M17 |- |Not started (see "Known gaps").
 |===
 
 == Test results
@@ -96,9 +102,9 @@ Blocked: AniList (terms), BGG (docs unreachable), Open Library, MusicBrainz, VND
 
 == Known gaps and bugs
 
-* M10 (board-game research), M11 (board games), M12 (importers), M13 (notifications), M14
-  (integrations), M15 (sharing flows), M16 (sync protocol), M17 (hardening, load test, image
-  size, G2) not done.
+* M10 (board-game research), M11 (board games), M13 (notifications), M14 (integrations),
+  M15 (sharing flows), M17 (hardening, load test, image size, G2) not done; M12 and M09 only
+  in part.
 * Legacy importer fixture (Q4) not present in the repository.
 * Docker image build and compose quick start are only verified by the GitLab kaniko job; no
   Docker on the build host.
@@ -110,8 +116,8 @@ Blocked: AniList (terms), BGG (docs unreachable), Open Library, MusicBrainz, VND
 
 . Owner decisions: rule 6 for public API docs of GPL-licensed services (DEC-106), anime/manga
   source (DEC-108), BGG docs and token (DEC-107).
-. M12 importers (Trakt, Goodreads, generic JSON) - most value for moving an existing library.
+. M12: Trakt importer (API docs research), Goodreads and BG Stats from owner sample exports.
 . M10/M11 board games once BGG is unblocked.
 . M15 sharing flows (the companion/user model already supports them in `app`).
-. M16 sync endpoints (change feed and HLC fields exist).
+. M16: Tauri desktop spike on a host with more disk.
 . M13, M14, M17 and an independent review (G2, and of M04-M08).

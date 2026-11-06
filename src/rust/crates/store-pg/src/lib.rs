@@ -69,3 +69,24 @@ pub(crate) fn be(e: sqlx::Error) -> RepoError {
 }
 
 pub(crate) type Res<T> = RepoResult<T>;
+
+#[async_trait::async_trait]
+impl app::ports::ChangeFeed for PgStore {
+    async fn changes_since(
+        &self,
+        user: domain::ids::UserId,
+        cursor: i64,
+        limit: i64,
+    ) -> Res<Vec<app::ports::ChangeRef>> {
+        Ok(PgStore::changes_since(self, user, cursor, limit)
+            .await?
+            .into_iter()
+            .map(|c| app::ports::ChangeRef {
+                seq: c.seq,
+                entity: c.entity,
+                id: c.entity_id,
+                op: c.op,
+            })
+            .collect())
+    }
+}

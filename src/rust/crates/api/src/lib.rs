@@ -10,6 +10,7 @@ mod error;
 mod extract;
 pub mod ops;
 mod routes;
+pub mod sync;
 
 use std::sync::Arc;
 
@@ -62,6 +63,8 @@ pub struct ApiState {
     pub registry: Registry,
     pub assets: Option<Arc<assets::AssetService>>,
     pub importer: Option<Arc<importers::Importer>>,
+    /// Per-user change feed for sync clients.
+    pub changes: Option<Arc<dyn app::ports::ChangeFeed>>,
     pub naming: Naming,
     pub secure_cookies: bool,
     /// Enabled kinds searched when the client does not name one.

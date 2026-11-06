@@ -27,6 +27,9 @@ use ports::{
     UserRepo,
 };
 
+/// How far ahead of the server clock a client's HLC stamp may be (5 minutes).
+pub const MAX_CLOCK_DRIFT_MS: u64 = 5 * 60 * 1000;
+
 /// Repository adapters, one per aggregate.
 #[derive(Clone)]
 pub struct Repos {
@@ -59,8 +62,18 @@ impl App {
     }
 
     /// HLC stamp for a write: the client's stamp if it sent one, else a fresh server stamp.
+    /// Client stamps more than [`MAX_CLOCK_DRIFT_MS`] ahead of the server are not trusted: a
+    /// device with a wrong clock would otherwise win every later write and drag the server
+    /// clock along (DEC-126). Such writes get a fresh server stamp instead.
     fn stamp(&self, client: Option<Hlc>) -> Hlc {
-        client.unwrap_or_else(|| self.clock.hlc())
+        let now_ms = u64::try_from(self.now().timestamp_millis()).unwrap_or(0);
+        match client {
+            Some(h) if h.wall_ms <= now_ms.saturating_add(MAX_CLOCK_DRIFT_MS) => {
+                self.clock.observe(h);
+                h
+            }
+            _ => self.clock.hlc(),
+        }
     }
 
     fn uuid(&self) -> uuid::Uuid {

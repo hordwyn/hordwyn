@@ -1,0 +1,39 @@
+= Sync protocol
+
+Clients that work offline (the future desktop app, scripts) keep a local copy and sync with
+two endpoints.
+
+== Pull
+
+`GET /api/v1/sync/changes?cursor=<seq>&limit=<n>` returns the user's changes after `cursor`
+in order, each with `seq`, `entity`, `id`, `op` (`upsert`/`delete`) and, for library
+entries, the current state with per-field HLC stamps. Store the returned `cursor`; `more`
+says whether another page is waiting.
+
+== Push
+
+`POST /api/v1/sync/commands` with a batch:
+
+[source,json]
+----
+{"commands": [
+  {"op_id": "<uuid>", "command": {"type": "add", "item_id": "<uuid>"}},
+  {"op_id": "<uuid>", "command": {"type": "rate", "item_id": "<uuid>", "rating": 80,
+   "hlc": "0000019b7b3dc800-00000000-00000002"}},
+  {"op_id": "<uuid>", "command": {"type": "log_progress", "item_id": "<uuid>",
+   "progress": {"type": "finished"}}}
+]}
+----
+
+Commands: `add`, `set_status`, `rate`, `set_notes` (each mutable field with the client's
+HLC stamp) and `log_progress` (append-only, keyed by `op_id`). The answer has one result per
+command; a failing command does not stop the others.
+
+== Guarantees
+
+* Replaying a batch changes nothing (no new change rows).
+* Mutable fields are last-writer-wins per field on the HLC stamp; two clients that edited
+  the same entry offline converge once both have pushed and pulled.
+* Progress events are never merged or overwritten.
+* The server's clock merges every client stamp it sees, so its own later writes win over
+  older offline edits.

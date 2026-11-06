@@ -186,6 +186,7 @@ impl Server {
             fanout: SearchFanout::new(app.clone(), registry.clone(), http.clone()),
             registry: registry.clone(),
             assets: Some(assets.clone()),
+            changes: Some(Arc::new(store_pg::PgStore::new(pool.clone()))),
             importer: Some(Arc::new(importers::Importer::new(
                 app.clone(),
                 Arc::new(importers::pg::PgImportStore::new(pool.clone())),

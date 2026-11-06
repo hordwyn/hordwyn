@@ -34,6 +34,7 @@ fn state() -> (ApiState, testkit::TestEnv) {
         registry: Registry::default(),
         assets: None,
         importer: None,
+        changes: None,
         naming: Naming::from_prefix("shelf", "Shelf"),
         secure_cookies: true,
         default_kinds: vec!["movie".into()],

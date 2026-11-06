@@ -220,6 +220,100 @@ pub struct ListDto {
     pub item_ids: Vec<String>,
 }
 
+// ---------------------------------------------------------------- sync (D-12)
+
+/// A mutation recorded by an offline client. Mutable fields carry the client's HLC stamp
+/// (`{wall_ms:016x}-{counter:08x}-{node:08x}`); the server keeps the newest stamp per field.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SyncCommandDto {
+    Add {
+        item_id: String,
+    },
+    SetStatus {
+        item_id: String,
+        status: String,
+        hlc: String,
+    },
+    Rate {
+        item_id: String,
+        rating: Option<u8>,
+        hlc: String,
+    },
+    SetNotes {
+        item_id: String,
+        notes: Option<String>,
+        hlc: String,
+    },
+    /// Append-only; idempotent by `op_id`.
+    LogProgress {
+        item_id: String,
+        #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+        progress: serde_json::Value,
+        occurred_at: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct SyncCommandEnvelope {
+    /// Client-generated id (UUID); replaying a command with the same id changes nothing.
+    pub op_id: String,
+    pub command: SyncCommandDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct SyncBatchDto {
+    pub commands: Vec<SyncCommandEnvelope>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct SyncResultDto {
+    pub op_id: String,
+    pub ok: bool,
+    pub error: Option<ErrorDto>,
+}
+
+/// A library entry with the stamps a client needs to merge it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct SyncEntryDto {
+    pub id: String,
+    pub item_id: String,
+    pub kind: String,
+    pub status: String,
+    pub status_hlc: String,
+    pub rating: Option<u8>,
+    pub rating_hlc: String,
+    pub notes: Option<String>,
+    pub notes_hlc: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct SyncChangeDto {
+    pub seq: i64,
+    pub entity: String,
+    pub id: String,
+    /// `upsert` or `delete`.
+    pub op: String,
+    /// Current state for library entries (absent after a delete).
+    pub entry: Option<SyncEntryDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct SyncChangesDto {
+    /// Pass back as `cursor` to continue.
+    pub cursor: i64,
+    pub changes: Vec<SyncChangeDto>,
+    /// More changes are waiting.
+    pub more: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
