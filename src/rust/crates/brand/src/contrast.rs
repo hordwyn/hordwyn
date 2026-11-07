@@ -144,7 +144,8 @@ fn parse_oklch(args: &str) -> Option<Rgb> {
     ))
 }
 
-/// One theme whose accent pair is below [`AA_TEXT`] or could not be checked.
+/// The accent pair of one theme with its ratio (a finding when below [`AA_TEXT`] or not
+/// checkable).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContrastFinding {
     /// `light` or `dark`.
@@ -168,6 +169,18 @@ pub(crate) fn findings(
     light: &std::collections::BTreeMap<String, String>,
     dark: &std::collections::BTreeMap<String, String>,
 ) -> Vec<ContrastFinding> {
+    pairs(light, dark, false)
+        .into_iter()
+        .filter(|f| f.ratio.is_none_or(|r| r < AA_TEXT))
+        .collect()
+}
+
+/// The accent pair of both themes with its ratio (`all`), or only the themes the brand sets.
+pub(crate) fn pairs(
+    light: &std::collections::BTreeMap<String, String>,
+    dark: &std::collections::BTreeMap<String, String>,
+    all: bool,
+) -> Vec<ContrastFinding> {
     let get = |m: &std::collections::BTreeMap<String, String>, key: &str| {
         m.iter()
             .find(|(k, _)| k.trim_start_matches("--") == key)
@@ -176,7 +189,7 @@ pub(crate) fn findings(
     let mut out = Vec::new();
     for ((theme, def_p, def_f), vars) in DEFAULTS.into_iter().zip([light, dark]) {
         let (p, f) = (get(vars, "primary"), get(vars, "primary-foreground"));
-        if p.is_none() && f.is_none() {
+        if !all && p.is_none() && f.is_none() {
             continue;
         }
         let primary = p.unwrap_or_else(|| def_p.into());
@@ -184,14 +197,12 @@ pub(crate) fn findings(
         let ratio = parse_color(&primary)
             .zip(parse_color(&foreground))
             .map(|(a, b)| contrast_ratio(a, b));
-        if ratio.is_none_or(|r| r < AA_TEXT) {
-            out.push(ContrastFinding {
-                theme,
-                primary,
-                foreground,
-                ratio,
-            });
-        }
+        out.push(ContrastFinding {
+            theme,
+            primary,
+            foreground,
+            ratio,
+        });
     }
     out
 }

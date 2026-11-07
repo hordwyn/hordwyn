@@ -13,9 +13,13 @@ const PAGES = [
   "/people",
   "/lists",
   "/you",
-  "/notifications",
-  "/integrations",
-  "/sources",
+  "/settings/account",
+  "/settings/notifications",
+  "/settings/integrations",
+  "/settings/sources",
+  "/settings/privacy",
+  // a member on an admin page: the "admins only" page
+  "/admin",
   "/no-such-page",
 ];
 
@@ -193,7 +197,7 @@ test("single-key shortcuts, but not while typing; aria-current marks the section
   await page.goto("/history");
   await hydrated(page);
   await expect(nav.getByRole("link", { name: "History" })).toHaveAttribute("aria-current", "page");
-  await page.goto("/notifications");
+  await page.goto("/settings/notifications");
   await hydrated(page);
   await expect(nav.locator("[aria-current=page]")).toHaveCount(0);
 });

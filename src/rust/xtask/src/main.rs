@@ -256,6 +256,11 @@ fn dev_env() -> Vec<(&'static str, String)> {
             "APP__STORAGE__FS_ROOT",
             dev.join("blobs").to_string_lossy().into_owned(),
         ),
+        // the secrets key of the dev database stays next to it, outside the repo (DEC-243)
+        (
+            "APP__SECRETS__KEY_FILE",
+            dev.join("secrets.key").to_string_lossy().into_owned(),
+        ),
     ];
     wanted
         .into_iter()

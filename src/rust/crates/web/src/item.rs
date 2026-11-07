@@ -38,6 +38,8 @@ type Res<T> = Resource<Result<T, ServerFnError>>;
 #[derive(Clone, Copy)]
 struct ItemUi {
     tab: RwSignal<String>,
+    /// The tab last chosen by the page rather than the user; replaced when the kind loads late.
+    auto_tab: RwSignal<String>,
     episodes: EpisodeUi,
     watched: WatchedState,
     play: PlayState,
@@ -86,6 +88,7 @@ pub fn ItemPage() -> impl IntoView {
     let companions = RwSignal::new(Vec::new());
     let ui = ItemUi {
         tab: RwSignal::new(String::new()),
+        auto_tab: RwSignal::new(String::new()),
         episodes: EpisodeUi::default(),
         watched: WatchedState::new(),
         play: PlayState::new(companions),
@@ -521,8 +524,11 @@ fn tab_values(page: &ItemPageDto, kind: Option<&KindDto>) -> Vec<&'static str> {
 #[component]
 fn ItemTabs(page: ItemPageDto, kind: Option<KindDto>, info: ItemInfo, ui: ItemUi) -> impl IntoView {
     let values = tab_values(&page, kind.as_ref());
-    if !values.contains(&ui.tab.get_untracked().as_str()) {
+    // the kind can arrive after a first render without it: a default chosen then is replaced
+    let current = ui.tab.get_untracked();
+    if !values.contains(&current.as_str()) || current == ui.auto_tab.get_untracked() {
         ui.tab.set(values[0].to_string());
+        ui.auto_tab.set(values[0].to_string());
     }
     let history_count = page.progress.len();
     let next = page

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, user_id, name, config, enabled, created_at FROM notify_channels\n             WHERE user_id = $1 ORDER BY created_at, id",
+  "query": "SELECT id, lane, kind, attempts, last_error, updated_at FROM jobs\n             WHERE state = 'dead' ORDER BY updated_at DESC, id DESC LIMIT $1",
   "describe": {
     "columns": [
       {
@@ -9,70 +9,70 @@
         "type_info": "Uuid",
         "origin": {
           "Table": {
-            "table": "notify_channels",
+            "table": "jobs",
             "name": "id"
           }
         }
       },
       {
         "ordinal": 1,
-        "name": "user_id",
-        "type_info": "Uuid",
+        "name": "lane",
+        "type_info": "Int2",
         "origin": {
           "Table": {
-            "table": "notify_channels",
-            "name": "user_id"
+            "table": "jobs",
+            "name": "lane"
           }
         }
       },
       {
         "ordinal": 2,
-        "name": "name",
+        "name": "kind",
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "notify_channels",
-            "name": "name"
+            "table": "jobs",
+            "name": "kind"
           }
         }
       },
       {
         "ordinal": 3,
-        "name": "config",
-        "type_info": "Jsonb",
+        "name": "attempts",
+        "type_info": "Int4",
         "origin": {
           "Table": {
-            "table": "notify_channels",
-            "name": "config"
+            "table": "jobs",
+            "name": "attempts"
           }
         }
       },
       {
         "ordinal": 4,
-        "name": "enabled",
-        "type_info": "Bool",
+        "name": "last_error",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "notify_channels",
-            "name": "enabled"
+            "table": "jobs",
+            "name": "last_error"
           }
         }
       },
       {
         "ordinal": 5,
-        "name": "created_at",
+        "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
-            "table": "notify_channels",
-            "name": "created_at"
+            "table": "jobs",
+            "name": "updated_at"
           }
         }
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Int8"
       ]
     },
     "nullable": [
@@ -80,9 +80,9 @@
       false,
       false,
       false,
-      false,
+      true,
       false
     ]
   },
-  "hash": "6966af9b468202232d211d6b762b286d73074d7b637f2522274c59df61cf8f96"
+  "hash": "762da6995f6ec9846790e2e1e49b4e3b0ae86caa3b410806f33fac4898131886"
 }

@@ -8,9 +8,11 @@
 //! jobs are claimed again once their lease expires.
 #![deny(unsafe_code)]
 
+mod admin;
 mod queue;
 mod worker;
 
+pub use admin::{CronEntry, DeadJob, LaneCounts};
 pub use queue::{Job, PgQueue, QueueError, backoff};
 pub use worker::{Handler, Worker, WorkerConfig};
 

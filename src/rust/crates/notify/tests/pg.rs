@@ -27,7 +27,10 @@ async fn engine_on_postgres_dedupes_and_queues_digests() {
         .register_user("root", "Root", None, Role::Admin)
         .await
         .unwrap();
-    let store = Arc::new(PgNotifyStore::new(pool));
+    let store = Arc::new(PgNotifyStore::new(
+        pool,
+        Arc::new(testkit::fakes::FakeCipher::default()),
+    ));
     assert_eq!(store.admins().await.unwrap(), vec![admin.id]);
     let engine = Engine::new(
         store.clone(),
@@ -131,4 +134,96 @@ async fn engine_on_postgres_dedupes_and_queues_digests() {
     // deleting the channel removes its deliveries
     store.delete_channel(ch.id).await.unwrap();
     assert_eq!(store.deliveries(admin.id, 10).await.unwrap().len(), 0);
+}
+
+/// addendum-1 2.2 (DEC-140 reversed): channel secrets are stored encrypted, the JSON config
+/// only keeps the redacted form; rows from before are migrated; a missing key pauses the
+/// channel instead of sending placeholders.
+#[tokio::test]
+async fn channel_secrets_are_encrypted_at_rest() {
+    use app::ports::SecretRows;
+    let Some(pool) = store_pg::testing::fresh_db().await else {
+        return;
+    };
+    let mut t = testkit::TestEnv::new();
+    let pg = Arc::new(store_pg::PgStore::new(pool.clone()));
+    t.app.repos.users = pg.clone();
+    t.app.repos.companions = pg;
+    let user = t
+        .app
+        .register_user("root", "Root", None, Role::Admin)
+        .await
+        .unwrap();
+    let cipher = Arc::new(testkit::fakes::FakeCipher::default());
+    let store = PgNotifyStore::new(pool.clone(), cipher.clone());
+    let ch = Channel {
+        id: uuid::Uuid::now_v7(),
+        user: user.id,
+        name: "Push".into(),
+        config: ChannelConfig::Gotify {
+            server: "https://push.example.org".into(),
+            token: "gotify-token-123".into(),
+        },
+        enabled: true,
+        created_at: t.clock.now(),
+    };
+    store.put_channel(&ch).await.unwrap();
+    let (config, secret): (serde_json::Value, Option<Vec<u8>>) =
+        sqlx::query_as("SELECT config, secret FROM notify_channels WHERE id = $1")
+            .bind(ch.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!config.to_string().contains("gotify-token-123"), "{config}");
+    assert!(secret.is_some());
+    assert_eq!(store.channel(ch.id).await.unwrap().unwrap(), ch);
+
+    // a row written before the migration: secret only in the JSON
+    let old = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO notify_channels (id, user_id, name, config, enabled, created_at)
+         VALUES ($1, $2, 'Old', $3, true, now())",
+    )
+    .bind(old)
+    .bind(user.id.0)
+    .bind(
+        serde_json::json!({"kind": "webhook", "url": "https://h.example.org", "secret": "whsec_x"}),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(store.seal_plaintext(cipher.as_ref()).await.unwrap(), 1);
+    assert_eq!(store.seal_plaintext(cipher.as_ref()).await.unwrap(), 0);
+    let (config,): (serde_json::Value,) =
+        sqlx::query_as("SELECT config FROM notify_channels WHERE id = $1")
+            .bind(old)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!config.to_string().contains("whsec_x"));
+    let back = store.channel(old).await.unwrap().unwrap();
+    assert!(
+        matches!(back.config, ChannelConfig::Webhook { ref secret, .. } if secret == "whsec_x")
+    );
+    assert_eq!(store.version_counts().await.unwrap(), vec![(1, 2)]);
+
+    // key v2 only: locked -> paused, redacted, never the placeholder as a secret
+    let v2 = Arc::new(testkit::fakes::FakeCipher {
+        version: 2,
+        loaded: vec![2],
+    });
+    let locked = PgNotifyStore::new(pool.clone(), v2.clone());
+    let c = locked.channel(ch.id).await.unwrap().unwrap();
+    assert!(!c.enabled);
+    assert!(
+        matches!(c.config, ChannelConfig::Gotify { ref token, .. } if token != "gotify-token-123")
+    );
+    // rotation with both versions loaded re-wraps everything
+    let both = testkit::fakes::FakeCipher {
+        version: 2,
+        loaded: vec![2, 1],
+    };
+    let b = store.rewrap_batch(&both, 2, None, 100).await.unwrap();
+    assert_eq!((b.rewrapped, b.locked), (2, 0));
+    assert_eq!(store.version_counts().await.unwrap(), vec![(2, 2)]);
 }

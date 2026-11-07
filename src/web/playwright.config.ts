@@ -15,7 +15,11 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${port}`,
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    // the instance admins exist before any spec runs (tests/global.setup.ts)
+    { name: "setup", testMatch: /global\.setup\.ts/ },
+    { name: "chromium", use: { ...devices["Desktop Chrome"] }, dependencies: ["setup"] },
+  ],
   webServer: [
     {
       command: "node tests/tmdb-mock.mjs",
@@ -41,6 +45,8 @@ export default defineConfig({
         APP__AUTH__SECURE_COOKIES: "false",
         APP__SEARCH__BACKEND: "postgres",
         APP__STORAGE__BACKEND: "memory",
+        // a temporary secrets key: every run starts on a fresh database (UX2-1)
+        APP__SECRETS__EPHEMERAL: "true",
         APP__BRAND__DIR: process.env.E2E_BRAND_DIR ?? `${repo}config/brand/default`,
         APP__CONNECTORS__TMDB__BASE_URL: `http://127.0.0.1:${tmdbPort}`,
         APP__CONNECTORS__TMDB__API_KEY: "e2e-not-a-real-key",

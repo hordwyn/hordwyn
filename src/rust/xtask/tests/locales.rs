@@ -70,6 +70,17 @@ const WEB_FAMILIES: &[&str] = &[
     "library-facet-",
     // labels of the brand's legal links (`[legal]` keys)
     "legal-",
+    // UX phase 2: words for codes the server names (contracts::admin); the admin pages
+    // build them from the DTO fields
+    "admin-error-",
+    "admin-warning-",
+    "admin-setting-",
+    "source-state-",
+    "source-test-",
+    "admin-source-field-",
+    "admin-health-",
+    "setup-checklist-",
+    "admin-audit-",
 ];
 
 #[test]

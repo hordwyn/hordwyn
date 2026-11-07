@@ -44,6 +44,8 @@ pub trait UserRepo: Send + Sync {
     async fn by_username(&self, username: &str) -> RepoResult<Option<User>>;
     /// Number of accounts (the first one becomes admin).
     async fn count(&self) -> RepoResult<u64>;
+    /// Every account, oldest first (admin users page).
+    async fn list(&self) -> RepoResult<Vec<User>>;
     async fn update(&self, user: &User) -> RepoResult<()>;
     /// Delete the user and everything they own. Companions of other users are untouched.
     async fn delete(&self, id: UserId) -> RepoResult<()>;
@@ -473,6 +475,11 @@ pub struct HttpRequest {
     pub headers: Vec<(String, String)>,
     pub body: Option<Vec<u8>>,
     pub lane: Lane,
+    /// A 401/403 answer says nothing about the instance credential: the request used a
+    /// member's own credential or an unsaved candidate key (UX2-S2, UX2-S5). The governed
+    /// client then keeps it out of the shared per-connector rejection state.
+    #[serde(default)]
+    pub skip_auth_record: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -527,4 +534,78 @@ pub trait ChangeFeed: Send + Sync {
         cursor: i64,
         limit: i64,
     ) -> RepoResult<Vec<ChangeRef>>;
+}
+
+// ---------------------------------------------------------------- secrets at rest
+
+/// Where an encrypted value belongs: bound into the ciphertext as associated data, so a
+/// value copied to another row, column or purpose does not decrypt (addendum-1 2.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SecretSlot<'a> {
+    /// One purpose per secret field (`connector_credential`, `channel_secret`, ...).
+    pub purpose: &'a str,
+    /// Primary key of the row.
+    pub row: &'a str,
+    pub field: &'a str,
+}
+
+/// The stored value cannot be decrypted: its key version is not loaded, or the key or the
+/// bytes are wrong (indistinguishable for an AEAD). Such rows are `locked`, never deleted.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("secret cannot be decrypted (key version {version:?})")]
+pub struct SecretLocked {
+    /// Key version named in the stored bytes, if they are long enough to carry one.
+    pub version: Option<u16>,
+}
+
+/// Envelope encryption of secrets at rest (the `auth` key ring in production, a fixed key
+/// in tests). Callers zero plaintext buffers after use where they can.
+pub trait SecretCipher: Send + Sync {
+    /// Encrypt with the active key version.
+    fn seal(&self, slot: SecretSlot<'_>, plaintext: &[u8]) -> Vec<u8>;
+
+    /// Decrypt a value written by [`SecretCipher::seal`] for the same slot.
+    ///
+    /// # Errors
+    /// [`SecretLocked`] for an unknown key version, a wrong key or tampered bytes.
+    fn open(&self, slot: SecretSlot<'_>, blob: &[u8]) -> Result<Vec<u8>, SecretLocked>;
+
+    /// Re-wrap the value's data key with the active key version (KEK rotation); `None` when
+    /// it already uses the active version.
+    ///
+    /// # Errors
+    /// [`SecretLocked`] when the value cannot be decrypted.
+    fn rewrap(&self, slot: SecretSlot<'_>, blob: &[u8]) -> Result<Option<Vec<u8>>, SecretLocked>;
+}
+
+/// One kind of stored secret (a purpose) as the rotation job and the status page see it.
+/// Implemented by the store that owns the column.
+#[async_trait]
+pub trait SecretRows: Send + Sync {
+    fn purpose(&self) -> &'static str;
+    /// Encrypt values still stored in plain text (migration on start); returns the count.
+    async fn seal_plaintext(&self, cipher: &dyn SecretCipher) -> RepoResult<u64>;
+    /// Rows per key version.
+    async fn version_counts(&self) -> RepoResult<Vec<(u16, u64)>>;
+    /// Re-wrap up to `limit` rows that are not on the active version `active`, in row id
+    /// order after `after` (keyset paging, so rows that stay locked never hide the rows
+    /// behind them). Rows that cannot be decrypted are left as they are and counted as
+    /// locked; values too short to carry a key version are skipped.
+    async fn rewrap_batch(
+        &self,
+        cipher: &dyn SecretCipher,
+        active: u16,
+        after: Option<uuid::Uuid>,
+        limit: u32,
+    ) -> RepoResult<RewrapBatch>;
+}
+
+/// One page of [`SecretRows::rewrap_batch`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RewrapBatch {
+    pub rewrapped: u64,
+    pub locked: u64,
+    /// Id of the last row looked at, the `after` of the next page; `None` when the page was
+    /// empty (done).
+    pub last: Option<uuid::Uuid>,
 }

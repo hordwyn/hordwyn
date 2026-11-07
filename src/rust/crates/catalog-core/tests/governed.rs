@@ -46,6 +46,7 @@ fn get(server: &MockServer, p: &str) -> HttpRequest {
         headers: vec![],
         body: None,
         lane: Lane::Interactive,
+        skip_auth_record: false,
     }
 }
 
@@ -218,4 +219,110 @@ async fn transient_5xx_is_retried() {
         200
     );
     assert!(!http.circuit_open("fake"));
+}
+
+/// design.md 4.4: the source status is computed from the governed client's counters.
+#[tokio::test]
+async fn counters_record_calls_rate_limits_auth_failures_and_the_circuit() {
+    let server = MockServer::start().await;
+    Mock::given(path("/ok"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+        .mount(&server)
+        .await;
+    Mock::given(path("/limited"))
+        .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "0"))
+        .mount(&server)
+        .await;
+    Mock::given(path("/denied"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    Mock::given(path("/broken"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let mut p = policy(&server);
+    p.max_retries = 0;
+    p.cache_ttl_secs = 0;
+    let stats = Arc::new(catalog_core::SourceStats::default());
+    let mut h = GovernedHttp::new("test-agent/1", None);
+    h.add_connector("fake", p);
+    let http = h.with_stats(stats.clone());
+    http.fetch(get(&server, "/ok")).await.unwrap();
+    let _ = http.fetch(get(&server, "/limited")).await;
+    let r = http.fetch(get(&server, "/denied")).await.unwrap();
+    assert_eq!(r.status, 401);
+    let c = stats.counters("fake");
+    assert_eq!((c.calls_24h, c.rate_limited_24h), (3, 1));
+    assert_eq!(c.last_auth_status, Some(401));
+    assert!(c.last_ok_at.is_some());
+    assert!(stats.rejected("fake"));
+    stats.key_changed("fake");
+    assert!(!stats.rejected("fake"), "a new key clears the rejection");
+    for _ in 0..3 {
+        let _ = http.fetch(get(&server, "/broken")).await;
+    }
+    let c = stats.counters("fake");
+    assert!(c.circuit_open_until.is_some(), "{c:?}");
+    assert_eq!(stats.counters("other").calls_24h, 0);
+}
+
+/// UX2-S2 / UX2-S5: a rejection of a member's own credential or of an unsaved candidate key
+/// says nothing about the instance key: it is not recorded in the shared counters.
+#[tokio::test]
+async fn rejections_of_user_scoped_requests_are_not_recorded() {
+    let server = MockServer::start().await;
+    Mock::given(path("/denied"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    let mut p = policy(&server);
+    p.cache_ttl_secs = 0;
+    let stats = Arc::new(catalog_core::SourceStats::default());
+    let mut h = GovernedHttp::new("test-agent/1", None);
+    h.add_connector("fake", p);
+    let http = h.with_stats(stats.clone());
+    let mut req = get(&server, "/denied");
+    req.skip_auth_record = true;
+    assert_eq!(http.fetch(req).await.unwrap().status, 401);
+    assert!(!stats.rejected("fake"), "{:?}", stats.counters("fake"));
+    assert_eq!(stats.counters("fake").calls_24h, 1, "the call still counts");
+    assert_eq!(
+        http.fetch(get(&server, "/denied")).await.unwrap().status,
+        401
+    );
+    assert!(stats.rejected("fake"), "an instance request is recorded");
+}
+
+/// UX2-S1: a network error never carries the request URL (query strings may hold keys).
+#[tokio::test]
+async fn network_errors_do_not_carry_the_url() {
+    // a port nothing listens on
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let mut p = ConnectorPolicy {
+        hosts: vec![addr.to_string()],
+        ..ConnectorPolicy::oidc("127.0.0.1", Some(addr.port()))
+    };
+    p.max_retries = 0;
+    let mut h = GovernedHttp::new("test-agent/1", None);
+    h.add_connector("fake", p);
+    let err = h
+        .fetch(HttpRequest {
+            connector: "fake".into(),
+            op: "test".into(),
+            method: "GET".into(),
+            url: format!("http://{addr}/token?client_secret=s3cr3t-value"),
+            headers: vec![],
+            body: None,
+            lane: Lane::Interactive,
+            skip_auth_record: false,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(err, HttpError::Network(_)), "{err:?}");
+    let shown = err.to_string();
+    assert!(!shown.contains("s3cr3t-value"), "{shown}");
+    assert!(!shown.contains("/token"), "{shown}");
 }

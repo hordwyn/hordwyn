@@ -26,9 +26,46 @@ Postgres is the source of truth. Back up:
 * user uploads in the blob store: objects under `up/` (fs backend: `<fs_root>/up/`). Image
   variants (`img/`) and cached provider responses (`http/`) are derived data and are
   regenerated on demand after a restore;
-* the brand directory if you changed it.
+* the brand directory if you changed it;
+* the secrets key file (`secrets.key`, see below). The database dump and the key file are
+  one backup unit: a dump restored without its key yields locked secrets.
 
 Meilisearch does not need a backup: after a restore run `cli reindex --clear`.
+
+== Secrets at rest
+
+Data-source keys entered in the admin area, notification channel secrets and TOTP seeds are
+stored encrypted (AES-256-GCM, envelope encryption: a random data key per value, wrapped by a
+versioned key-encryption key). Each value is bound to its purpose, row and field, so a value
+copied elsewhere does not decrypt. Passwords, session, invite and integration tokens and TOTP
+recovery codes are hashed, not encrypted.
+
+Where the key comes from, first match wins:
+
+. the key file `secrets.key_file` (`APP__SECRETS__KEY_FILE`, default `data/secrets.key`; the
+  container image uses `/data/secrets.key`): one key per line, `v<n>:<base64 of 32 bytes>`,
+  newest first;
+. `APP__SECRETS__KEYS`: the same lines joined with `,`. Environment variables can leak through
+  process listings and crash dumps, so the file is the recommended path; docker and podman
+  secrets mount as files.
+
+On the first start without either, the server generates `v1`, writes the file with mode 0600
+and logs one line. If the database already holds encrypted values but no key is found, the
+server refuses to start and names the file and the variable: restore the key file. A value
+whose key version is not loaded (or that fails to decrypt) is shown as locked; it is never
+deleted, and it unlocks when the right key is back. With the in-memory storage backend (tests,
+demos) and no key configured a temporary key is used.
+
+=== Rotating the key
+
+Rotate every two years or when staff changes (the admin overview reminds after two years):
+
+. generate 32 random bytes, for example `head -c 32 /dev/urandom | base64`;
+. add `v2:<base64>` as the first line of the key file (keep the `v1` line) and restart;
+. Admin > Security: "Re-encrypt now" re-wraps every value with `v2` (a nightly job does the
+  same while values are left on an old version); the page shows the rows per version;
+. when no value uses `v1` any more, the page marks it removable: delete the line yourself once
+  no backup you keep still needs it. The server never edits the key file.
 
 == Search index
 

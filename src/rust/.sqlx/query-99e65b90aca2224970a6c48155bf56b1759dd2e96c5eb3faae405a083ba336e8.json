@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT token_hash, user_id, created_at, last_seen_at, expires_at\n             FROM auth_sessions WHERE token_hash = $1",
+  "query": "SELECT token_hash, user_id, created_at, last_seen_at, expires_at, reauth_at,\n                    reauth_method, reauth_slide_at\n             FROM auth_sessions WHERE user_id = $1 ORDER BY last_seen_at DESC",
   "describe": {
     "columns": [
       {
@@ -57,11 +57,44 @@
             "name": "expires_at"
           }
         }
+      },
+      {
+        "ordinal": 5,
+        "name": "reauth_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "auth_sessions",
+            "name": "reauth_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "reauth_method",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "auth_sessions",
+            "name": "reauth_method"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "reauth_slide_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "auth_sessions",
+            "name": "reauth_slide_at"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -69,8 +102,11 @@
       false,
       false,
       false,
-      false
+      false,
+      true,
+      true,
+      true
     ]
   },
-  "hash": "c9536bb3f4a4602715653634a560fdc2520a8349e66848847deed0f4dd080b72"
+  "hash": "99e65b90aca2224970a6c48155bf56b1759dd2e96c5eb3faae405a083ba336e8"
 }

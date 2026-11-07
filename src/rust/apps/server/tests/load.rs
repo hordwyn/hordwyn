@@ -58,7 +58,7 @@ async fn search_and_library_with_many_items() {
     };
     let toml = format!(
         "[database]\nurl = \"{db_url}\"\nmax_connections = 20\n[auth]\nsignup = \"open\"\n\
-         secure_cookies = false\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
+         secure_cookies = false\n[secrets]\nephemeral = true\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
          [brand]\ndir = \"{}/../../../../config/brand/default\"\n",
         env!("CARGO_MANIFEST_DIR"),
     );

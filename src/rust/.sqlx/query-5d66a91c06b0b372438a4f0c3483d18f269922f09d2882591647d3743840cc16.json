@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT (get_byte(secret, 1) * 256 + get_byte(secret, 2))::int AS \"v!\",\n                      COUNT(*) AS \"n!\"\n               FROM notify_channels WHERE secret IS NOT NULL AND length(secret) >= 3\n               GROUP BY 1 ORDER BY 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "v!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "5d66a91c06b0b372438a4f0c3483d18f269922f09d2882591647d3743840cc16"
+}

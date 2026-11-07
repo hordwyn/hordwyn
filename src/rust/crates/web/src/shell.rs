@@ -43,14 +43,17 @@ pub fn section_of(path: &str) -> &'static str {
         "history" => "/history",
         "lists" | "shared" => "/lists",
         "people" => "/people",
-        "you" | "notifications" | "integrations" | "sources" => "/you",
+        "you" | "settings" | "admin" => "/you",
         _ => "",
     }
 }
 
-/// Where the admin entry points until the admin area exists: the data sources page is the
-/// only instance-level page so far (design.md 6.10).
-const ADMIN_HREF: &str = "/sources";
+/// The admin entry of the account menu and the You hub leads to Admin > Overview
+/// (addendum-1 3.4).
+const ADMIN_HREF: &str = "/admin";
+
+/// Notifications live in the settings area (design.md 6.8); the bell links there.
+const NOTIFICATIONS_HREF: &str = "/settings/notifications";
 
 /// The five sections of the top bar (design.md 3.2, 3.3); all routes exist.
 fn sections() -> Vec<(&'static str, &'static str)> {
@@ -63,18 +66,17 @@ fn sections() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-/// Account pages that are not top-level sections (no settings area yet).
+/// Account pages that are not top-level sections: notifications, stats, the settings area
+/// and, for admins, the admin area.
 fn account_links(is_admin: bool) -> Vec<(&'static str, &'static str)> {
     let mut links = vec![
-        ("/notifications", "nav-notifications"),
+        (NOTIFICATIONS_HREF, "nav-notifications"),
         ("/stats", "nav-stats"),
-        ("/integrations", "nav-integrations"),
+        ("/settings/account", "nav-settings"),
     ];
-    links.push(if is_admin {
-        (ADMIN_HREF, "shell-admin")
-    } else {
-        ("/sources", "nav-sources")
-    });
+    if is_admin {
+        links.push((ADMIN_HREF, "shell-admin"));
+    }
     links
 }
 
@@ -268,6 +270,7 @@ pub fn AppShell(children: Children) -> impl IntoView {
     let help = RwSignal::new(false);
     provide_context(ShortcutsOpen(help));
     let _ = provide_toasts();
+    provide_context(crate::reauth::Reauth::new());
     provide_theme();
     let online = provide_online();
     shortcut_keys(cfg.signed_in, palette, help);
@@ -282,7 +285,7 @@ pub fn AppShell(children: Children) -> impl IntoView {
         <main id="main" tabindex="-1" class="mx-auto w-full max-w-6xl px-4 pt-6 pb-[calc(1.5rem+var(--tab-bar-height))] focus:outline-none">
             {children()}
         </main>
-        {cfg.signed_in.then(|| view! { <MobileTabs current=current/> })}
+        {cfg.signed_in.then(|| view! { <MobileTabs current=current/> <crate::reauth::ReauthDialog/> })}
         <crate::palette::SearchPalette/>
         <ShortcutHelp open=help/>
         <Toaster dismiss_label=i18n.t("shell-dismiss")/>
@@ -366,7 +369,7 @@ fn SignedInBar(current: Signal<String>) -> impl IntoView {
         >
             <Icon name=IconName::Plus class="size-5"/>
         </button>
-        <a href="/notifications" aria-label=bell class=ICON_BTN>
+        <a href=NOTIFICATIONS_HREF aria-label=bell class=ICON_BTN>
             <Icon name=IconName::Bell class="size-5"/>
             {(cfg.unread > 0).then(|| view! {
                 <span class="absolute right-2 top-2 size-2 rounded-full border-2 border-background bg-destructive"></span>
@@ -394,15 +397,12 @@ const ACCOUNT_TRIGGER: &str = "account-menu-trigger";
 fn AccountMenu() -> impl IntoView {
     let cfg = expect_context::<ClientConfig>();
     let i18n = use_i18n();
-    let theme = expect_context::<ThemeChoice>().0;
-    let help = expect_context::<ShortcutsOpen>().0;
     let open = RwSignal::new(false);
     // the item that takes focus when the menu opens: `Home` (first) or `End` (last)
     let start = StoredValue::new("Home");
     let trigger = NodeRef::<html::Button>::new();
     let container = NodeRef::<html::Div>::new();
     let menu = NodeRef::<html::Div>::new();
-    let sign_out = sign_out_action();
     let label = i18n.t_args(
         "shell-account",
         &[("name", cfg.display_name.clone().into())],
@@ -441,8 +441,6 @@ fn AccountMenu() -> impl IntoView {
         start.set_value(at);
         open.set(true);
     };
-    let links = account_links(cfg.is_admin);
-    let support = cfg.support_url.clone();
     let (name, username) = (cfg.display_name.clone(), cfg.username.clone());
     view! {
         <div node_ref=container class="relative">
@@ -484,37 +482,51 @@ fn AccountMenu() -> impl IntoView {
                         <p class="truncate text-small text-muted-foreground">{username.clone()}</p>
                     </div>
                     <div node_ref=menu id="account-menu" role="menu" aria-label=label.clone() on:keydown=on_key>
-                        {links.iter().map(|(href, key)| view! {
-                            <a role="menuitem" tabindex="-1" href=*href class=MENU_ITEM on:click=move |_| open.set(false)>
-                                {t(key)}
-                            </a>
-                        }).collect_view()}
-                        <div role="separator" class=SEPARATOR></div>
-                        <ThemeItems theme=theme close=close/>
-                        <div role="separator" class=SEPARATOR></div>
-                        <LanguageItems close=close/>
-                        <div role="separator" class=SEPARATOR></div>
-                        <button type="button" role="menuitem" tabindex="-1" class=MENU_ITEM
-                            on:click=move |_| { open.set(false); sign_out.dispatch(()); }>
-                            <Icon name=IconName::LogOut/>
-                            {t("nav-sign-out")}
-                        </button>
-                        <div role="separator" class=SEPARATOR></div>
-                        <button type="button" role="menuitem" tabindex="-1" class=MENU_ITEM
-                            on:click=move |_| { close.run(()); help.set(true); }>
-                            {t("shell-shortcuts")}
-                            <KeyHint keys=vec!["?".to_string()] class="ml-auto"/>
-                        </button>
-                        {support.clone().map(|url| view! {
-                            <a role="menuitem" tabindex="-1" href=url target="_blank" rel="noopener" class=MENU_ITEM
-                                on:click=move |_| close.run(())>
-                                {t("shell-help")}
-                            </a>
-                        })}
+                        <AccountMenuItems open=open close=close/>
                     </div>
                 </div>
             </Show>
         </div>
+    }
+}
+
+/// The items of the account menu: the account and admin links, theme, language, sign out,
+/// shortcuts and help.
+#[component]
+fn AccountMenuItems(open: RwSignal<bool>, close: Callback<()>) -> impl IntoView {
+    let cfg = expect_context::<ClientConfig>();
+    let theme = expect_context::<ThemeChoice>().0;
+    let help = expect_context::<ShortcutsOpen>().0;
+    let sign_out = sign_out_action();
+    let links = account_links(cfg.is_admin);
+    view! {
+        {links.iter().map(|(href, key)| view! {
+            <a role="menuitem" tabindex="-1" href=*href class=MENU_ITEM on:click=move |_| open.set(false)>
+                {t(key)}
+            </a>
+        }).collect_view()}
+        <div role="separator" class=SEPARATOR></div>
+        <ThemeItems theme=theme close=close/>
+        <div role="separator" class=SEPARATOR></div>
+        <LanguageItems close=close/>
+        <div role="separator" class=SEPARATOR></div>
+        <button type="button" role="menuitem" tabindex="-1" class=MENU_ITEM
+            on:click=move |_| { open.set(false); sign_out.dispatch(()); }>
+            <Icon name=IconName::LogOut/>
+            {t("nav-sign-out")}
+        </button>
+        <div role="separator" class=SEPARATOR></div>
+        <button type="button" role="menuitem" tabindex="-1" class=MENU_ITEM
+            on:click=move |_| { close.run(()); help.set(true); }>
+            {t("shell-shortcuts")}
+            <KeyHint keys=vec!["?".to_string()] class="ml-auto"/>
+        </button>
+        {cfg.support_url.clone().map(|url| view! {
+            <a role="menuitem" tabindex="-1" href=url target="_blank" rel="noopener" class=MENU_ITEM
+                on:click=move |_| close.run(())>
+                {t("shell-help")}
+            </a>
+        })}
     }
 }
 
@@ -620,9 +632,9 @@ fn LanguageItems(close: Callback<()>) -> impl IntoView {
     }
 }
 
-/// The language on the You hub: a segmented choice like the theme.
+/// The language on the You hub and Settings > Account: a segmented choice like the theme.
 #[component]
-fn LanguageChoice() -> impl IntoView {
+pub(crate) fn LanguageChoice() -> impl IntoView {
     let cfg = expect_context::<ClientConfig>();
     let i18n = use_i18n();
     let value = RwSignal::new(
@@ -650,6 +662,18 @@ fn LanguageChoice() -> impl IntoView {
         })
         .collect();
     view! { <Segmented id="you-language" label=i18n.t("shell-language") value=value options=options/> }
+}
+
+/// The theme as a segmented choice (You hub, Settings > Account).
+#[component]
+pub(crate) fn ThemeChoiceControl() -> impl IntoView {
+    let i18n = use_i18n();
+    let theme = expect_context::<ThemeChoice>().0;
+    let options: Vec<SegmentedOption> = theme_options()
+        .into_iter()
+        .map(|(value, key, icon)| SegmentedOption::new(value, i18n.t(key)).icon(icon))
+        .collect();
+    view! { <Segmented id="you-theme" label=i18n.t("shell-theme") value=theme options=options/> }
 }
 
 /// Mobile bottom navigation: Home, Library, Add, History, You (owner ruling, DEC-171).
@@ -753,11 +777,10 @@ pub fn You() -> impl IntoView {
         }
         .into_any();
     }
-    let theme = expect_context::<ThemeChoice>().0;
     let help = expect_context::<ShortcutsOpen>().0;
     let sign_out = sign_out_action();
     let mut notifications =
-        NavItem::new("/notifications", i18n.t("nav-notifications")).icon(IconName::Bell);
+        NavItem::new(NOTIFICATIONS_HREF, i18n.t("nav-notifications")).icon(IconName::Bell);
     if cfg.unread > 0 {
         notifications =
             notifications.count(i18n.t_args("shell-unread", &[("count", cfg.unread.into())]));
@@ -772,19 +795,15 @@ pub fn You() -> impl IntoView {
         account_links(cfg.is_admin)
             .into_iter()
             // notifications and stats are already in the list above, with their icons
-            .filter(|(href, _)| !matches!(*href, "/notifications" | "/stats"))
+            .filter(|(href, _)| *href != NOTIFICATIONS_HREF && *href != "/stats")
             .map(|(href, key)| NavItem::new(href, i18n.t(key))),
     );
     let location = use_location();
-    let options: Vec<SegmentedOption> = theme_options()
-        .into_iter()
-        .map(|(value, key, icon)| SegmentedOption::new(value, i18n.t(key)).icon(icon))
-        .collect();
     view! {
         <crate::pages::PageTitle text=cfg.display_name.clone()/>
         <div class="grid max-w-md gap-6">
             <SideNav id="you" label=i18n.t("nav-you") groups=vec![NavGroup::new(items)] current=Signal::derive(move || location.pathname.get())/>
-            <Segmented id="you-theme" label=i18n.t("shell-theme") value=theme options=options/>
+            <ThemeChoiceControl/>
             <LanguageChoice/>
             <div class="flex flex-wrap gap-2">
                 <button type="button" class="inline-flex min-h-11 items-center rounded-md border border-input px-4 text-sm font-medium cursor-pointer" on:click=move |_| help.set(true)>
@@ -833,7 +852,9 @@ mod tests {
         assert_eq!(section_of("/history"), "/history");
         assert_eq!(section_of("/shared/lists/x"), "/lists");
         assert_eq!(section_of("/people"), "/people");
-        assert_eq!(section_of("/notifications"), "/you");
+        assert_eq!(section_of("/settings/notifications"), "/you");
+        assert_eq!(section_of("/admin/users"), "/you");
+        assert_eq!(section_of("/notifications"), "");
         assert_eq!(section_of("/sessions"), "");
     }
 
@@ -841,7 +862,8 @@ mod tests {
     fn five_sections_and_an_admin_entry_only_for_admins() {
         let hrefs: Vec<_> = sections().into_iter().map(|(h, _)| h).collect();
         assert_eq!(hrefs, ["/", "/library", "/history", "/lists", "/people"]);
-        assert!(account_links(true).iter().any(|(_, k)| *k == "shell-admin"));
+        assert!(account_links(true).contains(&("/admin", "shell-admin")));
+        assert!(account_links(false).contains(&("/settings/account", "nav-settings")));
         assert!(
             !account_links(false)
                 .iter()

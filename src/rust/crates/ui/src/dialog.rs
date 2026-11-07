@@ -21,7 +21,7 @@ pub enum SheetSide {
     Adaptive,
 }
 
-/// Controls Tab can reach inside the panel.
+/// Controls inside the panel; [`focusables`] keeps those in the Tab order.
 const FOCUSABLE: &str = "a[href], button:not([disabled]), input:not([disabled]), \
     select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
 
@@ -32,6 +32,8 @@ fn focusables(panel: &web_sys::HtmlElement) -> Vec<web_sys::HtmlElement> {
     (0..list.length())
         .filter_map(|i| list.item(i))
         .filter_map(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
+        // `tabindex=-1` (roving groups, UX2-W3) is focusable but not a Tab stop
+        .filter(|e| e.tab_index() >= 0)
         .collect()
 }
 
@@ -61,6 +63,16 @@ fn trap_tab(panel: &web_sys::HtmlElement, ev: &leptos::ev::KeyboardEvent) {
     }
 }
 
+/// Focus the control named `id` inside the panel (the re-auth password, UX2-W18), else
+/// the panel itself.
+fn focus_first(panel: &web_sys::HtmlElement, id: Option<&str>) {
+    let named = id
+        .and_then(|id| document().get_element_by_id(id))
+        .filter(|e| panel.contains(Some(e)))
+        .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok());
+    let _ = named.as_ref().unwrap_or(panel).focus();
+}
+
 /// Focus the opener if it is still in the page, else the element with id `fallback`.
 fn restore_focus(opener: Option<web_sys::HtmlElement>, fallback: Option<&str>) {
     let body = document().body();
@@ -85,6 +97,7 @@ fn Panel(
     panel_class: &'static str,
     class: MaybeProp<String>,
     return_to: Option<String>,
+    initial_focus: Option<String>,
     can_close: Option<Callback<(), bool>>,
     children: ChildrenFn,
 ) -> impl IntoView {
@@ -109,7 +122,7 @@ fn Panel(
             }
             // tracks the node ref too: the panel mounts after `open` turns true
             if let Some(el) = panel.get() {
-                let _ = el.focus();
+                focus_first(&el, initial_focus.as_deref());
             }
         } else if was_open {
             restore_focus(opener.take(), return_to.as_deref());
@@ -168,7 +181,6 @@ fn Panel(
 }
 /// Centered modal dialog. `close_label` is the (translated) label of the close button;
 /// `return_to` is the id of the element that gets focus on close when the opener is gone.
-/// Centered modal dialog. `close_label` is the (translated) label of the close button.
 #[component]
 pub fn Dialog(
     open: RwSignal<bool>,
@@ -177,6 +189,9 @@ pub fn Dialog(
     #[prop(into, optional)] description: Option<String>,
     #[prop(into, optional)] class: MaybeProp<String>,
     #[prop(into, optional)] return_to: Option<String>,
+    /// Id of the control that takes focus when the panel opens (else the panel itself).
+    #[prop(into, optional)]
+    initial_focus: Option<String>,
     /// Asked before the panel closes; `false` keeps it open (a sheet with unsaved changes
     /// shows its discard question instead).
     #[prop(optional, into)]
@@ -192,6 +207,7 @@ pub fn Dialog(
             panel_class="left-1/2 top-1/2 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-lg"
             class=class
             return_to=return_to
+            initial_focus=initial_focus
             can_close=can_close
             children=children
         />
@@ -208,6 +224,9 @@ pub fn Sheet(
     #[prop(into, optional)] description: Option<String>,
     #[prop(into, optional)] class: MaybeProp<String>,
     #[prop(into, optional)] return_to: Option<String>,
+    /// Id of the control that takes focus when the panel opens (else the panel itself).
+    #[prop(into, optional)]
+    initial_focus: Option<String>,
     /// Asked before the panel closes; `false` keeps it open (a sheet with unsaved changes
     /// shows its discard question instead).
     #[prop(optional, into)]
@@ -232,6 +251,7 @@ pub fn Sheet(
             panel_class=panel_class
             class=class
             return_to=return_to
+            initial_focus=initial_focus
             can_close=can_close
             children=children
         />

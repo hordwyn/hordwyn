@@ -5,8 +5,12 @@
 //! hash is stored. Password hashing runs on tokio's blocking pool, never on a worker thread.
 #![deny(unsafe_code)]
 
+pub mod admin;
+pub mod admin_pg;
+mod fresh;
 pub mod oidc;
 pub mod pg;
+pub mod secrets;
 mod store;
 
 use std::sync::Arc;
@@ -27,7 +31,11 @@ use domain::ids::UserId;
 use domain::user::{Actor, Role, User};
 use thiserror::Error;
 
-pub use store::{AuthStore, Credentials, MemAuthStore, OidcIdentity, Session};
+pub use fresh::{REAUTH_CAP_MINUTES, REAUTH_SLIDE_MINUTES, RECOVERY_CODES, ReauthStatus};
+pub use store::{
+    AuthStore, Credentials, InviteStore, MemAuthStore, MemInviteStore, OidcIdentity, RecoveryCode,
+    Session, SignupInvite,
+};
 
 /// Minimum password length (from the shared rules in `contracts::auth`).
 pub const MIN_PASSWORD_LEN: usize = contracts::auth::PASSWORD_MIN_LEN;
@@ -91,6 +99,14 @@ pub enum AuthError {
     /// Too many failed sign-ins for this name; try again later (G2-4).
     #[error("too many failed attempts, try again in {retry_after_secs} s")]
     TooManyAttempts { retry_after_secs: i64 },
+    #[error("this account is disabled")]
+    AccountDisabled,
+    /// The authenticator seed is stored but its key is not loaded (addendum-1 2.2).
+    #[error("the authenticator cannot be checked right now")]
+    TotpLocked,
+    /// The action needs a fresh proof (DEC-191).
+    #[error("confirm it is you first")]
+    ReauthRequired,
 }
 
 fn username_rule_message(r: UsernameRule) -> &'static str {
@@ -128,6 +144,9 @@ impl AuthError {
             Self::UsernameTaken => AuthErrorCode::UsernameTaken,
             Self::DisplayNameTooLong => AuthErrorCode::DisplayNameTooLong,
             Self::TooManyAttempts { .. } => AuthErrorCode::TooManyAttempts,
+            Self::AccountDisabled => AuthErrorCode::AccountDisabled,
+            Self::TotpLocked => AuthErrorCode::TotpLocked,
+            Self::ReauthRequired => AuthErrorCode::ReauthRequired,
             Self::App(_) | Self::Store(_) | Self::Oidc(_) => return None,
         })
     }
@@ -312,8 +331,9 @@ pub struct TotpEnrolment {
 pub struct Auth {
     app: App,
     store: Arc<dyn AuthStore>,
+    invites: Arc<dyn InviteStore>,
     clock: Arc<dyn Clock>,
-    settings: AuthSettings,
+    settings: Arc<std::sync::RwLock<AuthSettings>>,
     throttle: Arc<Throttle>,
     username_checks: Arc<Window>,
 }
@@ -325,16 +345,29 @@ impl Auth {
         Self {
             app,
             store,
+            invites: Arc::new(MemInviteStore::default()),
             clock,
-            settings,
+            settings: Arc::new(std::sync::RwLock::new(settings)),
             throttle: Arc::default(),
             username_checks: Arc::default(),
         }
     }
 
+    /// The current settings (admins change sign-up mode and session length at run time).
     #[must_use]
-    pub fn settings(&self) -> &AuthSettings {
-        &self.settings
+    pub fn settings(&self) -> AuthSettings {
+        self.settings
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Change the settings; sessions created from now on use them.
+    pub fn update_settings(&self, f: impl FnOnce(&mut AuthSettings)) {
+        f(&mut self
+            .settings
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner));
     }
 
     fn now(&self) -> DateTime<Utc> {
@@ -365,36 +398,66 @@ impl Auth {
             return Err(AuthError::UsernameTaken);
         }
         let hash = hash_password(s.password.clone()).await?;
-        let user = if let Some(token) = invite {
-            self.app
-                .accept_invite(token, &username, &display_name)
+        // an admin invite is claimed before the account exists, so two sign-ups racing on
+        // one invite cannot both get in (UX2-S4); a failed creation gives it back
+        let claimed = match invite {
+            Some(t) => self.claim_signup_invite(t).await?,
+            None => None,
+        };
+        let created = self
+            .create_account(
+                first,
+                invite.filter(|_| claimed.is_none()),
+                &username,
+                &display_name,
+                s.email.clone(),
+            )
+            .await;
+        if let Some(id) = claimed {
+            self.finish_signup_invite(id, created.as_ref().ok().map(|u| u.id))
+                .await?;
+        }
+        let user = created?;
+        self.store
+            .put_credentials(&Credentials {
+                password_hash: Some(hash),
+                ..Credentials::empty(user.id)
+            })
+            .await?;
+        let token = self.create_session(user.id, "password").await?;
+        Ok((user, token))
+    }
+
+    /// The account itself: through a companion invite (`companion_invite`), else a plain
+    /// account (admin for the first one).
+    async fn create_account(
+        &self,
+        first: bool,
+        companion_invite: Option<&str>,
+        username: &str,
+        display_name: &str,
+        email: Option<String>,
+    ) -> Result<User, AuthError> {
+        if let Some(token) = companion_invite {
+            return self
+                .app
+                .accept_invite(token, username, display_name)
                 .await
                 .map_err(|e| match e {
                     AppError::NotFound(_) | AppError::Conflict(_) => AuthError::InvalidInvite,
                     e => AuthError::App(e),
-                })?
-        } else {
-            let role = if first { Role::Admin } else { Role::Member };
-            self.app
-                .register_user(&username, &display_name, s.email.clone(), role)
-                .await
-                .map_err(|e| match e {
-                    // lost a race for the name
-                    AppError::Conflict(_) => AuthError::UsernameTaken,
-                    e => AuthError::App(e),
-                })?
-        };
-        self.store
-            .put_credentials(&Credentials {
-                user_id: user.id,
-                password_hash: Some(hash),
-                totp_secret: None,
-                totp_enabled: false,
-                totp_last_step: None,
+                });
+        }
+        // an admin invite (or none) creates a plain member account
+        let role = if first { Role::Admin } else { Role::Member };
+        self.app
+            .register_user(username, display_name, email, role)
+            .await
+            .map_err(|e| match e {
+                // lost a race for the name
+                AppError::Conflict(_) => AuthError::UsernameTaken,
+                e => AuthError::App(e),
             })
-            .await?;
-        let token = self.create_session(user.id).await?;
-        Ok((user, token))
     }
 
     /// May an account be created now: the first account, open sign-up, or a valid invite.
@@ -404,10 +467,12 @@ impl Auth {
         if self.app.user_count().await? == 0 {
             return Ok(true);
         }
-        match (self.settings.signup, invite) {
+        match (self.settings().signup, invite) {
             (SignupMode::Closed, _) | (SignupMode::Invite, None) => Err(AuthError::SignupClosed),
             (_, Some(token)) => {
-                if self.app.invite_is_valid(token).await? {
+                if self.app.invite_is_valid(token).await?
+                    || self.signup_invite_is_valid(token).await?
+                {
                     Ok(false)
                 } else {
                     Err(AuthError::InvalidInvite)
@@ -514,11 +579,34 @@ impl Auth {
         if !ok || creds.password_hash.is_none() {
             return Err(AuthError::InvalidCredentials);
         }
-        if creds.totp_enabled {
-            let code = totp.ok_or(AuthError::TotpRequired)?;
-            self.check_totp(&mut creds, code, &user.username).await?;
+        if self.store.is_disabled(user.id).await? {
+            return Err(AuthError::AccountDisabled);
         }
-        self.create_session(user.id).await
+        let method = self.second_factor(&mut creds, totp, &user.username).await?;
+        self.create_session(user.id, method).await
+    }
+
+    /// The TOTP step when the account has one (a recovery code also works); returns the
+    /// proof method (`password` or `password+totp`).
+    async fn second_factor(
+        &self,
+        creds: &mut Credentials,
+        code: Option<&str>,
+        account: &str,
+    ) -> Result<&'static str, AuthError> {
+        if !creds.totp_enabled {
+            return Ok("password");
+        }
+        if creds.totp_locked {
+            return Err(AuthError::TotpLocked);
+        }
+        let code = code.ok_or(AuthError::TotpRequired)?;
+        if fresh::looks_like_recovery_code(code) {
+            self.use_recovery(creds.user_id, code).await?;
+        } else {
+            self.check_totp(creds, code, account).await?;
+        }
+        Ok("password+totp")
     }
 
     async fn check_totp(
@@ -547,12 +635,13 @@ impl Auth {
         totp_rs::Builder::new()
             .with_secret(secret)
             .with_account_name(account)
-            .with_issuer(Some(self.settings.totp_issuer.as_str()))
+            .with_issuer(Some(self.settings().totp_issuer))
             .build()
             .map_err(|e| AuthError::Store(format!("totp: {e}")))
     }
 
-    async fn create_session(&self, user: UserId) -> Result<SessionToken, AuthError> {
+    /// A new session; signing in counts as a fresh proof made with `method` (DEC-191).
+    async fn create_session(&self, user: UserId, method: &str) -> Result<SessionToken, AuthError> {
         let token = URL_SAFE_NO_PAD.encode(random_bytes::<32>());
         let now = self.now();
         self.store
@@ -561,7 +650,10 @@ impl Auth {
                 user_id: user,
                 created_at: now,
                 last_seen_at: now,
-                expires_at: now + Duration::days(i64::from(self.settings.session_days)),
+                expires_at: now + Duration::days(i64::from(self.settings().session_days)),
+                reauth_at: Some(now),
+                reauth_method: Some(method.to_string()),
+                reauth_slide_at: None,
             })
             .await?;
         Ok(SessionToken(token))
@@ -588,7 +680,7 @@ impl Auth {
         };
         if now - s.last_seen_at > Duration::hours(1) {
             s.last_seen_at = now;
-            s.expires_at = now + Duration::days(i64::from(self.settings.session_days));
+            s.expires_at = now + Duration::days(i64::from(self.settings().session_days));
             self.store.update_session(&s).await?;
         }
         Ok(Some(Actor {
@@ -624,33 +716,33 @@ impl Auth {
         })
     }
 
-    /// Activate TOTP after the user proved they can generate codes.
+    /// Activate TOTP after the user proved they can generate codes. Returns the new
+    /// recovery codes (OD-08), shown once; only their hashes are stored.
     ///
     /// # Errors
     /// [`AuthError::InvalidTotp`] or storage errors.
-    pub async fn totp_confirm(&self, actor: Actor, code: &str) -> Result<(), AuthError> {
+    pub async fn totp_confirm(&self, actor: Actor, code: &str) -> Result<Vec<String>, AuthError> {
         let user = self.app.user(actor.user_id).await?;
         let mut creds = self.credentials_or_default(actor.user_id).await?;
         self.check_totp(&mut creds, code, &user.username).await?;
         creds.totp_enabled = true;
         self.store.put_credentials(&creds).await?;
-        Ok(())
+        self.new_recovery_codes(actor.user_id).await
     }
 
     async fn credentials_or_default(&self, user: UserId) -> Result<Credentials, AuthError> {
-        Ok(self.store.credentials(user).await?.unwrap_or(Credentials {
-            user_id: user,
-            password_hash: None,
-            totp_secret: None,
-            totp_enabled: false,
-            totp_last_step: None,
-        }))
+        Ok(self
+            .store
+            .credentials(user)
+            .await?
+            .unwrap_or_else(|| Credentials::empty(user)))
     }
 
-    /// Change the password (signs out every other session).
+    /// Change the password (signs out every other session). Wrong current passwords count
+    /// against the same per-name budget as sign-in (UX2-S6).
     ///
     /// # Errors
-    /// Wrong current password or a weak new one.
+    /// Wrong current password, [`AuthError::TooManyAttempts`] or a weak new one.
     pub async fn change_password(
         &self,
         actor: Actor,
@@ -658,16 +750,21 @@ impl Auth {
         new: &str,
     ) -> Result<SessionToken, AuthError> {
         check_password(new)?;
+        let key = self.app.user(actor.user_id).await?.username;
+        self.throttle.check(&key, self.now())?;
         let mut creds = self.credentials_or_default(actor.user_id).await?;
-        if let Some(h) = &creds.password_hash
-            && !verify_password(current.to_string(), h.clone()).await
-        {
-            return Err(AuthError::InvalidCredentials);
+        if let Some(h) = &creds.password_hash {
+            if !verify_password(current.to_string(), h.clone()).await {
+                self.throttle.failed(&key, self.now());
+                return Err(AuthError::InvalidCredentials);
+            }
+            self.throttle.succeeded(&key);
         }
         creds.password_hash = Some(hash_password(new.to_string()).await?);
         self.store.put_credentials(&creds).await?;
         self.store.delete_sessions_for(actor.user_id).await?;
-        self.create_session(actor.user_id).await
+        // entering the current password is a fresh proof (DEC-191)
+        self.create_session(actor.user_id, "password").await
     }
 
     #[must_use]

@@ -442,3 +442,61 @@ async fn a_job_longer_than_its_lease_runs_once() {
         "claimed again while still running"
     );
 }
+
+/// Admin > Storage and jobs (addendum-1 3.4): counts per lane, failed jobs with retry and
+/// discard, the cron list.
+#[tokio::test]
+async fn admin_view_counts_lanes_lists_dead_jobs_and_retries_them() {
+    let Some(q) = queue().await else { return };
+    q.push(job(Lane::Interactive, "a", None)).await.unwrap();
+    q.push(job(Lane::Prefetch, "b", None)).await.unwrap();
+    let mut dead = job(Lane::BackgroundRefresh, "c", None);
+    dead.kind = "boom".into();
+    let id = q.push(dead).await.unwrap();
+    sqlx::query(
+        "UPDATE jobs SET state = 'dead', last_error = 'HTTP 500', attempts = 5 WHERE id = $1",
+    )
+    .bind(id)
+    .execute(q.pool())
+    .await
+    .unwrap();
+    q.schedule(
+        "audit.retention",
+        "0 3 * * *",
+        Lane::BackgroundRefresh,
+        "admin.audit_retention",
+        serde_json::json!({}),
+        chrono::Utc::now(),
+    )
+    .await
+    .unwrap();
+    let lanes = q.lane_counts().await.unwrap();
+    let get = |l: Lane| lanes.iter().find(|c| c.lane == l).cloned().unwrap();
+    assert_eq!(get(Lane::Interactive).queued, 1);
+    assert_eq!(get(Lane::Prefetch).queued, 1);
+    assert_eq!(get(Lane::BackgroundRefresh).dead, 1);
+    assert_eq!(get(Lane::UserImport).queued, 0);
+    let failed = q.dead_jobs(10).await.unwrap();
+    assert_eq!(failed.len(), 1);
+    assert_eq!(
+        (
+            failed[0].id,
+            failed[0].kind.as_str(),
+            failed[0].last_error.as_deref()
+        ),
+        (id, "boom", Some("HTTP 500"))
+    );
+    assert!(q.retry_dead(id).await.unwrap());
+    assert_eq!(state(&q, id).await.0, "queued");
+    assert!(!q.retry_dead(id).await.unwrap(), "only dead jobs");
+    sqlx::query("UPDATE jobs SET state = 'dead' WHERE id = $1")
+        .bind(id)
+        .execute(q.pool())
+        .await
+        .unwrap();
+    assert!(q.discard_dead(id).await.unwrap());
+    assert_eq!(q.dead_jobs(10).await.unwrap().len(), 0);
+    let cron = q.cron_list().await.unwrap();
+    assert_eq!(cron.len(), 1);
+    assert_eq!(cron[0].name, "audit.retention");
+}

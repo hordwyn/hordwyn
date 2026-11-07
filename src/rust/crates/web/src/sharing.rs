@@ -258,14 +258,13 @@ pub fn Companions() -> impl IntoView {
             </form>
         </section>
         </Transition>
-
-        <Privacy/>
     }
 }
 
-/// Per-user privacy: whether linked participants see the sessions you log.
+/// Per-user privacy: whether linked participants see the sessions you log (Settings >
+/// Privacy).
 #[component]
-fn Privacy() -> impl IntoView {
+pub(crate) fn Privacy() -> impl IntoView {
     let user = expect_context::<crate::app::UserResource>();
     let on = RwSignal::new(true);
     Effect::new(move |_| {

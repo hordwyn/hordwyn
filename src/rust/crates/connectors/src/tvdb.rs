@@ -1,15 +1,19 @@
 //! `TheTVDB` (shows), API v4. Terms and attribution: `docs/connectors/tvdb.md`.
 //!
 //! Auth: `POST /v4/login` with the API key (and optional subscriber PIN) returns a bearer
-//! token valid for one month; it is cached and renewed after 25 days.
+//! token valid for one month; it is cached per PIN and renewed after 25 days. The PIN is the
+//! requesting member's own (`Ctx::user_key`, the user-supported model of design.md 4.1)
+//! when they stored one, else the one in the instance key (`<apikey>:<pin>`), if any.
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use catalog_core::{
-    Attribution, Auth, Capability, Connector, ConnectorError, ConnectorInfo, Ctx, Details,
-    DetailsRequest, ImageKind, ImageRef, RateLimit, Search, SearchRequest, Snapshot,
+    Attribution, Auth, Capability, Connector, ConnectorError, ConnectorInfo, CredentialSpec, Ctx,
+    Details, DetailsRequest, ImageKind, ImageRef, KeySlot, RateLimit, Search, SearchRequest,
+    Snapshot,
 };
 use domain::catalog::ExternalId;
 use kinds::builtin::{SeasonInfo, ShowAttributes};
@@ -20,6 +24,11 @@ use crate::util::{date_of, get_json, non_empty, post_json, year_of};
 pub const ID: &str = "tvdb";
 /// `<apikey>` or `<apikey>:<pin>`.
 pub const API_KEY_ENV: &str = "KK_TVDB_API_KEY";
+/// Credential fields (stored as JSON, joined with `:` into the key string).
+pub const CREDENTIALS: CredentialSpec = CredentialSpec {
+    instance_fields: &["api_key"],
+    user_fields: &["pin"],
+};
 const DEFAULT_API_BASE: &str = "https://api4.thetvdb.com/v4";
 const IMAGE_HOST: &str = "artworks.thetvdb.com";
 const KIND: &str = "show";
@@ -27,8 +36,9 @@ const KIND: &str = "show";
 pub struct Tvdb {
     info: ConnectorInfo,
     api_base: String,
-    credentials: Option<(String, Option<String>)>,
-    token: Mutex<Option<(String, Instant)>>,
+    key: KeySlot,
+    /// Bearer tokens per PIN (`""`: none): token, renew after, key version.
+    tokens: Mutex<HashMap<String, (String, Instant, u64)>>,
 }
 
 fn host_of(base: &str) -> String {
@@ -73,26 +83,37 @@ impl Tvdb {
                 cache_ttl_secs: 7 * 24 * 3600,
             },
             api_base,
-            credentials: key.map(|k| match k.split_once(':') {
-                Some((a, p)) => (a.trim().to_string(), Some(p.trim().to_string())),
-                None => (k.trim().to_string(), None),
-            }),
-            token: Mutex::new(None),
+            key: KeySlot::new(key),
+            tokens: Mutex::new(HashMap::new()),
         }
     }
 
     async fn headers(&self, ctx: &Ctx) -> Result<Vec<(String, String)>, ConnectorError> {
-        let (apikey, pin) = self
-            .credentials
-            .clone()
+        let (apikey, instance_pin) = self
+            .key
+            .get()
+            .map(|k| match k.split_once(':') {
+                Some((a, p)) => (a.trim().to_string(), Some(p.trim().to_string())),
+                None => (k.trim().to_string(), None),
+            })
             .ok_or_else(|| ConnectorError::MissingCredentials(API_KEY_ENV.into()))?;
+        let pin = ctx
+            .user_key
+            .as_deref()
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+            .or(instance_pin)
+            .filter(|p| !p.is_empty());
+        let slot = pin.clone().unwrap_or_default();
+        let version = self.key.version();
         let cached = self
-            .token
+            .tokens
             .lock()
             .expect("token lock")
-            .clone()
-            .filter(|(_, until)| Instant::now() < *until);
-        let token = if let Some((t, _)) = cached {
+            .get(&slot)
+            .cloned()
+            .filter(|(_, until, v)| Instant::now() < *until && *v == version);
+        let token = if let Some((t, _, _)) = cached {
             t
         } else {
             let mut body = serde_json::json!({ "apikey": apikey });
@@ -111,7 +132,10 @@ impl Tvdb {
             let t = resp.data.token;
             // tokens are valid for one month; renew well before
             let until = Instant::now() + Duration::from_hours(25 * 24);
-            *self.token.lock().expect("token lock") = Some((t.clone(), until));
+            let mut tokens = self.tokens.lock().expect("token lock");
+            // a new key version makes every older token useless
+            tokens.retain(|_, (_, _, v)| *v == version);
+            tokens.insert(slot, (t.clone(), until, version));
             t
         };
         Ok(vec![
@@ -120,12 +144,15 @@ impl Tvdb {
         ])
     }
 
-    fn url(&self, path: &str, query: &[(&str, &str)]) -> String {
-        let mut u = url::Url::parse(&format!("{}{path}", self.api_base)).expect("valid base url");
+    /// # Errors
+    /// A base URL from the configuration that does not parse (UX2-S11).
+    fn url(&self, path: &str, query: &[(&str, &str)]) -> Result<String, ConnectorError> {
+        let mut u = url::Url::parse(&format!("{}{path}", self.api_base))
+            .map_err(|e| ConnectorError::Parse(format!("base url: {e}")))?;
         if !query.is_empty() {
             u.query_pairs_mut().extend_pairs(query);
         }
-        u.to_string()
+        Ok(u.to_string())
     }
 }
 
@@ -239,7 +266,7 @@ impl Search for Tvdb {
                 ("type", "series"),
                 ("limit", &limit),
             ],
-        );
+        )?;
         let headers = self.headers(ctx).await?;
         let page: Envelope<Vec<Hit>> = get_json(ctx, ID, "search", &url, headers).await?;
         Ok(page
@@ -280,7 +307,7 @@ impl Details for Tvdb {
             .id
             .parse()
             .map_err(|_| ConnectorError::Parse(format!("tvdb id `{}`", req.id)))?;
-        let url = self.url(&format!("/series/{id}/extended"), &[]);
+        let url = self.url(&format!("/series/{id}/extended"), &[])?;
         let headers = self.headers(ctx).await?;
         let s: Envelope<Series> = get_json(ctx, ID, "details", &url, headers).await?;
         let s = s.data;
@@ -348,6 +375,21 @@ impl catalog_core::Images for Tvdb {
 impl Connector for Tvdb {
     fn info(&self) -> &ConnectorInfo {
         &self.info
+    }
+
+    fn key_slot(&self) -> Option<KeySlot> {
+        Some(self.key.clone())
+    }
+
+    fn credentials(&self) -> CredentialSpec {
+        CREDENTIALS
+    }
+
+    fn probe(&self, key: Option<String>) -> Option<std::sync::Arc<dyn Connector>> {
+        Some(std::sync::Arc::new(Self::with_base_url(
+            key,
+            &self.api_base,
+        )))
     }
 
     fn as_search(&self) -> Option<&dyn Search> {

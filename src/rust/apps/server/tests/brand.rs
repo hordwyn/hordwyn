@@ -7,7 +7,7 @@ use tower::ServiceExt;
 async fn home(brand_dir: &str, accept_language: &str) -> (String, String) {
     let db = store_pg::testing::fresh_db_url().await.expect("database");
     let toml = format!(
-        "[database]\nurl = \"{db}\"\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
+        "[database]\nurl = \"{db}\"\n[secrets]\nephemeral = true\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
          [auth]\nsignup = \"open\"\n[brand]\ndir = \"{brand_dir}\"\n"
     );
     let cfg = config::AppConfig::from_sources(&toml, Vec::new()).unwrap();
@@ -18,8 +18,9 @@ async fn home(brand_dir: &str, accept_language: &str) -> (String, String) {
         .output_name("app")
         .build();
     let app = srv.app_router(&options);
+    // pages render once the first account exists (before it, they lead to `/setup`)
+    let cookie = first_account(&app).await;
     let resp = app
-        .clone()
         .oneshot(
             axum::http::Request::builder()
                 .uri("/")
@@ -36,7 +37,13 @@ async fn home(brand_dir: &str, accept_language: &str) -> (String, String) {
             .to_vec(),
     )
     .unwrap();
+    (html, cookie)
+}
+
+/// Signs up the first account (`anna`) and returns its `set-cookie` header.
+async fn first_account(app: &axum::Router) -> String {
     let resp = app
+        .clone()
         .oneshot(
             axum::http::Request::builder()
                 .method("POST")
@@ -49,8 +56,7 @@ async fn home(brand_dir: &str, accept_language: &str) -> (String, String) {
         )
         .await
         .unwrap();
-    let cookie = resp.headers()["set-cookie"].to_str().unwrap().to_string();
-    (html, cookie)
+    resp.headers()["set-cookie"].to_str().unwrap().to_string()
 }
 
 fn repo(p: &str) -> String {
@@ -111,7 +117,7 @@ async fn brand_font_is_self_hosted() {
     }
     let db = store_pg::testing::fresh_db_url().await.expect("database");
     let toml = format!(
-        "[database]\nurl = \"{db}\"\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
+        "[database]\nurl = \"{db}\"\n[secrets]\nephemeral = true\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
          [brand]\ndir = \"{}\"\n",
         repo("config/brand/default")
     );
@@ -123,6 +129,7 @@ async fn brand_font_is_self_hosted() {
         .output_name("app")
         .build();
     let app = srv.app_router(&options);
+    first_account(&app).await;
     let resp = get(&app, "/").await;
     let html = String::from_utf8(
         axum::body::to_bytes(resp.into_body(), 1 << 22)

@@ -18,7 +18,7 @@ async fn a_jellyfin_play_becomes_a_progress_event_and_an_sse_update() {
     };
     let toml = format!(
         "[database]\nurl = \"{db_url}\"\n[auth]\nsignup = \"open\"\nsecure_cookies = false\n\
-         [storage]\nbackend = \"memory\"\n[server]\npublic_url = \"https://shelf.example.org\"\n\
+         [secrets]\nephemeral = true\n[storage]\nbackend = \"memory\"\n[server]\npublic_url = \"https://shelf.example.org\"\n\
          [brand]\ndir = \"{}/../../../../config/brand/default\"\n",
         env!("CARGO_MANIFEST_DIR"),
     );

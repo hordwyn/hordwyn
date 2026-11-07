@@ -137,26 +137,3 @@ pub fn Lists() -> impl IntoView {
         </Suspense>
     }
 }
-
-#[component]
-pub fn Sources() -> impl IntoView {
-    let i18n = use_i18n();
-    let data = Resource::new(|| (), |()| api::sources());
-    view! {
-        <PageTitle text=i18n.t("sources-title")/>
-        <p class="mb-4 text-sm text-muted-foreground">{i18n.t("sources-lead")}</p>
-        <Suspense fallback=|| ()>
-            {move || data.get().and_then(Result::ok).map(|list| view! {
-                <ul class="flex flex-col gap-3">
-                    {list.into_iter().map(|s| view! {
-                        <li class="rounded-md border border-border p-3 text-sm">
-                            <p class="font-medium">{s.name.clone()}</p>
-                            <p lang="en">{s.text.clone()}</p>
-                            <p class="text-muted-foreground"><span lang="en">{s.licence.clone()}</span> " - " <a class="underline" href=s.url.clone() rel="noopener">{s.url.clone()}</a></p>
-                        </li>
-                    }).collect_view()}
-                </ul>
-            })}
-        </Suspense>
-    }
-}

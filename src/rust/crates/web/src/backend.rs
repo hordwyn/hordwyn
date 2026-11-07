@@ -3,6 +3,7 @@
 //! REST API, so both call the same `app` use-cases (D-3).
 
 use async_trait::async_trait;
+use axum::response::IntoResponse;
 use contracts::{
     AttributionDto, CompanionDto, ErrorDto, InviteDto, ItemPageDto, LibraryEntryDto,
     LinkRequestDto, ListDto, LoggedSessionDto, NewProgressDto, PrivacyDto, ProgressEventDto,
@@ -37,20 +38,51 @@ pub fn session_token(headers: &axum::http::HeaderMap, name: &str) -> Option<Stri
         .map(|(_, v)| v.to_string())
 }
 
+/// Where the setup wizard stands, for the `/setup` page (design.md 5.1): completed means the
+/// page is the 404 page. Put into the request extensions by [`resolve_shell_session`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SetupGate {
+    pub completed: bool,
+}
+
+/// The wizard's own path.
+pub const SETUP_PATH: &str = "/setup";
+
+/// A page request (not a server function, a build asset or a file such as `favicon.ico`).
+#[must_use]
+pub fn is_page(path: &str) -> bool {
+    let file = path.rsplit('/').next().unwrap_or_default().contains('.');
+    !(file || path.starts_with("/_fn/") || path.starts_with("/pkg/"))
+}
+
 /// Middleware for the page routes: looks up the session once and stores a [`ShellSession`]
 /// in the request extensions, where the shell's config reads it. Server functions and static
-/// files are skipped.
+/// files are skipped. While no account exists every page answers `303 See Other` to
+/// `/setup` (design.md 5.1); `/setup` itself gets a [`SetupGate`].
 pub async fn resolve_shell_session(
     axum::extract::State(b): axum::extract::State<std::sync::Arc<dyn Backend>>,
     mut req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    let path = req.uri().path();
-    let page = !(path.starts_with("/_fn/") || path.starts_with("/pkg/"));
-    if page
-        && let Some(token) = session_token(req.headers(), &b.session_cookie())
-        && let Some(s) = b.shell_session(&token).await
-    {
+    let path = req.uri().path().to_string();
+    if !is_page(&path) {
+        return next.run(req).await;
+    }
+    let session = match session_token(req.headers(), &b.session_cookie()) {
+        Some(token) => b.shell_session(&token).await,
+        None => None,
+    };
+    let setup = path == SETUP_PATH;
+    if session.is_none() || setup {
+        let (users, completed) = b.setup_gate().await;
+        if !users && !setup {
+            return axum::response::Redirect::to(SETUP_PATH).into_response();
+        }
+        if setup {
+            req.extensions_mut().insert(SetupGate { completed });
+        }
+    }
+    if let Some(s) = session {
         req.extensions_mut().insert(s);
     }
     next.run(req).await
@@ -66,6 +98,9 @@ pub trait Backend: Send + Sync {
     async fn me(&self, token: &str) -> Option<UserDto>;
     /// The shell's view of the session; `None` when the token is not a valid session.
     async fn shell_session(&self, token: &str) -> Option<ShellSession>;
+    /// Does any account exist, and is the setup wizard completed (design.md 5.1)? Errors
+    /// count as "yes" both times, so a storage hiccup never sends people to the wizard.
+    async fn setup_gate(&self) -> (bool, bool);
     async fn sign_in(&self, b: SignInDto) -> BResult<SessionDto>;
     async fn sign_up(&self, b: SignUpDto) -> BResult<SessionDto>;
     async fn sign_out(&self, token: &str);
@@ -82,6 +117,7 @@ pub trait Backend: Send + Sync {
         token: &str,
         q: &str,
         kind: Option<String>,
+        group: Option<String>,
     ) -> BResult<SearchResponseDto>;
     async fn add(&self, token: &str, item_id: &str) -> BResult<LibraryEntryDto>;
     async fn log_progress(

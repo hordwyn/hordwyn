@@ -12,7 +12,7 @@ fn repo(p: &str) -> String {
 async fn app() -> axum::Router {
     let db = store_pg::testing::fresh_db_url().await.expect("database");
     let toml = format!(
-        "[database]\nurl = \"{db}\"\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
+        "[database]\nurl = \"{db}\"\n[secrets]\nephemeral = true\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
          [auth]\nsignup = \"open\"\nsecure_cookies = false\n[brand]\ndir = \"{}\"\n",
         repo("config/brand/default")
     );
@@ -23,7 +23,22 @@ async fn app() -> axum::Router {
     let options = leptos::prelude::LeptosOptions::builder()
         .output_name("app")
         .build();
-    srv.app_router(&options)
+    let app = srv.app_router(&options);
+    first_account(&app).await;
+    app
+}
+
+/// The first account: before it exists every page leads to `/setup` (design.md 5.1).
+async fn first_account(app: &axum::Router) {
+    let body = r#"{"username":"owner","display_name":"Owner","password":"correct horse battery"}"#;
+    let req = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/sign-up")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(body))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), 201, "first account");
 }
 
 async fn page(app: &axum::Router, uri: &str, lang: &str) -> (u16, String) {
@@ -149,7 +164,7 @@ async fn auth_pages_show_the_brand_mark_and_legal_links() {
     }
     let db = store_pg::testing::fresh_db_url().await.expect("database");
     let toml = format!(
-        "[database]\nurl = \"{db}\"\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
+        "[database]\nurl = \"{db}\"\n[secrets]\nephemeral = true\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
          [auth]\nsignup = \"open\"\nsecure_cookies = false\n[brand]\ndir = \"{}\"\n",
         repo("src/web/tests/brands/sample")
     );
@@ -161,6 +176,7 @@ async fn auth_pages_show_the_brand_mark_and_legal_links() {
         .output_name("app")
         .build();
     let app = srv.app_router(&options);
+    first_account(&app).await;
     for uri in ["/sign-in", "/sign-up"] {
         let (status, html) = page(&app, uri, "en").await;
         assert_eq!(status, 200, "{uri}");

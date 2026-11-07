@@ -596,6 +596,7 @@ notify-event-admin-storage_full = Storage full (admin)
 notify-event-admin-connector_down = Data source unavailable (admin)
 notify-event-admin-signup = New account (admin)
 notify-event-admin-job_backlog = Jobs piling up (admin)
+notify-event-admin-source_requested = Data source requested (admin)
 # ---- end i18n ----
 
 # ---- UX phase 0 review (docs/reviews/2026-11-06-ux0-review.md) ----
@@ -732,3 +733,509 @@ history-side-finished = Completed
 history-side-episodes = Episodes
 history-side-sessions = Sessions
 history-side-shared = Shared with you
+
+# ---- UX phase 2: server codes and words (contracts::admin) ----
+# Error codes of the admin area, the wizard and data sources (`admin-error-<code>`).
+auth-error-account_disabled = This account is disabled. Ask an admin.
+auth-error-totp_locked = Your authenticator cannot be checked right now. Ask your admin.
+auth-error-reauth_required = Confirm it is you to make this change.
+admin-error-reauth_required = Confirm it is you to make this change.
+admin-error-last_admin = This is the last admin. Make someone else admin first.
+admin-error-self_role_change = You cannot change your own role.
+admin-error-self_disable = You cannot disable your own account.
+admin-error-self_delete = You cannot delete your own account here.
+admin-error-secure_cookies_need_https = Secure cookies need an https public address, or nobody could sign in.
+admin-error-fixed_by_config = This value is set by the configuration and cannot be changed here.
+admin-error-invalid_setting = This value is not valid.
+admin-error-unknown_setting = This setting does not exist.
+admin-error-unknown_source = This data source does not exist.
+admin-error-missing_field = Fill in every field.
+admin-error-unknown_field = This field does not belong to the data source.
+admin-error-setup_done = The setup is complete.
+admin-error-forbidden = Only admins can do this.
+admin-error-not_found = Not found.
+admin-error-conflict = That is not possible right now.
+admin-error-internal = Something went wrong. Please try again.
+# Warnings of the settings pages (`admin-warning-<id>`).
+admin-warning-public_url_not_https = The public address does not use https. Secure cookies cannot be turned on.
+admin-warning-secure_cookies_over_http = Secure cookies are on, but the public address does not use https.
+# Setting labels (`admin-setting-<key with . replaced by _>`).
+admin-setting-instance_hosting = How you host
+admin-setting-auth_signup = Sign-up
+admin-setting-auth_session_days = Session length (days)
+admin-setting-auth_secure_cookies = Secure cookies
+admin-setting-storage_max_total_bytes = Storage limit
+admin-setting-storage_high_watermark = Start clean-up at
+admin-setting-storage_low_watermark = Clean up down to
+admin-setting-env = Set by environment variable { $var }
+admin-setting-file = Set in the configuration file
+admin-setting-shadowed = Stored value ignored while { $var } is set
+admin-setting-next-session = Applies from the next sign-in
+# States of data sources (`source-state-<state>`, design.md 4.4).
+source-state-working = Working
+source-state-not_set_up = Not set up
+source-state-key_rejected = Key rejected
+source-state-key_unavailable = Key unavailable
+source-state-rate_limited = Rate limited
+source-state-circuit_open = Not answering
+source-state-disabled = Disabled by configuration
+source-state-needs_account = Needs your account
+source-state-unavailable = Temporarily unavailable
+source-state-slow = Slow right now
+source-state-retrying = Not answering, retrying
+# Results of Test (`source-test-<result>`).
+source-test-ok = Works ({ $ms } ms).
+source-test-key_rejected = Key rejected.
+source-test-unreachable = Could not reach the service.
+source-test-rate_limited = Rate limited. Try again later.
+source-test-circuit_open = Paused after repeated failures. Try again later.
+source-test-missing_key = No key set.
+source-test-failed = The test failed.
+# Credential fields (`admin-source-field-<name>`).
+admin-source-field-api_key = API key
+admin-source-field-api_secret = API secret
+admin-source-field-client_id = Client ID
+admin-source-field-client_secret = Client secret
+admin-source-field-pin = Subscriber PIN
+# Health rows of Admin > Overview (`admin-health-<id>-<detail>`).
+admin-health-database-reachable = Reachable
+admin-health-database-unreachable = Not reachable
+admin-health-search-backend = Running on { $backend }
+admin-health-search-fallback = Meilisearch unavailable, using the database
+admin-health-storage-used = { $used } of { $cap } bytes used
+admin-health-storage-high = Almost full: { $used } of { $cap } bytes
+admin-health-storage-full = Full: { $used } of { $cap } bytes
+admin-health-storage-unreadable = The storage report failed
+admin-health-storage-off = Not configured
+admin-health-jobs-queued = { $queued } waiting
+admin-health-jobs-failed = { $failed } failed, { $queued } waiting
+admin-health-jobs-unreadable = The job queue cannot be read
+admin-health-jobs-off = Not configured
+admin-health-mail-configured = Configured
+admin-health-mail-off = Not configured
+admin-health-data_sources-working = { $working } of { $total } working
+admin-health-data_sources-some_not_working = { $working } of { $total } working
+admin-health-data_sources-none_working = No data source works
+admin-health-identity_provider-configured = Configured
+admin-health-identity_provider-off = Not configured
+admin-health-secrets-active = Key v{ $version } active
+admin-health-secrets-locked = { $count } secrets cannot be decrypted
+admin-health-secrets-rotation_due = Key v{ $version } is older than two years: consider a new one
+admin-health-secrets-rewrap = { $count } secrets still on an older key
+# Done step of the setup wizard (`setup-checklist-<id>`).
+setup-checklist-first_item = Add your first item
+setup-checklist-invite = Invite your household
+setup-checklist-media_server = Connect your media server
+setup-checklist-notification_defaults = Set notification defaults
+setup-checklist-backup_key = Back up the secrets key together with the database
+setup-checklist-identity_provider = Connect an identity provider
+# Audit log actions (`admin-audit-<action with . replaced by _>`).
+admin-audit-setting_changed = Setting changed
+admin-audit-secret_replaced = Key replaced
+admin-audit-secret_cleared = Key removed
+admin-audit-secrets_rewrapped = Secrets re-encrypted
+admin-audit-role_changed = Role changed
+admin-audit-user_disabled = Account disabled
+admin-audit-user_enabled = Account enabled
+admin-audit-user_deleted = Account deleted
+admin-audit-invite_created = Invite created
+admin-audit-invite_revoked = Invite revoked
+admin-audit-licence_recorded = Licence recorded
+admin-audit-wizard_completed = Setup completed
+admin-audit-eviction_run = Storage cleaned up
+admin-audit-job_retried = Job retried
+admin-audit-job_discarded = Job discarded
+
+# ---- UX phase 2: settings area and admin area (addendum-1 3.4, design.md 6.12, 6.13) ----
+nav-settings = Settings
+settings-nav-label = Settings
+settings-group-you = You
+settings-group-admin = Instance (admin)
+settings-nav-account = Account
+settings-nav-privacy = Privacy
+settings-privacy-lead = Who sees what you log.
+settings-account-lead = Your name, how this app looks for you, and how you sign in.
+settings-account-display-name = Display name
+settings-account-username = Username
+settings-account-username-hint = Used for sign-in and in links. It cannot be changed.
+settings-account-email = Email
+settings-account-no-email = Not set
+settings-signin = Sign-in
+settings-signin-summary = Password and authenticator
+settings-password = Change password
+settings-password-current = Current password
+settings-password-new = New password
+settings-password-rule = At least 10 characters. Your other devices are signed out.
+settings-password-save = Change password
+settings-password-changed = Password changed. Your other devices are signed out.
+settings-totp = Authenticator
+settings-totp-on = An authenticator app is set up. Sign-in asks for its code.
+settings-totp-off = No authenticator yet. With one, sign-in also asks for a code from your phone.
+settings-totp-start = Set up an authenticator
+settings-totp-scan = Add this key to your authenticator app (or open the link on your phone), then enter the code it shows.
+settings-totp-secret = Key
+settings-totp-link = Link for authenticator apps
+settings-totp-code = Code from the app
+settings-totp-confirm = Turn on
+settings-codes-title = Your recovery codes
+settings-codes-lead = Each code signs you in once if you lose your phone. Keep them somewhere safe.
+settings-codes-copy = All codes
+settings-codes-once = Shown only now. They are stored as fingerprints and cannot be shown again.
+settings-copy = Copy
+settings-copied = Copied
+settings-replace = Replace
+settings-sources-lead = Where titles, covers and episodes come from, and what you can do when one is missing.
+settings-sources-missing = Some kinds have no data source yet
+settings-sources-no-source = { $group }: no data source yet
+settings-sources-set-up = Set up
+settings-ask-admin = Ask admin
+settings-ask-admin-named = Ask admin about { $name }
+settings-asked = Your admin has been asked.
+settings-credential-set = Your key is set (since { $date }).
+settings-credential-locked = Your key is temporarily unavailable.
+settings-credential-hint = Stored encrypted, never shown again.
+settings-credential-save = Save
+settings-credential-saved = Saved.
+settings-credential-clear = Remove
+
+reauth-title = Confirm it is you
+reauth-lead = This change affects how people sign in. Enter your password to continue.
+reauth-password = Password
+reauth-code = Authenticator code or recovery code
+reauth-code-hint = The 6 digits from your app, or one of your recovery codes.
+reauth-confirm = Confirm
+reauth-cancel = Cancel
+reauth-confirm-now = Confirm it is you
+reauth-window-fresh = { $minutes ->
+    [one] Confirmed for 1 more minute.
+   *[other] Confirmed for { $minutes } more minutes.
+}
+reauth-window-stale = Not confirmed recently. Changes to sign-in settings ask for your password first.
+
+admin-only-title = Admins only
+admin-only-lead = This page belongs to the instance admin area. Your own settings are under Settings.
+admin-only-back = Go to your settings
+admin-save = Save
+admin-saved = Saved.
+admin-setting-read-only = Read-only
+admin-nav-overview = Overview
+admin-nav-users = Users and sign-up
+admin-nav-sources = Data sources
+admin-nav-storage = Storage and jobs
+admin-nav-notifications = Notification defaults
+admin-nav-brand = Branding
+admin-nav-security = Security and sessions
+admin-nav-audit = Audit log
+admin-status-ok = Working
+admin-status-warning = Needs attention
+admin-status-error = Not working
+admin-status-off = Off
+admin-health-name-database = Database
+admin-health-name-search = Search
+admin-health-name-storage = Storage
+admin-health-name-jobs = Background jobs
+admin-health-name-mail = Mail
+admin-health-name-data_sources = Data sources
+admin-health-name-identity_provider = Identity provider
+admin-health-name-secrets = Secrets at rest
+admin-overview-lead = What members cannot see: the parts this instance depends on.
+admin-overview-attention = { $count ->
+    [one] One thing needs attention
+   *[other] { $count } things need attention
+}
+admin-overview-fix = Open
+admin-overview-hosted = Hosted mode: record the licence agreement of each data source.
+admin-overview-health = Health
+admin-overview-open = Details: { $name }
+admin-overview-details = Details
+admin-overview-recent = Recent admin actions
+admin-overview-recent-none = No admin actions yet.
+admin-overview-audit = Full audit log
+admin-overview-signups = Recent sign-ups
+admin-overview-brand = { $name }, default language { $locale }. Read-only.
+admin-overview-brand-link = Branding and contrast
+admin-users-lead = Who has an account, who is admin, and how new people get in.
+admin-users-signup = Who can create an account
+admin-signup-open = Anyone
+admin-signup-open-hint = Anyone who can reach this address can create an account.
+admin-signup-invite = With an invite
+admin-signup-invite-hint = People need an invite link from an admin or from a member's People page.
+admin-signup-closed = Nobody
+admin-signup-closed-hint = No new accounts. Invites stop working too.
+admin-invites-title = { $count ->
+    [one] Open invites (1)
+   *[other] Open invites ({ $count })
+}
+admin-invites-summary = Create an invite link, revoke one
+admin-invites-list = Invites
+admin-invite-email = Email (optional)
+admin-invite-note = Note (optional)
+admin-invite-create = Create invite
+admin-invite-link = Invite link
+admin-invite-once = Copy it now: the link is shown only once. Send it to the person you invite.
+admin-invite-anyone = Anyone with the link
+admin-invite-line = Created { $created }, valid until { $expires }
+admin-invite-state-open = Open
+admin-invite-state-used = Used
+admin-invite-state-revoked = Revoked
+admin-invite-state-expired = Expired
+admin-invite-revoke = Revoke
+admin-invite-revoke-named = Revoke the invite for { $name }
+admin-users-people = People
+admin-users-person = Person
+admin-users-role = Role
+admin-users-signs-in = Signs in with
+admin-users-last-seen = Last seen
+admin-users-actions = Actions
+admin-users-admin = Admin
+admin-users-member = Member
+admin-users-disabled = Disabled
+admin-users-you = (you)
+admin-users-never = Never
+admin-users-with-password = Password
+admin-users-with-totp = Authenticator
+admin-users-with-oidc = Identity provider
+admin-users-self = You cannot change your own role or account here. Another admin can.
+admin-users-only-admin = You are the only admin. Make someone else admin before anything can change your role or account.
+admin-users-promote = Make admin
+admin-users-promote-named = Make admin: { $name }
+admin-users-demote = Remove admin
+admin-users-demote-named = Remove admin: { $name }
+admin-users-disable = Disable
+admin-users-disable-named = Disable: { $name }
+admin-users-enable = Enable
+admin-users-enable-named = Enable: { $name }
+admin-users-delete = Delete
+admin-users-delete-named = Delete: { $name }
+admin-users-delete-title = Delete { $name }?
+admin-users-delete-body = The account and its library are deleted. Sessions logged with others stay in their history, with this person as a companion.
+admin-sources-lead = Where titles, covers and episodes come from. Keys are stored encrypted and never shown again.
+admin-sources-attention = { $count ->
+    [one] One data source needs attention
+   *[other] { $count } data sources need attention
+}
+admin-sources-licence-banner = Hosted mode: record for each data source that its licence agreement is on file.
+admin-sources-source = Source
+admin-sources-kinds = Kinds
+admin-sources-status = Status
+admin-sources-set-up = Set up
+admin-sources-set-up-named = Set up { $name }
+admin-sources-details = Details
+admin-sources-details-named = Details of { $name }
+admin-sources-calls = { $calls } calls in the last 24 hours, { $limited } rate limited
+admin-sources-last-ok = Last answer { $when }
+admin-sources-last-error = Last error { $when }: { $error }
+admin-sources-no-key = This source needs no key.
+admin-sources-shadowed = A stored key is ignored while the environment variable is set.
+admin-sources-key-hint = Stored encrypted, never shown again.
+admin-sources-set-by = Set { $date } by { $name }
+admin-sources-set-on = Set { $date }
+admin-sources-locked = Stored, but the key to decrypt it is not loaded.
+admin-sources-test = Test
+admin-sources-sample = First result: { $title }.
+admin-sources-clear = Remove key
+admin-sources-clear-title = Remove the key of { $name }?
+admin-sources-clear-body = Searches stop using this source until a new key is saved.
+admin-sources-licence = Agreement on file
+admin-sources-licence-hint = Needed when you host for other people: the provider's terms allow this use.
+admin-sources-attribution-preview = Attribution
+admin-sources-terms = Terms of use
+admin-sources-attribution = Attribution list of all data sources
+admin-storage-lead = Images and caches on disk or S3, and the background work of this instance.
+admin-storage-full = Storage is full: new images are not stored until space is freed.
+admin-storage-title = Storage
+admin-storage-used = { $used } of { $cap } used
+admin-storage-backend = Backend: { $backend }
+admin-storage-pinned = Kept (covers in libraries)
+admin-storage-cache = Cache
+admin-storage-evictable = Can be freed now
+admin-storage-high = Clean-up starts at
+admin-storage-low = Clean-up stops at
+admin-storage-evict = Run eviction now
+admin-storage-evicted = Freed { $bytes } ({ $objects } files).
+admin-storage-budget = Budget
+admin-storage-limit-hint = For example 20 GiB.
+admin-storage-percent-hint = Percent of the limit.
+admin-storage-invalid = Check the value of { $field }.
+admin-jobs-title = Background jobs
+admin-jobs-lanes = Queues
+admin-jobs-lane = Queue
+admin-jobs-queued = Waiting
+admin-jobs-running = Running
+admin-jobs-dead = Failed
+admin-jobs-failed = Failed jobs
+admin-jobs-failed-attention = { $count ->
+    [one] One job failed.
+   *[other] { $count } jobs failed.
+}
+admin-jobs-none-failed = No failed jobs.
+admin-jobs-failed-line = { $attempts } attempts, last { $when }
+admin-jobs-retry = Retry
+admin-jobs-retry-named = Retry { $name }
+admin-jobs-discard = Discard
+admin-jobs-discard-named = Discard { $name }
+admin-jobs-discard-title = Discard { $name }?
+admin-jobs-discard-body = The job is removed and will not run again.
+admin-jobs-cron = Scheduled
+admin-jobs-name = Name
+admin-jobs-schedule = Schedule
+admin-jobs-next = Next run
+admin-defaults-lead = Rules that apply to everyone who has not set their own. Members change theirs under Settings, Notifications.
+admin-defaults-event = Event
+admin-defaults-delivery = Delivery
+admin-defaults-none = No instance defaults are set.
+admin-defaults-events = Events on this instance
+admin-defaults-events-summary = { $count ->
+    [one] 1 event
+   *[other] { $count } events
+}
+admin-defaults-for-admins = admins
+admin-defaults-for-everyone = everyone
+admin-brand-lead = Name, language and colours of this instance. Read-only here.
+admin-brand-name = Name
+admin-brand-short-name = Short name
+admin-brand-locale = Default language
+admin-brand-dir = Brand directory
+admin-brand-accent = Accent colour
+admin-brand-light = Light theme
+admin-brand-dark = Dark theme
+admin-brand-sample = Aa
+admin-brand-ratio = Contrast { $ratio }:1
+admin-brand-unreadable = Contrast cannot be checked
+admin-brand-pass = Meets AA
+admin-brand-fail = Below AA (4.5:1)
+admin-brand-edit = To change the brand, edit brand.toml in { $dir } and restart.
+admin-security-lead = How long sessions last, how cookies are sent, and the key that protects stored secrets.
+admin-security-window = Your confirmation
+admin-security-window-rule = Sign-in related changes ask for your password again after { $slide } minutes without such a change, at the latest { $cap } minutes after you confirmed.
+admin-security-sessions = Sessions
+admin-security-days-hint = 1 to 365 days.
+admin-security-days-invalid = Use 1 to 365 days.
+admin-security-cookies-hint = Browsers send the session cookie over https only. Applies from the next sign-in, so your current session keeps working.
+admin-secrets-title = Secrets at rest
+admin-secrets-active = Active key
+admin-secrets-version = Version { $version }
+admin-secrets-source = Loaded from
+admin-secrets-from-file = The key file
+admin-secrets-from-env = The environment
+admin-secrets-generated = A key file generated at the first start: back it up with the database
+admin-secrets-ephemeral = A temporary key (this process only)
+admin-secrets-file = Key file
+admin-secrets-old = Secrets on an older key
+admin-secrets-rewrap = Re-encrypt now
+admin-secrets-rewrapped = Re-encrypted { $count } secrets; { $locked } could not be decrypted.
+admin-secrets-versions = Key versions
+admin-secrets-versions-summary = { $count ->
+    [one] 1 version
+   *[other] { $count } versions
+}
+admin-secrets-key = Key
+admin-secrets-values = Secrets
+admin-secrets-state = State
+admin-secrets-state-active = Active
+admin-secrets-state-loaded = Loaded
+admin-secrets-state-missing = Not loaded
+admin-secrets-state-removable = No longer used, can be removed
+admin-audit-lead = Every admin action, who did it and what changed. Kept for 365 days. Secret values never appear.
+admin-audit-filter-who = Who
+admin-audit-filter-what = What
+admin-audit-anyone = Anyone
+admin-audit-anything = Any action
+admin-audit-apply = Apply
+admin-audit-csv = Export CSV
+admin-audit-none = No admin actions match.
+admin-audit-when = When
+admin-audit-who = Who
+admin-audit-what = What
+admin-audit-detail = Detail
+admin-audit-actor-system = system
+admin-audit-actor-cli = command line
+
+## Setup wizard (design.md 5.1)
+setup-title = Setup
+setup-title-named = Set up { $product }
+setup-sign-in-lead = The setup continues once the admin signs in.
+setup-progress = Setup progress
+setup-step-done-label = completed
+setup-step-account = Admin account
+setup-step-hosting = How you host
+setup-step-sources = Data sources
+setup-step-done = Done
+setup-account-title = Create the admin account
+setup-account-lead = This first account runs the instance. You stay signed in.
+setup-account-submit = Create admin account
+setup-hosting-title = How do you host?
+setup-hosting-lead = This changes defaults, not features. You can change it later under Admin.
+setup-hosting-home = Home: free, for family and friends
+setup-hosting-home-body = Sign-up by invite. No licence reminders.
+setup-hosting-hosted = Hosted: you run this for other people
+setup-hosting-hosted-body = Licence reminders on: record per data source that an agreement is on file. Close sign-up or invite people next.
+setup-hosting-fixed = The hosting mode is set by the configuration.
+setup-continue = Continue
+setup-back = Back
+setup-sources-title = Data sources
+setup-sources-lead = Add the keys you have and test them. Everything is optional: you can add keys later under Admin, Data sources.
+setup-sources-read-only = Every key comes from the environment. This is what the instance will use.
+setup-sources-hosted = Free tiers of many sources (for example TMDB and IGDB) do not cover paid services. Record for each source whether an agreement is on file.
+setup-done-title = Ready
+setup-done-lead = A few things worth doing next. Each one opens its page.
+setup-checklist = Next steps
+setup-task-done = Done
+setup-task-todo = To do
+setup-key-file = File: { $file }
+setup-go-home = Go to Home
+setup-go-users = Go to Users and sign-up
+
+## Admin nudge on Home (design.md 6.1)
+home-nudge-setup = The setup is not finished yet.
+home-nudge-setup-action = Continue the setup
+home-nudge-no-source = { $count ->
+    [one] { $groups } has no data source yet, so search finds nothing there.
+   *[other] { $groups } have no data source yet, so search finds nothing there.
+}
+home-nudge-set-up = Set up data sources
+home-nudge-failing = { $count ->
+    [one] { $sources } is set up but does not answer.
+   *[other] { $sources } are set up but do not answer.
+}
+home-nudge-check = Check data sources
+home-nudge-snooze = Snooze for 7 days
+
+## Search palette footer and no-results card (design.md 6.4)
+search-searching = Searching...
+search-none-title = Nothing matches "{ $query }"
+search-none-library = Searched your library.
+search-none-searched = Searched your library and { $sources }.
+search-none-spelling = Check the spelling or try another title.
+search-none-group = { $group }: not searched, no source is set up.
+search-none-skipped = { $source }: not searched ({ $state }).
+search-unset-title = Search is not set up yet
+search-unset-admin = This instance has no data sources for this search, so nothing can be found online.
+search-unset-member = There is no data source for this search yet. Ask your admin to add one.
+search-scope = Search in
+search-footer-label = Data sources
+search-footer-source = { $source }: { $state }
+search-footer-group = { $group }: no source set up
+
+# UX phase 2 review, web pages (UX2-W1, W7, W12, W14, W21)
+admin-sources-howto = How to get a key
+admin-sources-howto-link = Open the developer page of { $name } (opens in a new tab)
+admin-sources-howto-tmdb-1 = Sign in at themoviedb.org, or create a free account.
+admin-sources-howto-tmdb-2 = In your account settings, open API and request a key for a personal, non-commercial project.
+admin-sources-howto-tmdb-3 = Copy the API Read Access Token (the long one) and paste it here.
+admin-sources-howto-igdb-1 = IGDB uses Twitch accounts: sign in to the Twitch developer console with one.
+admin-sources-howto-igdb-2 = Register an application; http://localhost will do as its OAuth redirect URL.
+admin-sources-howto-igdb-3 = Copy its Client ID, create a new Client secret, and paste both here.
+admin-sources-howto-tvdb-1 = Create an account at thetvdb.com.
+admin-sources-howto-tvdb-2 = On the API information page, apply for a key and describe this server as your project.
+admin-sources-howto-tvdb-3 = Paste the API key here. If your key needs a subscriber PIN, each member adds their own under Settings, Data sources.
+admin-sources-howto-podcastindex-1 = Open api.podcastindex.org and sign up for a free developer account.
+admin-sources-howto-podcastindex-2 = Confirm your email address; the API key and the API secret arrive by email.
+admin-sources-howto-podcastindex-3 = Paste the API key and the API secret here.
+admin-sources-attention-line = { $name }: { $state }
+admin-sources-attention-open = Open { $name }
+settings-replace-named = Replace { $field }
+admin-only-lead-signed-out = This page belongs to the instance admin area. Sign in with an admin account to open it.
+admin-error-unauthorized = Your session has ended. Sign in again to continue.
+auth-error-unauthorized = Your session has ended. Sign in again to continue.
+auth-error-forbidden = You are not allowed to do this.

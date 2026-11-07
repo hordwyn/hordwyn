@@ -13,7 +13,7 @@ use leptos::prelude::*;
 use leptos::server_fn::codec::Json;
 
 #[cfg(feature = "ssr")]
-mod server {
+pub(crate) mod server {
     use std::sync::Arc;
 
     use axum::http::header::SET_COOKIE;
@@ -41,6 +41,7 @@ mod server {
 
     /// The error code travels to the page, which translates it (`auth-error-<code>`), with
     /// the seconds of a lock-out ([`super::encode_error`]).
+    // Takes the error by value so it can be passed to `map_err` directly.
     #[allow(clippy::needless_pass_by_value)]
     pub fn code(e: ErrorDto) -> ServerFnError {
         ServerFnError::new(super::encode_error(&e.code, e.retry_after_secs))
@@ -154,11 +155,16 @@ pub async fn item_page(id: String) -> Result<ItemPageDto, ServerFnError> {
     b.item(&t, &id).await.map_err(server::code)
 }
 
+/// `group` limits the search to one kind group (the palette scope segments, design.md 6.4).
 #[server(prefix = "/_fn")]
-pub async fn search(q: String, kind: Option<String>) -> Result<SearchResponseDto, ServerFnError> {
+pub async fn search(
+    q: String,
+    kind: Option<String>,
+    group: Option<String>,
+) -> Result<SearchResponseDto, ServerFnError> {
     let b = server::backend()?;
     let t = server::require_token(b.as_ref()).await?;
-    b.search(&t, &q, kind).await.map_err(server::code)
+    b.search(&t, &q, kind, group).await.map_err(server::code)
 }
 
 #[server(prefix = "/_fn")]

@@ -5,8 +5,9 @@
 
 use async_trait::async_trait;
 use catalog_core::{
-    Attribution, Auth, Capability, Connector, ConnectorError, ConnectorInfo, Ctx, Details,
-    DetailsRequest, ImageKind, ImageRef, RateLimit, Search, SearchRequest, Snapshot,
+    Attribution, Auth, Capability, Connector, ConnectorError, ConnectorInfo, CredentialSpec, Ctx,
+    Details, DetailsRequest, ImageKind, ImageRef, KeySlot, RateLimit, Search, SearchRequest,
+    Snapshot,
 };
 use domain::catalog::ExternalId;
 use kinds::builtin::PodcastAttributes;
@@ -18,13 +19,18 @@ use crate::util::{get_json, non_empty};
 pub const ID: &str = "podcastindex";
 /// `<api_key>:<api_secret>`.
 pub const API_KEY_ENV: &str = "KK_PODCASTINDEX_API_KEY";
+/// Credential fields (stored as JSON, joined with `:` into the key string).
+pub const CREDENTIALS: CredentialSpec = CredentialSpec {
+    instance_fields: &["api_key", "api_secret"],
+    user_fields: &[],
+};
 const DEFAULT_API_BASE: &str = "https://api.podcastindex.org/api/1.0";
 const KIND: &str = "podcast";
 
 pub struct PodcastIndex {
     info: ConnectorInfo,
     api_base: String,
-    credentials: Option<(String, String)>,
+    key: KeySlot,
     /// Unix time source (tests pin it).
     now: fn() -> i64,
 }
@@ -90,10 +96,7 @@ impl PodcastIndex {
                 cache_ttl_secs: 24 * 3600,
             },
             api_base,
-            credentials: key.and_then(|k| {
-                k.split_once(':')
-                    .map(|(a, b)| (a.trim().to_string(), b.trim().to_string()))
-            }),
+            key: KeySlot::new(key),
             now: unix_now,
         }
     }
@@ -107,22 +110,29 @@ impl PodcastIndex {
 
     fn headers(&self) -> Result<Vec<(String, String)>, ConnectorError> {
         let (key, secret) = self
-            .credentials
-            .as_ref()
+            .key
+            .get()
+            .and_then(|k| {
+                k.split_once(':')
+                    .map(|(a, b)| (a.trim().to_string(), b.trim().to_string()))
+            })
             .ok_or_else(|| ConnectorError::MissingCredentials(API_KEY_ENV.into()))?;
         let date = (self.now)();
         Ok(vec![
             ("X-Auth-Key".into(), key.clone()),
             ("X-Auth-Date".into(), date.to_string()),
-            ("Authorization".into(), signature(key, secret, date)),
+            ("Authorization".into(), signature(&key, &secret, date)),
             ("Accept".into(), "application/json".into()),
         ])
     }
 
-    fn url(&self, path: &str, query: &[(&str, &str)]) -> String {
-        let mut u = url::Url::parse(&format!("{}{path}", self.api_base)).expect("valid base url");
+    /// # Errors
+    /// A base URL from the configuration that does not parse (UX2-S11).
+    fn url(&self, path: &str, query: &[(&str, &str)]) -> Result<String, ConnectorError> {
+        let mut u = url::Url::parse(&format!("{}{path}", self.api_base))
+            .map_err(|e| ConnectorError::Parse(format!("base url: {e}")))?;
         u.query_pairs_mut().extend_pairs(query);
-        u.to_string()
+        Ok(u.to_string())
     }
 }
 
@@ -216,7 +226,7 @@ impl Search for PodcastIndex {
         let url = self.url(
             "/search/byterm",
             &[("q", req.query.as_str()), ("max", &max)],
-        );
+        )?;
         let page: SearchPage = get_json(ctx, ID, "search", &url, self.headers()?).await?;
         Ok(page.feeds.into_iter().map(|f| snapshot(f, false)).collect())
     }
@@ -226,7 +236,7 @@ impl Search for PodcastIndex {
 impl Details for PodcastIndex {
     async fn details(&self, ctx: &Ctx, req: &DetailsRequest) -> Result<Snapshot, ConnectorError> {
         check_kind(&req.kind)?;
-        let url = self.url("/podcasts/byfeedid", &[("id", req.id.as_str())]);
+        let url = self.url("/podcasts/byfeedid", &[("id", req.id.as_str())])?;
         let page: FeedPage = get_json(ctx, ID, "details", &url, self.headers()?).await?;
         page.feed
             .map(|f| snapshot(f, true))
@@ -248,6 +258,20 @@ impl catalog_core::Images for PodcastIndex {
 impl Connector for PodcastIndex {
     fn info(&self) -> &ConnectorInfo {
         &self.info
+    }
+
+    fn key_slot(&self) -> Option<KeySlot> {
+        Some(self.key.clone())
+    }
+
+    fn credentials(&self) -> CredentialSpec {
+        CREDENTIALS
+    }
+
+    fn probe(&self, key: Option<String>) -> Option<std::sync::Arc<dyn Connector>> {
+        Some(std::sync::Arc::new(
+            Self::with_base_url(key, &self.api_base).with_clock(self.now),
+        ))
     }
 
     fn as_search(&self) -> Option<&dyn Search> {

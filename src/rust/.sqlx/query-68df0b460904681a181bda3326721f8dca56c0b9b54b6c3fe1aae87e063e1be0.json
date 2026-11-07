@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE signup_invites\n             SET used_by = $2, used_at = CASE WHEN $2::uuid IS NULL THEN NULL ELSE used_at END\n             WHERE id = $1 AND used_by IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "68df0b460904681a181bda3326721f8dca56c0b9b54b6c3fe1aae87e063e1be0"
+}

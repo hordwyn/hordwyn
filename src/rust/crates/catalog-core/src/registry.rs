@@ -1,17 +1,36 @@
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use crate::connector::Connector;
+use crate::credentials::CredentialState;
 use crate::model::{Attribution, Capability, ConnectorInfo};
+use crate::stats::SourceStats;
 
-/// Enabled connectors, in registration order (which is also the default merge priority).
+/// Compiled-in connectors, in registration order (which is also the default merge priority).
+/// Every connector is registered; its [`CredentialState`] decides whether search and refresh
+/// use it (design.md 4.2). Clones share the states.
 #[derive(Default, Clone)]
 pub struct Registry {
     order: Vec<String>,
     connectors: BTreeMap<String, Arc<dyn Connector>>,
+    states: Arc<RwLock<BTreeMap<String, CredentialState>>>,
+    stats: Option<Arc<SourceStats>>,
 }
 
 impl Registry {
+    /// Read rejections (401/403) from the governed client's counters.
+    #[must_use]
+    pub fn with_stats(mut self, stats: Arc<SourceStats>) -> Self {
+        self.stats = Some(stats);
+        self
+    }
+
+    /// The counters, if wired.
+    #[must_use]
+    pub fn stats(&self) -> Option<&Arc<SourceStats>> {
+        self.stats.as_ref()
+    }
+
     /// # Panics
     /// If a connector with the same id is already registered.
     pub fn register(&mut self, c: Arc<dyn Connector>) -> &mut Self {
@@ -20,6 +39,17 @@ impl Registry {
             !self.connectors.contains_key(&id),
             "connector `{id}` registered twice"
         );
+        let state = if c.credentials().instance_fields.is_empty() {
+            CredentialState::NotNeeded
+        } else if c.key_slot().is_some_and(|k| k.get().is_some()) {
+            CredentialState::Env
+        } else {
+            CredentialState::Missing
+        };
+        self.states
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(id.clone(), state);
         self.order.push(id.clone());
         self.connectors.insert(id, c);
         self
@@ -30,6 +60,39 @@ impl Registry {
         self.connectors.get(id).cloned()
     }
 
+    /// The stored state, or `Invalid` when the provider rejected the current key.
+    #[must_use]
+    pub fn credential(&self, id: &str) -> CredentialState {
+        let state = self
+            .states
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(id)
+            .copied()
+            .unwrap_or(CredentialState::Missing);
+        let rejected = self.stats.as_ref().is_some_and(|s| s.rejected(id));
+        if rejected && matches!(state, CredentialState::Env | CredentialState::Db) {
+            CredentialState::Invalid
+        } else {
+            state
+        }
+    }
+
+    /// Set the credential state (and the key, for `Env`/`Db`); a new key clears an earlier
+    /// rejection.
+    pub fn set_key(&self, id: &str, key: Option<String>, state: CredentialState) {
+        if let Some(slot) = self.connectors.get(id).and_then(|c| c.key_slot()) {
+            slot.set(key);
+        }
+        if let Some(s) = &self.stats {
+            s.key_changed(id);
+        }
+        self.states
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(id.to_string(), state);
+    }
+
     #[must_use]
     pub fn infos(&self) -> Vec<ConnectorInfo> {
         self.order
@@ -38,9 +101,7 @@ impl Registry {
             .collect()
     }
 
-    /// Connectors serving `kind` with `capability`, in priority order.
-    #[must_use]
-    pub fn for_kind(&self, kind: &str, capability: Capability) -> Vec<Arc<dyn Connector>> {
+    fn serving(&self, kind: &str, capability: Capability) -> Vec<&Arc<dyn Connector>> {
         self.order
             .iter()
             .map(|id| &self.connectors[id])
@@ -48,8 +109,38 @@ impl Registry {
                 let i = c.info();
                 i.kinds.iter().any(|k| k == kind) && i.capabilities.contains(&capability)
             })
+            .collect()
+    }
+
+    /// Usable connectors serving `kind` with `capability`, in priority order.
+    #[must_use]
+    pub fn for_kind(&self, kind: &str, capability: Capability) -> Vec<Arc<dyn Connector>> {
+        self.serving(kind, capability)
+            .into_iter()
+            .filter(|c| self.credential(&c.info().id).usable())
             .cloned()
             .collect()
+    }
+
+    /// Connectors that would serve `kinds` but are skipped, with the reason (the palette
+    /// footer and the no-results card, design.md 4.4).
+    #[must_use]
+    pub fn skipped(
+        &self,
+        kinds: &[String],
+        capability: Capability,
+    ) -> Vec<(String, CredentialState)> {
+        let mut out: Vec<(String, CredentialState)> = Vec::new();
+        for kind in kinds {
+            for c in self.serving(kind, capability) {
+                let id = &c.info().id;
+                let state = self.credential(id);
+                if !state.usable() && !out.iter().any(|(i, _)| i == id) {
+                    out.push((id.clone(), state));
+                }
+            }
+        }
+        out
     }
 
     /// Attribution of every enabled connector (the "Data sources" page).

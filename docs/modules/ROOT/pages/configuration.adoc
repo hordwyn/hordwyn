@@ -70,6 +70,15 @@ they are never written back or logged.
 |`kinds` |`APP__FEATURES__KINDS` |list of string |`[]` |Enabled media kinds; empty = all built-in kinds (D-10 feature toggles).
 |===
 
+== `[instance]`
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`hosting` |`APP__INSTANCE__HOSTING` |`home` \| `hosted` |`"home"` |`home` or `hosted`. When set here or in the environment the admin area shows it read-only; otherwise the setup wizard and Admin > Instance store it in the database.
+|===
+
 == `[jobs]`
 
 [cols="2,3,2,2,4"]
@@ -114,6 +123,19 @@ they are never written back or logged.
 |`index_prefix` |`APP__SEARCH__INDEX_PREFIX` |string |`""` |Prefix for index names, so several instances can share one Meilisearch.
 |`meili_master_key` |`APP__SEARCH__MEILI_MASTER_KEY` |string |- |Master key; only the server uses it, clients never see it (D-13). Set it through `APP__SEARCH__MEILI_MASTER_KEY`.
 |`meili_url` |`APP__SEARCH__MEILI_URL` |string |`"http://localhost:7700"` |
+|===
+
+== `[secrets]`
+
+Encryption of secrets at rest (addendum-1 section 2).
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`ephemeral` |`APP__SECRETS__EPHEMERAL` |boolean |`false` |Use a temporary in-memory key when neither the key file nor `keys` exists. For test harnesses only: values encrypted under it cannot be read after a restart, so start-up still refuses when the database already holds encrypted values, and plain-text values from earlier versions are left unencrypted. Never implied by the storage backend.
+|`key_file` |`APP__SECRETS__KEY_FILE` |string |`"data/secrets.key"` |Key file, one key per line (`v<n>:<base64 of 32 bytes>`, newest first). Generated with mode 0600 on the first start when neither the file nor `keys` exists. Back it up together with the database.
+|`keys` |`APP__SECRETS__KEYS` |string |- |The same lines joined with `,`, for operators who prefer the environment (`APP__SECRETS__KEYS`). The key file wins when both exist.
 |===
 
 == `[server]`

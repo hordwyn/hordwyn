@@ -101,6 +101,7 @@ mod tests {
             headers: vec![],
             body: None,
             lane: Lane::Interactive,
+            skip_auth_record: false,
         }
     }
 

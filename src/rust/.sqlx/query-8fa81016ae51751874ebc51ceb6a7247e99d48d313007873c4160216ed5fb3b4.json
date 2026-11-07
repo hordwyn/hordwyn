@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT password_hash, totp_secret, totp_enabled, totp_last_step\n             FROM credentials WHERE user_id = $1",
+  "query": "SELECT password_hash, totp_secret, totp_secret_enc, totp_enabled, totp_last_step\n             FROM credentials WHERE user_id = $1",
   "describe": {
     "columns": [
       {
@@ -27,6 +27,17 @@
       },
       {
         "ordinal": 2,
+        "name": "totp_secret_enc",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "credentials",
+            "name": "totp_secret_enc"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
         "name": "totp_enabled",
         "type_info": "Bool",
         "origin": {
@@ -37,7 +48,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "totp_last_step",
         "type_info": "Int8",
         "origin": {
@@ -56,9 +67,10 @@
     "nullable": [
       true,
       true,
+      true,
       false,
       true
     ]
   },
-  "hash": "4c5572547c2b26992240db4cbfce10ec0a6bc89d748460522c7373fa9357c457"
+  "hash": "8fa81016ae51751874ebc51ceb6a7247e99d48d313007873c4160216ed5fb3b4"
 }

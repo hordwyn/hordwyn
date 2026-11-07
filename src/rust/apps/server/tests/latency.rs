@@ -98,7 +98,7 @@ async fn pages_never_wait_on_providers() {
     let blobs = std::env::temp_dir().join(format!("blobs-{}", uuid::Uuid::now_v7().simple()));
     let toml = format!(
         "[database]\nurl = \"{db_url}\"\n[auth]\nsignup = \"open\"\nsecure_cookies = false\n\
-         [storage]\nbackend = \"memory\"\nfs_root = \"{}\"\n\
+         [secrets]\nephemeral = true\n[storage]\nbackend = \"memory\"\nfs_root = \"{}\"\n\
          [brand]\ndir = \"{}/../../../../config/brand/default\"\n",
         blobs.display(),
         env!("CARGO_MANIFEST_DIR"),

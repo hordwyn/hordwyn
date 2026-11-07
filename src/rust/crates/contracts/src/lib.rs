@@ -3,6 +3,7 @@
 //! the REST API's OpenAPI document.
 #![deny(unsafe_code)]
 
+pub mod admin;
 pub mod auth;
 pub mod browse;
 pub mod locale;
@@ -164,6 +165,13 @@ pub struct SearchResponseDto {
     pub items: Vec<CatalogItemDto>,
     /// Connectors queried in the background.
     pub pending: Vec<String>,
+    /// Sources that would serve the kinds but were skipped, with the reason (design.md 4.4:
+    /// a search never returns an empty list without a reason line).
+    #[serde(default)]
+    pub skipped: Vec<crate::admin::SkippedSourceDto>,
+    /// Kind groups of the query with no working source at all.
+    #[serde(default)]
+    pub groups_without_source: Vec<String>,
 }
 
 /// Payload of a `search.results` event.

@@ -107,6 +107,10 @@ pub fn TaskList(
     #[prop(into)] items: Signal<Vec<TaskItem>>,
     #[prop(into)] done_label: String,
     #[prop(into)] todo_label: String,
+    /// Called with the id when a row link is clicked; `true` means it was handled here
+    /// (the link is not followed). Before hydration the link works as a plain link.
+    #[prop(optional, into)]
+    on_open: Option<Callback<String, bool>>,
     #[prop(into, optional)] class: MaybeProp<String>,
 ) -> impl IntoView {
     let labels = StoredValue::new((done_label, todo_label));
@@ -114,8 +118,14 @@ pub fn TaskList(
         <ul aria-label=label class=move || cn(&["grid gap-2", &class.get().unwrap_or_default()])>
             <For each=move || items.get() key=|t| (t.id.clone(), t.done) children=move |t: TaskItem| {
                 let (done, todo) = labels.get_value();
+                let id = t.id.clone();
                 let title = match t.href {
-                    Some(h) => view! { <a href=h class="font-medium underline-offset-4 hover:underline">{t.title}</a> }.into_any(),
+                    Some(h) => view! {
+                        <a href=h class="font-medium underline-offset-4 hover:underline"
+                            on:click=move |ev| if on_open.is_some_and(|f| f.run(id.clone())) { ev.prevent_default(); }>
+                            {t.title}
+                        </a>
+                    }.into_any(),
                     None => view! { <span class="font-medium">{t.title}</span> }.into_any(),
                 };
                 view! {

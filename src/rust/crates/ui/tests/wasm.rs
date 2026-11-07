@@ -344,6 +344,41 @@ async fn dialog_traps_focus_and_returns_it_to_the_opener() {
     assert_eq!(active_id(), "w-d-opener", "focus returns to the opener");
 }
 
+/// UX2-W3: controls taken out of the Tab order (`tabindex=-1`, the unselected options of a
+/// roving radio group) are not the trap's first or last stop, so Shift+Tab from the first
+/// reachable control still wraps; UX2-W18: `initial_focus` names the control that gets
+/// focus when the dialog opens.
+#[wasm_bindgen_test]
+async fn dialog_trap_skips_controls_out_of_the_tab_order_and_focuses_the_named_field() {
+    let open = RwSignal::new(false);
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <button id="w-r-opener" on:click=move |_| open.set(true)>"Open"</button>
+            <Dialog open=open title="W roving" close_label="Close R" initial_focus="w-r-input">
+                <button id="w-r-off" tabindex="-1">"Off"</button>
+                <button id="w-r-on">"On"</button>
+                <input id="w-r-input"/>
+            </Dialog>
+        }
+    });
+    let opener = el("w-r-opener");
+    opener.focus().unwrap();
+    opener.click();
+    settle().await;
+    assert_eq!(active_id(), "w-r-input", "the named field has focus");
+    let on = el("w-r-on");
+    on.focus().unwrap();
+    key_with_shift(&on, "Tab");
+    assert!(
+        document()
+            .active_element()
+            .is_some_and(|a| a.get_attribute("aria-label").as_deref() == Some("Close R")),
+        "Shift+Tab from the first reachable control wraps to the last"
+    );
+    key(&el("w-r-input"), "Escape");
+    settle().await;
+}
+
 /// An opener that unmounts as the dialog opens (a menu item): focus goes to `return_to`.
 #[wasm_bindgen_test]
 async fn dialog_returns_focus_to_the_fallback_when_the_opener_is_gone() {

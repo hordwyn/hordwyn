@@ -357,3 +357,30 @@ proptest! {
         prop_assert!(after <= target, "after {after} > target {target}");
     }
 }
+
+/// OD-10: the budget numbers are editable in the admin UI and apply without a restart.
+#[tokio::test]
+async fn limits_change_at_run_time_and_are_validated() {
+    let e = env(100);
+    assert_eq!(
+        put(&e, "pinned", Tier::Pinned, 95).await,
+        WriteOutcome::Stored
+    );
+    assert_eq!(
+        put(&e, "new", Tier::Cache, 10).await,
+        WriteOutcome::Refused(Refusal::HardCap)
+    );
+    e.budget.set_limits(ByteSize(1000), 0.9, 0.75).unwrap();
+    assert_eq!(e.budget.config().max_total_bytes, ByteSize(1000));
+    assert_eq!(put(&e, "new", Tier::Cache, 10).await, WriteOutcome::Stored);
+    assert!(
+        e.budget.set_limits(ByteSize(1000), 0.5, 0.8).is_err(),
+        "low >= high"
+    );
+    assert!(e.budget.set_limits(ByteSize(0), 0.9, 0.75).is_err());
+    assert_eq!(
+        e.budget.config().high_watermark,
+        0.9,
+        "unchanged after a refusal"
+    );
+}

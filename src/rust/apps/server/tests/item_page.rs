@@ -12,7 +12,7 @@ fn repo(p: &str) -> String {
 async fn server() -> Server {
     let db = store_pg::testing::fresh_db_url().await.expect("database");
     let toml = format!(
-        "[database]\nurl = \"{db}\"\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
+        "[database]\nurl = \"{db}\"\n[secrets]\nephemeral = true\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
          [auth]\nsignup = \"open\"\nsecure_cookies = false\n[brand]\ndir = \"{}\"\n",
         repo("config/brand/default")
     );

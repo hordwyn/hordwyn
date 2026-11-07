@@ -19,10 +19,7 @@ fn fixtures() -> Arc<ReplayHttp> {
 }
 
 fn ctx(http: Arc<ReplayHttp>) -> Ctx {
-    Ctx {
-        http,
-        lane: Lane::Interactive,
-    }
+    Ctx::new(http, Lane::Interactive)
 }
 
 fn tmdb() -> Tmdb {
@@ -229,10 +226,7 @@ async fn live_search() {
         "tmdb",
         catalog_core::ConnectorPolicy::from_info(catalog_core::Connector::info(&t)),
     );
-    let ctx = Ctx {
-        http: Arc::new(http),
-        lane: Lane::Interactive,
-    };
+    let ctx = Ctx::new(Arc::new(http), Lane::Interactive);
     let req = SearchRequest {
         kind: "movie".into(),
         query: "fight club".into(),
@@ -244,4 +238,47 @@ async fn live_search() {
         hits.iter()
             .any(|h| h.external_ids.contains(&ExternalId::new("tmdb", "550")))
     );
+}
+
+/// design.md 4.2: the key lives in a slot the server updates; a key entered in the admin UI
+/// is used by the next request, no restart.
+#[tokio::test]
+async fn a_new_key_in_the_slot_is_used_by_the_next_request() {
+    use catalog_core::Connector;
+    let http = fixtures();
+    let t = Tmdb::new(None);
+    let req = SearchRequest {
+        kind: "movie".into(),
+        query: "fight club".into(),
+        language: None,
+        limit: 1,
+    };
+    assert!(matches!(
+        catalog_core::Search::search(&t, &ctx(http.clone()), &req).await,
+        Err(ConnectorError::MissingCredentials(_))
+    ));
+    assert_eq!(t.credentials().instance_fields, &["api_key"]);
+    t.key_slot().unwrap().set(Some("from-the-ui".into()));
+    catalog_core::Search::search(&t, &ctx(http.clone()), &req)
+        .await
+        .unwrap();
+    assert!(
+        http.requests()[0]
+            .headers
+            .contains(&("Authorization".into(), "Bearer from-the-ui".into()))
+    );
+}
+
+/// UX2-S11: a malformed base URL from the configuration is an error, not a panic.
+#[tokio::test]
+async fn a_bad_base_url_is_an_error() {
+    let c = Tmdb::with_base_urls(Some("t".into()), "not a url", "not a url either");
+    let req = SearchRequest {
+        kind: "movie".into(),
+        query: "x".into(),
+        language: None,
+        limit: 1,
+    };
+    let r = catalog_core::Search::search(&c, &ctx(fixtures()), &req).await;
+    assert!(matches!(r, Err(ConnectorError::Parse(_))), "{r:?}");
 }

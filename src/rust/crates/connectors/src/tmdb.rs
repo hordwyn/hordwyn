@@ -2,8 +2,9 @@
 
 use async_trait::async_trait;
 use catalog_core::{
-    Attribution, Auth, Capability, Connector, ConnectorError, ConnectorInfo, Ctx, Details,
-    DetailsRequest, ImageKind, ImageRef, RateLimit, Search, SearchRequest, Snapshot,
+    Attribution, Auth, Capability, Connector, ConnectorError, ConnectorInfo, CredentialSpec, Ctx,
+    Details, DetailsRequest, ImageKind, ImageRef, KeySlot, RateLimit, Search, SearchRequest,
+    Snapshot,
 };
 use domain::catalog::ExternalId;
 use kinds::builtin::{MovieAttributes, SeasonInfo, ShowAttributes};
@@ -15,12 +16,17 @@ pub const ID: &str = "tmdb";
 pub const API_KEY_ENV: &str = "KK_TMDB_API_KEY";
 pub const DEFAULT_API_BASE: &str = "https://api.themoviedb.org";
 pub const DEFAULT_IMAGE_BASE: &str = "https://image.tmdb.org";
+/// The API read access token (v4 bearer).
+pub const CREDENTIALS: CredentialSpec = CredentialSpec {
+    instance_fields: &["api_key"],
+    user_fields: &[],
+};
 
 pub struct Tmdb {
     info: ConnectorInfo,
     api_base: String,
     image_base: String,
-    token: Option<String>,
+    token: KeySlot,
 }
 
 fn host_of(base: &str) -> String {
@@ -64,25 +70,28 @@ impl Tmdb {
             info,
             api_base,
             image_base,
-            token,
+            token: KeySlot::new(token),
         }
     }
 
     fn headers(&self) -> Result<Vec<(String, String)>, ConnectorError> {
         let token = self
             .token
-            .as_ref()
+            .get()
             .ok_or_else(|| ConnectorError::MissingCredentials(API_KEY_ENV.into()))?;
         Ok(vec![
-            ("Authorization".into(), format!("Bearer {token}")),
+            ("Authorization".into(), format!("Bearer {}", token.as_str())),
             ("Accept".into(), "application/json".into()),
         ])
     }
 
-    fn url(&self, path: &str, query: &[(&str, &str)]) -> String {
-        let mut u = url::Url::parse(&format!("{}{path}", self.api_base)).expect("valid base url");
+    /// # Errors
+    /// A base URL from the configuration that does not parse (UX2-S11).
+    fn url(&self, path: &str, query: &[(&str, &str)]) -> Result<String, ConnectorError> {
+        let mut u = url::Url::parse(&format!("{}{path}", self.api_base))
+            .map_err(|e| ConnectorError::Parse(format!("base url: {e}")))?;
         u.query_pairs_mut().extend_pairs(query);
-        u.to_string()
+        Ok(u.to_string())
     }
 
     fn image(&self, size: &str, path: Option<&str>, kind: ImageKind) -> Option<ImageRef> {
@@ -200,7 +209,7 @@ impl Search for Tmdb {
                 ("language", lang),
                 ("page", "1"),
             ],
-        );
+        )?;
         let page: Page<Hit> = get_json(ctx, ID, "search", &url, self.headers()?).await?;
         Ok(page
             .results
@@ -243,7 +252,7 @@ impl Details for Tmdb {
     async fn details(&self, ctx: &Ctx, req: &DetailsRequest) -> Result<Snapshot, ConnectorError> {
         let path = Self::tmdb_path(&req.kind)?;
         let lang = req.language.as_deref().unwrap_or("en-US");
-        let url = self.url(&format!("/3/{path}/{}", req.id), &[("language", lang)]);
+        let url = self.url(&format!("/3/{path}/{}", req.id), &[("language", lang)])?;
         if req.kind == "movie" {
             let m: MovieDetails = get_json(ctx, ID, "details", &url, self.headers()?).await?;
             let mut external_ids = vec![ExternalId::new(ID, m.id.to_string())];
@@ -312,6 +321,22 @@ impl catalog_core::Images for Tmdb {
 impl Connector for Tmdb {
     fn info(&self) -> &ConnectorInfo {
         &self.info
+    }
+
+    fn key_slot(&self) -> Option<KeySlot> {
+        Some(self.token.clone())
+    }
+
+    fn credentials(&self) -> CredentialSpec {
+        CREDENTIALS
+    }
+
+    fn probe(&self, key: Option<String>) -> Option<std::sync::Arc<dyn Connector>> {
+        Some(std::sync::Arc::new(Self::with_base_urls(
+            key,
+            &self.api_base,
+            &self.image_base,
+        )))
     }
 
     fn as_search(&self) -> Option<&dyn Search> {

@@ -11,6 +11,7 @@
 mod breaker;
 pub mod cache;
 mod connector;
+mod credentials;
 mod gate;
 mod http;
 pub mod merge;
@@ -21,9 +22,11 @@ pub mod refresh;
 mod registry;
 pub mod search;
 mod singleflight;
+mod stats;
 
 pub use breaker::Breaker;
 pub use connector::{Connector, Ctx, Details, Images, Search};
+pub use credentials::{CredentialSpec, CredentialState, KeySlot};
 pub use gate::Gate;
 pub use http::{ConnectorPolicy, GovernedHttp};
 pub use model::{
@@ -33,3 +36,4 @@ pub use model::{
 pub use plain::PlainHttp;
 pub use registry::Registry;
 pub use singleflight::SingleFlight;
+pub use stats::{SourceCounters, SourceStats};

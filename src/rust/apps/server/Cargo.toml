@@ -45,6 +45,7 @@ tokio-util.workspace = true
 tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
+zeroize.workspace = true
 web = { workspace = true, features = ["ssr"] }
 
 [features]
@@ -58,6 +59,7 @@ tvdb = ["connectors/tvdb"]
 all-connectors = ["tmdb", "igdb", "podcastindex", "tvdb"]
 
 [dev-dependencies]
+wiremock.workspace = true
 futures.workspace = true
 reqwest = { workspace = true, features = ["json", "stream"] }
 serde_json.workspace = true

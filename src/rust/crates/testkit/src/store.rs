@@ -89,6 +89,12 @@ impl UserRepo for MemStore {
         Ok(self.state().users.len() as u64)
     }
 
+    async fn list(&self) -> RepoResult<Vec<User>> {
+        let mut v: Vec<User> = self.state().users.values().cloned().collect();
+        v.sort_by_key(|u| (u.created_at, u.id.0));
+        Ok(v)
+    }
+
     async fn update(&self, user: &User) -> RepoResult<()> {
         self.state().users.insert(user.id, user.clone());
         Ok(())

@@ -95,6 +95,7 @@ async fn offline_clients_converge_and_replays_are_no_ops() {
         naming: Naming::from_prefix("app", "App"),
         secure_cookies: true,
         default_kinds: vec![],
+        admin: None,
     };
     let id = item.id.0.to_string();
     // both devices start from the same pulled state

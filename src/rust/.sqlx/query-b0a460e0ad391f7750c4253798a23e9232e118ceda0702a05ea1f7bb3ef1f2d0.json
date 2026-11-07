@@ -1,0 +1,146 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT hosting, signup, session_days, secure_cookies, storage_max_total_bytes,\n                    storage_high_watermark, storage_low_watermark, setup_completed_at, setup_step,\n                    updated_at, updated_by\n             FROM instance_settings WHERE id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "hosting",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_settings",
+            "name": "hosting"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "signup",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_settings",
+            "name": "signup"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "session_days",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "instance_settings",
+            "name": "session_days"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "secure_cookies",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "instance_settings",
+            "name": "secure_cookies"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "storage_max_total_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "instance_settings",
+            "name": "storage_max_total_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "storage_high_watermark",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "instance_settings",
+            "name": "storage_high_watermark"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "storage_low_watermark",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "instance_settings",
+            "name": "storage_low_watermark"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "setup_completed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "instance_settings",
+            "name": "setup_completed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "setup_step",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_settings",
+            "name": "setup_step"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "instance_settings",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "instance_settings",
+            "name": "updated_by"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "b0a460e0ad391f7750c4253798a23e9232e118ceda0702a05ea1f7bb3ef1f2d0"
+}

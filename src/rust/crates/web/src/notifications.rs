@@ -82,7 +82,7 @@ fn digest_hour(cron: &str) -> Option<u32> {
         .filter(|h| *h < 24)
 }
 
-fn mode_label(s: &SubscriptionDto) -> String {
+pub(crate) fn mode_label(s: &SubscriptionDto) -> String {
     match s.mode["mode"].as_str() {
         Some("digest") => {
             let cron = s.mode["cron"].as_str().unwrap_or_default();
@@ -97,7 +97,7 @@ fn mode_label(s: &SubscriptionDto) -> String {
 
 /// Name of an event or event pattern of a subscription (`*`, `release.*`, `release.episode`);
 /// events without a label show their id.
-fn event_label(id: &str) -> String {
+pub(crate) fn event_label(id: &str) -> String {
     if id == "*" {
         return t("notify-all-events");
     }

@@ -9,6 +9,11 @@
 // each with its reason (DEC-234).
 #![allow(clippy::needless_pass_by_value, clippy::must_use_candidate)]
 
+mod admin;
+pub mod admin_api;
+#[cfg(feature = "ssr")]
+pub mod admin_backend;
+pub mod admin_state;
 pub mod api;
 mod app;
 mod auth;
@@ -33,10 +38,16 @@ pub mod log_form;
 pub mod log_sheet;
 pub mod next_step;
 mod notifications;
+mod nudge;
 mod pages;
 mod palette;
+mod reauth;
+mod settings;
+mod setup;
+pub mod setup_state;
 mod sharing;
 mod shell;
+pub mod source_hints;
 pub mod widgets;
 
 pub use app::{App, CONFIG_ID, ClientConfig, shell};

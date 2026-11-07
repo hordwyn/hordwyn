@@ -23,6 +23,7 @@ pub async fn get_json<T: DeserializeOwned>(
             headers,
             body: None,
             lane: ctx.lane,
+            skip_auth_record: ctx.skip_auth_record(),
         })
         .await?;
     match resp.status {
@@ -30,7 +31,7 @@ pub async fn get_json<T: DeserializeOwned>(
             serde_json::from_slice(&resp.body).map_err(|e| ConnectorError::Parse(e.to_string()))
         }
         404 => Err(ConnectorError::NotFound),
-        status => Err(ConnectorError::Status { status }),
+        status => Err(status_error(ctx, status)),
     }
 }
 
@@ -69,6 +70,7 @@ pub async fn post_json<T: DeserializeOwned>(
             headers,
             body: Some(body),
             lane: ctx.lane,
+            skip_auth_record: ctx.skip_auth_record(),
         })
         .await?;
     match resp.status {
@@ -76,6 +78,15 @@ pub async fn post_json<T: DeserializeOwned>(
             serde_json::from_slice(&resp.body).map_err(|e| ConnectorError::Parse(e.to_string()))
         }
         404 => Err(ConnectorError::NotFound),
-        status => Err(ConnectorError::Status { status }),
+        status => Err(status_error(ctx, status)),
+    }
+}
+
+/// A non-2xx answer: a rejection of the member's own credential is theirs, not the source's.
+fn status_error(ctx: &Ctx, status: u16) -> ConnectorError {
+    if matches!(status, 401 | 403) && ctx.uses_user_key() {
+        ConnectorError::UserCredentialRejected { status }
+    } else {
+        ConnectorError::Status { status }
     }
 }

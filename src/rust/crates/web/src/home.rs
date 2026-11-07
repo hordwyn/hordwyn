@@ -82,6 +82,7 @@ fn SignedInHome() -> impl IntoView {
     view! {
         <leptos_meta::Title text=format!("{tab} - {product}")/>
         <h1 class="mb-6 text-2xl font-semibold tracking-tight">{title}</h1>
+        {cfg.is_admin.then(|| view! { <crate::nudge::AdminNudge/> })}
         <Transition fallback=|| view! { <HomeSkeleton/> }>
             <For each=move || data.get().map(|r| (fresh(renders), r)) key=|(k, _)| *k
                 children=move |(_, r)| match r {

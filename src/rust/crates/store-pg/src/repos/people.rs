@@ -158,6 +158,16 @@ impl UserRepo for PgStore {
         Ok(u64::try_from(n).unwrap_or(0))
     }
 
+    async fn list(&self) -> Res<Vec<User>> {
+        sqlx::query_as!(UserRow, "SELECT * FROM users ORDER BY created_at, id")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(be)?
+            .into_iter()
+            .map(User::try_from)
+            .collect()
+    }
+
     async fn update(&self, user: &User) -> Res<()> {
         let mut tx = self.begin().await?;
         sqlx::query!(

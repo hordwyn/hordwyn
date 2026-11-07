@@ -8,8 +8,8 @@
 
 use std::collections::HashMap;
 use std::num::NonZeroU32;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use app::ports::{HttpError, HttpFetch, HttpRequest, HttpResponse};
@@ -23,6 +23,7 @@ use crate::cache::{CacheEntry, HttpCache, cache_key, ttl_secs};
 use crate::gate::Gate;
 use crate::model::{ConnectorInfo, RateLimit};
 use crate::singleflight::SingleFlight;
+use crate::stats::SourceStats;
 
 /// Limits and allowlist for one connector.
 #[derive(Debug, Clone)]
@@ -77,6 +78,7 @@ impl ConnectorPolicy {
 }
 
 struct Governed {
+    id: String,
     policy: ConnectorPolicy,
     limiter: DefaultDirectRateLimiter,
     gate: std::sync::Arc<Gate>,
@@ -85,11 +87,12 @@ struct Governed {
 }
 
 impl Governed {
-    fn new(policy: ConnectorPolicy) -> Self {
+    fn new(id: &str, policy: ConnectorPolicy) -> Self {
         let per_second =
             NonZeroU32::new(policy.rate_limit.per_second.max(1)).unwrap_or(NonZeroU32::MIN);
         let burst = NonZeroU32::new(policy.rate_limit.burst.max(1)).unwrap_or(NonZeroU32::MIN);
         Self {
+            id: id.to_string(),
             limiter: RateLimiter::direct(Quota::per_second(per_second).allow_burst(burst)),
             gate: Gate::new(policy.rate_limit.max_concurrency.max(1) as usize),
             breaker: Breaker::new(policy.breaker_threshold, policy.breaker_cooldown),
@@ -139,6 +142,7 @@ pub struct GovernedHttp {
     cache: Option<HttpCache>,
     flights: SingleFlight<Result<HttpResponse, HttpError>>,
     upstream_calls: AtomicU64,
+    stats: Option<Arc<SourceStats>>,
 }
 
 enum Step {
@@ -188,13 +192,33 @@ impl GovernedHttp {
             cache,
             flights: SingleFlight::default(),
             upstream_calls: AtomicU64::new(0),
+            stats: None,
         }
     }
 
     pub fn add_connector(&mut self, id: &str, policy: ConnectorPolicy) -> &mut Self {
         self.connectors
-            .insert(id.to_string(), Governed::new(policy));
+            .insert(id.to_string(), Governed::new(id, policy));
         self
+    }
+
+    /// Record calls, answers and circuit changes per connector (source status, design.md 4.4).
+    #[must_use]
+    pub fn with_stats(mut self, stats: Arc<SourceStats>) -> Self {
+        self.stats = Some(stats);
+        self
+    }
+
+    fn failed(&self, g: &Governed) {
+        if let (Some(cooldown), Some(s)) = (g.breaker.failure(), &self.stats) {
+            s.record_circuit_open(&g.id, cooldown);
+        }
+    }
+
+    fn note(&self, f: impl FnOnce(&SourceStats)) {
+        if let Some(s) = &self.stats {
+            f(s);
+        }
     }
 
     /// Requests actually sent upstream (metrics, tests).
@@ -254,6 +278,7 @@ impl GovernedHttp {
         }
         g.limiter.until_ready().await;
         self.upstream_calls.fetch_add(1, Ordering::Relaxed);
+        self.note(|s| s.record_call(&g.id));
 
         let method =
             reqwest::Method::from_bytes(req.method.as_bytes()).unwrap_or(reqwest::Method::GET);
@@ -277,11 +302,12 @@ impl GovernedHttp {
             Ok(r) => r,
             Err(e) => {
                 drop(permit);
-                g.breaker.failure();
+                self.note(|s| s.record_error(&g.id, "network"));
+                self.failed(g);
                 return if retries_left {
                     Step::RetryAfter(jittered(attempt))
                 } else {
-                    Step::Done(Err(HttpError::Network(e.to_string())))
+                    Step::Done(Err(HttpError::Network(e.without_url().to_string())))
                 };
             }
         };
@@ -295,11 +321,12 @@ impl GovernedHttp {
             Ok(b) => b.to_vec(),
             Err(e) => {
                 drop(permit);
-                g.breaker.failure();
+                self.note(|s| s.record_error(&g.id, "network"));
+                self.failed(g);
                 return if retries_left {
                     Step::RetryAfter(jittered(attempt))
                 } else {
-                    Step::Done(Err(HttpError::Network(e.to_string())))
+                    Step::Done(Err(HttpError::Network(e.without_url().to_string())))
                 };
             }
         };
@@ -322,6 +349,10 @@ impl GovernedHttp {
         body: Vec<u8>,
     ) -> Step {
         let retries_left = attempt < g.policy.max_retries;
+        // a rejected member key or candidate key says nothing about the instance key
+        if !(req.skip_auth_record && matches!(status, 401 | 403)) {
+            self.note(|s| s.record_status(&g.id, status));
+        }
 
         if status == 304
             && let Some((entry, cached_body)) = cached
@@ -345,7 +376,7 @@ impl GovernedHttp {
         }
         if status == 429 || status == 503 {
             if status == 503 {
-                g.breaker.failure();
+                self.failed(g);
             }
             let wait = retry_after(&headers).unwrap_or_else(|| jittered(attempt));
             g.pause_for(wait);
@@ -357,7 +388,7 @@ impl GovernedHttp {
             }));
         }
         if status >= 500 {
-            g.breaker.failure();
+            self.failed(g);
             if retries_left {
                 return Step::RetryAfter(jittered(attempt));
             }

@@ -159,10 +159,16 @@ pub enum AuthErrorCode {
     TotpRequired,
     InvalidTotp,
     TooManyAttempts,
+    /// An admin disabled the account.
+    AccountDisabled,
+    /// The stored authenticator secret cannot be decrypted (its key is not loaded).
+    TotpLocked,
+    /// The action needs a fresh sign-in proof (DEC-191).
+    ReauthRequired,
 }
 
 impl AuthErrorCode {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 17] = [
         Self::UsernameTooShort,
         Self::UsernameTooLong,
         Self::UsernameSpace,
@@ -177,6 +183,9 @@ impl AuthErrorCode {
         Self::TotpRequired,
         Self::InvalidTotp,
         Self::TooManyAttempts,
+        Self::AccountDisabled,
+        Self::TotpLocked,
+        Self::ReauthRequired,
     ];
 
     /// The stable code in `ErrorDto::code`.
@@ -197,6 +206,9 @@ impl AuthErrorCode {
             Self::TotpRequired => "totp_required",
             Self::InvalidTotp => "invalid_totp",
             Self::TooManyAttempts => "too_many_attempts",
+            Self::AccountDisabled => "account_disabled",
+            Self::TotpLocked => "totp_locked",
+            Self::ReauthRequired => "reauth_required",
         }
     }
 
@@ -221,7 +233,10 @@ impl AuthErrorCode {
             | Self::SignupClosed
             | Self::InvalidCredentials
             | Self::TotpRequired
-            | Self::TooManyAttempts => None,
+            | Self::TooManyAttempts
+            | Self::AccountDisabled
+            | Self::TotpLocked
+            | Self::ReauthRequired => None,
         }
     }
 }

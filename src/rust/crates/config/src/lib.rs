@@ -360,6 +360,73 @@ impl Default for TelemetryConfig {
     }
 }
 
+/// How the instance is run (design.md 4.1): it changes defaults, not features.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Hosting {
+    /// Free, for family and friends (the default, DEC-171).
+    #[default]
+    Home,
+    /// Run for other people: licence reminders per data source.
+    Hosted,
+}
+
+impl Hosting {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Home => "home",
+            Self::Hosted => "hosted",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct InstanceConfig {
+    /// `home` or `hosted`. When set here or in the environment the admin area shows it
+    /// read-only; otherwise the setup wizard and Admin > Instance store it in the database.
+    pub hosting: Hosting,
+}
+
+/// Encryption of secrets at rest (addendum-1 section 2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct SecretsConfig {
+    /// Key file, one key per line (`v<n>:<base64 of 32 bytes>`, newest first). Generated with
+    /// mode 0600 on the first start when neither the file nor `keys` exists. Back it up
+    /// together with the database.
+    pub key_file: String,
+    /// The same lines joined with `,`, for operators who prefer the environment
+    /// (`APP__SECRETS__KEYS`). The key file wins when both exist.
+    #[serde(skip_serializing)]
+    pub keys: Option<Secret>,
+    /// Use a temporary in-memory key when neither the key file nor `keys` exists. For test
+    /// harnesses only: values encrypted under it cannot be read after a restart, so start-up
+    /// still refuses when the database already holds encrypted values, and plain-text values
+    /// from earlier versions are left unencrypted. Never implied by the storage backend.
+    pub ephemeral: bool,
+}
+
+impl Default for SecretsConfig {
+    fn default() -> Self {
+        Self {
+            key_file: "data/secrets.key".into(),
+            keys: None,
+            ephemeral: false,
+        }
+    }
+}
+
+/// Where an explicitly set value came from (the admin area shows env and file values
+/// read-only, with the variable name).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Origin {
+    File,
+    /// The environment variable that set it.
+    Env(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct FeaturesConfig {
@@ -383,6 +450,12 @@ pub struct AppConfig {
     pub notify: NotifyConfig,
     /// Per connector id (`tmdb`, `igdb`, ...).
     pub connectors: BTreeMap<String, ConnectorConfig>,
+    pub instance: InstanceConfig,
+    pub secrets: SecretsConfig,
+    /// Dotted keys set by the file or the environment (not part of the file format).
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub origins: BTreeMap<String, Origin>,
 }
 
 /// Parse an environment value as a TOML value (number, bool, array), else a string.
@@ -393,12 +466,36 @@ fn env_value(raw: &str) -> toml::Value {
         .unwrap_or_else(|| toml::Value::String(raw.to_string()))
 }
 
-/// Apply `APP__A__B=value` overrides onto a TOML table.
-fn apply_env(table: &mut toml::Table, vars: impl IntoIterator<Item = (String, String)>) {
+/// Dotted paths of every value in a TOML table (`auth.session_days`).
+fn leaf_paths(table: &toml::Table, prefix: &str, out: &mut BTreeMap<String, Origin>) {
+    for (k, v) in table {
+        let path = if prefix.is_empty() {
+            k.clone()
+        } else {
+            format!("{prefix}.{k}")
+        };
+        if let toml::Value::Table(t) = v {
+            leaf_paths(t, &path, out);
+        } else {
+            out.insert(path, Origin::File);
+        }
+    }
+}
+
+/// Apply `APP__A__B=value` overrides onto a TOML table, recording each key's variable.
+fn apply_env(
+    table: &mut toml::Table,
+    vars: impl IntoIterator<Item = (String, String)>,
+    origins: &mut BTreeMap<String, Origin>,
+) {
     for (k, v) in vars {
         let Some(path) = k.strip_prefix(ENV_PREFIX) else {
             continue;
         };
+        // an empty value means "not set" (a sourced `.env.example` lists every name empty)
+        if v.trim().is_empty() {
+            continue;
+        }
         let parts: Vec<String> = path.split("__").map(str::to_ascii_lowercase).collect();
         if parts.iter().any(String::is_empty) {
             continue;
@@ -414,6 +511,7 @@ fn apply_env(table: &mut toml::Table, vars: impl IntoIterator<Item = (String, St
             cur = entry.as_table_mut().expect("table");
         }
         cur.insert(parts[parts.len() - 1].clone(), env_value(&v));
+        origins.insert(parts.join("."), Origin::Env(k.clone()));
     }
 }
 
@@ -442,7 +540,9 @@ impl AppConfig {
         let env: Vec<(String, String)> = env.into_iter().collect();
         let mut table: toml::Table =
             toml::from_str(toml_text).map_err(|e| ConfigError::Parse(e.to_string()))?;
-        apply_env(&mut table, env.iter().cloned());
+        let mut origins = BTreeMap::new();
+        leaf_paths(&table, "", &mut origins);
+        apply_env(&mut table, env.iter().cloned(), &mut origins);
         let mut cfg: Self = toml::Value::Table(table)
             .try_into()
             .map_err(|e: toml::de::Error| ConfigError::Parse(e.to_string()))?;
@@ -461,11 +561,22 @@ impl AppConfig {
                     });
                 if c.api_key.is_none() && !v.is_empty() {
                     c.api_key = Some(Secret::new(v.clone()));
+                    origins.insert(
+                        format!("connectors.{}.api_key", id.to_ascii_lowercase()),
+                        Origin::Env(k.clone()),
+                    );
                 }
             }
         }
+        cfg.origins = origins;
         cfg.validate()?;
         Ok(cfg)
+    }
+
+    /// Where `key` (dotted, e.g. `auth.session_days`) was set, if it was set explicitly.
+    #[must_use]
+    pub fn origin(&self, key: &str) -> Option<&Origin> {
+        self.origins.get(key)
     }
 
     /// # Errors
@@ -594,6 +705,53 @@ mod tests {
     }
 
     #[test]
+    fn origins_name_the_file_and_the_environment_variable() {
+        let c = AppConfig::from_sources(
+            "[auth]\nsession_days = 7\n[storage]\nhigh_watermark = 0.8\n",
+            env(&[
+                ("APP__AUTH__SECURE_COOKIES", "false"),
+                ("APP__STORAGE__HIGH_WATERMARK", "0.85"),
+                ("KK_TMDB_API_KEY", "k"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(c.origin("auth.session_days"), Some(&Origin::File));
+        assert_eq!(
+            c.origin("auth.secure_cookies"),
+            Some(&Origin::Env("APP__AUTH__SECURE_COOKIES".into()))
+        );
+        // env wins over the file, and says so
+        assert_eq!(
+            c.origin("storage.high_watermark"),
+            Some(&Origin::Env("APP__STORAGE__HIGH_WATERMARK".into()))
+        );
+        assert_eq!(
+            c.origin("connectors.tmdb.api_key"),
+            Some(&Origin::Env("KK_TMDB_API_KEY".into()))
+        );
+        assert_eq!(c.origin("storage.max_total_bytes"), None);
+        assert_eq!(c.origin("instance.hosting"), None);
+    }
+
+    #[test]
+    fn instance_and_secrets_defaults() {
+        let c = AppConfig::from_sources("", env(&[])).unwrap();
+        assert_eq!(c.instance.hosting, Hosting::Home);
+        assert_eq!(c.secrets.key_file, "data/secrets.key");
+        let c = AppConfig::from_sources(
+            "",
+            env(&[
+                ("APP__INSTANCE__HOSTING", "hosted"),
+                ("APP__SECRETS__KEYS", "v1:abc"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(c.instance.hosting, Hosting::Hosted);
+        assert!(!toml::to_string(&c).unwrap().contains("v1:abc"));
+        assert!(!format!("{c:?}").contains("v1:abc"));
+    }
+
+    #[test]
     fn example_file_is_valid() {
         let text = std::fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../config/app.example.toml"),
@@ -615,5 +773,35 @@ mod tests {
             have == want,
             "configuration.adoc is stale: run `UPDATE_DOCS=1 cargo test -p config`"
         );
+    }
+
+    /// UX2-S8: `config/.env.example` lists every variable with an empty value; sourcing it
+    /// must not turn them into empty settings (an empty hosting mode or key file path).
+    #[test]
+    fn empty_environment_values_are_ignored() {
+        let c = AppConfig::from_sources(
+            "",
+            env(&[
+                ("APP__INSTANCE__HOSTING", ""),
+                ("APP__SECRETS__KEY_FILE", ""),
+                ("APP__SECRETS__KEYS", "  "),
+                ("APP__CONNECTORS__TMDB__API_KEY", ""),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(c.secrets.key_file, SecretsConfig::default().key_file);
+        assert!(c.secrets.keys.is_none());
+        assert_eq!(c.origin("secrets.key_file"), None);
+        assert_eq!(c.origin("instance.hosting"), None);
+        assert!(!c.connectors.contains_key("tmdb") || c.connectors["tmdb"].api_key.is_none());
+    }
+
+    /// UX2-1: the temporary key is an explicit switch, never implied by the asset backend.
+    #[test]
+    fn the_ephemeral_secrets_key_is_off_unless_asked_for() {
+        let c = AppConfig::from_sources("[storage]\nbackend = \"memory\"\n", env(&[])).unwrap();
+        assert!(!c.secrets.ephemeral);
+        let c = AppConfig::from_sources("", env(&[("APP__SECRETS__EPHEMERAL", "true")])).unwrap();
+        assert!(c.secrets.ephemeral);
     }
 }

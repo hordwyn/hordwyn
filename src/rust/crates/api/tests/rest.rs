@@ -67,6 +67,7 @@ fn state() -> (ApiState, testkit::TestEnv) {
         naming: Naming::from_prefix("shelf", "Shelf"),
         secure_cookies: true,
         default_kinds: vec!["movie".into()],
+        admin: None,
     };
     (s, t)
 }

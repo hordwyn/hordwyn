@@ -101,6 +101,7 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(stats_series))
         .routes(routes!(home))
         .routes(routes!(item_page))
+        .merge(crate::admin_routes::routes())
         // JSON bodies are small (G2-10); only file imports may be large (the upload quota
         // limits what is kept)
         .layer(axum::extract::DefaultBodyLimit::max(JSON_BODY_LIMIT))
@@ -126,7 +127,11 @@ pub fn router(state: ApiState) -> axum::Router {
 }
 
 fn session_cookie(state: &ApiState, token: &str, max_age_secs: i64) -> HeaderValue {
-    let secure = if state.secure_cookies { "; Secure" } else { "" };
+    let secure = if state.cookie_secure() {
+        "; Secure"
+    } else {
+        ""
+    };
     let v = format!(
         "{}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age_secs}{secure}",
         state.naming.session_cookie
@@ -223,22 +228,14 @@ async fn me(State(s): State<ApiState>, Authed(a): Authed) -> ApiResult<Json<User
     Ok(Json(dto::user(&s.app.user(a.user_id).await?)))
 }
 
-#[derive(serde::Serialize, ToSchema)]
-struct TotpEnrolmentDto {
-    otpauth_url: String,
-    secret_base32: String,
-}
-
-#[utoipa::path(post, path = "/auth/totp", tag = "auth", responses((status = 200, body = TotpEnrolmentDto)))]
+/// Start enrolling an authenticator; needs a fresh proof (DEC-191, `reauth_required`).
+#[utoipa::path(post, path = "/auth/totp", tag = "auth", responses((status = 200, body = contracts::admin::TotpEnrolmentDto),
+    (status = 403, body = contracts::ErrorDto)))]
 async fn totp_begin(
     State(s): State<ApiState>,
-    Authed(a): Authed,
-) -> ApiResult<Json<TotpEnrolmentDto>> {
-    let e = s.auth.totp_begin(a).await?;
-    Ok(Json(TotpEnrolmentDto {
-        otpauth_url: e.otpauth_url,
-        secret_base32: e.secret_base32,
-    }))
+    t: crate::AuthedToken,
+) -> ApiResult<Json<contracts::admin::TotpEnrolmentDto>> {
+    Ok(Json(crate::admin::totp_begin(&s, &t.token).await?))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -246,15 +243,15 @@ struct TotpCodeDto {
     code: String,
 }
 
+/// Turn the authenticator on; answers the recovery codes, shown once (OD-08).
 #[utoipa::path(post, path = "/auth/totp/confirm", tag = "auth", request_body = TotpCodeDto,
-    responses((status = 204)))]
+    responses((status = 200, body = contracts::admin::RecoveryCodesDto)))]
 async fn totp_confirm(
     State(s): State<ApiState>,
     Authed(a): Authed,
     Json(b): Json<TotpCodeDto>,
-) -> ApiResult<StatusCode> {
-    s.auth.totp_confirm(a, &b.code).await?;
-    Ok(StatusCode::NO_CONTENT)
+) -> ApiResult<Json<contracts::admin::RecoveryCodesDto>> {
+    Ok(Json(crate::admin::totp_confirm(&s, a, &b.code).await?))
 }
 
 fn oidc(s: &ApiState) -> ApiResult<&std::sync::Arc<auth::oidc::Oidc>> {
@@ -266,7 +263,7 @@ fn oidc(s: &ApiState) -> ApiResult<&std::sync::Arc<auth::oidc::Oidc>> {
 #[utoipa::path(get, path = "/auth/oidc/start", tag = "auth", responses((status = 302)))]
 async fn oidc_start(State(s): State<ApiState>) -> ApiResult<Response> {
     let (url, pending) = oidc(&s)?.start().await?;
-    let secure = if s.secure_cookies { "; Secure" } else { "" };
+    let secure = if s.cookie_secure() { "; Secure" } else { "" };
     let value = serde_json::to_string(&pending).unwrap_or_default();
     let cookie_value = format!(
         "{}={}; Path=/api/v1/auth/oidc; HttpOnly; SameSite=Lax; Max-Age=600{secure}",
@@ -334,6 +331,8 @@ struct SearchParams {
     q: String,
     /// Kind id; all enabled kinds when omitted.
     kind: Option<String>,
+    /// Kind group id (`watch`, `read`, ...): its enabled kinds; ignored with `kind`.
+    group: Option<String>,
 }
 
 /// Local results immediately; each connector's results follow as `search.results` events
@@ -345,7 +344,7 @@ async fn search(
     Authed(a): Authed,
     Query(p): Query<SearchParams>,
 ) -> ApiResult<Json<SearchResponseDto>> {
-    Ok(Json(ops::search(&s, a, &p.q, p.kind).await?))
+    Ok(Json(ops::search(&s, a, &p.q, p.kind, p.group).await?))
 }
 
 #[utoipa::path(get, path = "/sources", tag = "catalog",

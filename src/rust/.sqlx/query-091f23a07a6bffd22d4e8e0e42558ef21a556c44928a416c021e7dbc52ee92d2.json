@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE totp_recovery_codes SET used_at = $2 WHERE id = $1 AND used_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "091f23a07a6bffd22d4e8e0e42558ef21a556c44928a416c021e7dbc52ee92d2"
+}

@@ -12,7 +12,7 @@ fn repo(p: &str) -> String {
 async fn app() -> axum::Router {
     let db = store_pg::testing::fresh_db_url().await.expect("database");
     let toml = format!(
-        "[database]\nurl = \"{db}\"\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
+        "[database]\nurl = \"{db}\"\n[secrets]\nephemeral = true\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
          [auth]\nsignup = \"open\"\nsecure_cookies = false\n[brand]\ndir = \"{}\"\n",
         repo("config/brand/default")
     );
@@ -82,6 +82,8 @@ async fn the_shell_follows_the_session() {
         return;
     }
     let app = app().await;
+    // the first account is the instance admin (before it, every page leads to `/setup`)
+    let cookie = sign_up(&app, "anna", "Anna Example").await;
 
     let (status, html) = page(&app, "/", None).await;
     assert_eq!(status, 200);
@@ -93,8 +95,6 @@ async fn the_shell_follows_the_session() {
     assert!(!html.contains("aria-haspopup=\"menu\""), "no account menu");
     assert!(html.contains("\"signed_in\":false"), "config for hydration");
 
-    // the first account is the instance admin
-    let cookie = sign_up(&app, "anna", "Anna Example").await;
     let (status, html) = page(&app, "/", Some(&cookie)).await;
     assert_eq!(status, 200);
     assert!(

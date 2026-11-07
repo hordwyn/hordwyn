@@ -1,13 +1,44 @@
-# Handoff: state, rules, owner rulings, open items (2026-11-06)
+# Handoff: state, rules, owner rulings, open items (updated 2026-11-07)
 
 Read this first when resuming. It replaces the conversation context: the rules that govern
-all work, where the build stands, every ruling the owner made on 2026-11-06, what is still
-open, and how the next phase is run. Detail lives in the linked files; this file says what
-is true and what to do next.
+all work, where the build stands, every owner ruling (2026-11-06 and 2026-11-07), what is
+still open, and how the next work is run. Detail lives in the linked files; this file says
+what is true and what to do next.
 
 Sources of truth, in this order: the owner's words in this file (section 4), the KICKOFF
 rules (section 2, verbatim), `docs/DECISIONS.md`, `docs/design/DESIGN.md`, the UX design
 (`docs/design/ux/design.md` plus `addendum-1.md`), `docs/REPORT.adoc`.
+
+## 0. Resume here (2026-11-07, phase 2 done)
+
+**Standing instruction from the owner (2026-11-07):** work through the open phases
+sequentially (phase 2, then 3, then 4, then the parallel workstreams) WITHOUT waiting for a
+go between phases, under the KICKOFF rules (section 2): test-driven, decisions logged, an
+independent review per phase whose findings are applied or rejected in DECISIONS, `cargo
+xtask ci` and `cargo xtask e2e` green, commit, push, tag `ux<N>`. Report a short status at
+each phase boundary; ask the owner only when a decision really needs them.
+
+**Where the code is:**
+
+- `main` = tag `ux2` (UX phase 2 done, one squashed commit on top of `ux1`). The branch
+  `wip/ux2` is merged and may be deleted.
+- Untracked on purpose: `src/rust/crates/testkit/fixtures/import/legacy/` (anonymised extract
+  of the owner's Ryot export, owner-approved; commit it together with the legacy importer in
+  phase 3). The full export is in the git-ignored `owner-inbox/legacy/export.json`.
+- Agent brief files are in `docs/handoff/agent-briefs/` (rules.md, ui-api.md, p1-api.md,
+  p2-api.md). Point every workstream agent at `rules.md` first.
+
+**Next steps, in order:**
+
+1. `nix develop`, then `cd src/rust && cargo xtask services up` (services do not survive a
+   reboot). The VM has 16 GB RAM and 4 vCPU: builds use `CARGO_BUILD_JOBS=3`.
+2. Phase 3 (section 7), then phase 4, then the parallel workstreams. Items deferred to phase 3
+   by the ux2 review: DEC-282 (hosting mode change), DEC-283 (CLI escape hatches, SIGHUP key
+   reload), DEC-284 (audit client address / request id), DEC-281 (remaining untested
+   behaviours), DEC-289 (source Disabled switch), DEC-292 (wizard checklist done flags).
+3. e2e harness traps: `cargo test -p server` relinks `target/debug/server` without the
+   cargo-leptos settings, so run `cargo leptos build` (or `cargo xtask e2e`) before Playwright;
+   `--repeat-each` also repeats the setup project.
 
 ## 1. How we continue: agent-based work
 
@@ -26,9 +57,9 @@ rules and the decisions below.
   R-P1 now allows reading public API docs and terms of GPL services, not their code).
 - **Review agent (Fable model)** at the end of each phase against DESIGN.md, the UX design and
   the rules; findings are applied or rejected in `DECISIONS.md`, as with G1 and G2.
-- **Build host limits (important for parallelism).** 2 vCPU, about 4 GB RAM, 57 GB disk of
+- **Build host limits (important for parallelism).** 4 vCPU, 16 GB RAM, 57 GB disk of
   which a full debug build plus the wasm build needs about 9 GB. Run one cargo build at a time
-  (`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0`); git worktrees each get their own `target/` and
+  (`CARGO_BUILD_JOBS=3 CARGO_INCREMENTAL=0` on the 16 GB VM, see section 8); git worktrees each get their own `target/` and
   do not fit more than one at a time, so parallel agents share the main checkout and the
   orchestrator serialises builds. Free disk with
   `rtk proxy find src/rust/target/debug/deps -maxdepth 1 -type f -executable -delete`, drop
@@ -234,25 +265,58 @@ Everything you write in `docs/` is AsciiDoc for Antora.
 
 ## 3. State of the build
 
-- `origin/main` at the commit of this file; tags `m00`-`m09` (part), `m13`, `m14`, `m15`, `m16`,
-  `m17`. Not done: M10/M11 board games (BGG, ruling R-P2), rest of M12 importers (R-P4).
-- Last green run: `cargo xtask ci` 259 tests passed, 0 failed, 3 ignored; `cargo xtask e2e`
-  12 Playwright tests. GitLab: test, leptos-build, docker-image green; antora fixed by the
-  kroki pin (DEC-147, verify once).
-- Compose quick start verified by the owner on rootless podman (Ubuntu): needs
-  `config/certs/*.crt` behind the Cisco proxy (DEC-166), `systemctl --user enable --now
-  podman.socket`, and the override `src/docker/compose.podman.yml` because container DNS
-  (aardvark-dns) fails there (DEC-168); sign-up then worked.
-- Branch `wip/signup-username` (commit e1b0350): username normalisation (trim, lowercase),
-  `invalid_username` / `invalid_display_name` error codes and messages, the rules hint on the
-  sign-up form, a test. Not built or tested; fold into phase 0 (it is the owner's sign-up
-  bug: "Robin" was refused with only "check the fields").
-- Known bugs from the owner's test: "Create account" still shows when signed in; search is
-  silent without data sources; Notifications, Integrations and People pages look unfinished.
-  All are covered by the UX plan (section 7).
-- Reports and reviews: `docs/REPORT.adoc`, `docs/reviews/2026-11-06-prior-run-assessment.md`
-  (prior run: B+), `docs/reviews/2026-11-06-architecture-g1.md`,
-  `docs/reviews/2026-11-06-g2-review.md`.
+- **Tags on `origin`:** `m00`-`m17` (see REPORT.adoc; M10/M11 board games and most of M12
+  importers not done), `ux0` (UX phase 0), `ux1` (UX phase 1), `ux2` (UX phase 2). Last green runs at `ux2`: `cargo xtask ci` 538 passed / 0 failed / 3 ignored, `cargo xtask e2e` 62 passed, load test p95 under 106 ms everywhere (search 95, Home 105). At `ux1`:
+  `cargo xtask ci` 449 passed / 0 failed / 3 ignored, `cargo xtask e2e` 51 passed; GitLab
+  pipeline for `ux0` green incl. the S3 test against RustFS in CI.
+- **UX phase 0 (done, `ux0`):** tokens per design 2.7, Atkinson Hyperlegible Next vendored
+  (DEC-175), 14 new `ui` components plus Disclosure, AppShell with signed-in state (fixes
+  "Create account when signed in"), routes `/history` `/people` without redirects, sign-up
+  with one error code per rule and the username normalisation (the owner's "Robin" bug),
+  every string in Fluent en/de with parity checks and per-user language (DEC-199..201),
+  RustFS instead of versitygw (DEC-202), review `docs/reviews/2026-11-06-ux0-review.md`
+  applied (DEC-203). `xtask dev` fixed to use the local services.
+- **UX phase 1 (done, `ux1`):** server (kind groups, library counts/query, tags, next step,
+  undo as compensating event, activity feed, stats, continue/up next, plays with scores),
+  Library page, Home with all-time SVG charts, Stats page, History, item page with action bar,
+  log sheets and episode list (DEC-204..212, 222..242). Review
+  `docs/reviews/2026-11-07-ux1-review.md` applied. Load test (M17, `#[ignore]`, single
+  client, 50 000 items, debug build on 2 vCPU, p95 budget 300 ms): search 100 ms, library
+  pages 60/83 ms, Home 117 ms, library query 75/88 ms, stats 45 ms, activity 15 ms; with 40 000
+  events stats 197 ms, Home 270 ms. Still linear: stats scan all events, activity reads all
+  sessions (DEC-235) - optimise in phase 4.
+- **UX phase 2 (done, `ux2`):** review `docs/reviews/2026-11-07-ux2-review.md` (UX2-1..12 plus addenda W1..W21 and S1..S12) applied or deferred in DEC-270..296. Packages:
+  - WP2-server done (DEC-243..254): secrets at rest (AES-256-GCM envelope, key file
+    generated on first start with mode 0600, `APP__SECRETS__KEYS` override, re-wrap job,
+    rotation reminder), TOTP recovery codes, credential model (connectors always registered,
+    credential state, key slots, Test), source status counters, Ask admin event, instance
+    settings with env/file provenance, audit log with CSV, re-auth window (DEC-191) enforced
+    server-side (`reauth_required`), lock-out guards, setup wizard state machine, admin API
+    for eight pages. Gaps it recorded: audit rows not in the same transaction, counters per
+    process and OIDC/SMTP secret encryption left for phase 3. The CLI escape hatches and the
+    SIGHUP key reload were not recorded then (review UX2-4); DEC-283 defers them to phase 3.
+  - WP2-admin done (DEC-255..265): `/admin/*` eight pages, re-auth dialog, settings area
+    `/settings/{account,notifications,integrations,privacy,sources}`; old `/notifications`,
+    `/integrations`, `/sources` are 404 (no redirects). Its last full Playwright run: 58 passed.
+  - WP2-setup done (DEC-266..269): setup wizard `/setup` (account, hosting, sources, done;
+    resumable; 404 after completion) and the 303 redirect of every page to `/setup` before the
+    first account (API, `/_fn`, `/pkg`, files exempt); the Playwright setup project creates
+    `e2eadmin` through the wizard in the browser (axe + reflow per step). Palette scope
+    segments (All/Watch/Read/Listen/Play, `group` on search), source status footer and the
+    no-results card with Ask admin (members) / Set up (admins). Home admin nudge (open setup,
+    groups without source, failing sources; 7-day snooze in the browser). Hosted-mode banner
+    on Admin > Data sources and Overview (built in WP2-admin, now covered by
+    `server/tests/setup_page.rs`). TheTVDB uses the member's own PIN for their searches
+    (DEC-269; detail/refresh jobs still use the instance key). Server page tests now create a
+    first account before rendering pages (auth_pages, brand, shell). Verified: workspace
+    clippy (native and wasm) and fmt clean; server, web, api, catalog-core, connectors and
+    xtask tests green with services; Playwright `global.setup.ts` + `sources.spec.ts` 5/5.
+    Not run by the package: the full `cargo xtask ci` / `cargo xtask e2e`, `sqlx prepare
+    --check` (no SQL changed in this package).
+- **Research done** (in `docs/research/`): icons, notification channels, RustFS, OD-12
+  re-auth window, board game sources, anime/manga sources. Connector doc for BGG rewritten
+  from the owner-supplied terms (`docs/connectors/bgg.md`, DEC-190).
+- **Reviews:** `docs/reviews/` (prior run assessment, G1, G2, ux0, ux1).
 
 ## 4. Owner rulings, 2026-11-06
 
@@ -341,69 +405,137 @@ Decided later the same day: **OD-12** 15 minutes, sliding, 1 hour cap, provider 
   They are in force until the owner reconsiders one; do not treat them as owner-approved.
   They remain on the open-decisions page (section 9), where the owner can keep reviewing.
 
+
+### 4.6 Owner rulings and answers after the review pages (2026-11-06 evening and 2026-11-07)
+
+- **OD-12:** re-auth window 15 minutes, sliding, 1 hour cap; password-less admins get an OIDC
+  round trip with `max_age=0` and a checked `auth_time`, never skipped (DEC-191). Phase 3
+  must test whether the owner's authentik honours `max_age=0` (undocumented); fallback in
+  `docs/research/od-12-reauth-window.md` 4.4.
+- **BGG:** the owner applied for a non-commercial application (approval can take a week+);
+  terms received and recorded (DEC-190): per-instance token `KK_BGG_TOKEN`, data unmodified
+  and read-only, credit plus "Powered by BGG" logo, optional and off by default, covers not
+  copied. AI clause: owner ruled that implementing a client from the documented API is fine;
+  the app sends no BGG data to any AI. Raw texts in the git-ignored `owner-inbox/bgg/`.
+  Still missing from the owner: the token, the "Powered by BGG" logo files (from
+  https://boardgamegeek.com/image/7779581 - the build host cannot reach boardgamegeek.com).
+- **Board games direction (owner: "generally fine", keep BGG for those with a token):** own
+  catalogue seeded from Wikidata (CC0), user entry and imports, Commons images, "Suggest to
+  Wikidata" via the user's browser, BGG optional (DEC-192..198,
+  `docs/research/board-game-sources.md`). Open: whether to also check open product databases
+  (Open Products Facts) as a barcode source - offered, not answered.
+- **Anime/manga (R-P3):** defaults recorded, all off by default (DEC-213..221,
+  `docs/research/anime-manga-sources.md`): MAL API v2 primary (owner must read the developer
+  agreement at client registration, then `KK_MAL_CLIENT_ID`), Kitsu fallback and id mapper
+  (owner may save kitsu.app/terms into owner-inbox for a check), MangaDex not in v1 unless
+  the owner allows metadata-only. AniList stays out.
+- **Legacy (Ryot) export:** delivered; owner chose "anonymised subset" for the repo fixture
+  (21 of 135 items; see the README next to it). Ryot is GPL: build the importer only from the
+  file (rule 6 / Q4), never from Ryot docs or code.
+- **Owner-inbox:** `owner-inbox/` at the repo root is git-ignored; owner hand-overs go there
+  and are reviewed before anything is committed. Still expected: Goodreads, BG Stats and BGG
+  collection exports.
+- **Phases:** work through all open phases sequentially without waiting for a go (section 0).
+- **Build host:** the owner raises RAM (4 GB -> 6 GB now, more possible after another restart).
+
 ## 5. Action list from the rulings
 
-1. Record the rulings as DEC-169 onward and update design.md and addendum-1.md (status label,
-   no redirects, font, logo, OD-10/11/17 changes, Home stats, i18n scope).
-2. Amend rule 6 and rule 8 handling in `docs/DECISIONS.md` (R-P1, R-F3); do not edit
-   KICKOFF.md itself.
+1. Rulings recorded as DEC-169 onward and applied to design.md and addendum-1.md: done.
+2. Rule 6 and rule 8 handling amended in `docs/DECISIONS.md` (R-P1, R-F3): done.
 3. DEC-008: RustFS licence check and switch: done (DEC-202).
 4. OD-12: done (DEC-191).
-5. Attribution page: crate licences (from cargo metadata / cargo-deny), font, icons
-   (`config/brand/ICONS.adoc`), data sources and their required notices and logos.
+5. Attribution page (crate licences from cargo metadata / cargo-deny, font, icons from
+   `config/brand/ICONS.adoc`, data sources and their required notices and logos): OPEN,
+   parallel workstream.
 
 ## 6. Still open for the owner
 
-- The unreviewed DECISIONS entries (section 4.5).
-- Deliveries promised by the owner: BGG docs, terms and token; sample exports.
-- New owner questions that come up go to a review page, never block work (rule 2).
+- The unreviewed DECISIONS entries (section 4.5) - they stay in force until reconsidered.
+- Deliveries: BGG token and the "Powered by BGG" logo files; Goodreads, BG Stats and BGG
+  collection exports.
+- Questions with safe defaults in force: MAL developer agreement (register a client, then
+  `KK_MAL_CLIENT_ID`), Kitsu terms (save the page into owner-inbox), MangaDex metadata yes/no,
+  open product databases as a barcode source yes/no.
+- Optional: more RAM for the VM (section 8).
+- New owner questions go to a review page or a short chat question; never block work (rule 2).
 
 ## 7. Work plan
 
 Phases from `docs/design/ux/design.md` section 9, with the addendum and the rulings folded
-in. Each phase ends with `cargo xtask ci` and `cargo xtask e2e` green, a review, a commit and
-a tag (`ux0` to `ux4`).
+in. Each phase: workstream agents (one per package, sequential when they share the `web`
+crate), independent review, fixes, `cargo xtask ci` and `cargo xtask e2e` green, the load
+test by hand, commit, push, tag.
 
-- **Phase 0, foundations.** Tokens (2.7, darker inputs), Atkinson Hyperlegible Next vendored
-  with licence, new `ui` components (Alert, EmptyState, StatusDot, Chip, Segmented,
-  ErrorSummary, Steps, TaskList, SideNav, TabBar, CopyField, KeyHint, ProgressBar, Rating,
-  Disclosure per addendum 1.2), `ClientConfig` with signed-in state, the new shell (top bar,
-  mobile tab bar) - fixes "Create account when signed in"; forms with inline rules and the
-  `wip/signup-username` work; routes renamed without redirects; Fluent extraction of every
-  string with the parity test.
-- **Phase 1, where am I and what is next.** Kind groups, library (groups, chips, status tabs,
-  tags, one Filters button, views), next step, Home (continue, up next, 5 activity rows, all-
-  time stat charts), Stats page, log sheets with undo, item page, History.
-- **Phase 2, why is nothing happening, and the admin area.** Credential model with encrypted
-  storage (addendum 2), source status in the palette, setup wizard, admin area with eight pages
-  (addendum 3; OD-10/11 editable), audit log, lock-out guards.
-- **Phase 3, sign-in and the stale pages.** OIDC multi-provider and true SSO (addendum 4, with
-  OD-15..21 and OD-17 as changed), Notifications, Integrations, People, Lists, Imports.
-- **Phase 4, fluency and measurement.** Keyboard map, bulk edits, stats polish, in-app logging
-  funnel measurement.
-- **Parallel workstreams (research first):** RustFS (DEC-008); connectors unblocked by R-P1
-  (Open Library, MusicBrainz, VNDB, Metron), Radarr/Sonarr read-only and Jellyfin polling;
-  Hardcover research (docs need JavaScript); anime/manga sources (R-P3); Trakt importer;
-  web push (R-P5); attribution page.
+- **Phase 0 (done, `ux0`)** and **Phase 1 (done, `ux1`)**: see section 3.
+- **Phase 2 (done, `ux2`): why is nothing happening, and the admin area.**
+  Packages: WP2-server (done), WP2-admin (done), WP2-setup (to finish: wizard and the
+  redirect to `/setup` before the first account, palette source status footer and no-results
+  card with Ask admin / Set up, Home admin nudge (DEC-237), hosted-mode banner, TheTVDB member
+  PIN in requests (DEC-246), keep the Playwright setup project creating the first admin
+  through the wizard). Then the phase review and the tag `ux2`.
+- **Phase 3, sign-in and the stale pages.** OIDC multi-provider and true SSO (addendum 4,
+  OD-15..21 with OD-17 as changed; re-auth OIDC round trip for DEC-191 via
+  `Auth::confirm_oidc_reauth`; encrypt OIDC client secrets and the SMTP password; the
+  Sign-in-and-SSO and Instance admin pages DEC-255 left out), Notifications, Integrations,
+  People, Lists, Imports (with the legacy Ryot importer from the fixture, Trakt), per-user
+  time zone on the settings page (DEC-239), "Mark show" and backfill date modes and the
+  History export link (DEC-237).
+- **Phase 4, fluency and measurement.** Keyboard map, bulk edits, offline queue (DEC-237),
+  stats polish and goals, in-app logging funnel measurement; performance: incremental stats
+  totals and a paged activity query (DEC-235), a release-build load run and a
+  concurrent-clients load variant.
+- **Parallel workstreams (research done where noted):** attribution page; board games on
+  Wikidata (research done, DEC-192..198) and the optional BGG connector once the token
+  exists; anime/manga connectors (research done, DEC-213..221); connectors unblocked by R-P1
+  (Open Library, MusicBrainz, VNDB, Metron), Radarr/Sonarr read-only, Jellyfin polling;
+  Hardcover research (docs need JavaScript); importers (legacy, Trakt, Goodreads, BG Stats,
+  BGG when the exports arrive); web push (R-P5, DEC-141).
 
 ## 8. Environment notes
 
-- Host: NixOS VM, `nix develop` shell, Rust 1.99.1, no python3 (use perl, sed, node from the
-  dev shell). Local services: `cargo xtask services up` (Postgres 55432, RustFS S3 55433,
-  Meilisearch 55434). Tests that need services run with `TEST_DATABASE_URL` /
-  `REQUIRE_SERVICES=1`; `cargo xtask ci` sets them, plain `cargo test` silently skips them.
+- **Host:** NixOS VM on Proxmox (owner's), 4 vCPU and 16 GB RAM since the restart on
+  2026-11-07 (was 2 vCPU / 4 GB; memory is not hot-pluggable), 2 GB swap, 57 GB disk.
+  `nix develop` shell, Rust 1.99.1, no python3 (use perl, sed, node from the dev shell).
+- **Memory (important):** one `rustc` on the `web`/`server` crates reaches about 2.9 GB. Two
+  in parallel made the OOM killer kill the Claude session itself three times on 2026-11-07
+  (kernel log: `oom-kill ... task_memcg=.../claude-rc-kithkeep.service`). With 16 GB use
+  `CARGO_BUILD_JOBS=3` (at most 3 big rustc at about 2.9 GB each); below 8 GB use 1; never run two cargo commands at once; the dev profile
+  already uses `debug = "line-tables-only"`.
+- **Disk:** `src/rust/target/debug/deps` grows by GBs per phase. When free disk is below
+  ~5 GB and no cargo runs: `rtk proxy find src/rust/target/debug/deps -maxdepth 1 -type f
+  -executable -delete`; if still short, `rm -rf src/rust/target/debug` (rebuild ~1 h). Drop
+  leftover `e2e_*` / `test_*` databases. The owner allowed deleting build output of
+  `<projects dir>/{testingapi,pegaprox-rs,organizer}` (done once); never touch `<projects dir>/osd`.
+- **Local services:** `cargo xtask services up` (Postgres 55432, RustFS S3 55433,
+  Meilisearch 55434); they do not survive a restart. `cargo xtask dev` serves
+  http://127.0.0.1:3000 with the dev database. Tests that need services run with
+  `TEST_DATABASE_URL` / `REQUIRE_SERVICES=1` / `TEST_MEILI_*` / `TEST_S3_*`; `cargo xtask ci`
+  sets them, plain `cargo test` silently skips them. The M17 load test is `#[ignore]` and must
+  be run by hand.
+- **Stopping processes:** use `pkill -x <name>` (e.g. `pkill -x cargo-leptos`, `pkill -x
+  server`); `pkill -f <pattern>` matches the calling shell and kills it.
 - `rtk` rewrites common commands; use `rtk proxy <cmd>` for raw output.
 - Clippy pedantic is enforced: no `assert!(x.is_empty())` (use `assert_eq!(x.len(), 0)`),
-  functions at most 100 lines, no single-character binding clusters.
+  functions at most 100 lines (the crate-wide `too_many_lines` allow was removed in phase 1;
+  per-function allows need a reason comment, DEC-234), no single-character binding clusters.
 - After changing SQL queries run `cargo xtask sqlx-prepare`; after config schema changes
   `UPDATE_DOCS=1 cargo test -p config`.
-- Commits: Conventional Commits, no attribution lines of any kind, never force-push, tag
-  milestones.
+- Leptos gotchas found so far (also in the agent briefs): `StoredValue::new_local` /
+  `Action::new_local` abort SSR streams; read resources only inside `<Suspense>` /
+  `<Transition>`; key refetched row lists with `<For>` or stale click handlers remain; test
+  and DOM ids must not start with a Fluent key prefix (the locale checker treats them as key
+  families).
+- GitLab: `glab` works on this host (`glab ci list -R hordwyn/hordwyn`).
+- Commits: Conventional Commits, no attribution lines of any kind, never force-push `main`,
+  tag milestones.
 
 ## 9. Links
 
 - Review page (answered): https://claude.ai/artifact/DXNJa8yNPXcUH3nd227wKZ (store `reviews`)
 - Open decisions page (partly answered, keeps the unreviewed DECISIONS entries):
   https://claude.ai/artifact/EMtPcfBRksJoFv4LDVHfYv (store `answers`; read it back with the
-  ArtifactData tool before each phase to pick up new owner answers)
+  ArtifactData tool before each phase to pick up new owner answers; last read 2026-11-06,
+  nothing new)
 - Design: `docs/design/ux/design.md`, `addendum-1.md`, `research.md`, `mockups/index.html`
+- Agent briefs: `docs/handoff/agent-briefs/`
+- Research: `docs/research/`; connector docs: `docs/connectors/`; reviews: `docs/reviews/`

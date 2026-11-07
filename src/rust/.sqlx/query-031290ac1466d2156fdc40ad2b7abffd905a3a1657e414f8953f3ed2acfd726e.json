@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT token_hash, user_id, created_at, last_seen_at, expires_at, reauth_at,\n                    reauth_method, reauth_slide_at\n             FROM auth_sessions WHERE token_hash = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "token_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "auth_sessions",
+            "name": "token_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "auth_sessions",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "auth_sessions",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "auth_sessions",
+            "name": "last_seen_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "auth_sessions",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "reauth_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "auth_sessions",
+            "name": "reauth_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "reauth_method",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "auth_sessions",
+            "name": "reauth_method"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "reauth_slide_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "auth_sessions",
+            "name": "reauth_slide_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "031290ac1466d2156fdc40ad2b7abffd905a3a1657e414f8953f3ed2acfd726e"
+}

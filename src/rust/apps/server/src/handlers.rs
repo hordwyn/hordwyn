@@ -135,28 +135,125 @@ impl Handler for Digest {
     }
 }
 
+/// `admin.audit_retention`: delete audit rows older than 365 days (OD-13).
+struct AuditRetention(api::admin::AdminApi);
+
+#[async_trait]
+impl Handler for AuditRetention {
+    async fn run(&self, _job: &Job) -> Result<(), String> {
+        let n = api::admin::purge_audit(self.0.store.as_ref(), chrono::Utc::now())
+            .await
+            .map_err(|e| e.to_string())?;
+        if n > 0 {
+            tracing::info!(count = n, "deleted audit rows past the retention period");
+        }
+        Ok(())
+    }
+}
+
+/// `secrets.rewrap`: move values on an old key version to the active one (nightly while
+/// any is left; counts only, never values).
+struct Rewrap(api::admin::AdminApi);
+
+#[async_trait]
+impl Handler for Rewrap {
+    async fn run(&self, _job: &Job) -> Result<(), String> {
+        let r = api::admin::rewrap_all(&self.0)
+            .await
+            .map_err(|e| e.to_string())?;
+        if r.rewrapped > 0 || r.locked > 0 {
+            tracing::info!(
+                rewrapped = r.rewrapped,
+                locked = r.locked,
+                "re-wrapped stored secrets"
+            );
+            let entry = auth::admin::AuditEntry {
+                id: uuid::Uuid::now_v7(),
+                at: chrono::Utc::now(),
+                actor_id: None,
+                actor_kind: auth::admin::ActorKind::System,
+                actor_name: None,
+                action: "secrets.rewrapped".into(),
+                target_type: None,
+                target_id: None,
+                detail: serde_json::json!({
+                    "rewrapped": r.rewrapped, "locked": r.locked, "key_version": self.0.keys.active
+                }),
+                client_addr: None,
+                request_id: None,
+            };
+            self.0
+                .store
+                .audit(&entry)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+}
+
+/// Cron entries of the admin jobs (registered when a worker starts).
+pub async fn schedule_admin_jobs(s: &Server) {
+    let now = chrono::Utc::now();
+    for (name, cron, kind) in [
+        (
+            "admin.audit_retention",
+            "17 3 * * *",
+            crate::admin_wiring::AUDIT_RETENTION_JOB,
+        ),
+        (
+            "secrets.rewrap",
+            "37 3 * * *",
+            crate::admin_wiring::REWRAP_JOB,
+        ),
+    ] {
+        if let Err(e) = s
+            .queue
+            .schedule(
+                name,
+                cron,
+                Lane::BackgroundRefresh,
+                kind,
+                serde_json::json!({}),
+                now,
+            )
+            .await
+        {
+            tracing::warn!(error = %e, name, "scheduling a cron job failed");
+        }
+    }
+}
+
 pub fn worker(s: &Server) -> Worker {
     let cfg = WorkerConfig {
         concurrency: usize::try_from(s.config.jobs.concurrency).unwrap_or(4),
         shutdown_grace: std::time::Duration::from_secs(s.config.jobs.shutdown_grace_secs),
         ..WorkerConfig::default()
     };
-    Worker::new(s.queue.clone(), cfg)
-        .handle(
-            app::REFRESH_JOB,
-            Arc::new(Refresh {
-                app: s.app.clone(),
-                registry: s.registry.clone(),
-                http: s.http.clone(),
-                assets: s.assets.clone(),
-            }),
-        )
-        .handle(assets::FETCH_JOB, Arc::new(FetchAsset(s.assets.clone())))
-        .handle(assets::EVICT_JOB, Arc::new(Evict(s.budget.clone())))
-        .handle(
-            importers::IMPORT_JOB,
-            Arc::new(Import(s.api.importer.clone().expect("importer is wired"))),
-        )
-        .handle(notify::DELIVER_JOB, Arc::new(Deliver(s.deliverer.clone())))
-        .handle(notify::DIGEST_JOB, Arc::new(Digest(s.deliverer.clone())))
+    let mut w = Worker::new(s.queue.clone(), cfg);
+    if let Some(a) = &s.api.admin {
+        w = w
+            .handle(
+                crate::admin_wiring::AUDIT_RETENTION_JOB,
+                Arc::new(AuditRetention(a.clone())),
+            )
+            .handle(crate::admin_wiring::REWRAP_JOB, Arc::new(Rewrap(a.clone())));
+    }
+    w.handle(
+        app::REFRESH_JOB,
+        Arc::new(Refresh {
+            app: s.app.clone(),
+            registry: s.registry.clone(),
+            http: s.http.clone(),
+            assets: s.assets.clone(),
+        }),
+    )
+    .handle(assets::FETCH_JOB, Arc::new(FetchAsset(s.assets.clone())))
+    .handle(assets::EVICT_JOB, Arc::new(Evict(s.budget.clone())))
+    .handle(
+        importers::IMPORT_JOB,
+        Arc::new(Import(s.api.importer.clone().expect("importer is wired"))),
+    )
+    .handle(notify::DELIVER_JOB, Arc::new(Deliver(s.deliverer.clone())))
+    .handle(notify::DIGEST_JOB, Arc::new(Digest(s.deliverer.clone())))
 }

@@ -207,6 +207,13 @@ impl Brand {
     pub fn contrast_findings(&self) -> Vec<contrast::ContrastFinding> {
         contrast::findings(&self.theme, &self.theme_dark)
     }
+
+    /// The accent pair (`primary` / `primary-foreground`) of the light and the dark theme
+    /// with its contrast ratio, defaults filled in (the admin Branding page, design.md 6.13).
+    #[must_use]
+    pub fn accent_pairs(&self) -> Vec<contrast::ContrastFinding> {
+        contrast::pairs(&self.theme, &self.theme_dark, true)
+    }
 }
 
 fn valid_css_name(k: &str) -> bool {

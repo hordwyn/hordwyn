@@ -393,3 +393,73 @@ impl FixedClock {
         Clock::now(self)
     }
 }
+
+/// A stand-in for the key ring in tests: NOT encryption. The stored bytes carry the
+/// envelope header (format 1, key version) and are bound to the slot, so slot mix-ups and
+/// "key not loaded" (`version` not in `loaded`) behave like the real thing.
+pub struct FakeCipher {
+    pub version: u16,
+    pub loaded: Vec<u16>,
+}
+
+impl Default for FakeCipher {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            loaded: vec![1],
+        }
+    }
+}
+
+fn slot_tag(slot: app::ports::SecretSlot<'_>) -> [u8; 8] {
+    let h = blake3::hash(format!("{}|{}|{}", slot.purpose, slot.row, slot.field).as_bytes());
+    let mut t = [0u8; 8];
+    t.copy_from_slice(&h.as_bytes()[..8]);
+    t
+}
+
+impl app::ports::SecretCipher for FakeCipher {
+    fn seal(&self, slot: app::ports::SecretSlot<'_>, plaintext: &[u8]) -> Vec<u8> {
+        let tag = slot_tag(slot);
+        let mut out = vec![1];
+        out.extend_from_slice(&self.version.to_be_bytes());
+        out.extend_from_slice(&tag);
+        out.extend(
+            plaintext
+                .iter()
+                .zip(tag.iter().cycle())
+                .map(|(p, k)| p ^ k ^ 0x5a),
+        );
+        out
+    }
+
+    fn open(
+        &self,
+        slot: app::ports::SecretSlot<'_>,
+        blob: &[u8],
+    ) -> Result<Vec<u8>, app::ports::SecretLocked> {
+        let version = (blob.len() >= 11).then(|| u16::from_be_bytes([blob[1], blob[2]]));
+        let locked = app::ports::SecretLocked { version };
+        let tag = slot_tag(slot);
+        if !version.is_some_and(|v| self.loaded.contains(&v)) || blob[3..11] != tag {
+            return Err(locked);
+        }
+        Ok(blob[11..]
+            .iter()
+            .zip(tag.iter().cycle())
+            .map(|(c, k)| c ^ k ^ 0x5a)
+            .collect())
+    }
+
+    fn rewrap(
+        &self,
+        slot: app::ports::SecretSlot<'_>,
+        blob: &[u8],
+    ) -> Result<Option<Vec<u8>>, app::ports::SecretLocked> {
+        let plain = self.open(slot, blob)?;
+        if blob[1..3] == self.version.to_be_bytes() {
+            return Ok(None);
+        }
+        Ok(Some(self.seal(slot, &plain)))
+    }
+}

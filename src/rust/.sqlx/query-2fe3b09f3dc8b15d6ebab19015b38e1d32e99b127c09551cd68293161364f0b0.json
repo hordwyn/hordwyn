@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT connector_id, agreement_on_file, recorded_by, recorded_at FROM source_licences\n             ORDER BY connector_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "connector_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_licences",
+            "name": "connector_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "agreement_on_file",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "source_licences",
+            "name": "agreement_on_file"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "recorded_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "source_licences",
+            "name": "recorded_by"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "recorded_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "source_licences",
+            "name": "recorded_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "2fe3b09f3dc8b15d6ebab19015b38e1d32e99b127c09551cd68293161364f0b0"
+}

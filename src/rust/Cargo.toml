@@ -100,6 +100,9 @@ fluent-bundle = "0.16.0"
 fluent-syntax = "0.12.0"
 unic-langid = "0.9.6"
 meilisearch-sdk = { version = "0.33.0", default-features = false, features = ["reqwest", "tls"] }
+# secrets at rest (addendum-1 2.2, OD-05): RustCrypto, Apache-2.0 OR MIT (crates.io 2026-11-07)
+aes-gcm = { version = "0.11.1", default-features = false, features = ["aes", "alloc", "zeroize"] }
+zeroize = "1.9.1"
 
 # Small target dirs (DEC-055): line tables for our code (backtraces), no debug info for deps.
 [profile.dev]

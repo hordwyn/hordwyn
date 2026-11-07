@@ -78,21 +78,52 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
     })
 }
 
-/// Local results now; connector results follow as `search.results` events.
+/// The kinds a search covers: one kind, the enabled kinds of one kind group (the palette's
+/// scope segments, design.md 6.4), or every enabled kind.
+fn search_kinds(s: &ApiState, kind: Option<String>, group: Option<&str>) -> ApiResult<Vec<String>> {
+    if let Some(k) = kind {
+        return Ok(vec![k]);
+    }
+    let Some(g) = group.filter(|g| !g.is_empty() && *g != "all") else {
+        return Ok(s.default_kinds.clone());
+    };
+    let of_group: HashSet<String> = s
+        .app
+        .kinds
+        .all()
+        .iter()
+        .filter(|d| d.group.as_str() == g)
+        .map(|d| d.id.to_string())
+        .collect();
+    let kinds: Vec<String> = s
+        .default_kinds
+        .iter()
+        .filter(|k| of_group.contains(*k))
+        .cloned()
+        .collect();
+    if kinds.is_empty() {
+        return Err(ApiError::bad_request("unknown kind group"));
+    }
+    Ok(kinds)
+}
+
+/// Local results now; connector results follow as `search.results` events. `group` limits
+/// the search to one kind group (`all` or none: every enabled kind).
 ///
 /// # Errors
-/// Empty query.
+/// Empty query, unknown kind group.
 pub async fn search(
     s: &ApiState,
     a: Actor,
     q: &str,
     kind: Option<String>,
+    group: Option<String>,
 ) -> ApiResult<SearchResponseDto> {
     let text = q.trim().to_string();
     if text.is_empty() {
         return Err(ApiError::bad_request("empty query"));
     }
-    let kinds = kind.map_or_else(|| s.default_kinds.clone(), |k| vec![k]);
+    let kinds = search_kinds(s, kind, group.as_deref())?;
     let mut filters = Vec::new();
     if kinds.len() == 1 {
         filters.push(("kind".to_string(), kinds[0].clone()));
@@ -119,6 +150,13 @@ pub async fn search(
             items.push(dto::item(s, &item).await);
         }
     }
+    // the local index filters by one kind only; a group is filtered here
+    if group
+        .as_deref()
+        .is_some_and(|g| !g.is_empty() && g != "all")
+    {
+        items.retain(|i| kinds.contains(&i.kind));
+    }
     let search_id = uuid::Uuid::now_v7().to_string();
     let pending: Vec<String> = s
         .fanout
@@ -128,12 +166,15 @@ pub async fn search(
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
+    let (skipped, groups_without_source) = crate::admin::search_reasons(s, a, &kinds);
+    // the member's own credentials (TheTVDB PIN) go with their search (design.md 4.1)
+    let user_keys = crate::admin::user_keys(s, a).await;
     let state = s.clone();
     let sid = search_id.clone();
     tokio::spawn(async move {
         state
             .fanout
-            .run(&text, &kinds, 20, |r| {
+            .run_as(&user_keys, &text, &kinds, 20, |r| {
                 let state = state.clone();
                 let sid = sid.clone();
                 async move {
@@ -163,6 +204,8 @@ pub async fn search(
         search_id,
         items,
         pending,
+        skipped,
+        groups_without_source,
     })
 }
 

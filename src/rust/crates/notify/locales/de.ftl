@@ -64,6 +64,8 @@ admin-job_backlog-body = { $count ->
     [one] Eine Aufgabe wartet in der Spur { $lane }.
    *[other] { $count } Aufgaben warten in der Spur { $lane }.
 }
+admin-source_requested-title = Datenquelle gewünscht: { $source }
+admin-source_requested-body = { $user } bittet darum, { $source } einzurichten. Das geht unter Admin > Datenquellen.
 
 test-title = Test von { $product }
 test-body = Der Kanal "{ $name }" funktioniert.

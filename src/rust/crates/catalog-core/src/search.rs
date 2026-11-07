@@ -3,6 +3,7 @@
 //! items (deduplicated by external id) so they have ids, show up in repeat searches and can
 //! be added to a library right away. Callers run this in the background; nothing waits on it.
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -11,10 +12,49 @@ use app::{App, NewCatalogItem};
 use domain::catalog::CatalogItem;
 use domain::kind::KindId;
 use futures::stream::{FuturesUnordered, StreamExt};
+use zeroize::Zeroizing;
 
 use crate::connector::Ctx;
 use crate::model::{Capability, ImageKind, SearchRequest, Snapshot};
 use crate::registry::Registry;
+
+/// The requesting member's own credential per connector id (`CredentialSpec::user_fields`
+/// joined with `:`), handed to that connector only ([`Ctx::user_key`]). `Debug` prints the
+/// connector ids only (UX2-S9).
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct UserKeys(BTreeMap<String, Zeroizing<String>>);
+
+impl UserKeys {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, connector: String, key: Zeroizing<String>) {
+        self.0.insert(connector, key);
+    }
+
+    #[must_use]
+    pub fn get(&self, connector: &str) -> Option<&Zeroizing<String>> {
+        self.0.get(connector)
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl std::fmt::Debug for UserKeys {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_set().entries(self.0.keys()).finish()
+    }
+}
 
 /// One connector's answer.
 #[derive(Debug, Clone, PartialEq)]
@@ -72,22 +112,37 @@ impl SearchFanout {
         out
     }
 
-    /// Run the fan-out, calling `on_result` once per connector as results arrive.
+    /// Run the fan-out without member credentials (instance keys only).
     pub async fn run<F, Fut>(&self, query: &str, kinds: &[String], limit: u32, on_result: F)
     where
         F: Fn(FanoutResult) -> Fut,
         Fut: Future<Output = ()>,
     {
-        let ctx = Ctx {
-            http: self.http.clone(),
-            lane: Lane::Interactive,
-        };
+        self.run_as(&UserKeys::new(), query, kinds, limit, on_result)
+            .await;
+    }
+
+    /// Run the fan-out for a member, calling `on_result` once per connector as results
+    /// arrive. Each connector gets the member's own credential for it from `user_keys`.
+    pub async fn run_as<F, Fut>(
+        &self,
+        user_keys: &UserKeys,
+        query: &str,
+        kinds: &[String],
+        limit: u32,
+        on_result: F,
+    ) where
+        F: Fn(FanoutResult) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        let base = Ctx::new(self.http.clone(), Lane::Interactive);
         let mut pending = FuturesUnordered::new();
         for (connector, kind) in self.targets(kinds) {
             let Some(c) = self.registry.get(&connector) else {
                 continue;
             };
-            let ctx = ctx.clone();
+            let mut ctx = base.clone();
+            ctx.user_key = user_keys.get(&connector).cloned();
             let req = SearchRequest {
                 kind,
                 query: query.to_string(),

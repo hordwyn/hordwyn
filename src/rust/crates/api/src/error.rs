@@ -92,13 +92,17 @@ impl From<AuthError> for ApiError {
             AuthError::InvalidCredentials | AuthError::TotpRequired | AuthError::InvalidTotp => {
                 StatusCode::UNAUTHORIZED
             }
-            AuthError::SignupClosed | AuthError::InvalidInvite => StatusCode::FORBIDDEN,
+            AuthError::SignupClosed
+            | AuthError::InvalidInvite
+            | AuthError::AccountDisabled
+            | AuthError::ReauthRequired => StatusCode::FORBIDDEN,
             AuthError::UsernameTaken => StatusCode::CONFLICT,
             AuthError::PasswordTooShort
             | AuthError::PasswordTooLong
             | AuthError::InvalidUsername(_)
             | AuthError::DisplayNameTooLong => StatusCode::UNPROCESSABLE_ENTITY,
             AuthError::TooManyAttempts { .. } => StatusCode::TOO_MANY_REQUESTS,
+            AuthError::TotpLocked => StatusCode::SERVICE_UNAVAILABLE,
             AuthError::App(_) | AuthError::Store(_) | AuthError::Oidc(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }

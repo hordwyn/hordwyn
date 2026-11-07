@@ -15,10 +15,7 @@ async fn search_details_and_signed_requests() {
     let http = Arc::new(ReplayHttp::from_dir(
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/podcastindex"),
     ));
-    let ctx = Ctx {
-        http: http.clone(),
-        lane: Lane::Interactive,
-    };
+    let ctx = Ctx::new(http.clone(), Lane::Interactive);
     let c =
         PodcastIndex::new(Some("UXKCGDSYGUUEVQJSYDZH:secret".into())).with_clock(|| 1_613_713_388);
     let hits = c
@@ -82,4 +79,26 @@ fn kinds_validate(v: &serde_json::Value) {
         v,
     )
     .unwrap();
+}
+
+/// UX2-S11: a malformed base URL from the configuration is an error, not a panic.
+#[tokio::test]
+async fn a_bad_base_url_is_an_error() {
+    let http = Arc::new(ReplayHttp::default());
+    let c = PodcastIndex::with_base_url(Some("k:s".into()), "not a url");
+    let r = c
+        .search(
+            &Ctx::new(http, Lane::Interactive),
+            &SearchRequest {
+                kind: "podcast".into(),
+                query: "x".into(),
+                language: None,
+                limit: 1,
+            },
+        )
+        .await;
+    assert!(
+        matches!(r, Err(catalog_core::ConnectorError::Parse(_))),
+        "{r:?}"
+    );
 }

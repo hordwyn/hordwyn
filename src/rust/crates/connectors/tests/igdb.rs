@@ -16,13 +16,7 @@ fn ctx() -> (Ctx, Arc<ReplayHttp>) {
     let http = Arc::new(ReplayHttp::from_dir(
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/igdb"),
     ));
-    (
-        Ctx {
-            http: http.clone(),
-            lane: Lane::Interactive,
-        },
-        http,
-    )
+    (Ctx::new(http.clone(), Lane::Interactive), http)
 }
 
 fn igdb() -> Igdb {
@@ -79,6 +73,18 @@ async fn search_details_and_images() {
     // one token request, reused for both calls; headers as documented
     let reqs = http.requests();
     assert_eq!(reqs.iter().filter(|r| r.op == "token").count(), 1);
+    // UX2-S1: the client secret goes in a form body, never in the URL (Twitch docs, client
+    // credentials grant flow)
+    let token = reqs.iter().find(|r| r.op == "token").unwrap();
+    assert_eq!(token.url, "https://id.twitch.tv/oauth2/token");
+    assert!(token.headers.contains(&(
+        "Content-Type".into(),
+        "application/x-www-form-urlencoded".into()
+    )));
+    assert_eq!(
+        token.body.as_deref(),
+        Some(&b"client_id=test-client&client_secret=test-secret&grant_type=client_credentials"[..])
+    );
     let search = reqs.iter().find(|r| r.op == "search").unwrap();
     assert!(
         search

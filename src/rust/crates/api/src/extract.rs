@@ -53,3 +53,45 @@ impl FromRequestParts<ApiState> for Authed {
             .ok_or_else(ApiError::unauthorized)
     }
 }
+
+/// The signed-in caller and the session token (gated admin actions check its fresh proof).
+#[derive(Debug, Clone)]
+pub struct AuthedToken {
+    pub actor: Actor,
+    pub token: String,
+}
+
+impl FromRequestParts<ApiState> for AuthedToken {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &ApiState) -> Result<Self, ApiError> {
+        let token = session_token(parts, &state.naming.session_cookie)
+            .ok_or_else(ApiError::unauthorized)?;
+        let actor = state
+            .auth
+            .session(&token)
+            .await?
+            .ok_or_else(ApiError::unauthorized)?;
+        Ok(Self { actor, token })
+    }
+}
+
+/// Session token from the bearer header or the session cookie of a header map.
+#[must_use]
+pub fn cookie_or_bearer(headers: &axum::http::HeaderMap, cookie_name: &str) -> Option<String> {
+    if let Some(t) = headers
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+    {
+        return Some(t.trim().to_string());
+    }
+    headers
+        .get_all(COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .filter_map(|kv| kv.trim().split_once('='))
+        .find(|(k, v)| *k == cookie_name && !v.is_empty())
+        .map(|(_, v)| v.to_string())
+}

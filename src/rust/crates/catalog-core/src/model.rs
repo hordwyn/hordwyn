@@ -115,6 +115,10 @@ pub enum ConnectorError {
     Http(#[from] HttpError),
     #[error("upstream answered {status}")]
     Status { status: u16 },
+    /// The provider rejected the requesting member's own credential (their `TheTVDB` PIN);
+    /// the instance key is not affected (UX2-S2).
+    #[error("the provider rejected your own credential for this source (HTTP {status})")]
+    UserCredentialRejected { status: u16 },
     #[error("not found")]
     NotFound,
     #[error("missing credentials: {0}")]

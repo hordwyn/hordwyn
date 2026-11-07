@@ -151,6 +151,7 @@ impl HttpChannels {
                 headers,
                 body: Some(body),
                 lane: Lane::Interactive,
+                skip_auth_record: false,
             })
             .await
             .map_err(|e| SendError::Retry(format!("{what}: {e}")))?;

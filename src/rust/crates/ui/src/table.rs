@@ -29,10 +29,17 @@ pub fn Table(
 simple!(TableHeader, thead, "[&_tr]:border-b");
 simple!(TableBody, tbody, "[&_tr:last-child]:border-0");
 simple!(TableRow, tr, "border-b transition-colors hover:bg-muted/50");
-simple!(
-    TableHead,
-    th,
-    "h-10 px-2 text-left align-middle font-medium text-muted-foreground"
-);
+/// A column header (`scope="col"`, UX2-W19).
+#[component]
+pub fn TableHead(
+    #[prop(into, optional)] class: MaybeProp<String>,
+    children: Children,
+) -> impl IntoView {
+    view! {
+        <th scope="col" class=move || cn(&["h-10 px-2 text-left align-middle font-medium text-muted-foreground", &class.get().unwrap_or_default()])>
+            {children()}
+        </th>
+    }
+}
 simple!(TableCell, td, "p-2 align-middle");
 simple!(TableCaption, caption, "mt-4 text-sm text-muted-foreground");

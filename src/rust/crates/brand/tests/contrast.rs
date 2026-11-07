@@ -85,3 +85,23 @@ fn unparsable_values_are_reported_without_a_ratio() {
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].ratio, None);
 }
+
+#[test]
+fn accent_pairs_cover_both_themes_with_their_ratio() {
+    // the admin Branding page shows both swatches, also when the brand keeps the defaults
+    let b = Brand::parse("name = \"A\"\nshort_name = \"a\"\n").unwrap();
+    let pairs = b.accent_pairs();
+    let themes: Vec<_> = pairs.iter().map(|p| p.theme).collect();
+    assert_eq!(themes, ["light", "dark"]);
+    assert_eq!(pairs[0].primary, "#18181b");
+    assert!(
+        pairs[0].ratio.is_some_and(|r| (r - 16.98).abs() < 0.01),
+        "{pairs:?}"
+    );
+    let b =
+        Brand::parse("name = \"A\"\nshort_name = \"a\"\n[theme]\nprimary = \"#ffb900\"\n").unwrap();
+    let pairs = b.accent_pairs();
+    assert_eq!(pairs[0].primary, "#ffb900");
+    assert!(pairs[0].ratio.is_some_and(|r| r < 4.5));
+    assert_eq!(pairs[1].primary, "#fafafa", "dark keeps the default");
+}

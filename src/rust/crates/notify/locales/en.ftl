@@ -65,6 +65,8 @@ admin-job_backlog-body = { $count ->
     [one] One job is waiting in the { $lane } lane.
    *[other] { $count } jobs are waiting in the { $lane } lane.
 }
+admin-source_requested-title = Data source requested: { $source }
+admin-source_requested-body = { $user } asked for { $source } to be set up. Add it under Admin > Data sources.
 
 test-title = Test from { $product }
 test-body = The channel "{ $name }" works.

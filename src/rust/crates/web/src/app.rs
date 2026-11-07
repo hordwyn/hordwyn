@@ -168,8 +168,9 @@ pub fn App() -> impl IntoView {
             let _ = body.set_attribute("data-hydrated", "1");
         }
     });
-    // Routes: `/history` and `/people` replaced `/sessions` and `/companions` without
-    // redirects (owner ruling, DEC-171); the old paths are 404s.
+    // Routes: `/history` and `/people` replaced `/sessions` and `/companions`, and the
+    // settings area `/settings/*` replaced `/notifications`, `/integrations` and `/sources`,
+    // without redirects (owner ruling, DEC-171); the old paths are 404s.
     view! {
         <Stylesheet id="leptos" href="/pkg/app.css"/>
         <Title text=cfg.product_name.clone()/>
@@ -177,6 +178,7 @@ pub fn App() -> impl IntoView {
             <crate::shell::AppShell>
                 <Routes fallback=crate::shell::NotFound>
                     <Route path=path!("/") view=crate::home::Home/>
+                    <Route path=path!("/setup") view=crate::setup::SetupPage/>
                     <Route path=path!("/sign-in") view=crate::pages::SignIn/>
                     <Route path=path!("/sign-up") view=crate::pages::SignUp/>
                     <Route path=path!("/invite/:token") view=crate::pages::SignUp/>
@@ -186,11 +188,21 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/history") view=crate::history::History/>
                     <Route path=path!("/stats") view=crate::home::Stats/>
                     <Route path=path!("/you") view=crate::shell::You/>
-                    <Route path=path!("/notifications") view=crate::notifications::Notifications/>
-                    <Route path=path!("/integrations") view=crate::integrations::Integrations/>
                     <Route path=path!("/shared/lists/:token") view=crate::sharing::SharedList/>
                     <Route path=path!("/lists") view=crate::pages::Lists/>
-                    <Route path=path!("/sources") view=crate::pages::Sources/>
+                    <Route path=path!("/settings/account") view=crate::settings::SettingsAccount/>
+                    <Route path=path!("/settings/notifications") view=crate::settings::SettingsNotifications/>
+                    <Route path=path!("/settings/integrations") view=crate::settings::SettingsIntegrations/>
+                    <Route path=path!("/settings/sources") view=crate::settings::SettingsSources/>
+                    <Route path=path!("/settings/privacy") view=crate::settings::SettingsPrivacy/>
+                    <Route path=path!("/admin") view=crate::admin::Overview/>
+                    <Route path=path!("/admin/users") view=crate::admin::Users/>
+                    <Route path=path!("/admin/sources") view=crate::admin::Sources/>
+                    <Route path=path!("/admin/storage") view=crate::admin::Storage/>
+                    <Route path=path!("/admin/notifications") view=crate::admin::NotificationDefaults/>
+                    <Route path=path!("/admin/brand") view=crate::admin::Branding/>
+                    <Route path=path!("/admin/security") view=crate::admin::Security/>
+                    <Route path=path!("/admin/audit") view=crate::admin::Audit/>
                     <Route path=path!("/dev/gallery") view=GalleryPage/>
                 </Routes>
             </crate::shell::AppShell>

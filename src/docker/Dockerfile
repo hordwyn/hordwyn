@@ -37,7 +37,8 @@ ENV LEPTOS_SITE_ROOT=/srv/site \
     LEPTOS_SITE_ADDR=0.0.0.0:3000 \
     LEPTOS_ENV=PROD \
     APP__BRAND__DIR=/etc/app/brand/default \
-    APP__STORAGE__FS_ROOT=/data
+    APP__STORAGE__FS_ROOT=/data \
+    APP__SECRETS__KEY_FILE=/data/secrets.key
 USER app
 EXPOSE 3000
 ENTRYPOINT ["/usr/local/bin/server"]

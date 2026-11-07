@@ -13,6 +13,7 @@ use web::backend::{BResult, Backend, ShellSession};
 
 pub struct WebBackend(pub ApiState);
 
+// Takes the error by value so it can be passed to `map_err` directly.
 #[allow(clippy::needless_pass_by_value)]
 fn err(e: ApiError) -> ErrorDto {
     e.into_dto()
@@ -58,7 +59,7 @@ impl Backend for WebBackend {
     }
 
     fn secure_cookies(&self) -> bool {
-        self.0.secure_cookies
+        self.0.cookie_secure()
     }
 
     fn session_days(&self) -> u32 {
@@ -86,6 +87,13 @@ impl Backend for WebBackend {
             is_admin: a.is_admin(),
             unread,
             locale: user.locale,
+        })
+    }
+
+    async fn setup_gate(&self) -> (bool, bool) {
+        api::admin::setup_gate(&self.0).await.unwrap_or_else(|e| {
+            tracing::warn!(error = %e.into_dto().message, "setup state unreadable");
+            (true, true)
         })
     }
 
@@ -145,9 +153,10 @@ impl Backend for WebBackend {
         token: &str,
         q: &str,
         kind: Option<String>,
+        group: Option<String>,
     ) -> BResult<SearchResponseDto> {
         let a = self.actor(token).await?;
-        ops::search(&self.0, a, q, kind).await.map_err(err)
+        ops::search(&self.0, a, q, kind, group).await.map_err(err)
     }
 
     async fn add(&self, token: &str, item_id: &str) -> BResult<LibraryEntryDto> {

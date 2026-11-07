@@ -31,3 +31,21 @@ export async function signUp(page: Page, user: string, display = "") {
   await expect(page).toHaveURL(/\/library$/);
   await hydrated(page);
 }
+
+// The instance admin made by `global.setup.ts` before any spec runs (the first account is
+// the admin, so the setup creates it through the setup wizard's API), and a second admin
+// whose sessions the re-authentication spec may age.
+export const ADMIN = "e2eadmin";
+export const REAUTH_ADMIN = "e2ereauth";
+
+/** Sign in through the API; the browser context keeps the session cookie. */
+export async function signIn(page: Page, user: string) {
+  const r = await page.request.post("/api/v1/auth/sign-in", { data: { username: user, password: PASSWORD } });
+  expect(r.ok(), `sign-in ${user}: ${r.status()}`).toBeTruthy();
+}
+
+/** No horizontal page scroll at the current viewport (WCAG 1.4.10 reflow). */
+export async function expectReflow(page: Page, where = "") {
+  const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(over, `${where} horizontal overflow`).toBeLessThanOrEqual(1);
+}

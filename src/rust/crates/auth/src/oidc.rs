@@ -91,6 +91,7 @@ impl Oidc {
                         headers,
                         body: Some(req.body().clone()).filter(|b| !b.is_empty()),
                         lane: Lane::Interactive,
+                        skip_auth_record: false,
                     })
                     .await
                     .map_err(|e| OidcHttpError(e.to_string()))?;
@@ -200,10 +201,11 @@ impl Oidc {
         let issuer = claims.issuer().to_string();
         let subject = claims.subject().to_string();
         if let Some(id) = auth.store.identity(&issuer, &subject).await? {
-            return auth.create_session(id.user_id).await;
+            return auth.create_session(id.user_id, "oidc").await;
         }
         let first = auth.app.user_count().await? == 0;
-        if !first && !self.settings.auto_create && auth.settings.signup != crate::SignupMode::Open {
+        if !first && !self.settings.auto_create && auth.settings().signup != crate::SignupMode::Open
+        {
             return Err(AuthError::SignupClosed);
         }
         let username = claims
@@ -222,13 +224,7 @@ impl Oidc {
             .register_user(&username, &display, email, role)
             .await?;
         auth.store
-            .put_credentials(&Credentials {
-                user_id: user.id,
-                password_hash: None,
-                totp_secret: None,
-                totp_enabled: false,
-                totp_last_step: None,
-            })
+            .put_credentials(&Credentials::empty(user.id))
             .await?;
         auth.store
             .link_identity(&OidcIdentity {
@@ -241,7 +237,7 @@ impl Oidc {
             user_id: user.id,
             role,
         };
-        auth.create_session(user.id).await
+        auth.create_session(user.id, "oidc").await
     }
 }
 

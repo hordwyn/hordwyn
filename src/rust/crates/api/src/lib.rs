@@ -5,6 +5,8 @@
 //! as `search.results` events (D-6).
 #![deny(unsafe_code)]
 
+pub mod admin;
+mod admin_routes;
 pub mod browse;
 mod dto;
 mod error;
@@ -25,7 +27,7 @@ use catalog_core::Registry;
 use catalog_core::search::SearchFanout;
 
 pub use error::ApiError;
-pub use extract::{Authed, session_token};
+pub use extract::{Authed, AuthedToken, session_token};
 pub use routes::router;
 
 /// User DTO (also used by the web backend).
@@ -88,4 +90,17 @@ pub struct ApiState {
     pub secure_cookies: bool,
     /// Enabled kinds searched when the client does not name one.
     pub default_kinds: Vec<String>,
+    /// The admin area, credentials and setup (UX phase 2); `None` in small test setups.
+    pub admin: Option<admin::AdminApi>,
+}
+
+impl ApiState {
+    /// Send cookies with `Secure`? The admin setting when the admin area is wired (it
+    /// applies to cookies issued from now on, OD-11), else the configuration.
+    #[must_use]
+    pub fn cookie_secure(&self) -> bool {
+        self.admin
+            .as_ref()
+            .map_or(self.secure_cookies, admin::AdminApi::secure_cookies)
+    }
 }

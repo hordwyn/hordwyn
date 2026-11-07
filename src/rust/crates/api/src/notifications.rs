@@ -28,6 +28,7 @@ fn api(s: &ApiState) -> ApiResult<&NotifyApi> {
     })
 }
 
+// Takes the error by value so it can be passed to `map_err` directly.
 #[allow(clippy::needless_pass_by_value)]
 fn port(e: app::ports::PortError) -> ApiError {
     ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.0)
@@ -475,4 +476,22 @@ pub async fn page(s: &ApiState, a: Actor) -> ApiResult<contracts::NotificationPa
         events: catalogue(a),
         deliveries: deliveries(s, a).await?,
     })
+}
+
+/// The instance default subscriptions (Admin > Notification defaults; the caller checks
+/// the admin role).
+///
+/// # Errors
+/// Notifications disabled, storage errors.
+pub async fn instance_defaults(s: &ApiState) -> ApiResult<Vec<SubscriptionDto>> {
+    let na = api(s)?;
+    Ok(na
+        .engine
+        .store()
+        .defaults()
+        .await
+        .map_err(port)?
+        .iter()
+        .map(sub_dto)
+        .collect())
 }

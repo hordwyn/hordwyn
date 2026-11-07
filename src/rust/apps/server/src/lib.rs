@@ -2,9 +2,11 @@
 //! the `app` core and serves the web app, the REST API, SSE and `/assets`.
 #![deny(unsafe_code)]
 
+mod admin_wiring;
 mod csrf;
 mod handlers;
 pub mod infra;
+pub mod web_admin;
 pub mod web_backend;
 
 use std::sync::Arc;
@@ -74,9 +76,10 @@ async fn notify_engine(
     queue: &jobs::PgQueue,
     bus: &realtime::Bus,
     clock: Arc<dyn app::ports::Clock>,
+    cipher: Arc<dyn app::ports::SecretCipher>,
 ) -> anyhow::Result<(Arc<notify::Engine>, Arc<notify::Deliverer>, Option<String>)> {
     let engine = Arc::new(notify::Engine::new(
-        Arc::new(notify::pg::PgNotifyStore::new(pool.clone())),
+        Arc::new(notify::pg::PgNotifyStore::new(pool.clone(), cipher)),
         Arc::new(queue.clone()),
         Arc::new(bus.clone()),
         clock.clone(),
@@ -144,61 +147,47 @@ fn notify_channels(
     ))
 }
 
-/// Compiled-in connectors enabled by the configuration (all by default).
-fn default_registry(cfg: &AppConfig) -> Registry {
-    let mut r = Registry::default();
-    let enabled = |id: &str| cfg.connectors.get(id).is_none_or(|c| c.enabled);
-    #[cfg(feature = "tmdb")]
-    if enabled("tmdb") {
-        let c = cfg.connectors.get("tmdb");
-        let key = c
-            .and_then(|c| c.api_key.as_ref())
-            .map(|k| k.expose().to_string());
-        let conn = match c.and_then(|c| c.base_url.clone()) {
-            Some(base) => connectors::tmdb::Tmdb::with_base_urls(key, &base, &base),
-            None => connectors::tmdb::Tmdb::new(key),
-        };
-        r.register(Arc::new(conn));
-    }
-    // Connectors that cannot work without credentials are only registered when they have them.
+/// Every compiled-in connector (always registered, design.md 4.2: a missing key is a
+/// credential state, not an absence), except those the configuration switches off, which
+/// are returned as (id, name, kinds) for the admin's source table.
+fn default_registry(cfg: &AppConfig) -> (Registry, Vec<(String, String, Vec<String>)>) {
+    let mut all: Vec<Arc<dyn catalog_core::Connector>> = Vec::new();
+    let c = |id: &str| cfg.connectors.get(id);
     let key = |id: &str| {
-        cfg.connectors
-            .get(id)
+        c(id)
             .and_then(|c| c.api_key.as_ref())
             .map(|k| k.expose().to_string())
     };
+    let base = |id: &str| c(id).and_then(|c| c.base_url.clone());
+    #[cfg(feature = "tmdb")]
+    all.push(Arc::new(match base("tmdb") {
+        Some(b) => connectors::tmdb::Tmdb::with_base_urls(key("tmdb"), &b, &b),
+        None => connectors::tmdb::Tmdb::new(key("tmdb")),
+    }));
     #[cfg(feature = "igdb")]
-    if enabled("igdb")
-        && let Some(k) = key("igdb")
-    {
-        r.register(Arc::new(connectors::igdb::Igdb::new(Some(k))));
-    }
+    all.push(Arc::new(connectors::igdb::Igdb::new(key("igdb"))));
     #[cfg(feature = "podcastindex")]
-    if enabled("podcastindex")
-        && let Some(k) = key("podcastindex")
-    {
-        let c = match cfg
-            .connectors
-            .get("podcastindex")
-            .and_then(|c| c.base_url.clone())
-        {
-            Some(base) => connectors::podcastindex::PodcastIndex::with_base_url(Some(k), &base),
-            None => connectors::podcastindex::PodcastIndex::new(Some(k)),
-        };
-        r.register(Arc::new(c));
-    }
+    all.push(Arc::new(match base("podcastindex") {
+        Some(b) => connectors::podcastindex::PodcastIndex::with_base_url(key("podcastindex"), &b),
+        None => connectors::podcastindex::PodcastIndex::new(key("podcastindex")),
+    }));
     #[cfg(feature = "tvdb")]
-    if enabled("tvdb")
-        && let Some(k) = key("tvdb")
-    {
-        let c = match cfg.connectors.get("tvdb").and_then(|c| c.base_url.clone()) {
-            Some(base) => connectors::tvdb::Tvdb::with_base_url(Some(k), &base),
-            None => connectors::tvdb::Tvdb::new(Some(k)),
-        };
-        r.register(Arc::new(c));
+    all.push(Arc::new(match base("tvdb") {
+        Some(b) => connectors::tvdb::Tvdb::with_base_url(key("tvdb"), &b),
+        None => connectors::tvdb::Tvdb::new(key("tvdb")),
+    }));
+    let _ = (&key, &base);
+    let mut r = Registry::default();
+    let mut disabled = Vec::new();
+    for conn in all {
+        let info = conn.info().clone();
+        if c(&info.id).is_none_or(|c| c.enabled) {
+            r.register(conn);
+        } else {
+            disabled.push((info.id, info.name, info.kinds));
+        }
     }
-    let _ = (enabled, key);
-    r
+    (r, disabled)
 }
 
 impl Server {
@@ -221,6 +210,8 @@ impl Server {
         .await
         .context("connect to Postgres")?;
         store_pg::migrate(&pool).await.context("migrations")?;
+        let keys = admin_wiring::load_keys(&config, &pool).await?;
+        let cipher: Arc<dyn app::ports::SecretCipher> = keys.ring.clone();
 
         let repos = pg_repos(&pool);
         // Web and worker in separate processes need cross-process events (LISTEN/NOTIFY).
@@ -232,8 +223,16 @@ impl Server {
         let queue = jobs::PgQueue::new(pool.clone());
         let clock: Arc<dyn app::ports::Clock> = Arc::new(infra::SystemClock::default());
         let (kinds, kind_ids) = enabled_kinds(&config);
-        let (engine, deliverer, web_push_key) =
-            notify_engine(&config, &brand, &pool, &queue, &bus, clock.clone()).await?;
+        let (engine, deliverer, web_push_key) = notify_engine(
+            &config,
+            &brand,
+            &pool,
+            &queue,
+            &bus,
+            clock.clone(),
+            cipher.clone(),
+        )
+        .await?;
         let app = App {
             repos,
             kinds: Arc::new(kinds),
@@ -256,10 +255,15 @@ impl Server {
             )?
             .with_jobs(Arc::new(queue.clone())),
         );
-        let registry = o.registry.unwrap_or_else(|| default_registry(&config));
-        let http: Arc<dyn HttpFetch> = o
-            .http
-            .unwrap_or_else(|| governed_http(&config, &brand, &registry, &pool, budget.clone()));
+        let stats = Arc::new(catalog_core::SourceStats::default());
+        let (registry, disabled_sources) = match o.registry {
+            Some(r) => (r, Vec::new()),
+            None => default_registry(&config),
+        };
+        let registry = registry.with_stats(stats.clone());
+        let http: Arc<dyn HttpFetch> = o.http.unwrap_or_else(|| {
+            governed_http(&config, &brand, &registry, &pool, budget.clone(), stats)
+        });
         let assets = Arc::new(assets::AssetService::new(
             budget.clone(),
             Arc::new(assets::pg::PgAssetRepo::new(pool.clone())),
@@ -267,14 +271,16 @@ impl Server {
             Arc::new(queue.clone()),
             assets::CpuPool::default_size()?,
         ));
+        let auth_store = Arc::new(auth::pg::PgAuthStore::new(pool.clone(), cipher.clone()));
         let auth = auth::Auth::new(
             app.clone(),
-            Arc::new(auth::pg::PgAuthStore::new(pool.clone())),
+            auth_store.clone(),
             auth_settings(&config, &brand),
-        );
+        )
+        .with_invites(auth_store.clone());
         let oidc = oidc(&config, http.clone());
-        let search = match o.search {
-            Some(s) => s,
+        let (search, search_backend) = match o.search {
+            Some(s) => (s, "override"),
             None => search_index(&config, &pool).await,
         };
         let ident = brand.ident();
@@ -307,7 +313,33 @@ impl Server {
             naming: api::Naming::from_prefix(&ident, &brand.name),
             secure_cookies: config.auth.secure_cookies,
             default_kinds: kind_ids,
+            admin: None,
         };
+        let secret_rows: Vec<Arc<dyn app::ports::SecretRows>> = vec![
+            auth_store,
+            Arc::new(notify::pg::PgNotifyStore::new(pool.clone(), cipher.clone())),
+            Arc::new(auth::admin_pg::PgAdminStore::new(
+                pool.clone(),
+                cipher.clone(),
+            )),
+        ];
+        admin_wiring::seal_plaintext(&secret_rows, cipher.as_ref(), &keys.source).await?;
+        let api = admin_wiring::with_admin(
+            api,
+            admin_wiring::AdminParts {
+                config: &config,
+                brand: &brand,
+                pool: &pool,
+                keys,
+                secret_rows,
+                budget: budget.clone(),
+                queue: queue.clone(),
+                http: http.clone(),
+                search_backend,
+                disabled_sources,
+            },
+        )
+        .await?;
         Ok(Self {
             config,
             brand,
@@ -358,6 +390,7 @@ impl Server {
 
     /// Run the worker and the cron ticker until `stop` is cancelled.
     pub async fn run_worker(&self, stop: CancellationToken) {
+        handlers::schedule_admin_jobs(self).await;
         let ticker = {
             let queue = self.queue.clone();
             let stop = stop.clone();
@@ -481,6 +514,7 @@ fn governed_http(
     registry: &Registry,
     pool: &sqlx::PgPool,
     budget: Arc<assets::StorageBudget>,
+    stats: Arc<catalog_core::SourceStats>,
 ) -> Arc<dyn HttpFetch> {
     let cache = HttpCache {
         index: Arc::new(catalog_core::pg::PgCacheIndex::new(pool.clone())),
@@ -497,7 +531,7 @@ fn governed_http(
     {
         g.add_connector(auth::oidc::CONNECTOR, ConnectorPolicy::oidc(host, u.port()));
     }
-    Arc::new(g)
+    Arc::new(g.with_stats(stats))
 }
 
 fn auth_settings(config: &AppConfig, brand: &brand::Brand) -> auth::AuthSettings {
@@ -532,14 +566,19 @@ fn oidc(config: &AppConfig, http: Arc<dyn HttpFetch>) -> Option<Arc<auth::oidc::
 
 /// The configured search backend. If Meilisearch cannot be reached at start-up the process
 /// uses the Postgres fallback instead of refusing to start (logged as an error).
-async fn search_index(config: &AppConfig, pool: &sqlx::PgPool) -> Arc<dyn SearchIndex> {
+/// Also names the backend in use for the admin overview (`postgres_fallback` when
+/// Meilisearch was configured but is not usable).
+async fn search_index(
+    config: &AppConfig,
+    pool: &sqlx::PgPool,
+) -> (Arc<dyn SearchIndex>, &'static str) {
     let pg = || -> Arc<dyn SearchIndex> { Arc::new(search::pg::PgSearch::new(pool.clone())) };
     match config.search.backend {
-        config::SearchBackend::Postgres => pg(),
+        config::SearchBackend::Postgres => (pg(), "postgres"),
         config::SearchBackend::Meilisearch => {
             let Some(key) = &config.search.meili_master_key else {
                 tracing::error!("search.meili_master_key is not set; using Postgres search");
-                return pg();
+                return (pg(), "postgres_fallback");
             };
             match search::meili::MeiliIndex::connect(
                 &config.search.meili_url,
@@ -548,10 +587,10 @@ async fn search_index(config: &AppConfig, pool: &sqlx::PgPool) -> Arc<dyn Search
             )
             .await
             {
-                Ok(m) => Arc::new(m),
+                Ok(m) => (Arc::new(m), "meilisearch"),
                 Err(e) => {
                     tracing::error!(error = %e, "Meilisearch unavailable; using Postgres search");
-                    pg()
+                    (pg(), "postgres_fallback")
                 }
             }
         }
@@ -567,9 +606,12 @@ impl Server {
     pub fn web_context(&self) -> impl Fn() + Clone + Send + Sync + 'static {
         let brand = Arc::new(self.brand.clone());
         let backend = self.web_backend();
+        let admin: Arc<dyn web::admin_backend::AdminBackend> =
+            Arc::new(web_admin::WebAdmin(self.api.clone()));
         move || {
             leptos::prelude::provide_context(brand.clone());
             leptos::prelude::provide_context(backend.clone());
+            leptos::prelude::provide_context(admin.clone());
         }
     }
 }

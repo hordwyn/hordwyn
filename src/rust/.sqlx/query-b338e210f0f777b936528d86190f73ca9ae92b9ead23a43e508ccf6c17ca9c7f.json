@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE signup_invites SET used_by = $2, used_at = $3, revoked_at = $4 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b338e210f0f777b936528d86190f73ca9ae92b9ead23a43e508ccf6c17ca9c7f"
+}

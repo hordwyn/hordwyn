@@ -8,8 +8,9 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use catalog_core::{
-    Attribution, Auth, Capability, Connector, ConnectorError, ConnectorInfo, Ctx, Details,
-    DetailsRequest, ImageKind, ImageRef, RateLimit, Search, SearchRequest, Snapshot,
+    Attribution, Auth, Capability, Connector, ConnectorError, ConnectorInfo, CredentialSpec, Ctx,
+    Details, DetailsRequest, ImageKind, ImageRef, KeySlot, RateLimit, Search, SearchRequest,
+    Snapshot,
 };
 use domain::catalog::ExternalId;
 use kinds::builtin::VideoGameAttributes;
@@ -20,6 +21,11 @@ use crate::util::{non_empty, post_json};
 pub const ID: &str = "igdb";
 /// `<client_id>:<client_secret>` from the Twitch developer console.
 pub const API_KEY_ENV: &str = "KK_IGDB_API_KEY";
+/// Credential fields (stored as JSON, joined with `:` into the key string).
+pub const CREDENTIALS: CredentialSpec = CredentialSpec {
+    instance_fields: &["client_id", "client_secret"],
+    user_fields: &[],
+};
 const DEFAULT_API_BASE: &str = "https://api.igdb.com/v4";
 const DEFAULT_TOKEN_URL: &str = "https://id.twitch.tv/oauth2/token";
 const DEFAULT_IMAGE_BASE: &str = "https://images.igdb.com/igdb/image/upload";
@@ -33,8 +39,8 @@ pub struct Igdb {
     api_base: String,
     token_url: String,
     image_base: String,
-    credentials: Option<(String, String)>,
-    token: Mutex<Option<(String, Instant)>>,
+    key: KeySlot,
+    token: Mutex<Option<(String, Instant, u64)>>,
 }
 
 fn host_of(base: &str) -> String {
@@ -91,38 +97,54 @@ impl Igdb {
             api_base,
             token_url: token_url.to_string(),
             image_base,
-            credentials: key.and_then(|k| {
-                k.split_once(':')
-                    .map(|(id, secret)| (id.trim().to_string(), secret.trim().to_string()))
-            }),
+            key: KeySlot::new(key),
             token: Mutex::new(None),
         }
     }
 
     async fn headers(&self, ctx: &Ctx) -> Result<Vec<(String, String)>, ConnectorError> {
         let (id, secret) = self
-            .credentials
-            .clone()
+            .key
+            .get()
+            .and_then(|k| {
+                k.split_once(':')
+                    .map(|(id, secret)| (id.trim().to_string(), secret.trim().to_string()))
+            })
             .ok_or_else(|| ConnectorError::MissingCredentials(API_KEY_ENV.into()))?;
+        let version = self.key.version();
         let cached = self
             .token
             .lock()
             .expect("token lock")
             .clone()
-            .filter(|(_, until)| Instant::now() < *until);
-        let token = if let Some((t, _)) = cached {
+            .filter(|(_, until, v)| Instant::now() < *until && *v == version);
+        let token = if let Some((t, _, _)) = cached {
             t
         } else {
-            let mut u = url::Url::parse(&self.token_url)
-                .map_err(|e| ConnectorError::Parse(e.to_string()))?;
-            u.query_pairs_mut()
+            // a form body, as the Twitch docs show (client credentials grant flow): the secret
+            // never travels in the URL, so it cannot end up in an error string or a log line
+            let body = url::form_urlencoded::Serializer::new(String::new())
                 .append_pair("client_id", &id)
                 .append_pair("client_secret", &secret)
-                .append_pair("grant_type", "client_credentials");
-            let t: Token = post_json(ctx, ID, "token", u.as_str(), vec![], vec![]).await?;
+                .append_pair("grant_type", "client_credentials")
+                .finish();
+            let headers = vec![(
+                "Content-Type".into(),
+                "application/x-www-form-urlencoded".into(),
+            )];
+            let t: Token = post_json(
+                ctx,
+                ID,
+                "token",
+                &self.token_url,
+                headers,
+                body.into_bytes(),
+            )
+            .await?;
             // refresh a minute early
             let until = Instant::now() + Duration::from_secs(t.expires_in.saturating_sub(60));
-            *self.token.lock().expect("token lock") = Some((t.access_token.clone(), until));
+            *self.token.lock().expect("token lock") =
+                Some((t.access_token.clone(), until, version));
             t.access_token
         };
         Ok(vec![
@@ -296,6 +318,23 @@ impl catalog_core::Images for Igdb {
 impl Connector for Igdb {
     fn info(&self) -> &ConnectorInfo {
         &self.info
+    }
+
+    fn key_slot(&self) -> Option<KeySlot> {
+        Some(self.key.clone())
+    }
+
+    fn credentials(&self) -> CredentialSpec {
+        CREDENTIALS
+    }
+
+    fn probe(&self, key: Option<String>) -> Option<std::sync::Arc<dyn Connector>> {
+        Some(std::sync::Arc::new(Self::with_base_urls(
+            key,
+            &self.api_base,
+            &self.token_url,
+            &self.image_base,
+        )))
     }
 
     fn as_search(&self) -> Option<&dyn Search> {

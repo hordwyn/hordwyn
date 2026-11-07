@@ -33,7 +33,7 @@ test("link requests arrive in the inbox; channels and subscriptions", async ({ p
   await page.getByRole("button", { name: "Send link request" }).click();
   await expect(page.getByText("Link request sent.")).toBeVisible();
 
-  await pia.goto("/notifications");
+  await pia.goto("/settings/notifications");
   await hydrated(pia);
   const inbox = pia.getByRole("list", { name: "Inbox" });
   await expect(inbox.getByRole("listitem").filter({ hasText: 'Max says you are "P."' })).toBeVisible();

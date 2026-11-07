@@ -148,3 +148,25 @@ impl App {
         Ok(self.repos.users.get(id).await?)
     }
 }
+
+impl App {
+    /// Every account (admin users page). The caller checks the admin role.
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn list_users(&self) -> AppResult<Vec<User>> {
+        Ok(self.repos.users.list().await?)
+    }
+
+    /// Set a user's role without checks; lock-out rules are enforced by the admin API
+    /// (`api::admin`), which is the only caller.
+    ///
+    /// # Errors
+    /// Unknown user or storage errors.
+    pub async fn set_role_unchecked(&self, id: UserId, role: Role) -> AppResult<User> {
+        let mut user = self.user(id).await?;
+        user.role = role;
+        self.repos.users.update(&user).await?;
+        Ok(user)
+    }
+}

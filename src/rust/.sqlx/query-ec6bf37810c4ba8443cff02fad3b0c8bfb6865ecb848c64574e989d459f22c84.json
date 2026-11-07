@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE connector_credentials SET secret = $3 WHERE id = $1 AND secret = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ec6bf37810c4ba8443cff02fad3b0c8bfb6865ecb848c64574e989d459f22c84"
+}

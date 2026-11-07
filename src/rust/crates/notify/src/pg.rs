@@ -1,6 +1,10 @@
 //! Postgres adapter for [`NotifyStore`] (store-pg migration `0010_notifications.sql`).
 
-use app::ports::PortError;
+use std::sync::Arc;
+
+use app::ports::{
+    PortError, RepoError, RepoResult, RewrapBatch, SecretCipher, SecretRows, SecretSlot,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use domain::ids::UserId;
@@ -26,15 +30,45 @@ fn to_json<T: serde::Serialize>(v: &T) -> StoreResult<serde_json::Value> {
     serde_json::to_value(v).map_err(|e| PortError(e.to_string()))
 }
 
+/// Purpose of the encrypted channel config (addendum-1 2.2).
+pub const CHANNEL_PURPOSE: &str = "channel_secret";
+const CHANNEL_FIELD: &str = "config";
+
+fn channel_slot(row: &str) -> SecretSlot<'_> {
+    SecretSlot {
+        purpose: CHANNEL_PURPOSE,
+        row,
+        field: CHANNEL_FIELD,
+    }
+}
+
+// Takes the error by value so it can be passed to `map_err` directly.
+#[allow(clippy::needless_pass_by_value)]
+fn re(e: sqlx::Error) -> RepoError {
+    RepoError::Backend(format!("notifications db: {e}"))
+}
+
+/// Channel secrets are stored encrypted in `secret` (the whole config); `config` keeps the
+/// redacted form, so a dump holds no tokens.
 #[derive(Clone)]
 pub struct PgNotifyStore {
     pool: PgPool,
+    cipher: Arc<dyn SecretCipher>,
 }
 
 impl PgNotifyStore {
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(pool: PgPool, cipher: Arc<dyn SecretCipher>) -> Self {
+        Self { pool, cipher }
+    }
+
+    fn seal(&self, c: &Channel) -> StoreResult<(serde_json::Value, Vec<u8>)> {
+        let full = serde_json::to_vec(&c.config).map_err(|e| PortError(e.to_string()))?;
+        let row = c.id.to_string();
+        Ok((
+            to_json(&c.config.redacted())?,
+            self.cipher.seal(channel_slot(&row), &full),
+        ))
     }
 }
 
@@ -43,18 +77,36 @@ struct ChannelRow {
     user_id: Uuid,
     name: String,
     config: serde_json::Value,
+    secret: Option<Vec<u8>>,
     enabled: bool,
     created_at: DateTime<Utc>,
 }
 
 impl ChannelRow {
-    fn into_channel(self) -> StoreResult<Channel> {
+    /// The full config from `secret`; a value that cannot be decrypted (`locked`) leaves the
+    /// channel redacted and paused, so nothing is sent with placeholder secrets.
+    fn into_channel(self, cipher: &dyn SecretCipher) -> StoreResult<Channel> {
+        let row = self.id.to_string();
+        let (config, enabled) = match &self.secret {
+            Some(blob) => match cipher.open(channel_slot(&row), blob) {
+                Ok(plain) => (
+                    serde_json::from_slice(&plain)
+                        .map_err(|e| PortError(format!("notifications db: {e}")))?,
+                    self.enabled,
+                ),
+                Err(e) => {
+                    tracing::warn!(channel = %self.id, version = ?e.version, "channel secret is locked");
+                    (from_json(self.config)?, false)
+                }
+            },
+            None => (from_json(self.config)?, self.enabled),
+        };
         Ok(Channel {
             id: self.id,
             user: UserId(self.user_id),
             name: self.name,
-            config: from_json(self.config)?,
-            enabled: self.enabled,
+            config,
+            enabled,
             created_at: self.created_at,
         })
     }
@@ -184,7 +236,7 @@ impl NotifyStore for PgNotifyStore {
     async fn channels(&self, user: UserId) -> StoreResult<Vec<Channel>> {
         sqlx::query_as!(
             ChannelRow,
-            "SELECT id, user_id, name, config, enabled, created_at FROM notify_channels
+            "SELECT id, user_id, name, config, secret, enabled, created_at FROM notify_channels
              WHERE user_id = $1 ORDER BY created_at, id",
             user.0
         )
@@ -192,34 +244,36 @@ impl NotifyStore for PgNotifyStore {
         .await
         .map_err(pe)?
         .into_iter()
-        .map(ChannelRow::into_channel)
+        .map(|r| r.into_channel(self.cipher.as_ref()))
         .collect()
     }
 
     async fn channel(&self, id: Uuid) -> StoreResult<Option<Channel>> {
         sqlx::query_as!(
             ChannelRow,
-            "SELECT id, user_id, name, config, enabled, created_at FROM notify_channels
+            "SELECT id, user_id, name, config, secret, enabled, created_at FROM notify_channels
              WHERE id = $1",
             id
         )
         .fetch_optional(&self.pool)
         .await
         .map_err(pe)?
-        .map(ChannelRow::into_channel)
+        .map(|r| r.into_channel(self.cipher.as_ref()))
         .transpose()
     }
 
     async fn put_channel(&self, c: &Channel) -> StoreResult<()> {
+        let (redacted, secret) = self.seal(c)?;
         sqlx::query!(
-            "INSERT INTO notify_channels (id, user_id, name, config, enabled, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6)
+            "INSERT INTO notify_channels (id, user_id, name, config, secret, enabled, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, config = EXCLUDED.config,
-                 enabled = EXCLUDED.enabled",
+                 secret = EXCLUDED.secret, enabled = EXCLUDED.enabled",
             c.id,
             c.user.0,
             c.name,
-            to_json(&c.config)?,
+            redacted,
+            secret,
             c.enabled,
             c.created_at
         )
@@ -538,5 +592,107 @@ impl NotifyStore for PgNotifyStore {
             .map_err(pe)?,
         };
         Ok(())
+    }
+}
+
+/// The channel secret column for the rotation job and the start-up migration.
+#[async_trait]
+impl SecretRows for PgNotifyStore {
+    fn purpose(&self) -> &'static str {
+        CHANNEL_PURPOSE
+    }
+
+    async fn seal_plaintext(&self, cipher: &dyn SecretCipher) -> RepoResult<u64> {
+        let rows = sqlx::query!("SELECT id, config FROM notify_channels WHERE secret IS NULL")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(re)?;
+        let mut n = 0;
+        for r in rows {
+            let config: crate::model::ChannelConfig = serde_json::from_value(r.config.clone())
+                .map_err(|e| RepoError::Backend(format!("channel {}: {e}", r.id)))?;
+            let row = r.id.to_string();
+            let full =
+                serde_json::to_vec(&config).map_err(|e| RepoError::Backend(e.to_string()))?;
+            let redacted = serde_json::to_value(config.redacted())
+                .map_err(|e| RepoError::Backend(e.to_string()))?;
+            n += sqlx::query!(
+                "UPDATE notify_channels SET secret = $2, config = $3 WHERE id = $1 AND secret IS NULL",
+                r.id,
+                cipher.seal(channel_slot(&row), &full),
+                redacted
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(re)?
+            .rows_affected();
+        }
+        Ok(n)
+    }
+
+    async fn version_counts(&self) -> RepoResult<Vec<(u16, u64)>> {
+        let rows = sqlx::query!(
+            r#"SELECT (get_byte(secret, 1) * 256 + get_byte(secret, 2))::int AS "v!",
+                      COUNT(*) AS "n!"
+               FROM notify_channels WHERE secret IS NOT NULL AND length(secret) >= 3
+               GROUP BY 1 ORDER BY 1"#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(re)?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| Some((u16::try_from(r.v).ok()?, u64::try_from(r.n).ok()?)))
+            .collect())
+    }
+
+    async fn rewrap_batch(
+        &self,
+        cipher: &dyn SecretCipher,
+        active: u16,
+        after: Option<Uuid>,
+        limit: u32,
+    ) -> RepoResult<RewrapBatch> {
+        let rows = sqlx::query!(
+            r#"SELECT id, secret AS "blob!" FROM notify_channels
+               WHERE secret IS NOT NULL
+                 AND ($3::uuid IS NULL OR id > $3)
+                 AND CASE WHEN length(secret) >= 3
+                     THEN get_byte(secret, 1) * 256 + get_byte(secret, 2) <> $1
+                     ELSE false END
+               ORDER BY id LIMIT $2"#,
+            i32::from(active),
+            i64::from(limit),
+            after
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(re)?;
+        let last = rows.last().map(|r| r.id);
+        let (mut done, mut locked) = (0, 0);
+        for r in rows {
+            let row = r.id.to_string();
+            match cipher.rewrap(channel_slot(&row), &r.blob) {
+                Ok(Some(new)) => {
+                    done += sqlx::query!(
+                        "UPDATE notify_channels SET secret = $3 WHERE id = $1 AND secret = $2",
+                        r.id,
+                        r.blob,
+                        new
+                    )
+                    .execute(&self.pool)
+                    .await
+                    .map_err(re)?
+                    .rows_affected();
+                }
+                Ok(None) => {}
+                Err(_) => locked += 1,
+            }
+        }
+        Ok(RewrapBatch {
+            rewrapped: done,
+            locked,
+            last,
+        })
     }
 }

@@ -301,6 +301,7 @@ impl AssetService {
                 headers: vec![],
                 body: None,
                 lane: lane_for(a.priority),
+                skip_auth_record: false,
             })
             .await;
         let resp = match resp {

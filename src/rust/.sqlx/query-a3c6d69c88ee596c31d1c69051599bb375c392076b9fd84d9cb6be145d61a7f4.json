@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO secrets_keys (version, first_seen_at) VALUES ($1, $2)\n                 ON CONFLICT (version) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a3c6d69c88ee596c31d1c69051599bb375c392076b9fd84d9cb6be145d61a7f4"
+}

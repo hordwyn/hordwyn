@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth_sessions SET last_seen_at = $2, expires_at = $3, reauth_at = $4,\n                 reauth_method = $5, reauth_slide_at = $6\n             WHERE token_hash = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "58da7ff8002044b441d5ae4eabc9b0b53ea93f0a98aff998c8b9d252bd1c9660"
+}

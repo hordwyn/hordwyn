@@ -58,6 +58,8 @@ pub const CATALOGUE: &[EventDef] = &[
     admin("admin.connector_down", &["connector"]),
     admin("admin.signup", &["username", "name"]),
     admin("admin.job_backlog", &["lane", "count"]),
+    // a member asked for a data source (design.md 4.4, "Ask admin")
+    admin("admin.source_requested", &["source", "user"]),
 ];
 
 #[must_use]

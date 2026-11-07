@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT issuer, subject FROM oidc_identities WHERE user_id = $1 ORDER BY issuer",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "issuer",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_identities",
+            "name": "issuer"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "subject",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_identities",
+            "name": "subject"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "8c4e52b81dbe3589e59b5c618af46d39756ebecfbc8a69a1b231588abaf4373f"
+}

@@ -28,6 +28,7 @@ url.workspace = true
 fastrand.workspace = true
 chrono = { workspace = true, features = ["clock"] }
 uuid.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 store-pg.workspace = true

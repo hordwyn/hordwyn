@@ -212,3 +212,341 @@ async fn changing_the_password_ends_other_sessions() {
 fn dummy_hash_parses() {
     assert!(PasswordHash::new(DUMMY_HASH).is_ok());
 }
+
+// ---------------------------------------------------------------- UX phase 2 (DEC-191, OD-08)
+
+async fn totp_on(
+    auth: &Auth,
+    clock: &FixedClock,
+    token: &SessionToken,
+) -> (totp_rs::Totp, Vec<String>) {
+    let actor = auth.session(&token.0).await.unwrap().unwrap();
+    auth.totp_begin(actor).await.unwrap();
+    let secret = auth
+        .store()
+        .credentials(actor.user_id)
+        .await
+        .unwrap()
+        .unwrap()
+        .totp_secret
+        .unwrap();
+    let totp = auth.totp(secret, "anna").unwrap();
+    let now = u64::try_from(clock.now().timestamp()).unwrap();
+    let codes = auth
+        .totp_confirm(actor, &totp.generate(now).to_string())
+        .await
+        .unwrap();
+    (totp, codes)
+}
+
+#[tokio::test]
+async fn signing_in_is_a_fresh_proof_that_slides_for_15_minutes_up_to_an_hour() {
+    let (auth, clock, _) = env(SignupMode::Open);
+    let (_, token) = auth.sign_up(su("anna")).await.unwrap();
+    assert!(auth.require_fresh(&token.0).await.is_ok(), "sign-up counts");
+    for _ in 0..4 {
+        clock.advance(Duration::minutes(14));
+        assert!(auth.require_fresh(&token.0).await.is_ok(), "slides");
+    }
+    clock.advance(Duration::minutes(5));
+    assert!(
+        matches!(
+            auth.require_fresh(&token.0).await,
+            Err(AuthError::ReauthRequired)
+        ),
+        "capped at one hour after the proof"
+    );
+    let t2 = auth
+        .sign_in("anna", "correct horse battery", None)
+        .await
+        .unwrap();
+    clock.advance(Duration::minutes(16));
+    assert!(matches!(
+        auth.require_fresh(&t2.0).await,
+        Err(AuthError::ReauthRequired)
+    ));
+    let status = auth.reauth_status(&t2.0).await.unwrap();
+    assert!(!status.fresh && status.has_password && !status.has_totp);
+}
+
+#[tokio::test]
+async fn reauth_checks_the_password_then_totp_and_regenerates_the_session() {
+    let (auth, clock, _) = env(SignupMode::Open);
+    let (_, token) = auth.sign_up(su("anna")).await.unwrap();
+    let (totp, _) = totp_on(&auth, &clock, &token).await;
+    clock.advance(Duration::minutes(30));
+    assert!(matches!(
+        auth.reauth(&token.0, "wrong password!", None).await,
+        Err(AuthError::InvalidCredentials)
+    ));
+    assert!(matches!(
+        auth.reauth(&token.0, "correct horse battery", None).await,
+        Err(AuthError::TotpRequired)
+    ));
+    let now = u64::try_from(clock.now().timestamp()).unwrap();
+    let fresh = auth
+        .reauth(
+            &token.0,
+            "correct horse battery",
+            Some(&totp.generate(now).to_string()),
+        )
+        .await
+        .unwrap();
+    assert_ne!(fresh, token);
+    assert!(
+        auth.session(&token.0).await.unwrap().is_none(),
+        "old id is gone"
+    );
+    assert!(auth.require_fresh(&fresh.0).await.is_ok());
+    let s = auth
+        .store()
+        .session(&token_hash(&fresh.0))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(s.reauth_method.as_deref(), Some("password+totp"));
+}
+
+#[tokio::test]
+async fn recovery_codes_are_shown_once_hashed_and_work_once() {
+    let (auth, clock, _) = env(SignupMode::Open);
+    let (user, token) = auth.sign_up(su("anna")).await.unwrap();
+    let (_, codes) = totp_on(&auth, &clock, &token).await;
+    assert_eq!(codes.len(), RECOVERY_CODES);
+    assert!(
+        codes
+            .iter()
+            .all(|c| c.len() == 11 && c.as_bytes()[5] == b'-')
+    );
+    let stored = auth.store().recovery_codes(user.id).await.unwrap();
+    assert!(stored.iter().all(|c| c.code_hash.starts_with("$argon2id$")));
+    assert!(
+        stored
+            .iter()
+            .all(|c| !codes.iter().any(|p| c.code_hash.contains(p)))
+    );
+    let code = codes[3].to_uppercase();
+    assert!(
+        auth.sign_in("anna", "correct horse battery", Some(&code))
+            .await
+            .is_ok()
+    );
+    assert!(matches!(
+        auth.sign_in("anna", "correct horse battery", Some(&code))
+            .await,
+        Err(AuthError::InvalidTotp)
+    ));
+}
+
+#[tokio::test]
+async fn disabled_accounts_cannot_sign_in_and_lose_their_sessions() {
+    let (auth, _, _) = env(SignupMode::Open);
+    let (admin, _) = auth.sign_up(su("anna")).await.unwrap();
+    let (ben, ben_token) = auth.sign_up(su("ben")).await.unwrap();
+    auth.set_disabled(ben.id, Some(admin.id), true)
+        .await
+        .unwrap();
+    assert!(auth.session(&ben_token.0).await.unwrap().is_none());
+    assert!(matches!(
+        auth.sign_in("ben", "correct horse battery", None).await,
+        Err(AuthError::AccountDisabled)
+    ));
+    auth.set_disabled(ben.id, Some(admin.id), false)
+        .await
+        .unwrap();
+    assert!(
+        auth.sign_in("ben", "correct horse battery", None)
+            .await
+            .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn a_locked_authenticator_says_so() {
+    let (auth, clock, _) = env(SignupMode::Open);
+    let (user, token) = auth.sign_up(su("anna")).await.unwrap();
+    totp_on(&auth, &clock, &token).await;
+    let mut c = auth.store().credentials(user.id).await.unwrap().unwrap();
+    c.totp_locked = true;
+    c.totp_secret = None;
+    auth.store().put_credentials(&c).await.unwrap();
+    assert!(matches!(
+        auth.sign_in("anna", "correct horse battery", Some("123456"))
+            .await,
+        Err(AuthError::TotpLocked)
+    ));
+}
+
+#[tokio::test]
+async fn admin_signup_invites_work_once_and_can_be_revoked() {
+    let (auth, clock, _) = env(SignupMode::Invite);
+    let (admin, _) = auth.sign_up(su("anna")).await.unwrap();
+    let (inv, token) = auth
+        .create_signup_invite(admin.id, Some("ben@example.org".into()), None)
+        .await
+        .unwrap();
+    assert_eq!(auth.signup_invites().await.unwrap().len(), 1);
+    let mut ben = su("ben");
+    ben.invite = Some(token.clone());
+    let (u, _) = auth.sign_up(ben).await.unwrap();
+    assert_eq!(u.role, Role::Member);
+    let mut carl = su("carl");
+    carl.invite = Some(token);
+    assert!(matches!(
+        auth.sign_up(carl).await,
+        Err(AuthError::InvalidInvite)
+    ));
+    let (inv2, token2) = auth
+        .create_signup_invite(admin.id, None, None)
+        .await
+        .unwrap();
+    assert_ne!(inv.id, inv2.id);
+    auth.revoke_signup_invite(inv2.id).await.unwrap();
+    let mut dora = su("dora");
+    dora.invite = Some(token2.clone());
+    assert!(matches!(
+        auth.sign_up(dora).await,
+        Err(AuthError::InvalidInvite)
+    ));
+    let (_, token3) = auth
+        .create_signup_invite(admin.id, None, None)
+        .await
+        .unwrap();
+    clock.advance(Duration::days(15));
+    let mut eve = su("eve");
+    eve.invite = Some(token3);
+    assert!(matches!(
+        auth.sign_up(eve).await,
+        Err(AuthError::InvalidInvite)
+    ));
+}
+
+#[tokio::test]
+async fn the_oidc_reauth_hook_needs_a_recent_auth_time_of_the_same_identity() {
+    let (auth, clock, _) = env(SignupMode::Open);
+    let (user, token) = auth.sign_up(su("anna")).await.unwrap();
+    auth.store()
+        .link_identity(&OidcIdentity {
+            issuer: "https://idp".into(),
+            subject: "s1".into(),
+            user_id: user.id,
+        })
+        .await
+        .unwrap();
+    clock.advance(Duration::hours(2));
+    let old = clock.now() - Duration::minutes(10);
+    assert!(matches!(
+        auth.confirm_oidc_reauth(&token.0, "https://idp", "s1", "idp", old)
+            .await,
+        Err(AuthError::ReauthRequired)
+    ));
+    assert!(matches!(
+        auth.confirm_oidc_reauth(&token.0, "https://idp", "other", "idp", clock.now())
+            .await,
+        Err(AuthError::ReauthRequired)
+    ));
+    let fresh = auth
+        .confirm_oidc_reauth(&token.0, "https://idp", "s1", "idp", clock.now())
+        .await
+        .unwrap();
+    assert!(auth.require_fresh(&fresh.0).await.is_ok());
+}
+
+/// UX2-S4 / UX2-11: two sign-ups racing on one single-use admin invite: exactly one wins.
+#[tokio::test]
+async fn a_single_use_invite_admits_one_of_two_racing_sign_ups() {
+    let (auth, _, _) = env(SignupMode::Invite);
+    let (admin, _) = auth.sign_up(su("anna")).await.unwrap();
+    let (inv, token) = auth
+        .create_signup_invite(admin.id, None, None)
+        .await
+        .unwrap();
+    let mut ben = su("ben");
+    ben.invite = Some(token.clone());
+    let mut carl = su("carl");
+    carl.invite = Some(token);
+    let (b, c) = tokio::join!(auth.sign_up(ben), auth.sign_up(carl));
+    let won: Vec<_> = [&b, &c].into_iter().filter(|r| r.is_ok()).collect();
+    assert_eq!(won.len(), 1, "{b:?} / {c:?}");
+    assert!(
+        [&b, &c]
+            .into_iter()
+            .any(|r| matches!(r, Err(AuthError::InvalidInvite)))
+    );
+    let used = auth
+        .signup_invites()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|i| i.id == inv.id)
+        .unwrap();
+    let winner = won[0].as_ref().unwrap().0.id;
+    assert_eq!(used.used_by, Some(winner));
+}
+
+// A refused sign-up (the name is taken) does not use up the invite.
+#[tokio::test]
+async fn a_failed_sign_up_does_not_use_up_the_invite() {
+    let (auth, _, _) = env(SignupMode::Invite);
+    let (admin, _) = auth.sign_up(su("anna")).await.unwrap();
+    let (_, token) = auth
+        .create_signup_invite(admin.id, None, None)
+        .await
+        .unwrap();
+    let mut anna_again = su("anna");
+    anna_again.invite = Some(token.clone());
+    assert!(matches!(
+        auth.sign_up(anna_again).await,
+        Err(AuthError::UsernameTaken)
+    ));
+    let mut ben = su("ben");
+    ben.invite = Some(token);
+    auth.sign_up(ben).await.unwrap();
+}
+
+/// UX2-S6: guessing the current password through the password change is throttled like
+/// sign-in, and shares its budget.
+#[tokio::test]
+async fn changing_the_password_is_throttled_like_sign_in() {
+    let (auth, clock, _) = env(SignupMode::Open);
+    let (_, t1) = auth.sign_up(su("anna")).await.unwrap();
+    let actor = auth.session(&t1.0).await.unwrap().unwrap();
+    for _ in 0..MAX_FAILED_SIGN_INS {
+        assert!(matches!(
+            auth.change_password(actor, "wrong password!", "another long secret")
+                .await,
+            Err(AuthError::InvalidCredentials)
+        ));
+    }
+    assert!(matches!(
+        auth.change_password(actor, "correct horse battery", "another long secret")
+            .await,
+        Err(AuthError::TooManyAttempts { .. })
+    ));
+    assert!(matches!(
+        auth.sign_in("anna", "correct horse battery", None).await,
+        Err(AuthError::TooManyAttempts { .. })
+    ));
+    clock.advance(Duration::minutes(16));
+    auth.change_password(actor, "correct horse battery", "another long secret")
+        .await
+        .unwrap();
+}
+
+/// UX2-S9: a stored credential never prints its decrypted fields.
+#[test]
+fn stored_credentials_redact_their_fields_in_debug() {
+    let c = crate::admin::StoredCredential {
+        id: uuid::Uuid::nil(),
+        connector: "tvdb".into(),
+        user: None,
+        fields: Ok([("pin".to_string(), "5678-secret".to_string())].into()),
+        created_by: None,
+        created_at: chrono::Utc::now(),
+        last_tested_at: None,
+        last_result: None,
+    };
+    let shown = format!("{c:?}");
+    assert!(!shown.contains("5678-secret"), "{shown}");
+    assert!(shown.contains("pin"), "field names stay visible: {shown}");
+}

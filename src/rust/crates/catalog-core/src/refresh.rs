@@ -27,7 +27,7 @@ pub async fn refresh_item(
     id: ItemId,
 ) -> Result<(), AppError> {
     let item = app.catalog_item(id).await?;
-    let ctx = Ctx { http, lane };
+    let ctx = Ctx::new(http, lane);
     let mut snapshots = Vec::new();
     let connectors = registry.for_kind(item.kind.as_str(), Capability::Details);
     for c in &connectors {

@@ -602,3 +602,88 @@ fn adaptive_sheet_is_a_bottom_sheet_on_phones_and_a_side_panel_on_desktop() {
         assert!(html.contains(class), "{class}: {html}");
     }
 }
+
+#[test]
+fn secret_field_never_renders_a_stored_value() {
+    // addendum-1 2.3: a stored secret is a "set on" line with Replace, never a masked value
+    let html = render(|| {
+        let v = RwSignal::new(String::new());
+        let editing = RwSignal::new(false);
+        view! {
+            <SecretField id="tmdb-api_key" label="API key" value=v editing=editing
+                stored="Set Oct 12, 2026 by robin" replace_label="Replace" cancel_label="Cancel"/>
+        }
+    });
+    assert!(!html.contains("<input"), "{html}");
+    assert!(!html.contains('*'), "no masking characters: {html}");
+    assert!(html.contains("Set Oct 12, 2026 by robin"), "{html}");
+    assert!(html.contains("id=\"tmdb-api_key-stored\""), "{html}");
+    assert!(html.contains(">Replace<"), "{html}");
+    assert!(
+        html.contains("aria-describedby=\"tmdb-api_key-stored\""),
+        "Replace names what it replaces: {html}"
+    );
+    // replacing: an empty write-only field with Cancel
+    let html = render(|| {
+        let v = RwSignal::new(String::new());
+        let editing = RwSignal::new(true);
+        view! {
+            <SecretField id="tmdb-api_key" label="API key" value=v editing=editing
+                stored="Set Oct 12, 2026 by robin" replace_label="Replace" cancel_label="Cancel"/>
+        }
+    });
+    assert!(html.contains("type=\"password\""), "{html}");
+    assert!(html.contains("autocomplete=\"off\""), "{html}");
+    assert!(html.contains("for=\"tmdb-api_key\""), "labelled: {html}");
+    assert!(html.contains(">Cancel<"), "{html}");
+    // nothing stored yet: the field, no Cancel
+    let html = render(|| {
+        let v = RwSignal::new(String::new());
+        let editing = RwSignal::new(false);
+        view! {
+            <SecretField id="pin" label="PIN" value=v editing=editing
+                replace_label="Replace" cancel_label="Cancel" description="Stored encrypted."/>
+        }
+    });
+    assert!(html.contains("type=\"password\""), "{html}");
+    assert!(!html.contains(">Cancel<"), "{html}");
+    assert!(html.contains("id=\"pin-description\""), "{html}");
+}
+
+/// UX2-W7: with several secrets on one card each Replace has its own name.
+#[test]
+fn secret_field_replace_can_name_its_field() {
+    let html = render(|| {
+        let v = RwSignal::new(String::new());
+        let editing = RwSignal::new(false);
+        view! {
+            <SecretField id="igdb-client_id" label="Client ID" value=v editing=editing
+                stored="Set Oct 12, 2026" replace_label="Replace" replace_name="Replace Client ID"
+                cancel_label="Cancel"/>
+        }
+    });
+    assert!(html.contains("aria-label=\"Replace Client ID\""), "{html}");
+    assert!(html.contains(">Replace<"), "{html}");
+}
+
+/// UX2-W19: column headers carry `scope="col"`; UX2-W13: palette rows reach 44 px on phones.
+#[test]
+fn table_heads_are_column_headers_and_command_rows_are_touch_sized() {
+    let html = render(|| {
+        view! { <Table><TableHeader><TableRow><TableHead>"Name"</TableHead></TableRow></TableHeader></Table> }
+    });
+    assert!(html.contains("<th scope=\"col\""), "{html}");
+    let html = render(|| {
+        let q = RwSignal::new(String::new());
+        let items = Signal::derive(|| {
+            vec![CommandItem {
+                id: "m1".into(),
+                label: "Heat".into(),
+                group: "Movies".into(),
+                keywords: String::new(),
+            }]
+        });
+        view! { <Command id="cmd" label="Search" placeholder="Type" empty_label="Nothing" items=items query=q on_select=Callback::new(|_| ())/> }
+    });
+    assert!(html.contains("max-[47.5rem]:min-h-11"), "{html}");
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE notify_channels SET secret = $2, config = $3 WHERE id = $1 AND secret IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "13c0826fafb9f64ac9da5c4d95d730fc92998a1812183875f8a82405555698d5"
+}

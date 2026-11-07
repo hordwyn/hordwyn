@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_disabled (user_id, disabled_by, disabled_at) VALUES ($1, $2, $3)\n                 ON CONFLICT (user_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "efdeac474f03e09c72b250ae66da0305939d8265c92b616636c82c45746e815f"
+}

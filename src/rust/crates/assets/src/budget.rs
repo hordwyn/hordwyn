@@ -18,7 +18,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::backend::{BackendError, RawStore};
-use crate::config::{Backend, FetchPriority, StorageConfig};
+use crate::config::{Backend, ByteSize, FetchPriority, StorageConfig};
 use crate::index::{ObjectClass, ObjectIndex, OpCounts, StoredObject, Tier, Usage};
 
 /// Job kind that runs [`StorageBudget::evict`].
@@ -125,7 +125,8 @@ pub struct StorageReport {
 }
 
 pub struct StorageBudget {
-    cfg: StorageConfig,
+    /// Behind a lock: admins change the limits at run time (OD-10).
+    cfg: std::sync::RwLock<StorageConfig>,
     raw: RawStore,
     index: Arc<dyn ObjectIndex>,
     clock: Arc<dyn Clock>,
@@ -163,7 +164,7 @@ impl StorageBudget {
             Backend::S3 | Backend::Memory => Arc::new(NoDisk),
         };
         Ok(Self {
-            cfg,
+            cfg: std::sync::RwLock::new(cfg),
             raw,
             index,
             clock,
@@ -198,9 +199,38 @@ impl StorageBudget {
         self
     }
 
+    /// The current configuration (a copy: limits may change at run time).
     #[must_use]
-    pub fn config(&self) -> &StorageConfig {
-        &self.cfg
+    pub fn config(&self) -> StorageConfig {
+        self.cfg
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// A copy, so no lock guard is ever held across an `.await`.
+    fn cfg(&self) -> StorageConfig {
+        self.config()
+    }
+
+    /// Change the cap and watermarks (OD-10). Validated like the configuration file.
+    ///
+    /// # Errors
+    /// A description of the invalid value; nothing changes then.
+    pub fn set_limits(&self, max_total: ByteSize, high: f64, low: f64) -> Result<(), String> {
+        let mut next = self.config();
+        next.max_total_bytes = max_total;
+        next.high_watermark = high;
+        next.low_watermark = low;
+        if next.http_cache_max_bytes > max_total {
+            next.http_cache_max_bytes = max_total;
+        }
+        next.validate()?;
+        *self
+            .cfg
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = next;
+        Ok(())
     }
 
     /// Did the last write that needed room hit the hard cap (and none succeeded since)?
@@ -220,11 +250,11 @@ impl StorageBudget {
     /// Cap for total bytes right now: the configured cap, lowered so the volume keeps
     /// `min_free_disk` free (fs). Returns the cap and whether the disk rule lowered it.
     fn effective_cap(&self, used: u64) -> (u64, bool) {
-        let cap = self.cfg.max_total_bytes.0;
+        let cap = self.cfg().max_total_bytes.0;
         let Some((avail, total)) = self.disk.space() else {
             return (cap, false);
         };
-        let reserve = self.cfg.min_free_disk.required(total);
+        let reserve = self.cfg().min_free_disk.required(total);
         let disk_cap = (used + avail).saturating_sub(reserve);
         if disk_cap < cap {
             (disk_cap, true)
@@ -246,20 +276,20 @@ impl StorageBudget {
             return Ok(WriteOutcome::AlreadyStored);
         }
         if self.is_s3()
-            && self.index.ops(now.date_naive()).await?.puts >= self.cfg.s3.max_put_per_day
+            && self.index.ops(now.date_naive()).await?.puts >= self.cfg().s3.max_put_per_day
         {
             return Ok(Self::refuse(Refusal::S3PutLimit));
         }
         if obj.class == ObjectClass::Upload {
             let owner = obj.owner.unwrap_or_default();
             let used = self.index.upload_bytes(owner).await?;
-            let quota = self.cfg.per_user_upload_quota.0;
+            let quota = self.cfg().per_user_upload_quota.0;
             if used + n > quota {
                 return Ok(WriteOutcome::Refused(Refusal::UploadQuota { used, quota }));
             }
         }
         if obj.class == ObjectClass::HttpCache {
-            let max = self.cfg.http_cache_max_bytes.0;
+            let max = self.cfg().http_cache_max_bytes.0;
             let usage = self.index.usage().await?;
             let over = excess(usage.http_cache + n, max);
             if over > 0 {
@@ -313,7 +343,7 @@ impl StorageBudget {
                 .await?;
         }
         self.capped.store(false, Ordering::Relaxed);
-        if usage.total + n > self.cfg.high_bytes() {
+        if usage.total + n > self.cfg().high_bytes() {
             self.above_high_watermark(usage.total + n).await;
         }
         Ok(WriteOutcome::Stored)
@@ -346,7 +376,7 @@ impl StorageBudget {
                     topic: "admin.storage.high_watermark".into(),
                     entity: None,
                     audience: vec![],
-                    payload: serde_json::json!({ "used": used, "high": self.cfg.high_bytes() }),
+                    payload: serde_json::json!({ "used": used, "high": self.cfg().high_bytes() }),
                 })
                 .await;
         }
@@ -377,8 +407,8 @@ impl StorageBudget {
         };
         if self.is_s3() {
             let ops = self.index.ops(now.date_naive()).await?;
-            if ops.gets >= self.cfg.s3.max_get_per_day
-                || ops.egress_bytes + obj.bytes > self.cfg.s3.max_egress_bytes_per_day.0
+            if ops.gets >= self.cfg().s3.max_get_per_day
+                || ops.egress_bytes + obj.bytes > self.cfg().s3.max_egress_bytes_per_day.0
             {
                 return Ok(ReadOutcome::OverLimit);
             }
@@ -487,11 +517,11 @@ impl StorageBudget {
     /// and enough to restore `min_free_disk` on the volume.
     fn eviction_need(&self, usage: &Usage) -> u64 {
         let mut need = 0;
-        if usage.total > self.cfg.high_bytes() {
-            need = excess(usage.total, self.cfg.low_bytes());
+        if usage.total > self.cfg().high_bytes() {
+            need = excess(usage.total, self.cfg().low_bytes());
         }
         if let Some((avail, total)) = self.disk.space() {
-            let reserve = self.cfg.min_free_disk.required(total);
+            let reserve = self.cfg().min_free_disk.required(total);
             need = need.max(excess(reserve, avail));
         }
         need
@@ -508,7 +538,7 @@ impl StorageBudget {
         let report = self
             .evict_bytes(None, self.eviction_need(&usage), false)
             .await?;
-        if report.after <= self.cfg.high_bytes() {
+        if report.after <= self.cfg().high_bytes() {
             self.above_high.store(false, Ordering::Relaxed);
         }
         if report.objects > 0 {
@@ -529,15 +559,15 @@ impl StorageBudget {
             .evict_bytes(None, self.eviction_need(&usage), true)
             .await?;
         Ok(StorageReport {
-            backend: self.cfg.backend,
+            backend: self.cfg().backend,
             usage,
-            max_total_bytes: self.cfg.max_total_bytes.0,
-            high_watermark_bytes: self.cfg.high_bytes(),
-            low_watermark_bytes: self.cfg.low_bytes(),
+            max_total_bytes: self.cfg().max_total_bytes.0,
+            high_watermark_bytes: self.cfg().high_bytes(),
+            low_watermark_bytes: self.cfg().low_bytes(),
             effective_cap: cap,
             disk_available: space.map(|s| s.0),
             disk_total: space.map(|s| s.1),
-            http_cache_max_bytes: self.cfg.http_cache_max_bytes.0,
+            http_cache_max_bytes: self.cfg().http_cache_max_bytes.0,
             s3_ops_today: self.index.ops(self.now().date_naive()).await?,
             at_hard_cap: usage.total >= cap,
             eviction,

@@ -62,21 +62,31 @@ impl Breaker {
         *self.state.lock().expect("breaker lock") = State::Closed { failures: 0 };
     }
 
+    /// Count a failure; returns the cooldown when this opened the circuit.
+    ///
     /// # Panics
     /// If the internal mutex is poisoned.
-    pub fn failure(&self) {
+    pub fn failure(&self) -> Option<Duration> {
         let mut s = self.state.lock().expect("breaker lock");
-        *s = match *s {
-            State::Closed { failures } if failures + 1 < self.threshold => State::Closed {
-                failures: failures + 1,
-            },
+        let (next, opened) = match *s {
+            State::Closed { failures } if failures + 1 < self.threshold => (
+                State::Closed {
+                    failures: failures + 1,
+                },
+                None,
+            ),
             _ => {
                 tracing::warn!("circuit opened");
-                State::Open {
-                    until: Instant::now() + self.cooldown,
-                }
+                (
+                    State::Open {
+                        until: Instant::now() + self.cooldown,
+                    },
+                    Some(self.cooldown),
+                )
             }
         };
+        *s = next;
+        opened
     }
 
     /// # Panics

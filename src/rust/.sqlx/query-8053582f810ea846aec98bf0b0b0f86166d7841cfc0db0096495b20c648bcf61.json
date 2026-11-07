@@ -1,0 +1,110 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, connector_id, user_id, secret, created_by, created_at, last_tested_at,\n                    last_result\n             FROM connector_credentials WHERE scope = 'instance' ORDER BY connector_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "connector_credentials",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "connector_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "connector_credentials",
+            "name": "connector_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "connector_credentials",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "secret",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "connector_credentials",
+            "name": "secret"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "created_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "connector_credentials",
+            "name": "created_by"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "connector_credentials",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "last_tested_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "connector_credentials",
+            "name": "last_tested_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "last_result",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "connector_credentials",
+            "name": "last_result"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "8053582f810ea846aec98bf0b0b0f86166d7841cfc0db0096495b20c648bcf61"
+}

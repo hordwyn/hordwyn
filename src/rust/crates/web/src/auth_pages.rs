@@ -448,31 +448,56 @@ pub fn SignUp() -> impl IntoView {
     // `/invite/:token`: promotion of a companion (D-9); the account is linked on creation
     let params = use_params_map();
     let invite = params.with_untracked(|p| p.get("token"));
+    view! {
+        <AuthFrame>
+            <PageTitle text=i18n.t("auth-sign-up-title")/>
+            <SignUpFields invite=invite/>
+        </AuthFrame>
+    }
+}
+
+/// Create the account: the first one through the setup wizard (`setup`, then run it), else
+/// a sign-up (with the invite, if any) that opens the library. Server refusals go back to
+/// the fields.
+fn sign_up_action(
+    f: SignUpForm,
+    avail: Availability,
+    invite: Option<String>,
+    setup: Option<Callback<()>>,
+    i18n: Arc<I18n>,
+) -> Action<SignUpValues, ()> {
+    Action::new(move |v: &SignUpValues| {
+        let (v, inv, i18n) = (v.clone(), invite.clone(), i18n.clone());
+        let email = f.email.get_untracked();
+        async move {
+            let display = v.display_name.clone();
+            let (user, pass) = (v.username.clone(), v.password.clone());
+            let result = match setup {
+                Some(_) => crate::admin_api::setup_account(user, display, pass, Some(email)).await,
+                None => api::sign_up(user, display, pass, Some(email), inv).await,
+            };
+            match (result, setup) {
+                (Ok(_), Some(done)) => done.run(()),
+                (Ok(_), None) => go("/library"),
+                (Err(e), _) => f.server_error(&i18n, &api::error_code(&e), &v, avail),
+            }
+        }
+    })
+}
+
+/// The sign-up form. With `setup` it creates the first account through the setup wizard
+/// (design.md 5.1: the same fields and inline validation as 5.2) and runs `setup` after;
+/// otherwise it signs up (with the invite, if any) and opens the library.
+#[component]
+pub(crate) fn SignUpFields(
+    #[prop(optional_no_strip)] invite: Option<String>,
+    #[prop(optional)] setup: Option<Callback<()>>,
+) -> impl IntoView {
+    let i18n = use_i18n();
     let invited = invite.is_some();
     let f = SignUpForm::new();
     let avail = Availability::new(invite.clone(), f.form_error, i18n.clone());
-    let submit = {
-        let i18n = i18n.clone();
-        Action::new(move |v: &SignUpValues| {
-            let (v, inv, i18n) = (v.clone(), invite.clone(), i18n.clone());
-            let email = f.email.get_untracked();
-            async move {
-                let display = v.display_name.clone();
-                match api::sign_up(
-                    v.username.clone(),
-                    display,
-                    v.password.clone(),
-                    Some(email),
-                    inv,
-                )
-                .await
-                {
-                    Ok(_) => go("/library"),
-                    Err(e) => f.server_error(&i18n, &api::error_code(&e), &v, avail),
-                }
-            }
-        })
-    };
+    let submit = sign_up_action(f, avail, invite, setup, i18n.clone());
     let on_submit = {
         let i18n = i18n.clone();
         move |ev: SubmitEvent| {
@@ -508,9 +533,13 @@ pub fn SignUp() -> impl IntoView {
     let pw_rules = Signal::derive(move || password_rules(&pr, &f.password.get()));
     let (link, have) = (i18n.t("nav-sign-in"), i18n.t("auth-have-account"));
     let invited_text = i18n.t("auth-invited");
+    let wizard = setup.is_some();
+    let submit_label = i18n.t(if wizard {
+        "setup-account-submit"
+    } else {
+        "auth-sign-up-submit"
+    });
     view! {
-        <AuthFrame>
-            <PageTitle text=i18n.t("auth-sign-up-title")/>
             <form class="grid gap-4 rounded-xl border border-border bg-card p-6 shadow-sm" novalidate on:submit=on_submit>
                 {invited.then(|| view! { <p class="text-sm text-muted-foreground">{invited_text}</p> })}
                 <Summary errors=f.summary/>
@@ -532,12 +561,13 @@ pub fn SignUp() -> impl IntoView {
                     <PasswordInput value=f.password autocomplete="new-password"
                         invalid=Signal::derive(move || password_err.with(Option::is_some))/>
                 </FormField>
-                <SubmitButton pending=submit.pending() label=i18n.t("auth-sign-up-submit")/>
-                <p class="text-sm text-muted-foreground">
-                    {have} " " <A href="/sign-in" attr:class="underline">{link}</A>
-                </p>
+                <SubmitButton pending=submit.pending() label=submit_label/>
+                {(!wizard).then(|| view! {
+                    <p class="text-sm text-muted-foreground">
+                        {have} " " <A href="/sign-in" attr:class="underline">{link}</A>
+                    </p>
+                })}
             </form>
-        </AuthFrame>
     }
 }
 
