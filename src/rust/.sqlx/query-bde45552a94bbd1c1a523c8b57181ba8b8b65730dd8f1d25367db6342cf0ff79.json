@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, user_id, item_id, occurred_at, progress, client_op_id\n                 FROM progress_events WHERE user_id = $1 AND client_op_id = $2",
+  "query": "SELECT id, user_id, item_id, occurred_at, progress, client_op_id, recorded_at,\n                        status_change\n                 FROM progress_events WHERE user_id = $1 AND item_id = ANY($2)\n                 ORDER BY occurred_at, id",
   "describe": {
     "columns": [
       {
@@ -68,12 +68,34 @@
             "name": "client_op_id"
           }
         }
+      },
+      {
+        "ordinal": 6,
+        "name": "recorded_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "recorded_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "status_change",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "status_change"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid"
+        "UuidArray"
       ]
     },
     "nullable": [
@@ -82,8 +104,10 @@
       false,
       false,
       false,
+      true,
+      false,
       true
     ]
   },
-  "hash": "9ed3b52580dcab52daa71a080243535a54dd0dc8c2c42b1d05fa67fa64c5c2f0"
+  "hash": "bde45552a94bbd1c1a523c8b57181ba8b8b65730dd8f1d25367db6342cf0ff79"
 }

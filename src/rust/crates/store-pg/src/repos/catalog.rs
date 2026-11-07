@@ -36,23 +36,27 @@ impl PgStore {
         .into_iter()
         .map(|r| ExternalId::new(r.namespace, r.value))
         .collect();
-        Ok(CatalogItem {
-            id: ItemId(row.id),
-            kind: KindId::new(&row.kind).map_err(|_| corrupt("kind", &row.kind))?,
-            title: row.title,
-            original_title: row.original_title,
-            year: row.year,
-            description: row.description,
-            cover_asset: row.cover_asset,
-            cover_url: row.cover_url,
-            external_ids,
-            attributes: row.attributes,
-            provenance: crate::conv::json("provenance", row.provenance)?,
-            state: entity_state(&row.state)?,
-            fetched_at: row.fetched_at,
-            fresh_until: row.fresh_until,
-        })
+        item_from(row, external_ids)
     }
+}
+
+fn item_from(row: ItemRow, external_ids: Vec<ExternalId>) -> Res<CatalogItem> {
+    Ok(CatalogItem {
+        id: ItemId(row.id),
+        kind: KindId::new(&row.kind).map_err(|_| corrupt("kind", &row.kind))?,
+        title: row.title,
+        original_title: row.original_title,
+        year: row.year,
+        description: row.description,
+        cover_asset: row.cover_asset,
+        cover_url: row.cover_url,
+        external_ids,
+        attributes: row.attributes,
+        provenance: crate::conv::json("provenance", row.provenance)?,
+        state: entity_state(&row.state)?,
+        fetched_at: row.fetched_at,
+        fresh_until: row.fresh_until,
+    })
 }
 
 #[async_trait]
@@ -140,5 +144,41 @@ impl CatalogRepo for PgStore {
             Some(r) => Ok(Some(self.load_item(r).await?)),
             None => Ok(None),
         }
+    }
+
+    async fn get_many(&self, ids: &[ItemId]) -> Res<Vec<CatalogItem>> {
+        let ids: Vec<uuid::Uuid> = ids.iter().map(|i| i.0).collect();
+        let rows = sqlx::query_as!(
+            ItemRow,
+            "SELECT id, kind, title, original_title, year, description, cover_asset, attributes,
+                    state, fetched_at, fresh_until, cover_url, provenance
+             FROM catalog_items WHERE id = ANY($1)",
+            &ids
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?;
+        let mut external: std::collections::HashMap<uuid::Uuid, Vec<ExternalId>> =
+            std::collections::HashMap::new();
+        for r in sqlx::query!(
+            "SELECT item_id, namespace, value FROM external_ids WHERE item_id = ANY($1)
+             ORDER BY item_id, namespace, value",
+            &ids
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?
+        {
+            external
+                .entry(r.item_id)
+                .or_default()
+                .push(ExternalId::new(r.namespace, r.value));
+        }
+        rows.into_iter()
+            .map(|row| {
+                let ext = external.remove(&row.id).unwrap_or_default();
+                item_from(row, ext)
+            })
+            .collect()
     }
 }

@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH done AS (\n                 SELECT lower(btrim(c.attributes ->> 'series')) AS series,\n                        max((c.attributes ->> 'series_position')::float8) AS best\n                 FROM library_entries e\n                 JOIN catalog_items c ON c.id = e.item_id\n                 WHERE e.user_id = $1 AND e.kind = ANY($2) AND e.status = 'completed'\n                   AND jsonb_typeof(c.attributes -> 'series') = 'string'\n                   AND jsonb_typeof(c.attributes -> 'series_position') = 'number'\n                   AND btrim(c.attributes ->> 'series') <> ''\n                 GROUP BY 1\n               )\n               SELECT e.item_id AS \"item_id!\"\n               FROM library_entries e\n               JOIN catalog_items c ON c.id = e.item_id\n               JOIN done d ON d.series = lower(btrim(c.attributes ->> 'series'))\n               WHERE e.user_id = $1 AND e.kind = ANY($2) AND e.status = 'planned'\n                 AND jsonb_typeof(c.attributes -> 'series_position') = 'number'\n                 AND (c.attributes ->> 'series_position')::float8 > d.best\n                 AND (c.attributes ->> 'series_position')::float8 <= d.best + 1\n               ORDER BY e.added_at DESC, e.id DESC\n               LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "item_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "library_entries",
+            "name": "item_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ba5798b263f63eda1dce0fbe8515ae9d0f2a000ed501dfbb4189e99891ea3cb8"
+}

@@ -4,20 +4,36 @@
 //! REST API, server functions, importers and the sync endpoint all call these methods.
 #![deny(unsafe_code)]
 
+mod activity;
+mod browse;
 mod catalog;
 mod companions;
 mod error;
 mod library;
 mod lists;
+mod next_step;
 pub mod ports;
 mod sessions;
+mod stats;
 mod users;
 
 use std::sync::Arc;
 
+pub use activity::{
+    ActivityPage, ActivityPerson, ActivityQuery, ActivityRow, ActivityType, MAX_ACTIVITY_PAGE,
+};
+pub use browse::{
+    CountCell, DEFAULT_PAGE, LibraryCounts, LibraryPage, LibraryQuery, LibraryRow, TagCount,
+    UpNext, UpNextReason, series_of,
+};
 pub use catalog::{CatalogRefresh, NewCatalogItem, REFRESH_JOB};
 pub use error::{AppError, AppResult};
+pub use library::UNDO_WINDOW_HOURS;
+pub use next_step::{NextStep, next_step};
 pub use sessions::NewSession;
+pub use stats::{
+    Amounts, Bucket, GroupTotals, MonthAmounts, SeriesPoint, StatsTotals, Totals, month_amounts,
+};
 
 use domain::Timestamp;
 use domain::hlc::Hlc;

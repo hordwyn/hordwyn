@@ -28,7 +28,7 @@ async function addCompanion(page: Page, name: string) {
 async function historyRow(page: Page) {
   await page.goto("/history");
   await hydrated(page);
-  const row = page.getByRole("list", { name: "Your sessions" }).getByRole("listitem").first();
+  const row = page.getByTestId("activity-row").filter({ hasText: "Fight Club" }).first();
   await expect(row).toContainText("Fight Club");
   return (await row.innerText()).trim();
 }
@@ -52,11 +52,13 @@ test("promote, accept, see history, demote, merge", async ({ page, browser }) =>
   await expect(page).toHaveURL(/\/items\//);
   await hydrated(page);
   await page.getByRole("button", { name: "Add to library" }).click();
-  await expect(page.getByText("In your library")).toBeVisible();
-  await page.getByLabel("Carl", { exact: true }).check();
-  await page.getByLabel("Karl", { exact: true }).check();
-  await page.getByRole("button", { name: "Mark as completed" }).click();
-  await expect(page.getByText("Logged.")).toBeVisible();
+  // the item page's "With..." sheet (design.md 5.4): people as toggle chips
+  await page.getByRole("button", { name: "Log with details: Fight Club" }).click();
+  const sheet = page.getByRole("dialog", { name: "Log with details" });
+  await sheet.getByRole("button", { name: "Carl", exact: true }).click();
+  await sheet.getByRole("button", { name: "Karl", exact: true }).click();
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Logged: Watched")).toBeVisible();
 
   const before = await historyRow(page);
   expect(before).toContain("Carl");
@@ -76,14 +78,14 @@ test("promote, accept, see history, demote, merge", async ({ page, browser }) =>
   await signUp(carl, inviteUrl, `carl${stamp}`, "Carl C.");
   await carl.goto("/history");
   await hydrated(carl);
-  const shared = carl.getByRole("list", { name: "Shared with you" }).getByRole("listitem").first();
+  const shared = carl.getByTestId("activity-row").filter({ hasText: "by Olive" }).first();
   await expect(shared).toContainText("Fight Club");
   await expect(shared).toContainText("by Olive");
   await shared.getByRole("button", { name: "Copy to my log" }).click();
   await expect(carl.getByText("Copied to your log.")).toBeVisible();
-  await expect(
-    carl.getByRole("list", { name: "Your sessions" }).getByRole("listitem").first(),
-  ).toContainText("Fight Club");
+  // the copy is a row of Carl's own, next to the shared one
+  await expect(carl.getByTestId("activity-row").filter({ hasText: "Fight Club" })).toHaveCount(2);
+  await expect(carl.getByTestId("activity-row").filter({ hasText: "Fight Club" }).filter({ hasNotText: "by Olive" })).toHaveCount(1);
   await carlContext.close();
 
   // the owner sees Carl linked, then demotes (unlinks) him

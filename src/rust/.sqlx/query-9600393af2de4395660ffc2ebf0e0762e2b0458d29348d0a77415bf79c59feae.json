@@ -1,0 +1,113 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, user_id, item_id, occurred_at, progress, client_op_id, recorded_at,\n                        status_change\n                 FROM progress_events WHERE user_id = $1 AND item_id = $2 ORDER BY occurred_at, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "item_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "item_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "occurred_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "occurred_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "progress",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "progress"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "client_op_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "client_op_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "recorded_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "recorded_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "status_change",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "status_change"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "9600393af2de4395660ffc2ebf0e0762e2b0458d29348d0a77415bf79c59feae"
+}

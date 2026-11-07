@@ -375,3 +375,88 @@ async fn dialog_returns_focus_to_the_fallback_when_the_opener_is_gone() {
     settle().await;
     assert_eq!(active_id(), "w-f-trigger");
 }
+
+fn type_into(input: &HtmlElement, text: &str) {
+    let i: web_sys::HtmlInputElement = input.clone().dyn_into().unwrap();
+    i.set_value(text);
+    // the listener sits on the input itself: no bubbling needed
+    let ev = web_sys::Event::new("input").unwrap();
+    input.dispatch_event(&ev).unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn combobox_offers_to_create_what_was_typed_and_clears_after_choosing() {
+    let selected = RwSignal::new(None::<String>);
+    let created = RwSignal::new(String::new());
+    let options = Signal::derive(|| {
+        [("a", "Anna"), ("b", "Ben")]
+            .map(|(value, label)| SelectOption {
+                value: value.into(),
+                label: label.into(),
+            })
+            .to_vec()
+    });
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <Combobox id="w-combo" label="People" options=options selected=selected empty_label="none"
+                clear_on_select=true
+                create_label=Callback::new(|t: String| format!("Add {t}"))
+                on_create=Callback::new(move |t: String| created.set(t))/>
+        }
+    });
+    let input = el("w-combo");
+    type_into(&input, "Zoe");
+    settle().await;
+    let create = el("w-combo-create");
+    assert_eq!(create.get_attribute("role").as_deref(), Some("option"));
+    assert_eq!(create.text_content().as_deref(), Some("Add Zoe"));
+    key(&input, "Enter");
+    settle().await;
+    assert_eq!(created.get_untracked(), "Zoe");
+    let i: web_sys::HtmlInputElement = input.clone().dyn_into().unwrap();
+    assert_eq!(i.value(), "", "cleared for the next name");
+    // an existing name is chosen, not created, and the text clears as well
+    type_into(&input, "ben");
+    settle().await;
+    assert!(
+        document().get_element_by_id("w-combo-create").is_none(),
+        "exact match: no create row"
+    );
+    key(&input, "Enter");
+    settle().await;
+    assert_eq!(selected.get_untracked().as_deref(), Some("b"));
+    assert_eq!(i.value(), "");
+}
+
+#[wasm_bindgen_test]
+async fn sheet_asks_before_closing_when_it_may_not_close() {
+    let open = RwSignal::new(true);
+    let asked = RwSignal::new(0u32);
+    let may_close = RwSignal::new(false);
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <Sheet open=open title="W guarded" close_label="Close" side=SheetSide::Adaptive
+                can_close=Callback::new(move |()| {
+                    asked.update(|n| *n += 1);
+                    may_close.get_untracked()
+                })>
+                <p>"x"</p>
+            </Sheet>
+        }
+    });
+    settle().await;
+    let panel: HtmlElement = document()
+        .query_selector("[aria-labelledby=w-guarded-title]")
+        .unwrap()
+        .expect("sheet rendered")
+        .dyn_into()
+        .unwrap();
+    key(&panel, "Escape");
+    settle().await;
+    assert!(open.get_untracked(), "kept open while it may not close");
+    assert_eq!(asked.get_untracked(), 1);
+    may_close.set(true);
+    key(&panel, "Escape");
+    settle().await;
+    assert!(!open.get_untracked());
+}

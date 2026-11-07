@@ -1,4 +1,6 @@
-//! M17 load test: search and the library with 50 000 items (`LOAD_ITEMS` to change).
+//! M17 load test: search and the library with 50 000 items (`LOAD_ITEMS` to change), and
+//! the phase 1 endpoints (`/home`, `/library/query`, `/stats/totals`, `/activity`) over the
+//! same library with a few thousand progress events, book series and board game plays.
 //! Ignored by default (seeding and indexing take a while):
 //! `cargo test -p server --test load -- --ignored --nocapture`.
 //! Prints p50 / p95 / max per request and fails if a p95 exceeds its budget.
@@ -15,6 +17,21 @@ use tokio_util::sync::CancellationToken;
 /// p95 budgets (debug build on a small CI VM; release builds are several times faster).
 const SEARCH_BUDGET: Duration = Duration::from_millis(300);
 const LIBRARY_PAGE_BUDGET: Duration = Duration::from_millis(300);
+/// The phase 1 endpoints get the same budget as the library page (UX1-1).
+const PHASE1_BUDGET: Duration = Duration::from_millis(300);
+/// Books in series (series of 10; the first 5 of each completed, the rest planned).
+const BOOKS: i64 = 500;
+/// Finished events on completed movies, three hours apart (`LOAD_EVENTS` to change, at most
+/// the number of completed movies).
+fn events() -> i64 {
+    std::env::var("LOAD_EVENTS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5_000)
+}
+/// Board games, each in progress, and plays of them (one progress event each).
+const GAMES: i64 = 50;
+const PLAYS: i64 = 500;
 
 fn stats(name: &str, mut v: Vec<Duration>) -> Duration {
     v.sort();
@@ -110,6 +127,7 @@ async fn search_and_library_with_many_items() {
     .execute(&srv.pool)
     .await
     .unwrap();
+    seed_phase1(&srv.pool, user).await;
     let ix = search::indexer::Indexer::new(srv.app.clone(), srv.pool.clone(), srv.search.clone());
     search::indexer::Indexer::enqueue_all(&srv.pool)
         .await
@@ -179,12 +197,76 @@ async fn search_and_library_with_many_items() {
         assert_eq!(body["items"].as_array().unwrap().len(), 100);
         deep_page.push(d);
     }
-    assert_eq!(total, u64::try_from(n).unwrap());
+    let entries = n + BOOKS + GAMES;
+    assert_eq!(total, u64::try_from(entries).unwrap());
+
+    let post = |path: &'static str, body: serde_json::Value| {
+        let http = http.clone();
+        let token = token.clone();
+        let base = base.clone();
+        async move {
+            let t = Instant::now();
+            let r = http
+                .post(format!("{base}{path}"))
+                .bearer_auth(&token)
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            assert!(r.status().is_success(), "{path}: {}", r.status());
+            let body: serde_json::Value = r.json().await.unwrap();
+            (t.elapsed(), body)
+        }
+    };
+    get("/api/v1/home".into()).await;
+    let (mut home, mut query_first, mut query_deep, mut totals, mut activity) =
+        (vec![], vec![], vec![], vec![], vec![]);
+    for _ in 0..10 {
+        let (d, body) = get("/api/v1/home".into()).await;
+        assert_eq!(body["continue_rows"].as_array().unwrap().len(), 6, "{body}");
+        let up_next = body["up_next"].as_array().unwrap();
+        assert_eq!(up_next.len(), 6);
+        assert_eq!(up_next[0]["reason"], "next_in_series", "{body}");
+        assert_eq!(body["activity"]["rows"].as_array().unwrap().len(), 5);
+        home.push(d);
+        let (d, body) = post("/api/v1/library/query", serde_json::json!({"limit": 100})).await;
+        assert_eq!(body["rows"].as_array().unwrap().len(), 100);
+        assert_eq!(body["total"], entries);
+        query_first.push(d);
+        let (d, body) = post(
+            "/api/v1/library/query",
+            serde_json::json!({"limit": 100, "offset": entries - 100}),
+        )
+        .await;
+        assert_eq!(body["rows"].as_array().unwrap().len(), 100);
+        query_deep.push(d);
+        let (d, body) = get("/api/v1/stats/totals".into()).await;
+        assert_eq!(body["overall"]["entries"], entries);
+        assert_eq!(body["overall"]["amounts"]["finished"], events(), "{body}");
+        assert_eq!(body["overall"]["amounts"]["plays"], PLAYS, "{body}");
+        totals.push(d);
+        let (d, body) = get("/api/v1/activity?limit=20".into()).await;
+        assert_eq!(body["rows"].as_array().unwrap().len(), 20);
+        activity.push(d);
+    }
 
     println!("--- {n} items ---");
     let search_p95 = stats("search (catalog + library)", search);
     let first_p95 = stats("library, first 100", first_page);
     let deep_p95 = stats("library, last 100", deep_page);
+    let phase1 = [
+        ("home", stats("home", home)),
+        (
+            "library query, first 100",
+            stats("library query, first 100", query_first),
+        ),
+        (
+            "library query, last 100",
+            stats("library query, last 100", query_deep),
+        ),
+        ("stats totals", stats("stats totals", totals)),
+        ("activity, 20 rows", stats("activity, 20 rows", activity)),
+    ];
     stop.cancel();
     let _ = web.await;
     assert!(
@@ -199,4 +281,80 @@ async fn search_and_library_with_many_items() {
         deep_p95 <= LIBRARY_PAGE_BUDGET,
         "deep library p95 {deep_p95:?} over {LIBRARY_PAGE_BUDGET:?}"
     );
+    for (name, p95) in phase1 {
+        assert!(
+            p95 <= PHASE1_BUDGET,
+            "{name} p95 {p95:?} over {PHASE1_BUDGET:?}"
+        );
+    }
+}
+
+/// Statuses (a tenth planned, a tenth in progress, the rest completed), finished events on
+/// completed movies, book series and board game plays for the phase 1 endpoints.
+async fn seed_phase1(pool: &sqlx::PgPool, user: uuid::Uuid) {
+    let statements = [
+        "UPDATE library_entries e SET status = CASE x.rn % 10 WHEN 0 THEN 'planned'
+                WHEN 1 THEN 'in_progress' ELSE 'completed' END
+         FROM (SELECT id, row_number() OVER (ORDER BY id) AS rn FROM library_entries) x
+         WHERE x.id = e.id AND e.user_id = $1"
+            .to_string(),
+        format!(
+            "INSERT INTO progress_events (id, user_id, item_id, occurred_at, progress, recorded_at)
+             SELECT gen_random_uuid(), user_id, item_id,
+                    now() - (row_number() OVER ()) * interval '3 hours',
+                    jsonb_build_object('type', 'finished'), now() - interval '2 days'
+             FROM library_entries WHERE status = 'completed' AND user_id = $1 LIMIT {}",
+            events()
+        ),
+        format!(
+            "INSERT INTO catalog_items (id, kind, title, year, state, updated_at, attributes)
+             SELECT gen_random_uuid(), 'book', 'Saga ' || (g / 10) || ' part ' || (g % 10 + 1),
+                    2000, 'partial', now(),
+                    jsonb_build_object('series', 'Saga ' || (g / 10),
+                                       'series_position', g % 10 + 1)
+             FROM generate_series(0, {BOOKS} - 1) AS g"
+        ),
+        "INSERT INTO library_entries (id, user_id, item_id, kind, status, status_hlc, rating,
+             rating_hlc, notes_hlc, added_at)
+         SELECT gen_random_uuid(), $1, id, 'book',
+                CASE WHEN (attributes ->> 'series_position')::int <= 5 THEN 'completed'
+                     ELSE 'planned' END, '0-0-0', NULL, '0-0-0', '0-0-0',
+                now() - interval '400 days' - (row_number() OVER ()) * interval '1 minute'
+         FROM catalog_items WHERE kind = 'book'"
+            .to_string(),
+        format!(
+            "INSERT INTO catalog_items (id, kind, title, year, state, updated_at)
+             SELECT gen_random_uuid(), 'board_game', 'Game ' || g, 2010, 'partial', now()
+             FROM generate_series(1, {GAMES}) AS g"
+        ),
+        "INSERT INTO library_entries (id, user_id, item_id, kind, status, status_hlc, rating,
+             rating_hlc, notes_hlc, added_at)
+         SELECT gen_random_uuid(), $1, id, 'board_game', 'in_progress', '0-0-0', NULL, '0-0-0',
+                '0-0-0', now() - interval '500 days'
+         FROM catalog_items WHERE kind = 'board_game'"
+            .to_string(),
+        format!(
+            "INSERT INTO sessions (id, owner_id, item_id, started_at, duration_minutes)
+             SELECT gen_random_uuid(), $1, gm.id,
+                    now() - g * interval '1 day' - interval '1 hour', 60
+             FROM generate_series(1, {PLAYS}) AS g
+             JOIN (SELECT id, row_number() OVER (ORDER BY id) - 1 AS rn
+                   FROM catalog_items WHERE kind = 'board_game') gm ON gm.rn = g % {GAMES}"
+        ),
+        "INSERT INTO session_participants (session_id, companion_id, position)
+         SELECT s.id, u.self_companion, 0 FROM sessions s JOIN users u ON u.id = s.owner_id
+         WHERE s.owner_id = $1"
+            .to_string(),
+        "INSERT INTO progress_events (id, user_id, item_id, occurred_at, progress, recorded_at)
+         SELECT gen_random_uuid(), owner_id, item_id, started_at,
+                jsonb_build_object('type', 'session', 'session_id', id), now() - interval '2 days'
+         FROM sessions WHERE owner_id = $1"
+            .to_string(),
+    ];
+    for sql in statements {
+        let bind = sql.contains("$1");
+        let q = sqlx::query(sqlx::AssertSqlSafe(sql));
+        let q = if bind { q.bind(user) } else { q };
+        q.execute(pool).await.unwrap();
+    }
 }

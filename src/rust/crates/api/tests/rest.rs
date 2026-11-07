@@ -1000,3 +1000,541 @@ async fn lock_out_carries_the_seconds_left() {
     let (_, _, err) = call(&app, "GET", "/api/v1/library", None, None).await;
     assert!(err.get("retry_after_secs").is_none(), "{err}");
 }
+
+/// UX phase 1: kinds and groups, counts, the library query with a text filter, tags,
+/// notes, undo, the activity feed, statistics and Home.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn phase1_library_home_history_and_stats() {
+    let (s, t) = state();
+    let mk = |kind: &str, title: &str, attributes: serde_json::Value| app::NewCatalogItem {
+        kind: domain::kind::KindId::new(kind).unwrap(),
+        title: title.into(),
+        original_title: None,
+        year: Some(2000),
+        description: None,
+        external_ids: vec![domain::catalog::ExternalId::new("test", title)],
+        attributes,
+        cover_url: None,
+    };
+    let show = t
+        .app
+        .upsert_catalog_item(mk(
+            "show",
+            "Dark",
+            serde_json::json!({"seasons": [{"number": 1, "episode_count": 10}]}),
+        ))
+        .await
+        .unwrap();
+    let movie = t
+        .app
+        .upsert_catalog_item(mk(
+            "movie",
+            "Heat",
+            serde_json::json!({"genres": ["Crime"], "runtime_minutes": 170}),
+        ))
+        .await
+        .unwrap();
+    let search = s.search.clone();
+    let app = api::router(s);
+    let token = signed_up(&app).await;
+    let tk = Some(token.as_str());
+
+    let (st, _, kinds) = call(&app, "GET", "/api/v1/kinds", tk, None).await;
+    assert_eq!(st, StatusCode::OK, "{kinds}");
+    assert_eq!(kinds["groups"][0]["id"], "watch");
+    assert_eq!(kinds["groups"][0]["label_key"], "kind-group-watch");
+    let movie_kind = kinds["kinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|k| k["id"] == "movie")
+        .unwrap();
+    assert_eq!(movie_kind["group"], "watch");
+    assert_eq!(movie_kind["label_key"], "kind-movie");
+    assert_eq!(movie_kind["facets"][0], "genres");
+
+    let show_id = show.id.0.to_string();
+    let movie_id = movie.id.0.to_string();
+    let (st, _, ev) = call(
+        &app,
+        "POST",
+        &format!("/api/v1/items/{show_id}/progress"),
+        tk,
+        Some(serde_json::json!({"progress": {"type": "episode", "season": 1, "episode": 1}})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{ev}");
+    let (_, _, ev2) = call(
+        &app,
+        "POST",
+        &format!("/api/v1/items/{show_id}/progress"),
+        tk,
+        Some(serde_json::json!({"progress": {"type": "episode", "season": 1, "episode": 2}})),
+    )
+    .await;
+    let (st, _, undo) = call(
+        &app,
+        "POST",
+        &format!("/api/v1/progress/{}/undo", ev2["id"].as_str().unwrap()),
+        tk,
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{undo}");
+    assert_eq!(undo["progress"]["type"], "undo");
+    let (_, _, add) = call(
+        &app,
+        "POST",
+        "/api/v1/library",
+        tk,
+        Some(serde_json::json!({"item_id": movie_id})),
+    )
+    .await;
+    assert_eq!(add["status"], "planned");
+
+    let (st, _, counts) = call(&app, "GET", "/api/v1/library/counts", tk, None).await;
+    assert_eq!(st, StatusCode::OK, "{counts}");
+    assert_eq!(counts["total"], 2);
+    assert_eq!(
+        counts["groups"][0],
+        serde_json::json!({"key": "watch", "count": 2})
+    );
+
+    let (st, _, rows) = call(
+        &app,
+        "POST",
+        "/api/v1/library/query",
+        tk,
+        Some(serde_json::json!({"group": "watch", "statuses": ["in_progress"]})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{rows}");
+    assert_eq!(rows["total"], 1);
+    let row = &rows["rows"][0];
+    assert_eq!(row["item"]["title"], "Dark");
+    assert_eq!(row["next_step"]["action"], "episode");
+    assert_eq!(row["next_step"]["episode"], 2);
+    assert_eq!(row["next_step"]["label_key"], "next-step-episode");
+    assert_eq!(row["summary"]["episodes_watched"], 1);
+    assert!((row["summary"]["fraction"].as_f64().unwrap() - 0.1).abs() < 1e-6);
+    let (st, _, bad) = call(
+        &app,
+        "POST",
+        "/api/v1/library/query",
+        tk,
+        Some(serde_json::json!({"sort": "nope"})),
+    )
+    .await;
+    assert_eq!(
+        (st, bad["code"].as_str()),
+        (StatusCode::BAD_REQUEST, Some("bad_request"))
+    );
+    let (_, _, facet) = call(
+        &app,
+        "POST",
+        "/api/v1/library/query",
+        tk,
+        Some(serde_json::json!({"facets": [{"attribute": "genres", "value": "Crime"}]})),
+    )
+    .await;
+    assert_eq!(
+        facet["rows"][0]["next_step"]["label_key"],
+        "next-step-watched"
+    );
+
+    // text filter: through the library search index (indexed by hand here)
+    let me = t.app.user_by_username("anna").await.unwrap().unwrap();
+    search
+        .upsert(
+            "library",
+            vec![app::ports::SearchDoc {
+                id: "x".into(),
+                owner: Some(me.id),
+                fields: serde_json::json!({"item_id": movie_id, "title": "Heat"}),
+            }],
+        )
+        .await
+        .unwrap();
+    let (_, _, text) = call(
+        &app,
+        "POST",
+        "/api/v1/library/query",
+        tk,
+        Some(serde_json::json!({"q": "hea"})),
+    )
+    .await;
+    assert_eq!(text["total"], 1, "{text}");
+    assert_eq!(text["rows"][0]["item"]["title"], "Heat");
+
+    // tags and the private note
+    let (st, _, tags) = call(
+        &app,
+        "POST",
+        &format!("/api/v1/library/{movie_id}/tags"),
+        tk,
+        Some(serde_json::json!({"tag": "Cosy"})),
+    )
+    .await;
+    assert_eq!(
+        (st, tags.clone()),
+        (StatusCode::OK, serde_json::json!(["Cosy"]))
+    );
+    let (_, _, all) = call(&app, "GET", "/api/v1/tags", tk, None).await;
+    assert_eq!(all, serde_json::json!([{"tag": "Cosy", "entries": 1}]));
+    let (st, _, n) = call(
+        &app,
+        "PUT",
+        "/api/v1/tags/cosy",
+        tk,
+        Some(serde_json::json!({"name": "warm"})),
+    )
+    .await;
+    assert_eq!((st, n), (StatusCode::OK, serde_json::json!(1)));
+    let (st, _, left) = call(
+        &app,
+        "DELETE",
+        &format!("/api/v1/library/{movie_id}/tags/WARM"),
+        tk,
+        None,
+    )
+    .await;
+    assert_eq!((st, left), (StatusCode::OK, serde_json::json!([])));
+    let (st, _, noted) = call(
+        &app,
+        "PUT",
+        &format!("/api/v1/library/{movie_id}/note"),
+        tk,
+        Some(serde_json::json!({"note": "with dad"})),
+    )
+    .await;
+    assert_eq!(
+        (st, noted["notes"].as_str()),
+        (StatusCode::OK, Some("with dad"))
+    );
+
+    let (st, _, feed) = call(&app, "GET", "/api/v1/activity?limit=5", tk, None).await;
+    assert_eq!(st, StatusCode::OK, "{feed}");
+    assert_eq!(feed["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(feed["rows"][0]["event_id"], ev["id"]);
+    assert_eq!(feed["rows"][0]["undoable"], true);
+    assert_eq!(feed["next"], serde_json::Value::Null);
+    let (st, _, _) = call(&app, "GET", "/api/v1/activity?group=play", tk, None).await;
+    assert_eq!(st, StatusCode::OK);
+
+    let (st, _, totals) = call(&app, "GET", "/api/v1/stats/totals", tk, None).await;
+    assert_eq!(st, StatusCode::OK, "{totals}");
+    assert_eq!(totals["overall"]["group"], "all");
+    assert_eq!(totals["groups"][0]["group"], "watch");
+    assert_eq!(totals["groups"][0]["amounts"]["episodes"], 1);
+    let (st, _, series) = call(
+        &app,
+        "GET",
+        "/api/v1/stats/series?group=watch&bucket=year",
+        tk,
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{series}");
+    assert_eq!(series["points"][0]["bucket"], "2026");
+    assert_eq!(series["bucket"], "year");
+
+    let (st, _, home) = call(&app, "GET", "/api/v1/home", tk, None).await;
+    assert_eq!(st, StatusCode::OK, "{home}");
+    assert_eq!(home["library_total"], 2);
+    assert_eq!(home["continue_rows"][0]["item"]["title"], "Dark");
+    assert_eq!(home["up_next"][0]["row"]["item"]["title"], "Heat");
+    assert_eq!(home["up_next"][0]["reason"], "planned");
+    assert_eq!(home["activity"]["rows"].as_array().unwrap().len(), 1);
+
+    let (st, _, item) = call(
+        &app,
+        "GET",
+        &format!("/api/v1/items/{show_id}/page"),
+        tk,
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{item}");
+    assert_eq!(
+        item["progress"].as_array().unwrap().len(),
+        1,
+        "undone event hidden"
+    );
+    assert_eq!(item["next_step"]["episode"], 2);
+    assert_eq!(item["summary"]["episodes_watched"], 1);
+}
+
+/// The item page's play sheet (design.md 5.4): a play with players, scores and a winner is
+/// one call; it answers the progress event (for Undo) and shows up in the sessions with the
+/// scores. A kind without the sessions model refuses it.
+#[tokio::test]
+async fn a_play_with_players_scores_and_a_winner() {
+    let (s, t) = state();
+    let mk = |kind: &str, title: &str| app::NewCatalogItem {
+        kind: domain::kind::KindId::new(kind).unwrap(),
+        title: title.into(),
+        original_title: None,
+        year: Some(2017),
+        description: None,
+        external_ids: vec![domain::catalog::ExternalId::new("test", title)],
+        attributes: serde_json::json!({}),
+        cover_url: None,
+    };
+    let game = t
+        .app
+        .upsert_catalog_item(mk("board_game", "Harbour"))
+        .await
+        .unwrap();
+    let movie = t
+        .app
+        .upsert_catalog_item(mk("movie", "Heat"))
+        .await
+        .unwrap();
+    let app = api::router(s);
+    let token = signed_up(&app).await;
+    let tk = Some(token.as_str());
+    let (_, _, me) = call(&app, "GET", "/api/v1/auth/me", tk, None).await;
+    let (_, _, ben) = call(
+        &app,
+        "POST",
+        "/api/v1/companions",
+        tk,
+        Some(serde_json::json!({"name": "Ben"})),
+    )
+    .await;
+    let play = serde_json::json!({
+        "started_at": "2025-12-01T19:00:00Z",
+        "duration_minutes": 45,
+        "players": [
+            {"companion_id": me["self_companion"], "score": 31, "winner": false},
+            {"companion_id": ben["id"], "score": 42, "winner": true},
+        ],
+        "client_op_id": "01900000-0000-7000-8000-0000000000a1",
+    });
+    let gid = game.id.0.to_string();
+    let uri = format!("/api/v1/items/{gid}/plays");
+    let (st, _, ev) = call(&app, "POST", &uri, tk, Some(play.clone())).await;
+    assert_eq!(st, StatusCode::OK, "{ev}");
+    assert_eq!(ev["progress"]["type"], "session");
+    assert!(
+        ev["occurred_at"]
+            .as_str()
+            .unwrap()
+            .starts_with("2025-12-01T19:00:00")
+    );
+    let (_, _, sessions) = call(&app, "GET", "/api/v1/sessions", tk, None).await;
+    let ps = &sessions[0]["participants"];
+    assert_eq!(sessions.as_array().unwrap().len(), 1);
+    let benp = ps
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Ben")
+        .unwrap();
+    assert_eq!(benp["score"], 42.0);
+    assert_eq!(benp["winner"], true);
+    let (_, _, lib) = call(&app, "GET", "/api/v1/library", tk, None).await;
+    assert_eq!(lib["items"][0]["entry"]["status"], "in_progress");
+    // the play's event can be undone like any other
+    let undo = format!("/api/v1/progress/{}/undo", ev["id"].as_str().unwrap());
+    let (st, _, _) = call(&app, "POST", &undo, tk, None).await;
+    assert_eq!(st, StatusCode::OK);
+    // a movie has no plays
+    let uri = format!("/api/v1/items/{}/plays", movie.id.0);
+    let (st, _, err) = call(&app, "POST", &uri, tk, Some(play)).await;
+    assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY, "{err}");
+}
+
+#[tokio::test]
+async fn a_replayed_play_or_watched_with_stores_one_session() {
+    // UX1-3: the client op id is the idempotency key of the whole command, session included
+    let (s, t) = state();
+    let mk = |kind: &str, title: &str| app::NewCatalogItem {
+        kind: domain::kind::KindId::new(kind).unwrap(),
+        title: title.into(),
+        original_title: None,
+        year: Some(2017),
+        description: None,
+        external_ids: vec![domain::catalog::ExternalId::new("test", title)],
+        attributes: serde_json::json!({}),
+        cover_url: None,
+    };
+    let game = t
+        .app
+        .upsert_catalog_item(mk("board_game", "Harbour"))
+        .await
+        .unwrap();
+    let movie = t
+        .app
+        .upsert_catalog_item(mk("movie", "Heat"))
+        .await
+        .unwrap();
+    let app = api::router(s);
+    let token = signed_up(&app).await;
+    let tk = Some(token.as_str());
+    let (_, _, ben) = call(
+        &app,
+        "POST",
+        "/api/v1/companions",
+        tk,
+        Some(serde_json::json!({"name": "Ben"})),
+    )
+    .await;
+    let play = serde_json::json!({
+        "started_at": "2025-12-01T19:00:00Z",
+        "players": [{"companion_id": ben["id"], "score": 42, "winner": true}],
+        "client_op_id": "01900000-0000-7000-8000-0000000000b1",
+    });
+    let uri = format!("/api/v1/items/{}/plays", game.id.0);
+    let (st, _, first) = call(&app, "POST", &uri, tk, Some(play.clone())).await;
+    assert_eq!(st, StatusCode::OK, "{first}");
+    let (st, _, again) = call(&app, "POST", &uri, tk, Some(play)).await;
+    assert_eq!(st, StatusCode::OK, "{again}");
+    assert_eq!(
+        first["id"], again["id"],
+        "the same event answers the replay"
+    );
+    assert_eq!(
+        first["progress"], again["progress"],
+        "naming the same session"
+    );
+    let (_, _, sessions) = call(&app, "GET", "/api/v1/sessions", tk, None).await;
+    assert_eq!(sessions.as_array().unwrap().len(), 1, "{sessions}");
+
+    let watched = serde_json::json!({
+        "progress": {"type": "finished"},
+        "occurred_at": "2025-12-02T19:00:00Z",
+        "with": [ben["id"]],
+        "client_op_id": "01900000-0000-7000-8000-0000000000b2",
+    });
+    let uri = format!("/api/v1/items/{}/progress", movie.id.0);
+    let (st, _, first) = call(&app, "POST", &uri, tk, Some(watched.clone())).await;
+    assert_eq!(st, StatusCode::OK, "{first}");
+    let (st, _, again) = call(&app, "POST", &uri, tk, Some(watched)).await;
+    assert_eq!(st, StatusCode::OK, "{again}");
+    assert_eq!(first["id"], again["id"]);
+    let (_, _, sessions) = call(&app, "GET", "/api/v1/sessions", tk, None).await;
+    assert_eq!(sessions.as_array().unwrap().len(), 2, "{sessions}");
+}
+
+#[tokio::test]
+async fn progress_and_plays_refuse_the_future_and_oversized_fields() {
+    // UX1-5: the test clock stands at 2026-01-01T00:00:00Z; five minutes of clock skew pass
+    let (s, t) = state();
+    let mk = |kind: &str, title: &str| app::NewCatalogItem {
+        kind: domain::kind::KindId::new(kind).unwrap(),
+        title: title.into(),
+        original_title: None,
+        year: Some(2017),
+        description: None,
+        external_ids: vec![domain::catalog::ExternalId::new("test", title)],
+        attributes: serde_json::json!({}),
+        cover_url: None,
+    };
+    let game = t
+        .app
+        .upsert_catalog_item(mk("board_game", "Harbour"))
+        .await
+        .unwrap();
+    let movie = t
+        .app
+        .upsert_catalog_item(mk("movie", "Heat"))
+        .await
+        .unwrap();
+    let app = api::router(s);
+    let token = signed_up(&app).await;
+    let tk = Some(token.as_str());
+    let progress = format!("/api/v1/items/{}/progress", movie.id.0);
+    let plays = format!("/api/v1/items/{}/plays", game.id.0);
+    let watched =
+        |at: &str| serde_json::json!({"progress": {"type": "finished"}, "occurred_at": at});
+    for (uri, body, field) in [
+        (&progress, watched("2026-01-01T00:06:00Z"), "occurred_at"),
+        (
+            &plays,
+            serde_json::json!({"started_at": "2026-01-02T00:00:00Z"}),
+            "started_at",
+        ),
+        (
+            &plays,
+            serde_json::json!({"duration_minutes": 10_081}),
+            "duration_minutes",
+        ),
+        (
+            &plays,
+            serde_json::json!({"location": "x".repeat(201)}),
+            "location",
+        ),
+        (
+            &plays,
+            serde_json::json!({"notes": "x".repeat(20_001)}),
+            "notes",
+        ),
+    ] {
+        let (st, _, err) = call(&app, "POST", uri, tk, Some(body)).await;
+        assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY, "{field}: {err}");
+        assert_eq!(err["code"], "invalid", "{err}");
+        assert!(err["message"].as_str().unwrap().contains(field), "{err}");
+    }
+    let (st, _, ok) = call(
+        &app,
+        "POST",
+        &progress,
+        tk,
+        Some(watched("2026-01-01T00:04:00Z")),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "within the clock skew: {ok}");
+    let fine = serde_json::json!({
+        "duration_minutes": 10_080, "location": "x".repeat(200), "notes": "x".repeat(20_000)
+    });
+    let (st, _, ok) = call(&app, "POST", &plays, tk, Some(fine)).await;
+    assert_eq!(st, StatusCode::OK, "at the limits: {ok}");
+}
+
+/// A search backend that is down.
+struct SearchDown;
+
+#[async_trait::async_trait]
+impl app::ports::SearchIndex for SearchDown {
+    async fn upsert(
+        &self,
+        _: &str,
+        _: Vec<app::ports::SearchDoc>,
+    ) -> Result<(), app::ports::PortError> {
+        Err(app::ports::PortError("down".into()))
+    }
+    async fn delete(&self, _: &str, _: Vec<String>) -> Result<(), app::ports::PortError> {
+        Err(app::ports::PortError("down".into()))
+    }
+    async fn search(
+        &self,
+        _: app::ports::SearchQuery,
+    ) -> Result<Vec<app::ports::SearchHit>, app::ports::PortError> {
+        Err(app::ports::PortError("down".into()))
+    }
+}
+
+#[tokio::test]
+async fn the_library_text_filter_says_when_search_is_down() {
+    // UX1-10: not "nothing matches", but 503 so the page offers Retry
+    let (mut s, _t) = state();
+    s.search = Arc::new(SearchDown);
+    let app = api::router(s);
+    let token = signed_up(&app).await;
+    let tk = Some(token.as_str());
+    let q = serde_json::json!({"q": "harbour"});
+    let (st, _, err) = call(&app, "POST", "/api/v1/library/query", tk, Some(q)).await;
+    assert_eq!(st, StatusCode::SERVICE_UNAVAILABLE, "{err}");
+    assert_eq!(err["code"], "search_unavailable");
+    let (st, _, _) = call(
+        &app,
+        "POST",
+        "/api/v1/library/query",
+        tk,
+        Some(serde_json::json!({})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "without text the search is not asked");
+}

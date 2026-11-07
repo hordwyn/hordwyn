@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM entry_tags WHERE entry_id = ANY($1) AND tag_key IN ($2, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5a1e55002470f0378e052f02d74a91ef20e6fdc00def49c479fbabd5ba35fa2f"
+}

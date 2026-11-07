@@ -7,8 +7,8 @@
 //! [`cva`], and interactive components follow the WAI-ARIA authoring practices (keyboard and
 //! `aria-*` attributes).
 #![deny(unsafe_code)]
-// Leptos `#[component]` props are owned by design, and `view!` bodies are long markup.
-#![allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
+// Leptos `#[component]` props are owned by design.
+#![allow(clippy::needless_pass_by_value)]
 
 mod alert;
 mod avatar;
@@ -67,5 +67,8 @@ pub use steps::{Steps, TaskItem, TaskList};
 pub use table::{Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow};
 pub use tabs::{Tabs, TabsContent, TabsList, TabsTrigger};
 pub use theme::ThemeToggle;
-pub use toast::{Toast, ToastVariant, Toaster, Toasts, provide_toasts, use_toasts};
+pub use toast::{
+    ACTION_TOAST_SECS, TOAST_SECS, Toast, ToastAction, ToastVariant, Toaster, Toasts,
+    provide_toasts, use_toasts,
+};
 pub use tooltip::Tooltip;

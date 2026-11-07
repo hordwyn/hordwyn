@@ -4,7 +4,10 @@
 #![deny(unsafe_code)]
 
 pub mod auth;
+pub mod browse;
 pub mod locale;
+
+pub use browse::*;
 
 use serde::{Deserialize, Serialize};
 
@@ -228,9 +231,18 @@ pub struct ItemPageDto {
     pub item: CatalogItemDto,
     /// The viewer's library entry, if the item is in their library.
     pub entry: Option<LibraryEntryDto>,
+    /// The effective history (undone events left out), oldest first.
     pub progress: Vec<ProgressEventDto>,
     /// Attribution of the connectors that supplied data for this item.
     pub sources: Vec<AttributionDto>,
+    /// The entry's tags (empty when not in the library).
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Progress summary and next step, when the item is in the library.
+    #[serde(default)]
+    pub summary: Option<ProgressSummaryDto>,
+    #[serde(default)]
+    pub next_step: Option<NextStepDto>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

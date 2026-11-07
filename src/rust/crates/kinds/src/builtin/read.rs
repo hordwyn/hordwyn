@@ -1,8 +1,11 @@
 use chrono::NaiveDate;
-use domain::kind::{ProgressModel, RelationType};
+use domain::kind::{KindGroup, ProgressModel, RelationType};
 
 use super::attributes;
 use crate::{KindModule, relations, strings};
+
+/// Every kind in this module is in this group.
+const GROUP: KindGroup = KindGroup::Read;
 
 attributes!(
     /// Attributes of a book.
@@ -25,6 +28,10 @@ impl KindModule for Book {
     type Attributes = BookAttributes;
     const ID: &'static str = "book";
     const PROGRESS_MODEL: ProgressModel = ProgressModel::Paged;
+
+    fn group() -> KindGroup {
+        GROUP
+    }
 
     fn facets() -> Vec<String> {
         strings(&["authors", "subjects", "language"])
@@ -59,6 +66,10 @@ impl KindModule for Manga {
     const ID: &'static str = "manga";
     const PROGRESS_MODEL: ProgressModel = ProgressModel::Paged;
 
+    fn group() -> KindGroup {
+        GROUP
+    }
+
     fn facets() -> Vec<String> {
         strings(&["genres", "authors", "publishing_status"])
     }
@@ -92,6 +103,10 @@ impl KindModule for Comic {
     type Attributes = ComicAttributes;
     const ID: &'static str = "comic";
     const PROGRESS_MODEL: ProgressModel = ProgressModel::Paged;
+
+    fn group() -> KindGroup {
+        GROUP
+    }
 
     fn facets() -> Vec<String> {
         strings(&["publisher", "series"])

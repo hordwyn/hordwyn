@@ -188,6 +188,21 @@ impl I18n {
         }
     }
 
+    /// Day and month of a server timestamp without the year (CLDR `MMMd`: en `MMM d`, de
+    /// `dd.MM.`), for dates in the current year.
+    #[must_use]
+    pub fn day_month(&self, stamp: &str) -> String {
+        let Some(s) = parse_stamp(stamp) else {
+            return stamp.to_string();
+        };
+        if self.locale == "de" {
+            format!("{:02}.{:02}.", s.day, s.month)
+        } else {
+            let month = self.t(&format!("month-short-{}", s.month));
+            format!("{month} {}", s.day)
+        }
+    }
+
     /// A time of day (CLDR short time: en `h:mm a`, de `HH:mm`).
     #[must_use]
     pub fn time(&self, hour: u32, minute: u32) -> String {
@@ -404,8 +419,8 @@ mod tests {
         );
         assert_eq!(en.t("companions-title"), "People");
         assert_eq!(de.t("companions-title"), "Personen");
-        assert_eq!(en.t("item-mark-done"), "Mark as completed");
-        assert_eq!(de.t("item-mark-done"), "Als abgeschlossen markieren");
+        assert_eq!(en.t("item-rating"), "Your rating");
+        assert_eq!(de.t("item-rating"), "Deine Bewertung");
         for l in LOCALES {
             let i = I18n::new(l, BTreeMap::new());
             for key in [

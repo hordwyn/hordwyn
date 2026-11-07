@@ -92,13 +92,7 @@ async fn apply(s: &ApiState, a: Actor, op_id: &str, c: SyncCommandDto) -> ApiRes
         } => {
             let progress: Progress = serde_json::from_value(progress)
                 .map_err(|e| ApiError::bad_request(format!("progress: {e}")))?;
-            let at = occurred_at
-                .map(|t| {
-                    chrono::DateTime::parse_from_rfc3339(&t)
-                        .map(|d| d.with_timezone(&chrono::Utc))
-                        .map_err(|_| ApiError::bad_request("occurred_at must be RFC 3339"))
-                })
-                .transpose()?;
+            let at = crate::ops::client_time(s, "occurred_at", occurred_at.as_deref())?;
             s.app
                 .log_progress(
                     a,

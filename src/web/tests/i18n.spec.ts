@@ -31,3 +31,51 @@ test("the account menu switches the language for this account", async ({ page })
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
   await expect(page.getByRole("heading", { level: 1, name: "Library" })).toBeVisible();
 });
+
+test("the phase 1 pages render in German", async ({ page }) => {
+  // UX1-11: the rendered catalogue, not only its parity
+  test.setTimeout(120_000);
+  const user = `jonas${Date.now()}`;
+  await page.goto("/sign-up");
+  await hydrated(page);
+  await page.getByLabel("Username").fill(user);
+  await page.getByLabel("Display name").fill("Jonas");
+  await page.getByLabel("Password").fill("correct horse battery");
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page).toHaveURL(/\/library$/);
+  const file = [
+    JSON.stringify({ format: "library-export", version: 1 }),
+    JSON.stringify({ source_id: "1", kind: "movie", title: "Harbour Lights", year: 2021, status: "planned" }),
+  ].join("\n");
+  const started = await page.request.post("/api/v1/imports?format=generic-jsonl", {
+    data: file,
+    headers: { "content-type": "application/octet-stream" },
+  });
+  const { id } = await started.json();
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/v1/imports/${id}`)).json()).state, { timeout: 30_000 })
+    .toBe("done");
+  const lib = await (await page.request.get("/api/v1/library")).json();
+  const item = lib.items[0].item.id as string;
+  await hydrated(page);
+  await page.getByRole("button", { name: /^Account menu for/ }).click();
+  await page.getByRole("menuitemradio", { name: "Deutsch" }).click();
+  await expect(page.locator("html")).toHaveAttribute("lang", "de");
+
+  for (const [path, h1] of [
+    ["/", "Willkommen zur\u00fcck, Jonas"],
+    ["/library", "Bibliothek"],
+    ["/history", "Verlauf"],
+    ["/stats", "Statistik"],
+  ]) {
+    await page.goto(path);
+    await hydrated(page);
+    await expect(page.locator("html")).toHaveAttribute("lang", "de");
+    await expect(page.getByRole("heading", { level: 1, name: h1 })).toBeVisible();
+  }
+  await page.goto(`/items/${item}`);
+  await hydrated(page);
+  await expect(page.locator("html")).toHaveAttribute("lang", "de");
+  await expect(page.getByTestId("action-bar").getByRole("button", { name: /^Gesehen/ })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Angaben zum Eintrag" })).toBeVisible();
+});

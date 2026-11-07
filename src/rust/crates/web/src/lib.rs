@@ -4,13 +4,10 @@
 #![deny(unsafe_code)]
 // Deeply nested view types exceed the default query depth in release wasm builds.
 #![recursion_limit = "256"]
-// Leptos `#[component]` props are owned by design, and `view!` bodies are long markup.
-// Components return views that are always used; `must_use` on them adds nothing.
-#![allow(
-    clippy::needless_pass_by_value,
-    clippy::too_many_lines,
-    clippy::must_use_candidate
-)]
+// Leptos `#[component]` props are owned by design. Components return views that are
+// always used; `must_use` on them adds nothing. Long functions are allowed one by one,
+// each with its reason (DEC-234).
+#![allow(clippy::needless_pass_by_value, clippy::must_use_candidate)]
 
 pub mod api;
 mod app;
@@ -18,11 +15,23 @@ mod auth;
 mod auth_pages;
 #[cfg(feature = "ssr")]
 pub mod backend;
+pub mod charts;
+mod episode_list;
+pub mod episode_plan;
 mod events;
 #[cfg(feature = "gallery")]
 mod gallery;
+mod history;
+pub mod history_state;
+mod home;
 pub mod i18n;
 mod integrations;
+mod item;
+mod library;
+pub mod library_state;
+pub mod log_form;
+pub mod log_sheet;
+pub mod next_step;
 mod notifications;
 mod pages;
 mod palette;

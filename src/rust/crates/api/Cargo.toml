@@ -33,6 +33,7 @@ utoipa-axum.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+async-trait.workspace = true
 http-body-util = "0.1.5"
 testkit.workspace = true
 notify.workspace = true

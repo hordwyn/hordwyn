@@ -36,6 +36,9 @@ pub struct ClientConfig {
     pub support_url: Option<String>,
     /// The brand's legal links (`imprint` -> URL ...), in the auth pages' footer (6.14).
     pub legal: Vec<(String, String)>,
+    /// Today (UTC) when the server rendered the page: History groups by day with it on both
+    /// sides, so hydration sees the same Today and Yesterday.
+    pub today: String,
 }
 
 impl ClientConfig {
@@ -92,6 +95,7 @@ fn server_config() -> ClientConfig {
             .as_ref()
             .map(|b| b.legal.clone().into_iter().collect())
             .unwrap_or_default(),
+        today: crate::history_state::Day::today_utc().iso(),
     }
 }
 
@@ -172,14 +176,15 @@ pub fn App() -> impl IntoView {
         <Router>
             <crate::shell::AppShell>
                 <Routes fallback=crate::shell::NotFound>
-                    <Route path=path!("/") view=crate::pages::Home/>
+                    <Route path=path!("/") view=crate::home::Home/>
                     <Route path=path!("/sign-in") view=crate::pages::SignIn/>
                     <Route path=path!("/sign-up") view=crate::pages::SignUp/>
                     <Route path=path!("/invite/:token") view=crate::pages::SignUp/>
-                    <Route path=path!("/library") view=crate::pages::Library/>
-                    <Route path=path!("/items/:id") view=crate::pages::ItemPage/>
+                    <Route path=path!("/library") view=crate::library::Library/>
+                    <Route path=path!("/items/:id") view=crate::item::ItemPage/>
                     <Route path=path!("/people") view=crate::sharing::Companions/>
-                    <Route path=path!("/history") view=crate::sharing::Sessions/>
+                    <Route path=path!("/history") view=crate::history::History/>
+                    <Route path=path!("/stats") view=crate::home::Stats/>
                     <Route path=path!("/you") view=crate::shell::You/>
                     <Route path=path!("/notifications") view=crate::notifications::Notifications/>
                     <Route path=path!("/integrations") view=crate::integrations::Integrations/>

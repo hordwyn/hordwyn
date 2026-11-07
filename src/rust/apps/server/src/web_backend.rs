@@ -1,7 +1,7 @@
 //! `web::Backend` for the web app's server functions, on top of the same operations as the
 //! REST API (`api::ops`).
 
-use api::{ApiError, ApiState, notifications, ops, sharing};
+use api::{ApiError, ApiState, browse, notifications, ops, sharing};
 use async_trait::async_trait;
 use contracts::{
     AttributionDto, CompanionDto, ErrorDto, InviteDto, ItemPageDto, LibraryEntryDto,
@@ -163,6 +163,16 @@ impl Backend for WebBackend {
     ) -> BResult<ProgressEventDto> {
         let a = self.actor(token).await?;
         ops::log_progress(&self.0, a, item_id, p).await.map_err(err)
+    }
+
+    async fn log_play(
+        &self,
+        token: &str,
+        item_id: &str,
+        p: contracts::NewPlayDto,
+    ) -> BResult<ProgressEventDto> {
+        let a = self.actor(token).await?;
+        ops::log_play(&self.0, a, item_id, p).await.map_err(err)
     }
 
     async fn rate(
@@ -358,5 +368,106 @@ impl Backend for WebBackend {
         notifications::delete_subscription(&self.0, a, id)
             .await
             .map_err(err)
+    }
+
+    async fn kinds(&self, token: &str) -> BResult<contracts::KindsDto> {
+        self.actor(token).await?;
+        Ok(browse::kinds(&self.0))
+    }
+
+    async fn library_counts(&self, token: &str) -> BResult<contracts::LibraryCountsDto> {
+        let a = self.actor(token).await?;
+        browse::library_counts(&self.0, a).await.map_err(err)
+    }
+
+    async fn library_query(
+        &self,
+        token: &str,
+        q: contracts::LibraryQueryDto,
+    ) -> BResult<contracts::LibraryRowsDto> {
+        let a = self.actor(token).await?;
+        browse::library_query(&self.0, a, q).await.map_err(err)
+    }
+
+    async fn set_status(
+        &self,
+        token: &str,
+        item_id: &str,
+        status: &str,
+    ) -> BResult<LibraryEntryDto> {
+        let a = self.actor(token).await?;
+        ops::set_status(&self.0, a, item_id, status.to_string())
+            .await
+            .map_err(err)
+    }
+
+    async fn tags(&self, token: &str) -> BResult<Vec<contracts::TagDto>> {
+        let a = self.actor(token).await?;
+        browse::tags(&self.0, a).await.map_err(err)
+    }
+
+    async fn add_tag(&self, token: &str, item_id: &str, tag: &str) -> BResult<Vec<String>> {
+        let a = self.actor(token).await?;
+        browse::add_tag(&self.0, a, item_id, tag).await.map_err(err)
+    }
+
+    async fn remove_tag(&self, token: &str, item_id: &str, tag: &str) -> BResult<Vec<String>> {
+        let a = self.actor(token).await?;
+        browse::remove_tag(&self.0, a, item_id, tag)
+            .await
+            .map_err(err)
+    }
+
+    async fn rename_tag(&self, token: &str, from: &str, to: &str) -> BResult<u64> {
+        let a = self.actor(token).await?;
+        browse::rename_tag(&self.0, a, from, to).await.map_err(err)
+    }
+
+    async fn set_entry_note(
+        &self,
+        token: &str,
+        item_id: &str,
+        note: Option<String>,
+    ) -> BResult<LibraryEntryDto> {
+        let a = self.actor(token).await?;
+        browse::set_note(&self.0, a, item_id, note)
+            .await
+            .map_err(err)
+    }
+
+    async fn undo_progress(&self, token: &str, event_id: &str) -> BResult<ProgressEventDto> {
+        let a = self.actor(token).await?;
+        browse::undo(&self.0, a, event_id).await.map_err(err)
+    }
+
+    async fn activity(
+        &self,
+        token: &str,
+        q: contracts::ActivityQueryDto,
+    ) -> BResult<contracts::ActivityPageDto> {
+        let a = self.actor(token).await?;
+        browse::activity(&self.0, a, q).await.map_err(err)
+    }
+
+    async fn stats_totals(&self, token: &str) -> BResult<contracts::StatsTotalsDto> {
+        let a = self.actor(token).await?;
+        browse::stats_totals(&self.0, a).await.map_err(err)
+    }
+
+    async fn stats_series(
+        &self,
+        token: &str,
+        group: Option<String>,
+        bucket: Option<String>,
+    ) -> BResult<contracts::StatsSeriesDto> {
+        let a = self.actor(token).await?;
+        browse::stats_series(&self.0, a, group, bucket)
+            .await
+            .map_err(err)
+    }
+
+    async fn home(&self, token: &str) -> BResult<contracts::HomeDto> {
+        let a = self.actor(token).await?;
+        browse::home(&self.0, a).await.map_err(err)
     }
 }

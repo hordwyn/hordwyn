@@ -50,6 +50,7 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(set_status))
         .routes(routes!(set_rating))
         .routes(routes!(item_progress, log_progress))
+        .routes(routes!(log_play))
         .routes(routes!(companions, create_companion))
         .routes(routes!(lists, create_list))
         .routes(routes!(add_to_list))
@@ -86,6 +87,20 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(import_status))
         .routes(routes!(export))
         .routes(routes!(events))
+        .routes(routes!(kinds))
+        .routes(routes!(library_counts))
+        .routes(routes!(library_query))
+        .routes(routes!(tags))
+        .routes(routes!(rename_tag))
+        .routes(routes!(add_tag))
+        .routes(routes!(remove_tag))
+        .routes(routes!(set_note))
+        .routes(routes!(undo_progress))
+        .routes(routes!(activity))
+        .routes(routes!(stats_totals))
+        .routes(routes!(stats_series))
+        .routes(routes!(home))
+        .routes(routes!(item_page))
         // JSON bodies are small (G2-10); only file imports may be large (the upload quota
         // limits what is kept)
         .layer(axum::extract::DefaultBodyLimit::max(JSON_BODY_LIMIT))
@@ -435,6 +450,19 @@ async fn log_progress(
     Json(b): Json<NewProgressDto>,
 ) -> ApiResult<Json<ProgressEventDto>> {
     Ok(Json(ops::log_progress(&s, a, &id, b).await?))
+}
+
+/// Log a play or gaming session (sessions progress model) with players, scores and the
+/// winner; answers its progress event (for Undo).
+#[utoipa::path(post, path = "/items/{id}/plays", tag = "library", request_body = contracts::NewPlayDto,
+    params(("id" = String, Path)), responses((status = 200, body = ProgressEventDto)))]
+async fn log_play(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+    Json(b): Json<contracts::NewPlayDto>,
+) -> ApiResult<Json<ProgressEventDto>> {
+    Ok(Json(ops::log_play(&s, a, &id, b).await?))
 }
 
 // ---------------------------------------------------------------- companions and lists
@@ -993,4 +1021,199 @@ impl ApiState {
             tracing::warn!(error = %e, "could not pin cover");
         }
     }
+}
+
+// ---------------------------------------------------------------- UX phase 1
+
+#[utoipa::path(get, path = "/kinds", tag = "catalog",
+    responses((status = 200, body = contracts::KindsDto)))]
+async fn kinds(State(s): State<ApiState>, Authed(_): Authed) -> Json<contracts::KindsDto> {
+    Json(crate::browse::kinds(&s))
+}
+
+/// Entry counts per group, kind and status of the signed-in user.
+#[utoipa::path(get, path = "/library/counts", tag = "library",
+    responses((status = 200, body = contracts::LibraryCountsDto)))]
+async fn library_counts(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+) -> ApiResult<Json<contracts::LibraryCountsDto>> {
+    Ok(Json(crate::browse::library_counts(&s, a).await?))
+}
+
+/// The Library page query: filters, text filter, sort, paging; rows carry the next step.
+#[utoipa::path(post, path = "/library/query", tag = "library",
+    request_body = contracts::LibraryQueryDto,
+    responses((status = 200, body = contracts::LibraryRowsDto),
+        (status = 400, body = contracts::ErrorDto), (status = 422, body = contracts::ErrorDto)))]
+async fn library_query(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Json(b): Json<contracts::LibraryQueryDto>,
+) -> ApiResult<Json<contracts::LibraryRowsDto>> {
+    Ok(Json(crate::browse::library_query(&s, a, b).await?))
+}
+
+#[utoipa::path(get, path = "/tags", tag = "library",
+    responses((status = 200, body = Vec<contracts::TagDto>)))]
+async fn tags(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+) -> ApiResult<Json<Vec<contracts::TagDto>>> {
+    Ok(Json(crate::browse::tags(&s, a).await?))
+}
+
+/// Rename a tag on every entry (onto an existing tag merges them); answers the number of
+/// entries changed.
+#[utoipa::path(put, path = "/tags/{tag}", tag = "library", request_body = contracts::RenameTagDto,
+    params(("tag" = String, Path)), responses((status = 200, body = u64)))]
+async fn rename_tag(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(tag): Path<String>,
+    Json(b): Json<contracts::RenameTagDto>,
+) -> ApiResult<Json<u64>> {
+    Ok(Json(crate::browse::rename_tag(&s, a, &tag, &b.name).await?))
+}
+
+/// Add a tag; answers the entry's tags.
+#[utoipa::path(post, path = "/library/{item_id}/tags", tag = "library",
+    request_body = contracts::TagBodyDto, params(("item_id" = String, Path)),
+    responses((status = 200, body = Vec<String>)))]
+async fn add_tag(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(item_id): Path<String>,
+    Json(b): Json<contracts::TagBodyDto>,
+) -> ApiResult<Json<Vec<String>>> {
+    Ok(Json(crate::browse::add_tag(&s, a, &item_id, &b.tag).await?))
+}
+
+#[utoipa::path(delete, path = "/library/{item_id}/tags/{tag}", tag = "library",
+    params(("item_id" = String, Path), ("tag" = String, Path)),
+    responses((status = 200, body = Vec<String>)))]
+async fn remove_tag(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path((item_id, tag)): Path<(String, String)>,
+) -> ApiResult<Json<Vec<String>>> {
+    Ok(Json(
+        crate::browse::remove_tag(&s, a, &item_id, &tag).await?,
+    ))
+}
+
+/// The private note of an entry (never shown to anyone else).
+#[utoipa::path(put, path = "/library/{item_id}/note", tag = "library",
+    request_body = contracts::NoteDto, params(("item_id" = String, Path)),
+    responses((status = 200, body = LibraryEntryDto)))]
+async fn set_note(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(item_id): Path<String>,
+    Json(b): Json<contracts::NoteDto>,
+) -> ApiResult<Json<LibraryEntryDto>> {
+    Ok(Json(
+        crate::browse::set_note(&s, a, &item_id, b.note).await?,
+    ))
+}
+
+/// Undo one of your recent progress events: appends a compensating `undo` event.
+#[utoipa::path(post, path = "/progress/{event_id}/undo", tag = "library",
+    params(("event_id" = String, Path)),
+    responses((status = 200, body = ProgressEventDto), (status = 404, body = contracts::ErrorDto),
+        (status = 409, body = contracts::ErrorDto)))]
+async fn undo_progress(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(event_id): Path<String>,
+) -> ApiResult<Json<ProgressEventDto>> {
+    Ok(Json(crate::browse::undo(&s, a, &event_id).await?))
+}
+
+#[derive(Deserialize, IntoParams)]
+struct ActivityParams {
+    /// `next` of the previous page.
+    before: Option<String>,
+    /// 1 to 100, default 20.
+    limit: Option<u32>,
+    group: Option<String>,
+    kind: Option<String>,
+    /// Companion id.
+    person: Option<String>,
+    /// `progress` or `session`.
+    row_type: Option<String>,
+    /// Only sessions shared with you.
+    #[serde(default)]
+    shared: bool,
+    year: Option<i32>,
+}
+
+/// The activity feed (Home, History), newest first.
+#[utoipa::path(get, path = "/activity", tag = "library", params(ActivityParams),
+    responses((status = 200, body = contracts::ActivityPageDto)))]
+async fn activity(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Query(p): Query<ActivityParams>,
+) -> ApiResult<Json<contracts::ActivityPageDto>> {
+    let q = contracts::ActivityQueryDto {
+        before: p.before,
+        limit: p.limit,
+        group: p.group,
+        kind: p.kind,
+        person: p.person,
+        row_type: p.row_type,
+        shared: p.shared,
+        year: p.year,
+    };
+    Ok(Json(crate::browse::activity(&s, a, q).await?))
+}
+
+/// All-time totals overall and per group.
+#[utoipa::path(get, path = "/stats/totals", tag = "stats",
+    responses((status = 200, body = contracts::StatsTotalsDto)))]
+async fn stats_totals(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+) -> ApiResult<Json<contracts::StatsTotalsDto>> {
+    Ok(Json(crate::browse::stats_totals(&s, a).await?))
+}
+
+#[derive(Deserialize, IntoParams)]
+struct SeriesParams {
+    /// Group id or `all` (default).
+    group: Option<String>,
+    /// `month` (default) or `year`.
+    bucket: Option<String>,
+}
+
+/// Activity over time per month or year.
+#[utoipa::path(get, path = "/stats/series", tag = "stats", params(SeriesParams),
+    responses((status = 200, body = contracts::StatsSeriesDto)))]
+async fn stats_series(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Query(p): Query<SeriesParams>,
+) -> ApiResult<Json<contracts::StatsSeriesDto>> {
+    Ok(Json(
+        crate::browse::stats_series(&s, a, p.group, p.bucket).await?,
+    ))
+}
+
+/// Everything the signed-in Home page shows.
+#[utoipa::path(get, path = "/home", tag = "library",
+    responses((status = 200, body = contracts::HomeDto)))]
+async fn home(State(s): State<ApiState>, Authed(a): Authed) -> ApiResult<Json<contracts::HomeDto>> {
+    Ok(Json(crate::browse::home(&s, a).await?))
+}
+
+/// The item page: item, your entry, effective history, attribution, tags, next step.
+#[utoipa::path(get, path = "/items/{id}/page", tag = "catalog",
+    params(("id" = String, Path)), responses((status = 200, body = contracts::ItemPageDto)))]
+async fn item_page(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+) -> ApiResult<Json<contracts::ItemPageDto>> {
+    Ok(Json(ops::item_page(&s, a, &id).await?))
 }

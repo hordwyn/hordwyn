@@ -1,0 +1,117 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT x.id, x.user_id, x.item_id, x.occurred_at, x.progress, x.client_op_id,\n                        x.recorded_at, x.status_change\n                 FROM progress_events x JOIN catalog_items c ON c.id = x.item_id\n                 WHERE x.user_id = $1 AND x.undoes IS NULL\n                   AND NOT EXISTS (SELECT 1 FROM progress_events u WHERE u.undoes = x.id)\n                   AND ($2::timestamptz IS NULL OR (x.occurred_at, x.id) < ($2, $3::uuid))\n                   AND ($4::timestamptz IS NULL OR x.occurred_at >= $4)\n                   AND (cardinality($5::text[]) = 0 OR c.kind = ANY($5))\n                 ORDER BY x.occurred_at DESC, x.id DESC\n                 LIMIT $6",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "item_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "item_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "occurred_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "occurred_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "progress",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "progress"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "client_op_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "client_op_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "recorded_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "recorded_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "status_change",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "progress_events",
+            "name": "status_change"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Uuid",
+        "Timestamptz",
+        "TextArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "72fbbe46a9c1244f08f03240d59670c855b5831788c58c7a103012f72cdb3aab"
+}

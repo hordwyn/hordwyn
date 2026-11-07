@@ -10,9 +10,10 @@ use domain::catalog::{CatalogItem, ExternalId};
 use domain::companion::{Companion, Invite, LinkRequest};
 use domain::hlc::Hlc;
 use domain::ids::{
-    CompanionId, EntryId, InviteId, ItemId, LinkRequestId, ListId, ReviewId, SessionId, UserId,
+    CompanionId, EntryId, EventId, InviteId, ItemId, LinkRequestId, ListId, ReviewId, SessionId,
+    UserId,
 };
-use domain::kind::{KindDescriptor, KindId};
+use domain::kind::{KindDescriptor, KindId, Status};
 use domain::library::LibraryEntry;
 use domain::list::List;
 use domain::progress::ProgressEvent;
@@ -88,6 +89,8 @@ pub trait CatalogRepo: Send + Sync {
         kind: &KindId,
         id: &ExternalId,
     ) -> RepoResult<Option<CatalogItem>>;
+    /// The items with these ids that exist, in any order.
+    async fn get_many(&self, ids: &[ItemId]) -> RepoResult<Vec<CatalogItem>>;
 }
 
 #[async_trait]
@@ -106,6 +109,95 @@ pub trait LibraryRepo: Send + Sync {
     ) -> RepoResult<(Vec<LibraryEntry>, u64)>;
     /// Is the item in anyone's library (pins its cover, D-8)?
     async fn any_for_item(&self, item: ItemId) -> RepoResult<bool>;
+    /// One page of the user's entries matching `filter`, in its order, and the number of
+    /// matching entries.
+    async fn query(
+        &self,
+        user: UserId,
+        filter: &LibraryFilter,
+    ) -> RepoResult<(Vec<LibraryHit>, u64)>;
+    /// Number of the user's entries per `(kind, status)`.
+    async fn counts(&self, user: UserId) -> RepoResult<Vec<(KindId, Status, u64)>>;
+    /// Tags of the given entries, `(entry, tag)` pairs sorted by tag key.
+    async fn tags_of(&self, entries: &[EntryId]) -> RepoResult<Vec<(EntryId, String)>>;
+    /// Replace the tags of an entry (already normalised and distinct by key).
+    async fn set_tags(&self, entry: &LibraryEntry, tags: &[String]) -> RepoResult<()>;
+    /// Every tag of the user with the number of entries carrying it, sorted by key.
+    async fn tag_counts(&self, user: UserId) -> RepoResult<Vec<(String, u64)>>;
+    /// Rename a tag (by key) on all of the user's entries; entries that already carry
+    /// `to` keep one. Returns the number of entries changed.
+    async fn rename_tag(&self, user: UserId, from_key: &str, to: &str) -> RepoResult<u64>;
+    /// Planned entries of `kinds` that continue a series: among the user's completed entries
+    /// of `kinds` with the same series (see [`crate::series_of`]) the highest position is
+    /// `best`, and the planned item's position is above `best` and at most `best + 1`. Most
+    /// recently added first, at most `limit` item ids.
+    async fn next_in_series(
+        &self,
+        user: UserId,
+        kinds: &[KindId],
+        limit: u32,
+    ) -> RepoResult<Vec<ItemId>>;
+}
+
+/// Order of a library query (design.md 3.5).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum LibrarySort {
+    /// Latest progress event, else when added (default, newest first).
+    #[default]
+    LastActivity,
+    Title,
+    Added,
+    Year,
+    Rating,
+    /// Logged sessions (board games).
+    Plays,
+}
+
+impl LibrarySort {
+    /// The natural direction: titles A to Z, everything else highest or newest first.
+    #[must_use]
+    pub const fn descending_by_default(self) -> bool {
+        !matches!(self, Self::Title)
+    }
+}
+
+/// What a library query selects. Empty lists select everything.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LibraryFilter {
+    pub kinds: Vec<KindId>,
+    pub statuses: Vec<Status>,
+    /// Tag keys ([`domain::tag::tag_key`]); an entry must carry all of them.
+    pub tags: Vec<String>,
+    /// `(attribute, value)`: the item attribute equals the value or, for a list, contains
+    /// it (compared as text). All must match.
+    pub facets: Vec<(String, String)>,
+    /// Only these items (the result of a text search), when set.
+    pub items: Option<Vec<ItemId>>,
+    pub sort: LibrarySort,
+    pub descending: bool,
+    pub offset: u64,
+    pub limit: u32,
+}
+
+/// A library entry as a query returns it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryHit {
+    pub entry: LibraryEntry,
+    /// Latest effective progress event, or when it was added.
+    pub last_activity: Timestamp,
+}
+
+/// A window of a user's history, newest first: events strictly before `before` (by
+/// `(occurred_at, id)`), at or after `since`, of the given kinds (empty: all).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HistoryWindow {
+    pub before: Option<(Timestamp, uuid::Uuid)>,
+    pub since: Option<Timestamp>,
+    pub kinds: Vec<KindId>,
+    pub limit: u32,
 }
 
 #[async_trait]
@@ -114,6 +206,16 @@ pub trait ProgressRepo: Send + Sync {
     /// written and the existing event is returned.
     async fn append(&self, e: &ProgressEvent) -> RepoResult<ProgressEvent>;
     async fn for_item(&self, user: UserId, item: ItemId) -> RepoResult<Vec<ProgressEvent>>;
+    async fn get(&self, id: EventId) -> RepoResult<Option<ProgressEvent>>;
+    /// Every event of the user (undo events included), oldest first.
+    async fn by_user(&self, user: UserId) -> RepoResult<Vec<ProgressEvent>>;
+    /// Every event of the user for these items (undo events included), oldest first.
+    async fn for_items(&self, user: UserId, items: &[ItemId]) -> RepoResult<Vec<ProgressEvent>>;
+    /// Effective events (no undo events, none that were undone) in `window`, newest first.
+    async fn recent(&self, user: UserId, window: &HistoryWindow) -> RepoResult<Vec<ProgressEvent>>;
+    /// The user's statistics per kind and UTC month, by the rules of
+    /// [`crate::month_amounts`] (sessions counted with the user's own sessions' durations).
+    async fn month_amounts(&self, user: UserId) -> RepoResult<Vec<crate::MonthAmounts>>;
 }
 
 #[async_trait]

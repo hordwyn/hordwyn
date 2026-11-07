@@ -62,6 +62,12 @@ const WEB_FAMILIES: &[&str] = &[
     "notify-state-",
     "notify-event-",
     "month-short-",
+    // group names on Home, Stats and History (`KindGroupDto.label_key` is `kind-group-<id>`)
+    "kind-group-",
+    // next-step button labels, named by the server (`NextStepDto.label_key`)
+    "next-step-",
+    // facet filter labels, named by the kind descriptor (`KindDto.facets`)
+    "library-facet-",
     // labels of the brand's legal links (`[legal]` keys)
     "legal-",
 ];

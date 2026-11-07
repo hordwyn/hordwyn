@@ -38,7 +38,7 @@ pub fn section_of(path: &str) -> &'static str {
         .next()
         .unwrap_or_default()
     {
-        "" => "/",
+        "" | "stats" => "/",
         "library" | "items" => "/library",
         "history" => "/history",
         "lists" | "shared" => "/lists",
@@ -67,6 +67,7 @@ fn sections() -> Vec<(&'static str, &'static str)> {
 fn account_links(is_admin: bool) -> Vec<(&'static str, &'static str)> {
     let mut links = vec![
         ("/notifications", "nav-notifications"),
+        ("/stats", "nav-stats"),
         ("/integrations", "nav-integrations"),
     ];
     links.push(if is_admin {
@@ -130,7 +131,7 @@ fn is_online() -> bool {
 
 /// Is the key press meant for a text field (single-key shortcuts stay off there)?
 #[cfg(feature = "hydrate")]
-fn typing(ev: &leptos::ev::KeyboardEvent) -> bool {
+pub(crate) fn typing(ev: &leptos::ev::KeyboardEvent) -> bool {
     use wasm_bindgen::JsCast;
     ev.target()
         .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
@@ -141,7 +142,7 @@ fn typing(ev: &leptos::ev::KeyboardEvent) -> bool {
 }
 
 #[cfg(not(feature = "hydrate"))]
-fn typing(_: &leptos::ev::KeyboardEvent) -> bool {
+pub(crate) fn typing(_: &leptos::ev::KeyboardEvent) -> bool {
     false
 }
 
@@ -762,6 +763,7 @@ pub fn You() -> impl IntoView {
             notifications.count(i18n.t_args("shell-unread", &[("count", cfg.unread.into())]));
     }
     let mut items = vec![
+        NavItem::new("/stats", i18n.t("nav-stats")).icon(IconName::History),
         NavItem::new("/people", i18n.t("nav-people")).icon(IconName::Users),
         NavItem::new("/lists", i18n.t("nav-lists")).icon(IconName::List),
         notifications,
@@ -769,7 +771,8 @@ pub fn You() -> impl IntoView {
     items.extend(
         account_links(cfg.is_admin)
             .into_iter()
-            .skip(1)
+            // notifications and stats are already in the list above, with their icons
+            .filter(|(href, _)| !matches!(*href, "/notifications" | "/stats"))
             .map(|(href, key)| NavItem::new(href, i18n.t(key))),
     );
     let location = use_location();
@@ -844,5 +847,7 @@ mod tests {
                 .iter()
                 .any(|(_, k)| *k == "shell-admin")
         );
+        // the Stats page is reached from the account menu too (design.md 6.1)
+        assert!(account_links(false).iter().any(|(h, _)| *h == "/stats"));
     }
 }

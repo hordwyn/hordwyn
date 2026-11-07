@@ -46,10 +46,11 @@ test("sign up, find a movie, watch it with a companion", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1, name: "Fight Club" })).toBeVisible();
   await expect(page.getByTestId("attribution")).toContainText("uses TMDB and the TMDB APIs");
   await page.getByRole("button", { name: "Add to library" }).click();
-  await expect(page.getByText("In your library")).toBeVisible();
-  await page.getByLabel("Ben").check();
-  await page.getByRole("button", { name: "Mark as completed" }).click();
-  await expect(page.getByText("Logged.")).toBeVisible();
+  await page.getByRole("button", { name: "Log with details: Fight Club" }).click();
+  const sheet = page.getByRole("dialog", { name: "Log with details" });
+  await sheet.getByRole("button", { name: "Ben", exact: true }).click();
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Logged: Watched")).toBeVisible();
 
   await page.goto("/library");
   await hydrated(page);

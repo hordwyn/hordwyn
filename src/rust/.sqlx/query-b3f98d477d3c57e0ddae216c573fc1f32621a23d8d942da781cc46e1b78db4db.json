@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT * FROM library_entries WHERE user_id = $1 ORDER BY added_at, id",
+  "query": "SELECT id, user_id, item_id, kind, status, status_hlc, rating, rating_hlc, notes,\n                    notes_hlc, added_at FROM library_entries WHERE user_id = $1\n             ORDER BY added_at DESC, id DESC OFFSET $2 LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -127,7 +127,9 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Int8",
+        "Int8"
       ]
     },
     "nullable": [
@@ -144,5 +146,5 @@
       false
     ]
   },
-  "hash": "16ef2c1fcb97b1d375cdd48b2a25b796bfe353e1d74ccf49a272742fad23e886"
+  "hash": "b3f98d477d3c57e0ddae216c573fc1f32621a23d8d942da781cc46e1b78db4db"
 }

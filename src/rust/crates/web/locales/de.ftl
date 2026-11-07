@@ -32,7 +32,104 @@ auth-error-invalid_invite = Diese Einladung ist nicht mehr gültig.
 error-generic = Etwas ist schiefgelaufen. Bitte versuche es erneut.
 
 library-title = Bibliothek
-library-empty = Deine Bibliothek ist leer. Mit Strg+K findest du etwas zum Hinzufügen.
+library-empty = Deine Bibliothek ist leer
+library-empty-body = Suche einen Film, eine Serie, ein Buch oder ein Spiel und füge es hinzu. Strg+K öffnet die Suche auf jeder Seite.
+library-find = Etwas finden
+library-add = Hinzufügen
+library-group = Bereich
+library-kinds = Arten
+library-kinds-all = Alle Arten
+library-status = Status
+library-status-all = Alle
+library-view = Ansicht
+library-view-grid = Raster
+library-view-list = Liste
+library-sort = Sortierung
+library-sort-last-activity = Letzte Aktivität
+library-sort-title = Titel
+library-sort-added = Hinzugefügt
+library-sort-year = Jahr
+library-sort-rating = Deine Bewertung
+library-sort-plays = Partien
+library-sort-reverse = Reihenfolge umkehren
+library-filter = Nach Titel oder Notiz filtern
+library-filter-placeholder = Filtern...
+library-filters = Filter
+library-filters-active = { $count ->
+    [one] einer aktiv
+   *[other] { $count } aktiv
+}
+library-tags = Schlagwörter
+library-tags-none = Noch keine Schlagwörter. Du fügst sie über das Menü einer Karte hinzu.
+library-facets = { $kind } filtern nach
+library-facets-pick = Wähle oben eine Art, um nach Genre und weiteren Angaben zu filtern.
+library-facet-any = Beliebig
+library-active = Aktive Filter
+library-remove-filter = Filter { $filter } entfernen
+library-filter-tag = Schlagwort: { $tag }
+library-filter-facet = { $name }: { $value }
+library-filter-text = Text: { $text }
+library-clear = Filter zurücksetzen
+library-no-match = Nichts passt zu diesen Filtern
+library-no-match-body = Aktiv: { $filters }. Setze die Filter zurück oder schau in einem anderen Status nach.
+library-show-status = Stattdessen { $status } zeigen
+library-results = Einträge
+library-showing = { $shown } von { $total } angezeigt
+library-error = Deine Bibliothek konnte nicht geladen werden.
+library-retry = Erneut versuchen
+library-loading = Deine Bibliothek wird geladen...
+library-actions = Aktionen für { $title }
+library-open = Öffnen
+library-mark = Als { $status } markieren
+library-edit-tags = Schlagwörter bearbeiten
+library-tags-title = Schlagwörter für { $title }
+library-tag-new = Neues Schlagwort
+library-tag-add = Schlagwort hinzufügen
+library-tag-remove = Schlagwort { $tag } entfernen
+library-col-title = Titel
+library-col-kind = Art
+library-col-progress = Fortschritt
+library-col-rating = Bewertung
+library-col-tags = Schlagwörter
+library-col-activity = Letzte Aktivität
+library-col-next = Nächster Schritt
+library-rating-value = { $stars } von 5
+library-no-rating = Nicht bewertet
+library-status-changed = Als { $status } markiert
+library-next-step-named = { $step }: { $title }
+library-logged = Eingetragen: { $step }
+library-undo = Rückgängig
+library-undone = Rückgängig gemacht
+library-step-failed = Das hat nicht geklappt: { $error }
+library-progress = Fortschritt
+library-progress-episodes = { $done } von { $total } Folgen
+library-progress-pages = Seite { $page } von { $pages }
+library-progress-percent = { $percent } % geschafft
+library-facet-genres = Genre
+library-facet-authors = Autor:in
+library-facet-narrators = Sprecher:in
+library-facet-language = Sprache
+library-facet-languages = Sprache
+library-facet-original_language = Originalsprache
+library-facet-categories = Kategorie
+library-facet-artists = Künstler:in
+library-facet-release_type = Veröffentlichungsart
+library-facet-platforms = Plattform
+library-facet-game_modes = Spielmodus
+library-facet-tags = Schlagwort der Quelle
+library-facet-subjects = Thema
+library-facet-publishing_status = Erscheinungsstatus
+library-facet-publisher = Verlag
+library-facet-series = Reihe
+library-facet-network = Sender
+library-facet-airing_status = Ausstrahlungsstatus
+library-facet-format = Format
+library-facet-studios = Studio
+library-facet-players_min = Mindestens Spielende
+library-facet-players_max = Höchstens Spielende
+library-facet-players_best = Beste Spielerzahl
+library-facet-mechanics = Mechanik
+library-facet-weight = Komplexität
 library-count = { $count ->
     [one] Ein Eintrag
    *[other] { $count } Einträge
@@ -43,6 +140,7 @@ status-in_progress = Begonnen
 status-completed = Abgeschlossen
 status-paused = Pausiert
 status-dropped = Abgebrochen
+status-endless = Endlos
 
 kind-movie = Film
 kind-show = Serie
@@ -57,11 +155,28 @@ kind-visual_novel = Visual Novel
 kind-comic = Comic
 kind-board_game = Brettspiel
 
+# activity groups (design.md 3.1)
+kind-group-all = Alle
+kind-group-watch = Sehen
+kind-group-read = Lesen
+kind-group-listen = Hören
+kind-group-play = Spielen
+kind-group-other = Sonstiges
+
+# next step buttons (design.md 3.4); the server names the key
+next-step-watched = Gesehen
+next-step-watched-again = Nochmal gesehen
+next-step-finished = Beendet
+next-step-finished-again = Nochmal beendet
+next-step-episode = S{ $season } E{ $episode } gesehen
+next-step-episode-listened = S{ $season } E{ $episode } gehört
+next-step-caught-up = Auf dem neuesten Stand
+next-step-update-page = Seite eintragen
+next-step-update-position = Position eintragen
+next-step-log-play = Partie eintragen
+next-step-log-session = Sitzung eintragen
+
 item-add = Zur Bibliothek hinzufügen
-item-in-library = In deiner Bibliothek
-item-mark-done = Als abgeschlossen markieren
-item-mark-done-with = Als abgeschlossen markieren mit
-item-done-logged = Eingetragen.
 item-rating = Deine Bewertung
 item-rate = Mit { $stars } von 5 bewerten
 item-history = Verlauf
@@ -70,6 +185,119 @@ item-loading-details = Details werden geladen...
 item-source = Quelle: { $name }
 item-cover-alt = Cover von { $title }
 item-lists = Zu Liste hinzufügen
+item-original-title = Originaltitel: { $title }
+item-facts = Angaben zum Eintrag
+item-status = Status
+item-progress = Fortschritt
+item-not-started = Noch nicht begonnen
+item-not-rated = Nicht bewertet
+item-rated = { $stars } von 5
+item-more-facts = Weitere Angaben
+item-more-facts-summary = Hinzugefügt, begonnen, zuletzt eingetragen
+item-added = Hinzugefügt
+item-started = Begonnen
+item-last = Zuletzt eingetragen
+item-plays = Partien
+item-rewatches = Wiederholungen
+item-plays-count = { $count ->
+    [one] Eine Partie
+   *[other] { $count } Partien
+}
+item-actions = Weitere Aktionen für { $title }
+item-action-bar = Nächster Schritt
+item-with = Mit...
+item-with-named = Mit Details eintragen: { $title }
+item-tags = Tags
+item-edit-tags = Tags bearbeiten
+item-lists-title = Listen
+item-added-to-list = Zu { $list } hinzugefügt.
+item-sections = Bereiche
+item-section-episodes = Folgen
+item-section-about = Details
+item-section-notes = Notizen
+item-about-empty = Noch keine Details.
+item-ids = Kennungen:
+item-note = Private Notiz
+item-note-hint = Nur du siehst diese Notiz.
+item-note-save = Notiz speichern
+item-note-saved = Notiz gespeichert.
+
+# log sheets and inline loggers of the item page (design.md 5.4)
+log-sheet-title = Mit Details eintragen
+log-when = Wann
+log-today = Heute
+log-yesterday = Gestern
+log-pick = Datum wählen
+log-date = Datum
+log-people = Mit
+log-players = Mitspielende
+log-people-add = Person hinzufügen
+log-people-create = „{ $name }“ hinzufügen
+log-people-none = Niemand mit diesem Namen
+log-more = Mehr
+log-more-watched = Bewertung und Notiz
+log-more-play = Kooperativ, Dauer, Ort, Notizen
+log-note = Notiz zu diesem Titel (privat)
+log-rewatch = { $count ->
+    [one] Schon einmal abgeschlossen: Das zählt als Wiederholung.
+   *[other] Schon { $count }-mal abgeschlossen: Das zählt als Wiederholung.
+}
+log-save = Speichern
+log-discard-question = Änderungen verwerfen?
+log-discard = Verwerfen
+log-keep = Weiter bearbeiten
+log-score = Punkte von { $name }
+log-winner = Gewonnen hat
+log-winner-auto = Höchste Punktzahl
+log-coop = Kooperatives Spiel
+log-coop-won = Wir haben gewonnen
+log-duration = Dauer in Minuten
+log-location = Ort
+log-notes = Notizen
+log-play-step = Partie
+log-page = Aktuelle Seite
+log-of-pages = von { $pages }
+log-update = Aktualisieren
+log-plus-pages = +{ $count }
+log-finished = Fertig
+log-position = Position
+log-position-hint = Als h:mm:ss oder in Minuten.
+log-of-time = von { $time }
+log-plus-minutes = +{ $count } Min.
+log-error-date-missing = Wähle ein Datum.
+log-error-date-future = Das Datum liegt in der Zukunft.
+log-error-score = Punkte sind Zahlen, zum Beispiel 42 oder 12,5.
+log-error-duration = Die Dauer ist eine ganze Zahl von Minuten.
+log-error-page = Gib eine Seitenzahl ab 1 ein.
+log-error-page-beyond = Das hat { $pages } Seiten.
+log-error-position = Gib die Position als h:mm:ss ein, innerhalb der Länge.
+
+# the Episodes tab of the item page (design.md 6.3)
+episodes-seasons = Staffeln
+episodes-season = Staffel { $season }
+episodes-count = { $watched }/{ $total }
+episodes-episode = Folge { $episode }
+episodes-mark-season = Staffel als gesehen markieren
+episodes-mark = S{ $season } E{ $episode } als gesehen markieren
+episodes-mark-again = S{ $season } E{ $episode } nochmal sehen
+episodes-watched = Gesehen
+episodes-again = Nochmal
+episodes-next = Als Nächstes
+episodes-row-menu = Mehr zu S{ $season } E{ $episode }
+episodes-up-to-here = Bis hierhin markieren
+episodes-with = Gesehen mit...
+episodes-ask = { $count ->
+    [one] Auch die frühere Folge als gesehen markieren?
+   *[other] Auch die { $count } früheren Folgen als gesehen markieren?
+}
+episodes-ask-all = Alle { $count } markieren
+episodes-ask-one = Nur S{ $season } E{ $episode }
+episodes-remember = Für diese Serie merken
+episodes-logged = { $count ->
+    [one] Eine Folge
+   *[other] { $count } Folgen
+}
+episodes-none = Noch keine Folgen bekannt.
 
 search-title = Suche
 search-label = Katalog durchsuchen
@@ -102,7 +330,6 @@ dialog-close = Schließen
 auth-invited = Du wurdest eingeladen: Dein Konto wird mit der Person verknüpft, die dich eingeladen hat, und du siehst die Sitzungen, bei denen du dabei warst.
 companions-choose = Auswählen...
 companions-companion = Person
-companions-you-short = du
 companions-linked = Verknüpft
 companions-invite = Einladen
 companions-invite-link = Schicke diesen einmaligen Link:
@@ -122,11 +349,6 @@ companions-merge-remove = Doppelter Eintrag
 companions-merge-submit = Zusammenführen
 privacy-title = Privatsphäre
 privacy-share-sessions = Verknüpfte Mitspieler sehen die Sitzungen, die ich erfasse
-sessions-title = Verlauf
-sessions-shared = Mit dir geteilt
-sessions-shared-empty = Noch hat niemand eine Sitzung mit dir geteilt.
-sessions-mine = Deine Sitzungen
-sessions-mine-empty = Noch keine Sitzungen erfasst.
 sessions-by = von { $name }
 sessions-claim = In mein Protokoll kopieren
 sessions-claimed = In dein Protokoll kopiert.
@@ -238,6 +460,7 @@ auth-error-username_taken = Dieser Benutzername ist schon vergeben.
 auth-error-display_name_too_long = Der Anzeigename darf höchstens 100 Zeichen haben.
 auth-error-password_too_short = Das Passwort braucht mindestens 10 Zeichen.
 auth-error-password_too_long = Das Passwort darf höchstens 1024 Zeichen haben.
+auth-error-search_unavailable = Die Suche ist gerade nicht erreichbar. Versuch es gleich noch einmal.
 
 # ---- UX phase 0: app shell (design.md 3.2, 6.15) ----
 nav-home = Start
@@ -345,7 +568,6 @@ lists-share-named = { $name } per Link teilen
 companions-name-self = { $name } (du)
 companions-invite-named = { $name } einladen
 companions-unlink-named = Verknüpfung lösen: { $name }
-sessions-winner = { $name } (gewonnen)
 integrations-last-call = Letzter Aufruf: { $when }
 integrations-revoke-named = { $name } widerrufen
 notify-mark-read-named = Als gelesen markieren: { $title }
@@ -387,3 +609,126 @@ legal-nav = Rechtliches
 legal-imprint = Impressum
 legal-privacy = Datenschutz
 legal-terms = Nutzungsbedingungen
+history-today = Heute
+history-yesterday = Gestern
+history-day = { $weekday }, { $date }
+weekday-monday = Montag
+weekday-tuesday = Dienstag
+weekday-wednesday = Mittwoch
+weekday-thursday = Donnerstag
+weekday-friday = Freitag
+weekday-saturday = Samstag
+weekday-sunday = Sonntag
+stats-bucket-month = { $month } { $year }
+nav-stats = Statistik
+home-greeting = Willkommen zurück, { $name }
+home-error = Die Startseite konnte nicht geladen werden.
+home-loading = Deine Startseite wird geladen …
+home-empty = Noch nichts hier
+home-empty-body = Füge das Erste hinzu, das du gerade schaust, liest oder spielst: Suche nach einem Titel und nimm ihn in deine Bibliothek auf.
+home-continue = Weitermachen
+home-all-in-progress = Alles Begonnene
+home-up-next = Als Nächstes
+home-all-planned = Alles Geplante
+home-reason-next-in-series = Nächster Teil der Reihe
+home-reason-planned = Geplant
+home-activity = Letzte Aktivität
+home-all-history = Ganzer Verlauf
+home-stats = Statistik insgesamt
+home-all-stats = Alle Statistiken
+stats-title = Statistik
+stats-groups = Gruppen
+stats-bucket = Zeiteinheit
+stats-by-month = Nach Monat
+stats-by-year = Nach Jahr
+stats-error = Die Statistik konnte nicht geladen werden.
+stats-totals = Summen insgesamt
+stats-entries = Einträge
+stats-empty = Hier ist noch nichts eingetragen
+stats-empty-body = Sobald du Fortschritt einträgst, erscheint hier deine Aktivität im Zeitverlauf.
+stats-chart-summary = { $measure } in { $group }, { $from } bis { $to }: insgesamt { $total }, am meisten im { $peak }.
+stats-chart-summary-empty = { $measure } in { $group }, { $from } bis { $to }: noch nichts.
+stats-totals-summary = { $group }: { $parts }
+stats-totals-part-planned = { $count } geplant
+stats-totals-part-in_progress = { $count } begonnen
+stats-totals-part-completed = { $count } abgeschlossen
+stats-totals-part-paused = { $count } pausiert
+stats-totals-part-dropped = { $count } abgebrochen
+chart-value = { $label }: { $value }
+stats-show-table = Als Tabelle zeigen
+stats-col-month = Monat
+stats-col-year = Jahr
+stats-measure-events = Aktivität
+stats-measure-completions = Abgeschlossene Einträge
+stats-measure-finished = Gesehen
+stats-measure-episodes = Folgen
+stats-measure-pages = Seiten
+stats-measure-plays = Partien
+stats-measure-minutes = Minuten
+stats-count-events = { $count ->
+    [one] Ein eingetragener Schritt
+   *[other] { $count } eingetragene Schritte
+}
+stats-count-completions = { $count ->
+    [one] Ein Eintrag abgeschlossen
+   *[other] { $count } Einträge abgeschlossen
+}
+stats-count-finished = { $count ->
+    [one] Einmal gesehen
+   *[other] { $count }-mal gesehen
+}
+stats-count-episodes = { $count ->
+    [one] Eine Folge
+   *[other] { $count } Folgen
+}
+stats-count-pages = { $count ->
+    [one] Eine Seite
+   *[other] { $count } Seiten
+}
+stats-count-plays = { $count ->
+    [one] Eine Partie
+   *[other] { $count } Partien
+}
+stats-count-minutes = { $count ->
+    [one] Eine Minute
+   *[other] { $count } Minuten
+}
+history-title = Verlauf
+history-lead = Alles, was du eingetragen hast, das Neueste zuerst.
+history-stream = Aktivität nach Tagen
+history-filters = Filter
+history-filters-summary = { $count ->
+    [0] Art, Person, Typ, mit mir geteilt, Jahr
+    [one] Ein Filter gesetzt
+   *[other] { $count } Filter gesetzt
+}
+history-filter-kind = Art
+history-filter-person = Person
+history-filter-type = Typ
+history-filter-year = Jahr
+history-filter-shared = Nur mit mir geteilt
+history-kind-all = Alle Arten
+history-person-all = Mit allen
+history-type-all = Alles
+history-type-progress = Fortschritt
+history-type-session = Sitzungen
+history-year-all = Alle Jahre
+history-session = Sitzung eingetragen
+history-with = mit { $names }
+history-time-utc = { $time } UTC
+history-shared = Geteilt
+history-undo-named = Rückgängig: { $title }
+history-copy-named = In mein Protokoll kopieren: { $title }
+history-error = Der Verlauf konnte nicht geladen werden.
+history-loading = Dein Verlauf wird geladen …
+history-empty = Noch nichts eingetragen
+history-empty-body = Eingetragen wird auf der Seite eines Titels oder mit den Knöpfen für den nächsten Schritt; alles landet hier.
+history-no-match = In dieser Ansicht ist nichts eingetragen
+history-no-match-body = Keine Aktivität passt zu diesen Filtern.
+history-side-title = Auf dieser Seite
+history-side-range = { $from } bis { $to }
+history-side-rows = Einträge im Verlauf
+history-side-finished = Abgeschlossen
+history-side-episodes = Folgen
+history-side-sessions = Sitzungen
+history-side-shared = Mit dir geteilt

@@ -1,7 +1,7 @@
 //! A tiny kind catalog for use-case tests. The real one lives in the `kinds` crate.
 
 use app::ports::KindCatalog;
-use domain::kind::{KindDescriptor, KindId, ProgressModel};
+use domain::kind::{KindDescriptor, KindGroup, KindId, ProgressModel};
 use serde_json::Value;
 
 pub struct StaticKinds {
@@ -9,12 +9,29 @@ pub struct StaticKinds {
 }
 
 fn descriptor(id: &str, model: ProgressModel, extra: &[&str]) -> KindDescriptor {
+    let group = match id {
+        "movie" | "show" => KindGroup::Watch,
+        "book" => KindGroup::Read,
+        "audiobook" => KindGroup::Listen,
+        _ => KindGroup::Play,
+    };
+    let facets = if id == "movie" {
+        vec!["genres".to_string()]
+    } else {
+        vec![]
+    };
     KindDescriptor {
         id: KindId::new(id).expect("valid id"),
+        group,
         progress_model: model,
         extra_statuses: extra.iter().map(ToString::to_string).collect(),
-        attributes_schema: serde_json::json!({"type": "object"}),
-        facets: vec![],
+        attributes_schema: if id == "book" {
+            serde_json::json!({"type": "object", "properties": {
+                "series": {"type": "string"}, "series_position": {"type": "number"}}})
+        } else {
+            serde_json::json!({"type": "object"})
+        },
+        facets,
         relations: vec![],
         default_connectors: vec![],
     }

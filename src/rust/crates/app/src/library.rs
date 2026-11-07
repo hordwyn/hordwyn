@@ -4,12 +4,16 @@ use domain::ids::{EntryId, EventId, ItemId, ReviewId};
 use domain::kind::Status;
 use domain::library::{LibraryEntry, Rating};
 use domain::list::Visibility;
-use domain::progress::{Progress, ProgressEvent};
+use domain::progress::{Progress, ProgressEvent, StatusChange, effective};
 use domain::review::{Review, validate_review_body};
 use domain::user::Actor;
 
+use crate::error::OptionExt;
 use crate::ports::AppEvent;
-use crate::{App, AppResult};
+use crate::{App, AppError, AppResult};
+
+/// How long after logging an event it can still be undone (hours).
+pub const UNDO_WINDOW_HOURS: i64 = 24;
 
 impl App {
     /// Add an item to the actor's library. Returns the existing entry if already present.
@@ -153,7 +157,8 @@ impl App {
 
     /// Append a progress event. Idempotent per `client_op_id`. Adds the item to the library
     /// and moves the status to `in_progress` (or `completed` for `Finished`) unless the user
-    /// already set a later status.
+    /// already set a later status. The status move is stored on the event, so undo can
+    /// take it back.
     ///
     /// # Errors
     /// Unknown item or progress that does not fit the kind's progress model.
@@ -168,27 +173,36 @@ impl App {
         let item = self.catalog_item(item_id).await?;
         let kind = self.kind(&item.kind)?;
         progress.validate_for(kind.progress_model)?;
+        let mut entry = self.add_to_library(actor, item_id, None).await?;
+        let target = match progress {
+            Progress::Finished => Some(Status::completed()),
+            _ if entry.status.value.as_str() == Status::PLANNED => Some(Status::in_progress()),
+            _ => None,
+        };
+        let status_change = target
+            .filter(|t| entry.status.value != *t)
+            .map(|to| StatusChange {
+                from: entry.status.value.clone(),
+                to,
+                stamp: self.stamp(None),
+            });
+        let now = self.now();
         let event = ProgressEvent {
             id: EventId(self.uuid()),
             user_id: actor.user_id,
             item_id,
-            occurred_at: occurred_at.unwrap_or_else(|| self.now()),
+            occurred_at: occurred_at.unwrap_or(now),
             progress,
             client_op_id,
+            recorded_at: now,
+            status_change,
         };
         let stored = self.repos.progress.append(&event).await?;
         if stored.id != event.id {
             return Ok(stored);
         }
-        let mut entry = self.add_to_library(actor, item_id, None).await?;
-        let target = match stored.progress {
-            Progress::Finished => Some(Status::completed()),
-            _ if entry.status.value.as_str() == Status::PLANNED => Some(Status::in_progress()),
-            _ => None,
-        };
-        if let Some(t) = target
-            && entry.status.value != t
-            && entry.status.set(t, self.stamp(None))
+        if let Some(c) = &stored.status_change
+            && entry.status.set(c.to.clone(), c.stamp)
         {
             self.save_entry(&entry).await?;
         }
@@ -201,10 +215,104 @@ impl App {
         Ok(stored)
     }
 
+    /// Take back one of the actor's recent progress events by appending a compensating
+    /// [`Progress::Undo`] event (append-only, D-12). The status move the event caused is
+    /// reverted while the entry still carries it; a logged play (`Session`) is removed with
+    /// its session. Undoing twice returns the first compensating event.
+    ///
+    /// # Errors
+    /// `NotFound` for someone else's or an unknown event; `Conflict` for an undo event or
+    /// one recorded more than [`UNDO_WINDOW_HOURS`] ago.
+    pub async fn undo_progress(&self, actor: Actor, id: EventId) -> AppResult<ProgressEvent> {
+        let target = self
+            .repos
+            .progress
+            .get(id)
+            .await?
+            .filter(|e| e.user_id == actor.user_id)
+            .found("progress event")?;
+        if matches!(target.progress, Progress::Undo { .. }) {
+            return Err(AppError::Conflict("an undo cannot be undone".into()));
+        }
+        let history = self
+            .repos
+            .progress
+            .for_item(actor.user_id, target.item_id)
+            .await?;
+        if let Some(done) = history
+            .iter()
+            .find(|e| matches!(e.progress, Progress::Undo { event_id } if event_id == id))
+        {
+            return Ok(done.clone());
+        }
+        let now = self.now();
+        if now - target.recorded_at > chrono::Duration::hours(UNDO_WINDOW_HOURS) {
+            return Err(AppError::Conflict("the event is too old to undo".into()));
+        }
+        let undo = ProgressEvent {
+            id: EventId(self.uuid()),
+            user_id: actor.user_id,
+            item_id: target.item_id,
+            occurred_at: now,
+            progress: Progress::Undo { event_id: id },
+            client_op_id: Some(uuid::Uuid::new_v5(&id.0, b"undo")),
+            recorded_at: now,
+            status_change: None,
+        };
+        let stored = self.repos.progress.append(&undo).await?;
+        if stored.id != undo.id {
+            return Ok(stored);
+        }
+        self.revert_status(actor, &target).await?;
+        if let Progress::Session { session_id } = target.progress
+            && let Some(s) = self.repos.sessions.get(session_id).await?
+            && s.owner == actor.user_id
+        {
+            self.repos.sessions.delete(session_id).await?;
+            self.publish_session(&s).await?;
+        }
+        self.publish(AppEvent::entity_updated(
+            "progress_event",
+            stored.id.0,
+            vec![actor.user_id],
+        ))
+        .await;
+        Ok(stored)
+    }
+
+    async fn revert_status(&self, actor: Actor, target: &ProgressEvent) -> AppResult<()> {
+        let Some(c) = &target.status_change else {
+            return Ok(());
+        };
+        if let Some(mut entry) = self
+            .repos
+            .library
+            .get(actor.user_id, target.item_id)
+            .await?
+            && entry.status.value == c.to
+            && entry.status.stamp == c.stamp
+            && entry.status.set(c.from.clone(), self.stamp(None))
+        {
+            self.save_entry(&entry).await?;
+        }
+        Ok(())
+    }
+
+    /// Every stored event of the item, undo events included, oldest first.
+    ///
     /// # Errors
     /// Storage errors.
     pub async fn progress(&self, actor: Actor, item_id: ItemId) -> AppResult<Vec<ProgressEvent>> {
         Ok(self.repos.progress.for_item(actor.user_id, item_id).await?)
+    }
+
+    /// The item's effective history (undone events and undo events left out), oldest first.
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn history(&self, actor: Actor, item_id: ItemId) -> AppResult<Vec<ProgressEvent>> {
+        let all = self.progress(actor, item_id).await?;
+        Ok(effective(&all).into_iter().cloned().collect())
     }
 
     /// Write or replace the actor's review of an item.

@@ -74,6 +74,7 @@ version = "0.1.0"
 dependencies = [
  "app",
  "assets",
+ "async-trait",
  "auth",
  "axum",
  "base64 0.22.1",

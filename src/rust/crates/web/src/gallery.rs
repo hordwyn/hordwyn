@@ -28,6 +28,8 @@ fn Section(#[prop(into)] title: String, children: Children) -> impl IntoView {
     }
 }
 
+// The dev gallery is one long showcase of every component, read top to bottom (DEC-234).
+#[allow(clippy::too_many_lines)]
 #[component]
 pub fn Gallery() -> impl IntoView {
     // the shell provides the toasts and mounts the one Toaster

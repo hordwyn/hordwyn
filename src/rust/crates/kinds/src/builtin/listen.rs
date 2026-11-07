@@ -1,8 +1,11 @@
 use chrono::NaiveDate;
-use domain::kind::{ProgressModel, RelationType};
+use domain::kind::{KindGroup, ProgressModel, RelationType};
 
 use super::attributes;
 use crate::{KindModule, relations, strings};
+
+/// Every kind in this module is in this group.
+const GROUP: KindGroup = KindGroup::Listen;
 
 attributes!(
     /// Attributes of an audiobook.
@@ -24,6 +27,10 @@ impl KindModule for Audiobook {
     type Attributes = AudiobookAttributes;
     const ID: &'static str = "audiobook";
     const PROGRESS_MODEL: ProgressModel = ProgressModel::Timed;
+
+    fn group() -> KindGroup {
+        GROUP
+    }
 
     fn facets() -> Vec<String> {
         strings(&["authors", "narrators", "language"])
@@ -57,6 +64,10 @@ impl KindModule for Podcast {
     const ID: &'static str = "podcast";
     const PROGRESS_MODEL: ProgressModel = ProgressModel::Episodic;
 
+    fn group() -> KindGroup {
+        GROUP
+    }
+
     fn facets() -> Vec<String> {
         strings(&["categories", "language"])
     }
@@ -86,6 +97,10 @@ impl KindModule for Music {
     type Attributes = MusicAttributes;
     const ID: &'static str = "music";
     const PROGRESS_MODEL: ProgressModel = ProgressModel::Timed;
+
+    fn group() -> KindGroup {
+        GROUP
+    }
 
     fn facets() -> Vec<String> {
         strings(&["artists", "release_type", "genres"])

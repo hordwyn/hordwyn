@@ -13,6 +13,7 @@ pub mod net;
 pub mod progress;
 pub mod review;
 pub mod session;
+pub mod tag;
 pub mod user;
 
 pub use error::DomainError;

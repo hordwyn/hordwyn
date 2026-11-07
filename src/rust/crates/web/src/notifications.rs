@@ -123,6 +123,8 @@ fn targets_label(s: &SubscriptionDto, channels: &[ChannelDto]) -> String {
     }
 }
 
+// Pre-phase-1 page, rebuilt (tabs, cards, rules) in UX phase 3; split then (DEC-234).
+#[allow(clippy::too_many_lines)]
 #[component]
 pub fn Notifications() -> impl IntoView {
     let data = Resource::new(|| (), |()| api::notifications());

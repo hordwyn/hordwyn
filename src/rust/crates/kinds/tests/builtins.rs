@@ -100,3 +100,26 @@ fn committed_schemas_are_up_to_date() {
         );
     }
 }
+
+#[test]
+fn every_builtin_kind_is_in_the_group_of_its_module() {
+    use domain::kind::KindGroup;
+    let r = Registry::with_builtins();
+    let expected = [
+        ("movie", KindGroup::Watch),
+        ("show", KindGroup::Watch),
+        ("anime", KindGroup::Watch),
+        ("book", KindGroup::Read),
+        ("manga", KindGroup::Read),
+        ("comic", KindGroup::Read),
+        ("audiobook", KindGroup::Listen),
+        ("podcast", KindGroup::Listen),
+        ("music", KindGroup::Listen),
+        ("video_game", KindGroup::Play),
+        ("visual_novel", KindGroup::Play),
+        ("board_game", KindGroup::Play),
+    ];
+    for (k, group) in expected {
+        assert_eq!(r.get(&id(k)).unwrap().group, group, "{k}");
+    }
+}

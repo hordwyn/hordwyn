@@ -16,6 +16,9 @@ pub enum SheetSide {
     Left,
     #[default]
     Right,
+    /// A bottom sheet on phones (below `md`), the right-hand side panel from `md` on
+    /// (design.md 7.3: log sheets).
+    Adaptive,
 }
 
 /// Controls Tab can reach inside the panel.
@@ -82,8 +85,15 @@ fn Panel(
     panel_class: &'static str,
     class: MaybeProp<String>,
     return_to: Option<String>,
+    can_close: Option<Callback<(), bool>>,
     children: ChildrenFn,
 ) -> impl IntoView {
+    // every way out (Escape, backdrop, close button) asks `can_close` first
+    let close = move || {
+        if can_close.is_none_or(|c| c.run(())) {
+            open.set(false);
+        }
+    };
     let base = slug(&title);
     let title_id = format!("{base}-title");
     let desc_id = description.as_ref().map(|_| format!("{base}-description"));
@@ -109,7 +119,7 @@ fn Panel(
     let children = StoredValue::new(children);
     view! {
         <Show when=move || open.get()>
-            <div class="fixed inset-0 z-50 bg-black/60" aria-hidden="true" on:click=move |_| open.set(false)></div>
+            <div class="fixed inset-0 z-50 bg-black/60" aria-hidden="true" on:click=move |_| close()></div>
             <div
                 node_ref=panel
                 role="dialog"
@@ -121,7 +131,7 @@ fn Panel(
                     match ev.key().as_str() {
                         "Escape" => {
                             ev.stop_propagation();
-                            open.set(false);
+                            close();
                         }
                         "Tab" => {
                             if let Some(p) = panel.get_untracked() {
@@ -147,7 +157,7 @@ fn Panel(
                 <button
                     type="button"
                     aria-label=close_label.clone()
-                    on:click=move |_| open.set(false)
+                    on:click=move |_| close()
                     class="absolute right-4 top-4 rounded-sm opacity-70 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                     <Icon name=IconName::Close/>
@@ -167,6 +177,10 @@ pub fn Dialog(
     #[prop(into, optional)] description: Option<String>,
     #[prop(into, optional)] class: MaybeProp<String>,
     #[prop(into, optional)] return_to: Option<String>,
+    /// Asked before the panel closes; `false` keeps it open (a sheet with unsaved changes
+    /// shows its discard question instead).
+    #[prop(optional, into)]
+    can_close: Option<Callback<(), bool>>,
     children: ChildrenFn,
 ) -> impl IntoView {
     view! {
@@ -178,6 +192,7 @@ pub fn Dialog(
             panel_class="left-1/2 top-1/2 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-lg"
             class=class
             return_to=return_to
+            can_close=can_close
             children=children
         />
     }
@@ -193,11 +208,20 @@ pub fn Sheet(
     #[prop(into, optional)] description: Option<String>,
     #[prop(into, optional)] class: MaybeProp<String>,
     #[prop(into, optional)] return_to: Option<String>,
+    /// Asked before the panel closes; `false` keeps it open (a sheet with unsaved changes
+    /// shows its discard question instead).
+    #[prop(optional, into)]
+    can_close: Option<Callback<(), bool>>,
     children: ChildrenFn,
 ) -> impl IntoView {
     let panel_class = match side {
         SheetSide::Left => "inset-y-0 left-0 h-full w-3/4 max-w-sm border-r",
         SheetSide::Right => "inset-y-0 right-0 h-full w-3/4 max-w-sm border-l",
+        SheetSide::Adaptive => {
+            "inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto rounded-t-xl border-t \
+             md:inset-x-auto md:inset-y-0 md:right-0 md:left-auto md:h-full md:max-h-none md:w-full \
+             md:max-w-md md:rounded-none md:border-t-0 md:border-l"
+        }
     };
     view! {
         <Panel
@@ -208,6 +232,7 @@ pub fn Sheet(
             panel_class=panel_class
             class=class
             return_to=return_to
+            can_close=can_close
             children=children
         />
     }

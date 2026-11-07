@@ -40,7 +40,8 @@ pub async fn item(s: &ApiState, id: &str) -> ApiResult<CatalogItemDto> {
     Ok(dto::item(s, &item).await)
 }
 
-/// Item page: item (refresh queued if stale), the viewer's entry, history, attribution.
+/// Item page: item (refresh queued if stale), the viewer's entry, effective history,
+/// attribution, tags, progress summary and next step.
 ///
 /// # Errors
 /// Unknown item.
@@ -48,7 +49,14 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
     let item_id = parse_id(id, ItemId)?;
     let item = s.app.item_detail(item_id).await?;
     let entry = s.app.entry(a, item_id).await?;
-    let progress = s.app.progress(a, item_id).await?;
+    let progress = s.app.history(a, item_id).await?;
+    // the row from the entry and history already read (UX1-10)
+    let state = match &entry {
+        Some(e) => Some(crate::browse::item_state(
+            s.app.entry_row(e.clone(), item.clone(), &progress).await?,
+        )),
+        None => None,
+    };
     let namespaces: BTreeSet<String> = item
         .external_ids
         .iter()
@@ -64,6 +72,9 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
         entry: entry.as_ref().map(dto::entry),
         progress: progress.iter().map(dto::progress).collect(),
         sources,
+        tags: state.as_ref().map(|x| x.2.clone()).unwrap_or_default(),
+        summary: state.as_ref().map(|x| x.0.clone()),
+        next_step: state.map(|x| x.1),
     })
 }
 
@@ -250,6 +261,46 @@ pub async fn progress(s: &ApiState, a: Actor, item_id: &str) -> ApiResult<Vec<Pr
     Ok(events.iter().map(dto::progress).collect())
 }
 
+/// Clock skew allowed for a client timestamp ahead of the server (UX1-5).
+pub const CLOCK_SKEW_MINUTES: i64 = 5;
+/// Longest play: a week.
+pub const MAX_PLAY_MINUTES: u32 = 7 * 24 * 60;
+/// Longest play location, in characters.
+pub const MAX_LOCATION_CHARS: usize = 200;
+
+/// An optional RFC 3339 timestamp from a client: 400 if it does not parse, 422 `invalid` if
+/// it lies more than [`CLOCK_SKEW_MINUTES`] after the server clock.
+///
+/// # Errors
+/// As above.
+pub(crate) fn client_time(
+    s: &ApiState,
+    field: &'static str,
+    value: Option<&str>,
+) -> ApiResult<Option<domain::Timestamp>> {
+    let Some(v) = value else {
+        return Ok(None);
+    };
+    let t = chrono::DateTime::parse_from_rfc3339(v)
+        .map(|d| d.with_timezone(&chrono::Utc))
+        .map_err(|_| ApiError::bad_request(format!("{field} must be RFC 3339")))?;
+    if t > s.app.clock.now() + chrono::Duration::minutes(CLOCK_SKEW_MINUTES) {
+        return Err(invalid(field, "lies in the future".into()));
+    }
+    Ok(Some(t))
+}
+
+fn invalid(field: &'static str, reason: String) -> ApiError {
+    app::AppError::from(domain::DomainError::invalid(field, reason)).into()
+}
+
+fn check_len(field: &'static str, value: Option<&String>, max: usize) -> ApiResult<()> {
+    if value.is_some_and(|v| v.chars().count() > max) {
+        return Err(invalid(field, format!("longer than {max} characters")));
+    }
+    Ok(())
+}
+
 /// Log progress; with `with` (companion ids) a session with those companions and the user's
 /// self-companion is logged as well ("watched with"). Replays with the same `client_op_id`
 /// are no-ops.
@@ -265,14 +316,7 @@ pub async fn log_progress(
     let item_id = parse_id(item_id, ItemId)?;
     let progress: Progress = serde_json::from_value(b.progress)
         .map_err(|e| ApiError::bad_request(format!("progress: {e}")))?;
-    let occurred_at = b
-        .occurred_at
-        .map(|t| {
-            chrono::DateTime::parse_from_rfc3339(&t)
-                .map(|d| d.with_timezone(&chrono::Utc))
-                .map_err(|_| ApiError::bad_request("occurred_at must be RFC 3339"))
-        })
-        .transpose()?;
+    let occurred_at = client_time(s, "occurred_at", b.occurred_at.as_deref())?;
     let op = b.client_op_id.map(|o| parse_id(&o, |u| u)).transpose()?;
     if !b.with.is_empty() {
         let me = s.app.user(a.user_id).await?;
@@ -295,6 +339,55 @@ pub async fn log_progress(
         .app
         .log_progress(a, item_id, progress, occurred_at, op)
         .await?;
+    s.pin_cover(item_id).await;
+    Ok(dto::progress(&e))
+}
+
+/// Log a play (sessions progress model) with players, scores and the winner; answers the
+/// play's progress event.
+///
+/// # Errors
+/// Bad ids or timestamp, foreign companions, a kind without plays.
+pub async fn log_play(
+    s: &ApiState,
+    a: Actor,
+    item_id: &str,
+    b: contracts::NewPlayDto,
+) -> ApiResult<ProgressEventDto> {
+    let item_id = parse_id(item_id, ItemId)?;
+    let mut players = Vec::new();
+    for p in &b.players {
+        let mut part = Participant::new(parse_id(&p.companion_id, CompanionId)?);
+        part.score = p.score;
+        part.winner = p.winner;
+        players.push(part);
+    }
+    if players.is_empty() {
+        players.push(Participant::new(
+            s.app.user(a.user_id).await?.self_companion,
+        ));
+    }
+    let mut play = app::NewSession::new(item_id, players);
+    play.started_at = client_time(s, "started_at", b.started_at.as_deref())?;
+    if b.duration_minutes.is_some_and(|m| m > MAX_PLAY_MINUTES) {
+        return Err(invalid(
+            "duration_minutes",
+            format!("longer than {MAX_PLAY_MINUTES} minutes"),
+        ));
+    }
+    check_len("location", b.location.as_ref(), MAX_LOCATION_CHARS)?;
+    check_len("notes", b.notes.as_ref(), domain::review::MAX_REVIEW_CHARS)?;
+    play.duration_minutes = b.duration_minutes;
+    play.location = b.location.filter(|l| !l.trim().is_empty());
+    play.notes = b.notes.filter(|n| !n.trim().is_empty());
+    play.coop_outcome = match b.coop.as_deref() {
+        None | Some("") => None,
+        Some("won") => Some(domain::session::CoopOutcome::Won),
+        Some("lost") => Some(domain::session::CoopOutcome::Lost),
+        Some(_) => return Err(ApiError::bad_request("coop must be `won` or `lost`")),
+    };
+    play.client_op_id = b.client_op_id.map(|o| parse_id(&o, |u| u)).transpose()?;
+    let (_, e) = s.app.log_play(a, play).await?;
     s.pin_cover(item_id).await;
     Ok(dto::progress(&e))
 }

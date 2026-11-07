@@ -544,6 +544,24 @@ fn toaster_sits_above_the_mobile_tab_bar() {
     assert!(html.contains("var(--tab-bar-height)"), "{html}");
 }
 
+/// design.md 7.1: an undoable toast carries its action as a real button inside the live
+/// region, next to the dismiss button.
+#[test]
+fn toast_with_an_action_renders_its_button() {
+    let html = render(|| {
+        let toasts = provide_toasts();
+        toasts.push_action(
+            "Logged: Watched",
+            Some("Dune".into()),
+            ToastAction::new("Undo", Callback::new(|()| {})),
+        );
+        view! { <Toaster dismiss_label="Dismiss"/> }
+    });
+    assert!(html.contains(">Undo<"), "{html}");
+    assert!(html.contains("Logged: Watched"), "{html}");
+    assert!(html.contains("aria-label=\"Dismiss\""), "{html}");
+}
+
 /// UX0-3 (WCAG 2.5.3): inside a labelled button the initials are decoration, drawn by CSS,
 /// so the visible text never contradicts the button's name.
 #[test]
@@ -558,4 +576,29 @@ fn decorative_avatar_has_no_text_of_its_own() {
         plain.contains("role=\"img\"") && plain.contains(">AT<"),
         "{plain}"
     );
+}
+
+#[test]
+fn adaptive_sheet_is_a_bottom_sheet_on_phones_and_a_side_panel_on_desktop() {
+    let html = render(|| {
+        let open = RwSignal::new(true);
+        view! {
+            <Sheet open=open title="Log with details" close_label="Close" side=SheetSide::Adaptive>
+                <p>"body"</p>
+            </Sheet>
+        }
+    });
+    assert!(html.contains("role=\"dialog\""), "{html}");
+    assert!(html.contains("aria-modal=\"true\""), "{html}");
+    // phones: anchored to the bottom, scrolls inside; desktop: the right-hand side panel
+    for class in [
+        "bottom-0",
+        "inset-x-0",
+        "overflow-y-auto",
+        "rounded-t-xl",
+        "md:right-0",
+        "md:h-full",
+    ] {
+        assert!(html.contains(class), "{class}: {html}");
+    }
 }

@@ -90,6 +90,13 @@ pub trait Backend: Send + Sync {
         item_id: &str,
         p: NewProgressDto,
     ) -> BResult<ProgressEventDto>;
+    /// A play with players, scores and the winner (sessions progress model).
+    async fn log_play(
+        &self,
+        token: &str,
+        item_id: &str,
+        p: contracts::NewPlayDto,
+    ) -> BResult<ProgressEventDto>;
     async fn rate(
         &self,
         token: &str,
@@ -152,4 +159,43 @@ pub trait Backend: Send + Sync {
         b: contracts::SubscriptionDto,
     ) -> BResult<contracts::SubscriptionDto>;
     async fn delete_subscription(&self, token: &str, id: &str) -> BResult<()>;
+
+    // UX phase 1: library, Home, History, Stats
+    async fn kinds(&self, token: &str) -> BResult<contracts::KindsDto>;
+    async fn library_counts(&self, token: &str) -> BResult<contracts::LibraryCountsDto>;
+    async fn library_query(
+        &self,
+        token: &str,
+        q: contracts::LibraryQueryDto,
+    ) -> BResult<contracts::LibraryRowsDto>;
+    async fn set_status(
+        &self,
+        token: &str,
+        item_id: &str,
+        status: &str,
+    ) -> BResult<LibraryEntryDto>;
+    async fn tags(&self, token: &str) -> BResult<Vec<contracts::TagDto>>;
+    async fn add_tag(&self, token: &str, item_id: &str, tag: &str) -> BResult<Vec<String>>;
+    async fn remove_tag(&self, token: &str, item_id: &str, tag: &str) -> BResult<Vec<String>>;
+    async fn rename_tag(&self, token: &str, from: &str, to: &str) -> BResult<u64>;
+    async fn set_entry_note(
+        &self,
+        token: &str,
+        item_id: &str,
+        note: Option<String>,
+    ) -> BResult<LibraryEntryDto>;
+    async fn undo_progress(&self, token: &str, event_id: &str) -> BResult<ProgressEventDto>;
+    async fn activity(
+        &self,
+        token: &str,
+        q: contracts::ActivityQueryDto,
+    ) -> BResult<contracts::ActivityPageDto>;
+    async fn stats_totals(&self, token: &str) -> BResult<contracts::StatsTotalsDto>;
+    async fn stats_series(
+        &self,
+        token: &str,
+        group: Option<String>,
+        bucket: Option<String>,
+    ) -> BResult<contracts::StatsSeriesDto>;
+    async fn home(&self, token: &str) -> BResult<contracts::HomeDto>;
 }

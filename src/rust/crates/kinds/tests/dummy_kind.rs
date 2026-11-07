@@ -93,3 +93,15 @@ async fn dummy_kind_works_end_to_end_through_app() {
     let entry = env.app.entry(me, item.id).await.unwrap().unwrap();
     assert_eq!(entry.status.value, Status::completed());
 }
+
+#[test]
+fn a_kind_without_a_group_is_in_other() {
+    use app::ports::KindCatalog;
+    use domain::kind::KindGroup;
+    let mut registry = Registry::empty();
+    registry.register::<Wine>();
+    let d = registry
+        .get(&KindId::new("ext:test/wine").unwrap())
+        .unwrap();
+    assert_eq!(d.group, KindGroup::Other);
+}

@@ -5,6 +5,7 @@
 //! as `search.results` events (D-6).
 #![deny(unsafe_code)]
 
+pub mod browse;
 mod dto;
 mod error;
 mod extract;

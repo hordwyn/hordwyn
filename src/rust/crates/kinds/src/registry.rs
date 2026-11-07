@@ -66,6 +66,7 @@ impl Registry {
         }
         let descriptor = KindDescriptor {
             id: id.clone(),
+            group: K::group(),
             progress_model: K::PROGRESS_MODEL,
             extra_statuses: K::extra_statuses(),
             attributes_schema: schema,

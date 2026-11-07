@@ -2,9 +2,8 @@
 //! requests addressed to the user; the privacy switch; sessions logged and shared with the
 //! user ("copy to my log"); the public page of a link-shared list.
 
-use contracts::{CompanionDto, LoggedSessionDto};
+use contracts::CompanionDto;
 use leptos::prelude::*;
-use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
 use ui::{
     Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, FormField, Input, Label, Select,
@@ -64,6 +63,8 @@ fn options(cs: &[CompanionDto], with_self: bool) -> Vec<SelectOption> {
     .collect()
 }
 
+// Pre-phase-1 page, rebuilt as the People page in UX phase 3; split then (DEC-234).
+#[allow(clippy::too_many_lines)]
 #[component]
 pub fn Companions() -> impl IntoView {
     let data = Resource::new(|| (), |()| api::companions());
@@ -289,99 +290,6 @@ fn Privacy() -> impl IntoView {
                     on:change=move |ev| { let v = event_target_checked(&ev); on.set(v); save.dispatch(v); }/>
                 <Label r#for="share-sessions">{t("privacy-share-sessions")}</Label>
             </div>
-        </section>
-    }
-}
-
-fn session_row(s: LoggedSessionDto, claim: Option<Action<String, ()>>) -> impl IntoView {
-    let i18n = use_i18n();
-    let date = i18n.date(&s.started_at);
-    let names = s
-        .participants
-        .iter()
-        .map(|p| {
-            let n = if p.is_me {
-                i18n.t("companions-you-short")
-            } else {
-                p.name.clone()
-            };
-            if p.winner {
-                i18n.t_args("sessions-winner", &[("name", n.into())])
-            } else {
-                n
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let by =
-        (!s.mine).then(|| i18n.t_args("sessions-by", &[("name", s.owner_name.clone().into())]));
-    let id = s.id.clone();
-    view! {
-        <li class="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
-            <span class="flex-1">
-                <A href=format!("/items/{}", s.item_id) attr:class="font-medium underline-offset-2 hover:underline">{s.item_title.clone()}</A>
-                <span class="ml-2 text-sm text-muted-foreground">{date}</span>
-                <span class="block text-sm">{names}</span>
-                {by.map(|b| view! { <span class="block text-xs text-muted-foreground">{b}</span> })}
-            </span>
-            {claim.map(|a| view! {
-                <Button size=ButtonSize::Sm variant=ButtonVariant::Outline on:click=move |_| { a.dispatch(id.clone()); }>
-                    {t("sessions-claim")}
-                </Button>
-            })}
-        </li>
-    }
-}
-
-/// History of sessions: the user's own, and those of others the user took part in.
-#[component]
-pub fn Sessions() -> impl IntoView {
-    let mine = Resource::new(|| (), |()| api::sessions(false));
-    let shared = Resource::new(|| (), |()| api::sessions(true));
-    refetch_on_update(move || mine.refetch());
-    refetch_on_update(move || shared.refetch());
-    let message = RwSignal::new(None::<String>);
-    let claim = Action::new(move |id: &String| {
-        let id = id.clone();
-        async move {
-            match api::claim(id).await {
-                Ok(_) => message.set(Some(t("sessions-claimed"))),
-                Err(e) => message.set(Some(share_error(&e))),
-            }
-            mine.refetch();
-        }
-    });
-    view! {
-        <PageTitle text=t("sessions-title")/>
-        <p role="status" class="mb-4 text-sm">{move || message.get()}</p>
-        <section class="mb-8" aria-labelledby="shared-title">
-            <h2 id="shared-title" class="mb-2 font-medium">{t("sessions-shared")}</h2>
-            <Suspense fallback=|| view! { <Skeleton class="h-16 w-full"/> }>
-                {move || shared.get().map(|r| match r {
-                    Err(e) if needs_sign_in(&e) => { go("/sign-in"); ().into_any() }
-                    Err(e) => view! { <p role="alert">{share_error(&e)}</p> }.into_any(),
-                    Ok(list) if list.is_empty() => view! { <p class="text-sm text-muted-foreground">{t("sessions-shared-empty")}</p> }.into_any(),
-                    Ok(list) => view! {
-                        <ul class="flex flex-col gap-2" aria-labelledby="shared-title">
-                            {list.into_iter().map(|s| session_row(s, Some(claim))).collect_view()}
-                        </ul>
-                    }.into_any(),
-                })}
-            </Suspense>
-        </section>
-        <section aria-labelledby="mine-title">
-            <h2 id="mine-title" class="mb-2 font-medium">{t("sessions-mine")}</h2>
-            <Suspense fallback=|| view! { <Skeleton class="h-16 w-full"/> }>
-                {move || mine.get().and_then(Result::ok).map(|list| if list.is_empty() {
-                    view! { <p class="text-sm text-muted-foreground">{t("sessions-mine-empty")}</p> }.into_any()
-                } else {
-                    view! {
-                        <ul class="flex flex-col gap-2" aria-labelledby="mine-title">
-                            {list.into_iter().map(|s| session_row(s, None)).collect_view()}
-                        </ul>
-                    }.into_any()
-                })}
-            </Suspense>
         </section>
     }
 }

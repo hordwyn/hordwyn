@@ -1,8 +1,11 @@
 use chrono::NaiveDate;
-use domain::kind::{ProgressModel, RelationType};
+use domain::kind::{KindGroup, ProgressModel, RelationType};
 
 use super::attributes;
 use crate::{KindModule, relations, strings};
+
+/// Every kind in this module is in this group.
+const GROUP: KindGroup = KindGroup::Play;
 
 attributes!(
     /// Attributes of a video game.
@@ -22,6 +25,10 @@ impl KindModule for VideoGame {
     type Attributes = VideoGameAttributes;
     const ID: &'static str = "video_game";
     const PROGRESS_MODEL: ProgressModel = ProgressModel::Sessions;
+
+    fn group() -> KindGroup {
+        GROUP
+    }
 
     /// Games without an end (online, sandbox) are never "completed".
     fn extra_statuses() -> Vec<String> {
@@ -67,6 +74,10 @@ impl KindModule for VisualNovel {
     const ID: &'static str = "visual_novel";
     const PROGRESS_MODEL: ProgressModel = ProgressModel::Sessions;
 
+    fn group() -> KindGroup {
+        GROUP
+    }
+
     fn facets() -> Vec<String> {
         strings(&["languages", "platforms", "tags"])
     }
@@ -104,6 +115,10 @@ impl KindModule for BoardGame {
     type Attributes = BoardGameAttributes;
     const ID: &'static str = "board_game";
     const PROGRESS_MODEL: ProgressModel = ProgressModel::Sessions;
+
+    fn group() -> KindGroup {
+        GROUP
+    }
 
     fn facets() -> Vec<String> {
         strings(&[

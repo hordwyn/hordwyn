@@ -50,11 +50,50 @@ impl App {
     /// # Errors
     /// Unknown item, foreign or merged companions, duplicate participants.
     pub async fn log_session(&self, actor: Actor, new: NewSession) -> AppResult<Session> {
+        Ok(self.log_session_event(actor, new).await?.0)
+    }
+
+    /// Log a play of a kind with the `Sessions` progress model and answer the session with
+    /// its progress event (the item page offers Undo on it).
+    ///
+    /// # Errors
+    /// As [`Self::log_session`]; a kind with another progress model is a model mismatch.
+    pub async fn log_play(
+        &self,
+        actor: Actor,
+        new: NewSession,
+    ) -> AppResult<(Session, domain::progress::ProgressEvent)> {
+        let item = self.catalog_item(new.item_id).await?;
+        let model = self.kind(&item.kind)?.progress_model;
+        if model != ProgressModel::Sessions {
+            return Err(domain::DomainError::ProgressModelMismatch {
+                model: model.as_str().into(),
+                got: ProgressModel::Sessions.as_str().into(),
+            }
+            .into());
+        }
+        let (session, event) = self.log_session_event(actor, new).await?;
+        let event = event.ok_or(AppError::NotFound("progress event"))?;
+        Ok((session, event))
+    }
+
+    async fn log_session_event(
+        &self,
+        actor: Actor,
+        new: NewSession,
+    ) -> AppResult<(Session, Option<domain::progress::ProgressEvent>)> {
         let item = self.catalog_item(new.item_id).await?;
         let kind = self.kind(&item.kind)?;
         self.check_participants(actor, &new.participants).await?;
+        let op = new.client_op_id;
+        // the client op id is the idempotency key of the whole command: a replay names the
+        // same session (UX1-3); the user id keeps the ids of two users apart
+        let id = op.map_or_else(
+            || SessionId(self.uuid()),
+            |o| SessionId(uuid::Uuid::new_v5(&o, actor.user_id.0.as_bytes())),
+        );
         let session = Session {
-            id: SessionId(self.uuid()),
+            id,
             owner: actor.user_id,
             item_id: new.item_id,
             started_at: new.started_at.unwrap_or_else(|| self.now()),
@@ -66,24 +105,57 @@ impl App {
             incomplete: new.incomplete,
         };
         session.validate()?;
-        self.repos.sessions.insert(&session).await?;
-        if kind.progress_model == ProgressModel::Sessions {
+        let plays = kind.progress_model == ProgressModel::Sessions;
+        let play_event = |s: &Session| {
             self.log_progress(
                 actor,
-                session.item_id,
-                Progress::Session {
-                    session_id: session.id,
-                },
-                Some(session.started_at),
-                new.client_op_id,
+                s.item_id,
+                Progress::Session { session_id: s.id },
+                Some(s.started_at),
+                op,
             )
-            .await?;
+        };
+        if op.is_some()
+            && let Some(existing) = self.repos.sessions.get(id).await?
+            && existing.owner == actor.user_id
+        {
+            let event = if plays {
+                Some(play_event(&existing).await?)
+            } else {
+                None
+            };
+            return Ok((existing, event));
+        }
+        let event = if plays {
+            // the event first: a replay of a play undone since (its session deleted) answers
+            // the undone event and stores nothing
+            let e = play_event(&session).await?;
+            if op.is_some() && self.is_undone(actor, &e).await? {
+                return Ok((session, Some(e)));
+            }
+            Some(e)
         } else {
             self.add_to_library(actor, session.item_id, None).await?;
-        }
+            None
+        };
+        self.repos.sessions.insert(&session).await?;
         self.publish_session(&session).await?;
         self.announce_session(&session, &item).await?;
-        Ok(session)
+        Ok((session, event))
+    }
+
+    async fn is_undone(
+        &self,
+        actor: Actor,
+        e: &domain::progress::ProgressEvent,
+    ) -> AppResult<bool> {
+        Ok(self
+            .repos
+            .progress
+            .for_item(actor.user_id, e.item_id)
+            .await?
+            .iter()
+            .any(|x| matches!(x.progress, Progress::Undo { event_id } if event_id == e.id)))
     }
 
     /// Tell linked participants that a session was shared with them (unless the owner
@@ -327,7 +399,7 @@ impl App {
         Ok(ids)
     }
 
-    async fn publish_session(&self, s: &Session) -> AppResult<()> {
+    pub(crate) async fn publish_session(&self, s: &Session) -> AppResult<()> {
         let mut audience = vec![s.owner];
         // linked participants only hear about it if the owner shares sessions (G2-9)
         let shared = self.shares_sessions(s.owner).await?;

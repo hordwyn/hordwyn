@@ -23,6 +23,33 @@ fn focus_item(menu: &web_sys::HtmlElement, index: usize) {
     }
 }
 
+/// Arrow keys, Home and End move the active item (wrapping); Escape and Tab close the menu.
+fn menu_keys(
+    active: RwSignal<usize>,
+    count: usize,
+    menu_ref: NodeRef<html::Div>,
+    close: impl Fn() + Copy + 'static,
+) -> impl Fn(leptos::ev::KeyboardEvent) + Copy + 'static {
+    move |ev: leptos::ev::KeyboardEvent| {
+        let next = match ev.key().as_str() {
+            "ArrowDown" => (active.get_untracked() + 1) % count.max(1),
+            "ArrowUp" => (active.get_untracked() + count.max(1) - 1) % count.max(1),
+            "Home" => 0,
+            "End" => count.saturating_sub(1),
+            "Escape" | "Tab" => {
+                close();
+                return;
+            }
+            _ => return,
+        };
+        ev.prevent_default();
+        active.set(next);
+        if let Some(menu) = menu_ref.get_untracked() {
+            focus_item(&menu, next);
+        }
+    }
+}
+
 #[component]
 pub fn DropdownMenu(
     /// Accessible name of the trigger and id prefix.
@@ -30,14 +57,21 @@ pub fn DropdownMenu(
     label: String,
     items: Vec<MenuItem>,
     #[prop(into, optional)] class: MaybeProp<String>,
+    /// Element id prefix (default: from `label`); give one when several menus share a label.
+    #[prop(into, optional)]
+    id: Option<String>,
+    /// Extra classes for the trigger button (for example a background over an image).
+    #[prop(into, optional)]
+    trigger_class: MaybeProp<String>,
     /// Trigger content (for example an icon); defaults to `label`.
     #[prop(optional)]
     trigger: Option<Children>,
 ) -> impl IntoView {
     let open = RwSignal::new(false);
     let active = RwSignal::new(0usize);
-    let base = slug(&label);
+    let base = id.unwrap_or_else(|| slug(&label));
     let menu_id = format!("{base}-menu");
+    let panel_id = menu_id.clone();
     let trigger_ref = NodeRef::<html::Button>::new();
     let menu_ref = NodeRef::<html::Div>::new();
     let count = items.len();
@@ -55,24 +89,7 @@ pub fn DropdownMenu(
             let _ = t.focus();
         }
     };
-    let on_menu_key = move |ev: leptos::ev::KeyboardEvent| {
-        let next = match ev.key().as_str() {
-            "ArrowDown" => (active.get_untracked() + 1) % count.max(1),
-            "ArrowUp" => (active.get_untracked() + count.max(1) - 1) % count.max(1),
-            "Home" => 0,
-            "End" => count.saturating_sub(1),
-            "Escape" | "Tab" => {
-                close();
-                return;
-            }
-            _ => return,
-        };
-        ev.prevent_default();
-        active.set(next);
-        if let Some(menu) = menu_ref.get_untracked() {
-            focus_item(&menu, next);
-        }
-    };
+    let on_menu_key = menu_keys(active, count, menu_ref, close);
     let trigger_label = label.clone();
     view! {
         <div class=move || cn(&["relative inline-block", &class.get().unwrap_or_default()])>
@@ -94,7 +111,10 @@ pub fn DropdownMenu(
                         open.set(true);
                     }
                 }
-                class="inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                class=move || cn(&[
+                    "inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer",
+                    &trigger_class.get().unwrap_or_default(),
+                ])
             >
                 {match trigger {
                     Some(t) => t().into_any(),
@@ -104,7 +124,7 @@ pub fn DropdownMenu(
             <Show when=move || open.get()>
                 <div
                     node_ref=menu_ref
-                    id=format!("{}-menu", slug(&label))
+                    id=panel_id.clone()
                     role="menu"
                     aria-label=label.clone()
                     on:keydown=on_menu_key

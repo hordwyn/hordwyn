@@ -32,7 +32,104 @@ auth-error-invalid_invite = This invite is not valid any more.
 error-generic = Something went wrong. Please try again.
 
 library-title = Library
-library-empty = Your library is empty. Press Ctrl+K to search for something to add.
+library-empty = Your library is empty
+library-empty-body = Search for a movie, show, book or game and add it. Ctrl+K opens the search on every page.
+library-find = Find something
+library-add = Add
+library-group = Group
+library-kinds = Kinds
+library-kinds-all = All kinds
+library-status = Status
+library-status-all = All
+library-view = View
+library-view-grid = Grid
+library-view-list = List
+library-sort = Sort
+library-sort-last-activity = Last activity
+library-sort-title = Title
+library-sort-added = Added
+library-sort-year = Year
+library-sort-rating = Your rating
+library-sort-plays = Plays
+library-sort-reverse = Reverse the order
+library-filter = Filter by title or note
+library-filter-placeholder = Filter...
+library-filters = Filters
+library-filters-active = { $count ->
+    [one] one active
+   *[other] { $count } active
+}
+library-tags = Tags
+library-tags-none = No tags yet. Add them from the menu on a card.
+library-facets = Filter { $kind } by
+library-facets-pick = Choose one kind above to filter by genre and other details.
+library-facet-any = Any
+library-active = Active filters
+library-remove-filter = Remove filter { $filter }
+library-filter-tag = Tag: { $tag }
+library-filter-facet = { $name }: { $value }
+library-filter-text = Text: { $text }
+library-clear = Clear filters
+library-no-match = Nothing matches these filters
+library-no-match-body = Active: { $filters }. Clear the filters or look in another status.
+library-show-status = Show { $status } instead
+library-results = Entries
+library-showing = Showing { $shown } of { $total }
+library-error = Your library could not be loaded.
+library-retry = Try again
+library-loading = Loading your library...
+library-actions = Actions for { $title }
+library-open = Open
+library-mark = Mark as { $status }
+library-edit-tags = Edit tags
+library-tags-title = Tags for { $title }
+library-tag-new = New tag
+library-tag-add = Add tag
+library-tag-remove = Remove tag { $tag }
+library-col-title = Title
+library-col-kind = Kind
+library-col-progress = Progress
+library-col-rating = Rating
+library-col-tags = Tags
+library-col-activity = Last activity
+library-col-next = Next step
+library-rating-value = { $stars } of 5
+library-no-rating = Not rated
+library-status-changed = Marked as { $status }
+library-next-step-named = { $step }: { $title }
+library-logged = Logged: { $step }
+library-undo = Undo
+library-undone = Undone
+library-step-failed = That did not work: { $error }
+library-progress = Progress
+library-progress-episodes = { $done } of { $total } episodes
+library-progress-pages = Page { $page } of { $pages }
+library-progress-percent = { $percent }% done
+library-facet-genres = Genre
+library-facet-authors = Author
+library-facet-narrators = Narrator
+library-facet-language = Language
+library-facet-languages = Language
+library-facet-original_language = Original language
+library-facet-categories = Category
+library-facet-artists = Artist
+library-facet-release_type = Release type
+library-facet-platforms = Platform
+library-facet-game_modes = Game mode
+library-facet-tags = Source tag
+library-facet-subjects = Subject
+library-facet-publishing_status = Publishing status
+library-facet-publisher = Publisher
+library-facet-series = Series
+library-facet-network = Network
+library-facet-airing_status = Airing status
+library-facet-format = Format
+library-facet-studios = Studio
+library-facet-players_min = Minimum players
+library-facet-players_max = Maximum players
+library-facet-players_best = Best player count
+library-facet-mechanics = Mechanic
+library-facet-weight = Weight
 library-count = { $count ->
     [one] One item
    *[other] { $count } items
@@ -43,6 +140,7 @@ status-in_progress = In progress
 status-completed = Completed
 status-paused = Paused
 status-dropped = Dropped
+status-endless = Endless
 
 kind-movie = Movie
 kind-show = Show
@@ -57,11 +155,28 @@ kind-visual_novel = Visual novel
 kind-comic = Comic
 kind-board_game = Board game
 
+# activity groups (design.md 3.1)
+kind-group-all = All
+kind-group-watch = Watch
+kind-group-read = Read
+kind-group-listen = Listen
+kind-group-play = Play
+kind-group-other = Other
+
+# next step buttons (design.md 3.4); the server names the key
+next-step-watched = Watched
+next-step-watched-again = Watched again
+next-step-finished = Finished
+next-step-finished-again = Finished again
+next-step-episode = Watched S{ $season } E{ $episode }
+next-step-episode-listened = Listened to S{ $season } E{ $episode }
+next-step-caught-up = Up to date
+next-step-update-page = Update page
+next-step-update-position = Update position
+next-step-log-play = Log a play
+next-step-log-session = Log a session
+
 item-add = Add to library
-item-in-library = In your library
-item-mark-done = Mark as completed
-item-mark-done-with = Mark as completed with
-item-done-logged = Logged.
 item-rating = Your rating
 item-rate = Rate { $stars } of 5
 item-history = History
@@ -70,6 +185,119 @@ item-loading-details = Fetching details...
 item-source = Source: { $name }
 item-cover-alt = Cover of { $title }
 item-lists = Add to list
+item-original-title = Original title: { $title }
+item-facts = Entry facts
+item-status = Status
+item-progress = Progress
+item-not-started = Not started
+item-not-rated = Not rated
+item-rated = { $stars } of 5
+item-more-facts = More facts
+item-more-facts-summary = Added, started, last logged
+item-added = Added
+item-started = Started
+item-last = Last logged
+item-plays = Plays
+item-rewatches = Rewatches
+item-plays-count = { $count ->
+    [one] One play
+   *[other] { $count } plays
+}
+item-actions = More actions for { $title }
+item-action-bar = Next step
+item-with = With...
+item-with-named = Log with details: { $title }
+item-tags = Tags
+item-edit-tags = Edit tags
+item-lists-title = Lists
+item-added-to-list = Added to { $list }.
+item-sections = Sections
+item-section-episodes = Episodes
+item-section-about = About
+item-section-notes = Notes
+item-about-empty = No details yet.
+item-ids = Identifiers:
+item-note = Private note
+item-note-hint = Only you see this note.
+item-note-save = Save note
+item-note-saved = Note saved.
+
+# log sheets and inline loggers of the item page (design.md 5.4)
+log-sheet-title = Log with details
+log-when = When
+log-today = Today
+log-yesterday = Yesterday
+log-pick = Pick a date
+log-date = Date
+log-people = With
+log-players = Players
+log-people-add = Add a person
+log-people-create = Add "{ $name }"
+log-people-none = Nobody with that name
+log-more = More
+log-more-watched = Rating and note
+log-more-play = Co-op, duration, place, notes
+log-note = Note on this title (private)
+log-rewatch = { $count ->
+    [one] Finished once before: this counts as a rewatch.
+   *[other] Finished { $count } times before: this counts as a rewatch.
+}
+log-save = Save
+log-discard-question = Discard your changes?
+log-discard = Discard
+log-keep = Keep editing
+log-score = Score of { $name }
+log-winner = Winner
+log-winner-auto = Highest score
+log-coop = Co-op game
+log-coop-won = We won
+log-duration = Duration in minutes
+log-location = Place
+log-notes = Notes
+log-play-step = Play
+log-page = Current page
+log-of-pages = of { $pages }
+log-update = Update
+log-plus-pages = +{ $count }
+log-finished = Finished
+log-position = Position
+log-position-hint = As h:mm:ss, or minutes.
+log-of-time = of { $time }
+log-plus-minutes = +{ $count } min
+log-error-date-missing = Pick a date.
+log-error-date-future = The date is in the future.
+log-error-score = Scores are numbers, for example 42 or 12.5.
+log-error-duration = The duration is a whole number of minutes.
+log-error-page = Enter a page number from 1 on.
+log-error-page-beyond = This has { $pages } pages.
+log-error-position = Enter a position as h:mm:ss, within the length.
+
+# the Episodes tab of the item page (design.md 6.3)
+episodes-seasons = Seasons
+episodes-season = Season { $season }
+episodes-count = { $watched }/{ $total }
+episodes-episode = Episode { $episode }
+episodes-mark-season = Mark season watched
+episodes-mark = Mark S{ $season } E{ $episode } watched
+episodes-mark-again = Watch S{ $season } E{ $episode } again
+episodes-watched = Watched
+episodes-again = Again
+episodes-next = Next up
+episodes-row-menu = More for S{ $season } E{ $episode }
+episodes-up-to-here = Mark up to here
+episodes-with = Watched with...
+episodes-ask = { $count ->
+    [one] Also mark the earlier episode as watched?
+   *[other] Also mark the { $count } earlier episodes as watched?
+}
+episodes-ask-all = Mark all { $count }
+episodes-ask-one = Only S{ $season } E{ $episode }
+episodes-remember = Remember for this show
+episodes-logged = { $count ->
+    [one] One episode
+   *[other] { $count } episodes
+}
+episodes-none = No episodes known yet.
 
 search-title = Search
 search-label = Search the catalog
@@ -102,7 +330,6 @@ dialog-close = Close
 auth-invited = You were invited: your account is linked to the person who invited you, and you see the sessions you were part of.
 companions-choose = Choose...
 companions-companion = Person
-companions-you-short = you
 companions-linked = Linked
 companions-invite = Invite
 companions-invite-link = Send this single-use link:
@@ -122,11 +349,6 @@ companions-merge-remove = Duplicate
 companions-merge-submit = Merge
 privacy-title = Privacy
 privacy-share-sessions = Linked participants see the sessions I log
-sessions-title = History
-sessions-shared = Shared with you
-sessions-shared-empty = Nobody has shared a session with you yet.
-sessions-mine = Your sessions
-sessions-mine-empty = No sessions logged yet.
 sessions-by = by { $name }
 sessions-claim = Copy to my log
 sessions-claimed = Copied to your log.
@@ -238,6 +460,7 @@ auth-error-username_taken = That username is already taken.
 auth-error-display_name_too_long = Use at most 100 characters for the display name.
 auth-error-password_too_short = Use at least 10 characters for the password.
 auth-error-password_too_long = Use at most 1024 characters for the password.
+auth-error-search_unavailable = Search is not available right now. Try again in a moment.
 
 # ---- UX phase 0: app shell (design.md 3.2, 6.15) ----
 nav-home = Home
@@ -345,7 +568,6 @@ lists-share-named = Share by link: { $name }
 companions-name-self = { $name } (you)
 companions-invite-named = Invite { $name }
 companions-unlink-named = Unlink { $name }
-sessions-winner = { $name } (won)
 integrations-last-call = Last call: { $when }
 integrations-revoke-named = Revoke { $name }
 notify-mark-read-named = Mark as read: { $title }
@@ -387,3 +609,126 @@ legal-nav = Legal
 legal-imprint = Imprint
 legal-privacy = Privacy
 legal-terms = Terms
+history-today = Today
+history-yesterday = Yesterday
+history-day = { $weekday }, { $date }
+weekday-monday = Monday
+weekday-tuesday = Tuesday
+weekday-wednesday = Wednesday
+weekday-thursday = Thursday
+weekday-friday = Friday
+weekday-saturday = Saturday
+weekday-sunday = Sunday
+stats-bucket-month = { $month } { $year }
+nav-stats = Stats
+home-greeting = Welcome back, { $name }
+home-error = Home could not be loaded.
+home-loading = Loading your home page...
+home-empty = Nothing here yet
+home-empty-body = Add the first thing you are watching, reading or playing: search for a title and add it to your library.
+home-continue = Continue
+home-all-in-progress = All in progress
+home-up-next = Up next
+home-all-planned = All planned
+home-reason-next-in-series = Next in the series
+home-reason-planned = Planned
+home-activity = Recent activity
+home-all-history = All history
+home-stats = All-time stats
+home-all-stats = All stats
+stats-title = Stats
+stats-groups = Groups
+stats-bucket = Time unit
+stats-by-month = By month
+stats-by-year = By year
+stats-error = The stats could not be loaded.
+stats-totals = All-time totals
+stats-entries = Entries
+stats-empty = Nothing logged here yet
+stats-empty-body = Once you log progress, your activity over time shows up here.
+stats-chart-summary = { $measure } in { $group }, { $from } to { $to }: { $total } in total, most in { $peak }.
+stats-chart-summary-empty = { $measure } in { $group }, { $from } to { $to }: none yet.
+stats-totals-summary = { $group }: { $parts }
+stats-totals-part-planned = { $count } planned
+stats-totals-part-in_progress = { $count } in progress
+stats-totals-part-completed = { $count } completed
+stats-totals-part-paused = { $count } paused
+stats-totals-part-dropped = { $count } dropped
+chart-value = { $label }: { $value }
+stats-show-table = Show as a table
+stats-col-month = Month
+stats-col-year = Year
+stats-measure-events = Activity
+stats-measure-completions = Completed entries
+stats-measure-finished = Watched
+stats-measure-episodes = Episodes
+stats-measure-pages = Pages
+stats-measure-plays = Plays
+stats-measure-minutes = Minutes
+stats-count-events = { $count ->
+    [one] One logged step
+   *[other] { $count } logged steps
+}
+stats-count-completions = { $count ->
+    [one] One entry completed
+   *[other] { $count } entries completed
+}
+stats-count-finished = { $count ->
+    [one] Watched once
+   *[other] Watched { $count } times
+}
+stats-count-episodes = { $count ->
+    [one] One episode
+   *[other] { $count } episodes
+}
+stats-count-pages = { $count ->
+    [one] One page
+   *[other] { $count } pages
+}
+stats-count-plays = { $count ->
+    [one] One play
+   *[other] { $count } plays
+}
+stats-count-minutes = { $count ->
+    [one] One minute
+   *[other] { $count } minutes
+}
+history-title = History
+history-lead = Everything you logged, newest first.
+history-stream = Activity by day
+history-filters = Filters
+history-filters-summary = { $count ->
+    [0] Kind, person, type, shared with me, year
+    [one] One filter set
+   *[other] { $count } filters set
+}
+history-filter-kind = Kind
+history-filter-person = Person
+history-filter-type = Type
+history-filter-year = Year
+history-filter-shared = Only shared with me
+history-kind-all = All kinds
+history-person-all = With anyone
+history-type-all = Everything
+history-type-progress = Progress
+history-type-session = Sessions
+history-year-all = All years
+history-session = Session logged
+history-with = with { $names }
+history-time-utc = { $time } UTC
+history-shared = Shared
+history-undo-named = Undo: { $title }
+history-copy-named = Copy to my log: { $title }
+history-error = The history could not be loaded.
+history-loading = Loading your history...
+history-empty = Nothing logged yet
+history-empty-body = Logging happens from an item page or with the next-step buttons; everything lands here.
+history-no-match = Nothing logged in this view
+history-no-match-body = No activity matches these filters.
+history-side-title = On this page
+history-side-range = { $from } to { $to }
+history-side-rows = Entries in the stream
+history-side-finished = Completed
+history-side-episodes = Episodes
+history-side-sessions = Sessions
+history-side-shared = Shared with you

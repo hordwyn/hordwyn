@@ -1,10 +1,13 @@
 use chrono::NaiveDate;
-use domain::kind::{ProgressModel, RelationType};
+use domain::kind::{KindGroup, ProgressModel, RelationType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::attributes;
 use crate::{KindModule, relations, strings};
+
+/// Every kind in this module is in this group.
+const GROUP: KindGroup = KindGroup::Watch;
 
 /// One season of an episodic item.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -30,6 +33,10 @@ impl KindModule for Movie {
     type Attributes = MovieAttributes;
     const ID: &'static str = "movie";
     const PROGRESS_MODEL: ProgressModel = ProgressModel::Single;
+
+    fn group() -> KindGroup {
+        GROUP
+    }
 
     fn facets() -> Vec<String> {
         strings(&["genres", "original_language"])
@@ -71,6 +78,10 @@ impl KindModule for Show {
     const ID: &'static str = "show";
     const PROGRESS_MODEL: ProgressModel = ProgressModel::Episodic;
 
+    fn group() -> KindGroup {
+        GROUP
+    }
+
     fn facets() -> Vec<String> {
         strings(&["genres", "network", "airing_status"])
     }
@@ -103,6 +114,10 @@ impl KindModule for Anime {
     type Attributes = AnimeAttributes;
     const ID: &'static str = "anime";
     const PROGRESS_MODEL: ProgressModel = ProgressModel::Episodic;
+
+    fn group() -> KindGroup {
+        GROUP
+    }
 
     fn facets() -> Vec<String> {
         strings(&["genres", "format", "studios"])

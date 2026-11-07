@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT * FROM library_entries WHERE id = $1",
+  "query": "SELECT id, user_id, item_id, kind, status, status_hlc, rating, rating_hlc, notes,\n                    notes_hlc, added_at FROM library_entries WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -144,5 +144,5 @@
       false
     ]
   },
-  "hash": "a749ce30f03f7131026f732f84724f8a9ccd2783149b3d1329c54a822f333824"
+  "hash": "dc25b5ae83e737d10fe493e26aa331d4d08ea31f397245732493c6b0d459a5f4"
 }

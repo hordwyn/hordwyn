@@ -26,6 +26,40 @@ fn to_item(i: &CatalogItemDto, group: &str) -> CommandItem {
     }
 }
 
+/// Streamed connector results of the current search join the list as they arrive.
+fn stream_results(
+    events: crate::events::LastEvent,
+    search_id: RwSignal<Option<String>>,
+    waiting: RwSignal<Vec<String>>,
+    items: RwSignal<Vec<CommandItem>>,
+) {
+    Effect::new(move |_| {
+        let Some((topic, data)) = events.0.get() else {
+            return;
+        };
+        if topic != "search.results" {
+            return;
+        }
+        let Ok(ev) = serde_json::from_str::<serde_json::Value>(&data) else {
+            return;
+        };
+        let Ok(r) = serde_json::from_value::<SearchResultsEventDto>(ev["payload"].clone()) else {
+            return;
+        };
+        if search_id.get_untracked().as_deref() != Some(r.search_id.as_str()) {
+            return;
+        }
+        waiting.update(|w| w.retain(|c| c != &r.connector));
+        items.update(|list| {
+            for i in &r.items {
+                if !list.iter().any(|x| x.id == i.id) {
+                    list.push(to_item(i, &r.connector));
+                }
+            }
+        });
+    });
+}
+
 #[component]
 pub fn SearchPalette() -> impl IntoView {
     let open = expect_context::<PaletteOpen>().0;
@@ -76,32 +110,7 @@ pub fn SearchPalette() -> impl IntoView {
         );
     });
 
-    // Streamed connector results.
-    Effect::new(move |_| {
-        let Some((topic, data)) = events.0.get() else {
-            return;
-        };
-        if topic != "search.results" {
-            return;
-        }
-        let Ok(ev) = serde_json::from_str::<serde_json::Value>(&data) else {
-            return;
-        };
-        let Ok(r) = serde_json::from_value::<SearchResultsEventDto>(ev["payload"].clone()) else {
-            return;
-        };
-        if search_id.get_untracked().as_deref() != Some(r.search_id.as_str()) {
-            return;
-        }
-        waiting.update(|w| w.retain(|c| c != &r.connector));
-        items.update(|list| {
-            for i in &r.items {
-                if !list.iter().any(|x| x.id == i.id) {
-                    list.push(to_item(i, &r.connector));
-                }
-            }
-        });
-    });
+    stream_results(events, search_id, waiting, items);
 
     let navigate = use_navigate();
     let on_select = Callback::new(move |item: CommandItem| {

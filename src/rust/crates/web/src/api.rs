@@ -168,7 +168,8 @@ pub async fn add_to_library(item_id: String) -> Result<LibraryEntryDto, ServerFn
     b.add(&t, &item_id).await.map_err(server::code)
 }
 
-#[server(prefix = "/_fn")]
+// nested JSON with numbers (`season`, `episode`) does not survive URL encoding: JSON input
+#[server(prefix = "/_fn", input = Json)]
 pub async fn log_progress(
     item_id: String,
     progress: NewProgressDto,
@@ -178,6 +179,17 @@ pub async fn log_progress(
     b.log_progress(&t, &item_id, progress)
         .await
         .map_err(server::code)
+}
+
+/// Log a play (players, scores, winner) of a board or video game; answers its progress event.
+#[server(prefix = "/_fn", input = Json)]
+pub async fn log_play(
+    item_id: String,
+    play: contracts::NewPlayDto,
+) -> Result<ProgressEventDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.log_play(&t, &item_id, play).await.map_err(server::code)
 }
 
 #[server(prefix = "/_fn")]
@@ -406,6 +418,134 @@ pub async fn delete_subscription(id: String) -> Result<(), ServerFnError> {
     let b = server::backend()?;
     let t = server::require_token(b.as_ref()).await?;
     b.delete_subscription(&t, &id).await.map_err(server::code)
+}
+
+// ---------------------------------------------------------------- UX phase 1
+
+/// Kinds and activity groups (with their Fluent label keys).
+#[server(prefix = "/_fn")]
+pub async fn kinds() -> Result<contracts::KindsDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.kinds(&t).await.map_err(server::code)
+}
+
+/// Counts per group, kind and status for the group switcher, chips and tabs.
+#[server(prefix = "/_fn")]
+pub async fn library_counts() -> Result<contracts::LibraryCountsDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.library_counts(&t).await.map_err(server::code)
+}
+
+/// The Library page query (its URL state): filters, text, sort, paging.
+#[server(prefix = "/_fn", input = Json)]
+pub async fn library_query(
+    query: contracts::LibraryQueryDto,
+) -> Result<contracts::LibraryRowsDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.library_query(&t, query).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn set_status(item_id: String, status: String) -> Result<LibraryEntryDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.set_status(&t, &item_id, &status)
+        .await
+        .map_err(server::code)
+}
+
+/// Every tag of the user with its number of entries.
+#[server(prefix = "/_fn")]
+pub async fn tags() -> Result<Vec<contracts::TagDto>, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.tags(&t).await.map_err(server::code)
+}
+
+/// Add a tag to an item's entry; answers the entry's tags.
+#[server(prefix = "/_fn")]
+pub async fn add_tag(item_id: String, tag: String) -> Result<Vec<String>, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.add_tag(&t, &item_id, &tag).await.map_err(server::code)
+}
+
+#[server(prefix = "/_fn")]
+pub async fn remove_tag(item_id: String, tag: String) -> Result<Vec<String>, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.remove_tag(&t, &item_id, &tag).await.map_err(server::code)
+}
+
+/// Rename (or merge) a tag on every entry; answers the number of entries changed.
+#[server(prefix = "/_fn")]
+pub async fn rename_tag(from: String, to: String) -> Result<u64, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.rename_tag(&t, &from, &to).await.map_err(server::code)
+}
+
+/// The private note of an entry; `None` or blank clears it.
+#[server(prefix = "/_fn")]
+pub async fn set_entry_note(
+    item_id: String,
+    note: Option<String>,
+) -> Result<LibraryEntryDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.set_entry_note(&t, &item_id, note)
+        .await
+        .map_err(server::code)
+}
+
+/// Undo a recent progress event (the toast's Undo); answers the compensating event.
+#[server(prefix = "/_fn")]
+pub async fn undo_progress(event_id: String) -> Result<ProgressEventDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.undo_progress(&t, &event_id).await.map_err(server::code)
+}
+
+/// A page of the activity feed (Home, History).
+#[server(prefix = "/_fn", input = Json)]
+pub async fn activity_feed(
+    query: contracts::ActivityQueryDto,
+) -> Result<contracts::ActivityPageDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.activity(&t, query).await.map_err(server::code)
+}
+
+/// All-time totals overall and per group (Home charts).
+#[server(prefix = "/_fn")]
+pub async fn stats_totals() -> Result<contracts::StatsTotalsDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.stats_totals(&t).await.map_err(server::code)
+}
+
+/// Activity per `month` or `year` for a group (`None`/`all`: every group), Stats page.
+#[server(prefix = "/_fn")]
+pub async fn stats_series(
+    group: Option<String>,
+    bucket: Option<String>,
+) -> Result<contracts::StatsSeriesDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.stats_series(&t, group, bucket)
+        .await
+        .map_err(server::code)
+}
+
+/// Everything the signed-in Home page shows.
+#[server(prefix = "/_fn")]
+pub async fn home() -> Result<contracts::HomeDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.home(&t).await.map_err(server::code)
 }
 
 /// Error code carried by a server function error (see `server::code`).

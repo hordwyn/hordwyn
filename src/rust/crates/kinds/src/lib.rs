@@ -10,7 +10,7 @@
 pub mod builtin;
 mod registry;
 
-use domain::kind::{ProgressModel, RelationType};
+use domain::kind::{KindGroup, ProgressModel, RelationType};
 use schemars::JsonSchema;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -26,6 +26,13 @@ pub trait KindModule: 'static {
     /// Stable kind id, e.g. `movie`.
     const ID: &'static str;
     const PROGRESS_MODEL: ProgressModel;
+
+    /// Activity group (design.md 3.1). Built-in kinds take the group of their module
+    /// (`screen` -> Watch, `read`, `listen`, `play`); a kind that does not say is in `Other`.
+    #[must_use]
+    fn group() -> KindGroup {
+        KindGroup::Other
+    }
 
     /// Statuses in addition to the five core ones.
     #[must_use]

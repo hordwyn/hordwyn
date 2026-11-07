@@ -180,6 +180,14 @@
     scroll-padding-top: var(--top-bar-height);
     scroll-padding-bottom: var(--tab-bar-height);
   }
+
+  /* the item page's action bar sticks above the tab bar on phones (design.md 6.3): focused
+     controls scroll clear of it too */
+  @media (width < 48rem) {
+    html:has([data-sticky-action]) {
+      scroll-padding-bottom: calc(var(--tab-bar-height) + 6rem);
+    }
+  }
 }
 
 /* WCAG 2.3.3 technique (design.md 2.9, 8): no movement, the pulse stops. Outside the

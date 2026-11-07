@@ -125,10 +125,70 @@ impl Status {
 #[serde(transparent)]
 pub struct RelationType(pub String);
 
+/// Activity group of a kind (design.md 3.1): Watch, Read, Listen, Play. A kind that names
+/// no known group (a runtime kind, later) is in `Other`, which the UI shows only when it is
+/// not empty. Serialised as the lower-case id; unknown ids read as `Other`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum KindGroup {
+    Watch,
+    Read,
+    Listen,
+    Play,
+    #[default]
+    Other,
+}
+
+impl KindGroup {
+    /// Every group in display order.
+    pub const ALL: [Self; 5] = [
+        Self::Watch,
+        Self::Read,
+        Self::Listen,
+        Self::Play,
+        Self::Other,
+    ];
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Watch => "watch",
+            Self::Read => "read",
+            Self::Listen => "listen",
+            Self::Play => "play",
+            Self::Other => "other",
+        }
+    }
+
+    /// The group with this id; unknown ids are `Other`.
+    #[must_use]
+    pub fn parse(s: &str) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|g| g.as_str() == s)
+            .unwrap_or(Self::Other)
+    }
+}
+
+impl Serialize for KindGroup {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for KindGroup {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::parse(&s))
+    }
+}
+
 /// Data description of a media kind (D-5.1).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KindDescriptor {
     pub id: KindId,
+    /// Activity group; descriptors without one are in [`KindGroup::Other`].
+    #[serde(default)]
+    pub group: KindGroup,
     pub progress_model: ProgressModel,
     /// Kind-specific statuses in addition to [`Status::CORE`].
     pub extra_statuses: Vec<String>,
@@ -179,9 +239,30 @@ mod tests {
     }
 
     #[test]
+    fn groups_have_stable_ids_and_unknown_ones_fall_into_other() {
+        assert_eq!(
+            KindGroup::ALL.map(KindGroup::as_str),
+            ["watch", "read", "listen", "play", "other"]
+        );
+        assert_eq!(KindGroup::parse("listen"), KindGroup::Listen);
+        assert_eq!(KindGroup::parse("cooking"), KindGroup::Other);
+        let g: KindGroup = serde_json::from_str("\"wine\"").unwrap();
+        assert_eq!(g, KindGroup::Other);
+        assert_eq!(serde_json::to_string(&KindGroup::Play).unwrap(), "\"play\"");
+        // a descriptor without a group (older runtime kinds) is in "other"
+        let d: KindDescriptor = serde_json::from_value(serde_json::json!({
+            "id": "ext:acme/wine", "progress_model": "single", "extra_statuses": [],
+            "attributes_schema": {}, "facets": [], "relations": [], "default_connectors": []
+        }))
+        .unwrap();
+        assert_eq!(d.group, KindGroup::Other);
+    }
+
+    #[test]
     fn statuses_include_core_and_extra() {
         let d = KindDescriptor {
             id: KindId::new("video_game").unwrap(),
+            group: KindGroup::Play,
             progress_model: ProgressModel::Sessions,
             extra_statuses: vec!["endless".into()],
             attributes_schema: serde_json::json!({}),

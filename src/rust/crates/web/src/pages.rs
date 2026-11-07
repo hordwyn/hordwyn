@@ -1,17 +1,12 @@
 //! Pages. Data comes from server functions; `entity.updated` events refetch (no polling).
 
-use contracts::{ItemPageDto, NewProgressDto};
 use leptos::prelude::*;
 use leptos_meta::Title;
-use leptos_router::components::A;
-use leptos_router::hooks::use_params_map;
 use ui::{Button, ButtonVariant, FormField, Input, Skeleton};
 
 use crate::api;
 pub use crate::auth_pages::{SignIn, SignUp};
-use crate::events::{mentions, use_events};
 use crate::i18n::{t, use_i18n};
-use crate::widgets::{CompanionPicker, Cover, PosterCard, RatingInput};
 
 /// Full page load after sign-in/out so the server renders with the new cookie.
 pub(crate) fn go(path: &str) {
@@ -52,267 +47,25 @@ pub(crate) fn PageTitle(#[prop(into)] text: String) -> impl IntoView {
     }
 }
 
-#[component]
-pub fn Home() -> impl IntoView {
-    // owner bug: no "Create account" once signed in (the shell config knows the session)
-    let signed_in = expect_context::<crate::app::ClientConfig>().signed_in;
-    view! {
-        <section class="mx-auto max-w-2xl py-16 text-center">
-            <h1 class="text-3xl font-semibold tracking-tight">{t("home-title")}</h1>
-            <p class="mt-4 text-muted-foreground">{t("home-lead")}</p>
-            <div class="mt-8 flex justify-center gap-4">
-                <A href="/library" attr:class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">{t("nav-library")}</A>
-                {(!signed_in).then(|| view! {
-                    <A href="/sign-up" attr:class="rounded-md border border-input px-4 py-2 text-sm font-medium">{t("nav-sign-up")}</A>
-                })}
-            </div>
-        </section>
-    }
-}
-
 /// Redirect to sign-in when a server function says the caller is not signed in.
-/// Library entries per "show more" step.
-const LIBRARY_PAGE: u32 = 120;
-
 pub(crate) fn needs_sign_in(e: &ServerFnError) -> bool {
     api::error_code(e) == "unauthorized"
 }
 
-#[component]
-pub fn Library() -> impl IntoView {
-    let i18n = use_i18n();
-    // grows by one page per "show more"
-    let limit = RwSignal::new(LIBRARY_PAGE);
-    let data = Resource::new(move || limit.get(), api::library);
-    let events = use_events();
-    Effect::new(move |_| {
-        if let Some((topic, _)) = events.0.get()
-            && topic == "entity.updated"
-        {
-            data.refetch();
-        }
-    });
-    view! {
-        <PageTitle text=i18n.t("library-title")/>
-        <Suspense fallback=|| view! { <Skeleton class="h-48 w-full"/> }>
-            {move || data.get().map(|r| match r {
-                Err(e) if needs_sign_in(&e) => { go("/sign-in"); ().into_any() }
-                Err(e) => view! { <p role="alert">{error_text(&e)}</p> }.into_any(),
-                Ok(page) if page.items.is_empty() => view! { <p class="text-muted-foreground">{t("library-empty")}</p> }.into_any(),
-                Ok(page) => {
-                    let count = use_i18n().t_args("library-count", &[("count", page.total.into())]);
-                    let more = (page.total > page.items.len() as u64).then(|| view! {
-                        <div class="mt-6 flex justify-center">
-                            <Button variant=ButtonVariant::Outline on:click=move |_| limit.update(|l| *l += LIBRARY_PAGE)>{t("library-more")}</Button>
-                        </div>
-                    });
-                    let list = page.items;
-                    view! {
-                        <p class="mb-4 text-sm text-muted-foreground">{count}</p>
-                        <ul class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-5" aria-label=t("library-title")>
-                            {list.into_iter().map(|li| view! {
-                                <PosterCard item=li.item status=li.entry.status/>
-                            }).collect_view()}
-                        </ul>
-                        {more}
-                    }.into_any()
-                }
-            })}
-        </Suspense>
-    }
+/// The server refused the query as malformed (400) or invalid (422). Filters come from a
+/// URL that may be old or hand-edited, so the pages show "no match" with "Clear filters"
+/// instead of an error whose Retry cannot help (UX1-7).
+pub(crate) fn bad_query(e: &ServerFnError) -> bool {
+    matches!(api::error_code(e).as_str(), "bad_request" | "invalid")
 }
 
-#[component]
-pub fn ItemPage() -> impl IntoView {
-    let params = use_params_map();
-    let id = move || params.read().get("id").unwrap_or_default();
-    let data = Resource::new(id, api::item_page);
-    let companions = Resource::new(|| (), |()| api::companions());
-    let lists = Resource::new(|| (), |()| api::lists());
-    let events = use_events();
-    Effect::new(move |_| {
-        if let Some((topic, payload)) = events.0.get()
-            && topic == "entity.updated"
-            && mentions(&payload, &id())
-        {
-            data.refetch();
-        }
-    });
-    // Actions and form state live here, not in `ItemView`: a refetch (for example after
-    // `entity.updated`) rebuilds the view, and must not drop a pending click or the
-    // companions the user ticked.
-    let state = ItemState {
-        with: RwSignal::new(Vec::new()),
-        logged: RwSignal::new(false),
-        add: Action::new(move |item: &String| {
-            let item = item.clone();
-            async move {
-                let _ = api::add_to_library(item).await;
-                data.refetch();
-            }
-        }),
-        done: Action::new(move |(item, with): &(String, Vec<String>)| {
-            let (item, with) = (item.clone(), with.clone());
-            async move {
-                let p = NewProgressDto {
-                    progress: serde_json::json!({"type": "finished"}),
-                    occurred_at: None,
-                    client_op_id: Some(uuid::Uuid::now_v7().to_string()),
-                    with,
-                };
-                let ok = api::log_progress(item, p).await.is_ok();
-                data.refetch();
-                ok
-            }
-        }),
-        add_list: Action::new(move |(list, item): &(String, String)| {
-            let (list, item) = (list.clone(), item.clone());
-            async move {
-                let _ = api::add_to_list(list, item).await;
-                lists.refetch();
-            }
-        }),
-    };
-    Effect::new(move |_| {
-        if state.done.value().get() == Some(true) {
-            state.logged.set(true);
-        }
-    });
-    view! {
-        <Suspense fallback=|| view! { <Skeleton class="h-64 w-full"/> }>
-            {move || data.get().map(|r| match r {
-                Err(e) if needs_sign_in(&e) => { go("/sign-in"); ().into_any() }
-                Err(e) => view! { <p role="alert">{error_text(&e)}</p> }.into_any(),
-                Ok(page) => view! {
-                    <ItemView page=page state=state companions=companions lists=lists/>
-                }.into_any(),
-            })}
-        </Suspense>
-    }
-}
-
-#[derive(Clone, Copy)]
-struct ItemState {
-    with: RwSignal<Vec<String>>,
-    logged: RwSignal<bool>,
-    add: Action<String, ()>,
-    done: Action<(String, Vec<String>), bool>,
-    add_list: Action<(String, String), ()>,
-}
-
-#[component]
-fn ItemView(
-    page: ItemPageDto,
-    state: ItemState,
-    companions: Resource<Result<Vec<contracts::CompanionDto>, ServerFnError>>,
-    lists: Resource<Result<Vec<contracts::ListDto>, ServerFnError>>,
-) -> impl IntoView {
-    let i18n = use_i18n();
-    let item = page.item.clone();
-    let item_id = item.id.clone();
-    let rating = RwSignal::new(page.entry.as_ref().and_then(|e| e.rating));
-    let ItemState {
-        with,
-        logged,
-        add,
-        done,
-        add_list,
-    } = state;
-    let rate = {
-        let id = item_id.clone();
-        Callback::new(move |v: Option<u8>| {
-            let id = id.clone();
-            leptos::task::spawn_local(async move {
-                let _ = api::rate(id, v).await;
-            });
-        })
-    };
-    let item_id_for_lists = item_id.clone();
-    let in_library = page.entry.is_some();
-    let status = page
-        .entry
-        .as_ref()
-        .map(|e| t(&format!("status-{}", e.status)));
-    // partial items already show search data; only bare stubs are "loading"
-    let loading = item.state == "stub";
-    let kind = crate::i18n::kind_label(&item.kind);
-    view! {
-        <Title text=item.title.clone()/>
-        <article class="grid gap-8 md:grid-cols-[220px_1fr]">
-            <Cover title=item.title.clone() image=item.cover.clone() sizes="220px"/>
-            <div class="flex flex-col gap-4">
-                <div>
-                    <h1 class="text-2xl font-semibold tracking-tight">{item.title.clone()}</h1>
-                    <p class="text-sm text-muted-foreground">
-                        {kind}{item.year.map(|y| format!(" - {y}"))}
-                        {item.original_title.clone().filter(|o| o != &item.title).map(|o| format!(" - {o}"))}
-                    </p>
-                </div>
-                {loading.then(|| view! { <p class="text-sm text-muted-foreground" aria-live="polite">{t("item-loading-details")}</p> })}
-                {item.description.clone().map(|d| view! { <p class="max-w-prose">{d}</p> })}
-                <div class="flex flex-wrap items-center gap-3">
-                    {if in_library {
-                        view! { <span class="rounded-md bg-muted px-3 py-1.5 text-sm">{t("item-in-library")} {status.map(|s| format!(" - {s}"))}</span> }.into_any()
-                    } else {
-                        { let id = item_id.clone(); view! { <Button on:click=move |_| { add.dispatch(id.clone()); }>{t("item-add")}</Button> }.into_any() }
-                    }}
-                </div>
-                <section class="flex flex-col gap-3 rounded-md border border-border p-4">
-                    <Suspense fallback=|| ()>
-                        {move || companions.get().and_then(Result::ok).map(|cs| view! { <CompanionPicker companions=cs selected=with/> })}
-                    </Suspense>
-                    <div class="flex items-center gap-3">
-                        <Button variant=ButtonVariant::Secondary on:click={ let id = item_id.clone(); move |_| { done.dispatch((id.clone(), with.get_untracked())); } }>{t("item-mark-done")}</Button>
-                        <span aria-live="polite" class="text-sm text-muted-foreground">{move || logged.get().then(|| t("item-done-logged"))}</span>
-                    </div>
-                </section>
-                {in_library.then(|| view! {
-                    <section class="flex flex-col gap-2">
-                        <h2 class="text-sm font-medium">{t("item-rating")}</h2>
-                        <RatingInput value=rating on_change=rate/>
-                    </section>
-                })}
-                <Suspense fallback=|| ()>
-                    {move || lists.get().and_then(Result::ok).filter(|l| !l.is_empty()).map(|ls| view! {
-                        <section class="flex flex-col gap-2">
-                            <h2 class="text-sm font-medium">{t("item-lists")}</h2>
-                            <div class="flex flex-wrap gap-2">
-                                {ls.into_iter().map(|l| {
-                                    let lid = l.id.clone();
-                                    view! {
-                                        <Button variant=ButtonVariant::Outline on:click={ let item = item_id_for_lists.clone(); move |_| { add_list.dispatch((lid.clone(), item.clone())); } }>{l.name.clone()}</Button>
-                                    }
-                                }).collect_view()}
-                            </div>
-                        </section>
-                    })}
-                </Suspense>
-                <section class="flex flex-col gap-2">
-                    <h2 class="text-sm font-medium">{t("item-history")}</h2>
-                    {if page.progress.is_empty() {
-                        view! { <p class="text-sm text-muted-foreground">{t("item-history-empty")}</p> }.into_any()
-                    } else {
-                        view! {
-                            <ul class="text-sm">
-                                {page.progress.iter().map(|p| view! {
-                                    <li>{i18n.date(&p.occurred_at)} " - " {crate::widgets::progress_label(&i18n, &p.progress)}</li>
-                                }).collect_view()}
-                            </ul>
-                        }.into_any()
-                    }}
-                </section>
-                <footer class="mt-4 border-t border-border pt-4 text-xs text-muted-foreground" data-testid="attribution">
-                    {page.sources.iter().map(|s| view! {
-                        <p>
-                            {i18n.t_args("item-source", &[("name", s.name.clone().into())])} " - "
-                            // the attribution text is the provider's own wording, in English
-                            <span lang="en">{s.text.clone()}</span> " " <a href=s.url.clone() class="underline" rel="noopener">{s.url.clone()}</a>
-                        </p>
-                    }).collect_view()}
-                </footer>
-            </div>
-        </article>
-    }
+/// A key that changes on every call. The data pages render each new value of a resource
+/// afresh, `<For each=move || data.get().map(|d| (fresh(n), d)) key=|(k, _)| *k ...>`,
+/// instead of rebuilding the previous render in place, which kept event handlers whose
+/// state was already disposed (found on the item page; UX1-2 applies it to every list).
+pub(crate) fn fresh(counter: StoredValue<u32>) -> u32 {
+    counter.update_value(|v| *v = v.wrapping_add(1));
+    counter.get_value()
 }
 
 #[component]
