@@ -5,6 +5,7 @@
 //! with a template the user writes (DEC-149); Radarr/Sonarr are not built (DEC-148).
 #![deny(unsafe_code)]
 
+mod call;
 #[cfg(feature = "pg")]
 pub mod pg;
 mod store;
@@ -12,7 +13,7 @@ mod store;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use app::ports::{Audience, Lane, NewJob, Notification, PortError, Subject};
+use app::ports::{AppEvent, Audience, Lane, NewJob, Notification, PortError, Subject};
 use app::{App, AppError, NewCatalogItem};
 use chrono::{DateTime, Utc};
 use domain::catalog::ExternalId;
@@ -25,7 +26,12 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+pub use call::{MAX_PAYLOAD, redact, remembered};
 pub use store::{IntegrationStore, MemIntegrationStore};
+
+/// SSE topic of every call attributed to an integration (accepted, refused or a test), for
+/// the open "Connect a sender" panel and the cards (design.md 5.9).
+pub const CALL_TOPIC: &str = "integration.call";
 
 /// Prefix of integration tokens (tells them apart from session tokens in logs and configs).
 pub const TOKEN_PREFIX: &str = "itk_";
@@ -98,6 +104,44 @@ pub struct Integration {
     pub created_at: DateTime<Utc>,
     pub last_seen_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
+    /// HTTP status of the last attributed call (200, 422, ...).
+    pub last_status: Option<u16>,
+    /// The offending field of the last refused call.
+    pub last_error_field: Option<String>,
+    /// The body of the last call, redacted, at most [`MAX_PAYLOAD`] bytes.
+    pub last_payload: Option<String>,
+    /// What the last accepted call recorded (kept when later calls are refused).
+    pub last_item: Option<LastItem>,
+}
+
+/// An item a call recorded, as the card shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LastItem {
+    pub id: ItemId,
+    /// The title, for episodes with `2x04`.
+    pub title: String,
+}
+
+/// What one attributed call leaves on its integration ([`IntegrationStore::touch`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallRecord {
+    pub at: DateTime<Utc>,
+    pub status: u16,
+    /// `None` clears the last error.
+    pub error: Option<String>,
+    pub field: Option<String>,
+    pub payload: Option<String>,
+    /// `None` keeps the item of an earlier accepted call.
+    pub item: Option<LastItem>,
+}
+
+/// The answer of a test call: nothing was recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestCall {
+    /// The catalog item the sample's ids point to, if it is already known.
+    pub matched: Option<LastItem>,
+    /// The title the sample names, as shown.
+    pub title: String,
 }
 
 #[derive(Debug, Error)]
@@ -106,6 +150,13 @@ pub enum IntegrationError {
     Unauthorized,
     #[error("invalid event: {0}")]
     Invalid(String),
+    /// A webhook body that is not a valid [`WatchedEvent`]; `field` names the offending
+    /// field when it can be told (R-38).
+    #[error("{message}")]
+    Refused {
+        field: Option<String>,
+        message: String,
+    },
     #[error("not found")]
     NotFound,
     #[error(transparent)]
@@ -119,6 +170,35 @@ pub enum IntegrationError {
 pub struct Recorded {
     pub item_id: ItemId,
     pub event_id: Uuid,
+    /// The item as shown (`Heat`, `Northern Lights Station 2x04`).
+    pub title: String,
+}
+
+/// The title of what an event stands for, with `2x04` for episodes.
+fn shown(e: &WatchedEvent, title: &str) -> String {
+    match (e.kind, e.season, e.episode) {
+        (WatchedKind::Episode, Some(s), Some(n)) => format!("{title} {s}x{n:02}"),
+        _ => title.to_string(),
+    }
+}
+
+/// The HTTP status a failed call is answered with (see `api::hooks`).
+fn status_of(e: &IntegrationError) -> u16 {
+    match e {
+        IntegrationError::Unauthorized => 401,
+        IntegrationError::NotFound => 404,
+        IntegrationError::Invalid(_)
+        | IntegrationError::Refused { .. }
+        | IntegrationError::App(AppError::Domain(_)) => 422,
+        IntegrationError::App(_) | IntegrationError::Port(_) => 500,
+    }
+}
+
+fn field_of(e: &IntegrationError) -> Option<String> {
+    match e {
+        IntegrationError::Refused { field, .. } => field.clone(),
+        _ => None,
+    }
 }
 
 pub struct Integrations {
@@ -142,24 +222,33 @@ struct Target {
     progress: Progress,
 }
 
+fn rule(field: &str, message: &str) -> IntegrationError {
+    IntegrationError::Refused {
+        field: Some(field.into()),
+        message: message.into(),
+    }
+}
+
 fn target(e: &WatchedEvent) -> Result<Target, IntegrationError> {
-    let (kind, title, year, external, progress) = match e.kind {
+    let (kind, title, year, external, progress, at) = match e.kind {
         WatchedKind::Movie => (
             "movie",
             e.title.clone(),
             e.year,
             ids(&e.ids),
             Progress::Finished,
+            "",
         ),
         WatchedKind::Episode => {
             let s = e
                 .series
                 .as_ref()
-                .ok_or_else(|| IntegrationError::Invalid("episodes need `series`".into()))?;
-            let (Some(season), Some(episode)) = (e.season, e.episode) else {
-                return Err(IntegrationError::Invalid(
-                    "episodes need `season` and `episode`".into(),
-                ));
+                .ok_or_else(|| rule("series", "episodes need `series`"))?;
+            let Some(season) = e.season else {
+                return Err(rule("season", "episodes need `season` and `episode`"));
+            };
+            let Some(episode) = e.episode else {
+                return Err(rule("episode", "episodes need `season` and `episode`"));
             };
             (
                 "show",
@@ -167,15 +256,17 @@ fn target(e: &WatchedEvent) -> Result<Target, IntegrationError> {
                 s.year,
                 ids(&s.ids),
                 Progress::Episode { season, episode },
+                "series.",
             )
         }
     };
     if title.trim().is_empty() {
-        return Err(IntegrationError::Invalid("title is empty".into()));
+        return Err(rule(&format!("{at}title"), "title is empty"));
     }
     if external.is_empty() {
-        return Err(IntegrationError::Invalid(
-            "at least one provider id (tmdb, imdb, tvdb, ...) is needed to find the item".into(),
+        return Err(rule(
+            &format!("{at}ids"),
+            "at least one provider id (tmdb, imdb, tvdb, ...) is needed to find the item",
         ));
     }
     Ok(Target {
@@ -217,6 +308,10 @@ impl Integrations {
             created_at: self.app.clock.now(),
             last_seen_at: None,
             last_error: None,
+            last_status: None,
+            last_error_field: None,
+            last_payload: None,
+            last_item: None,
         };
         self.store.insert(&i).await?;
         Ok((i, token))
@@ -250,16 +345,145 @@ impl Integrations {
         token: &str,
         e: &WatchedEvent,
     ) -> Result<Recorded, IntegrationError> {
-        let integration = self
-            .store
+        let integration = self.by_token(token).await?;
+        let payload = serde_json::to_value(e).ok().map(|v| remembered(&v));
+        self.attributed(&integration, Ok(e.clone()), payload).await
+    }
+
+    /// [`Self::receive`] for the raw body of `POST /hooks/watched`: the token is checked
+    /// first, so a body that is not a valid event is refused *for this integration*, which
+    /// keeps the offending field and the redacted body for its card (R-38).
+    ///
+    /// # Errors
+    /// Unknown token, a refused body, app errors.
+    pub async fn receive_body(
+        &self,
+        token: &str,
+        body: &[u8],
+    ) -> Result<Recorded, IntegrationError> {
+        let integration = self.by_token(token).await?;
+        let (event, payload) = call::parse(body);
+        self.attributed(&integration, event, payload).await
+    }
+
+    async fn by_token(&self, token: &str) -> Result<Integration, IntegrationError> {
+        self.store
             .by_token_hash(&self.app.ids.hash_token(token))
             .await?
-            .ok_or(IntegrationError::Unauthorized)?;
-        let now = self.app.clock.now();
-        let result = self.record(&integration, e).await;
-        let error = result.as_ref().err().map(ToString::to_string);
-        self.store.touch(integration.id, now, error).await?;
+            .ok_or(IntegrationError::Unauthorized)
+    }
+
+    /// Record a call of `integration`: the play, what the card remembers, and the event for
+    /// the user's open pages.
+    async fn attributed(
+        &self,
+        integration: &Integration,
+        event: Result<WatchedEvent, IntegrationError>,
+        payload: Option<String>,
+    ) -> Result<Recorded, IntegrationError> {
+        let at = self.app.clock.now();
+        let result = match event {
+            Ok(e) => self.record(integration, &e).await,
+            Err(e) => Err(e),
+        };
+        let record = CallRecord {
+            at,
+            status: result.as_ref().map_or_else(status_of, |_| 200),
+            error: result.as_ref().err().map(ToString::to_string),
+            field: result.as_ref().err().and_then(field_of),
+            payload,
+            item: result.as_ref().ok().map(|r| LastItem {
+                id: r.item_id,
+                title: r.title.clone(),
+            }),
+        };
+        self.store.touch(integration.id, &record).await?;
+        self.announce(integration, &record, false).await;
         result
+    }
+
+    /// Publish [`CALL_TOPIC`] to the integration's user.
+    async fn announce(&self, integration: &Integration, r: &CallRecord, test: bool) {
+        self.app
+            .events
+            .publish(AppEvent {
+                topic: CALL_TOPIC.into(),
+                entity: None,
+                audience: vec![integration.user],
+                payload: serde_json::json!({
+                    "integration_id": integration.id,
+                    "status": r.status,
+                    "field": r.field,
+                    "error": r.error,
+                    "test": test,
+                    "item_id": r.item.as_ref().map(|i| i.id.0),
+                    "title": r.item.as_ref().map(|i| i.title.clone()),
+                    "at": r.at.to_rfc3339(),
+                }),
+            })
+            .await;
+    }
+
+    /// "Send a test call from here" (design.md 5.9): validate a sample body and find the
+    /// catalog item its ids point to, as a real call would, but record nothing (no play, no
+    /// change to the card). The user's open pages hear about it, marked as a test.
+    ///
+    /// # Errors
+    /// Not the caller's integration, a refused sample, storage errors.
+    pub async fn test_call(
+        &self,
+        actor: Actor,
+        id: Uuid,
+        body: &[u8],
+    ) -> Result<TestCall, IntegrationError> {
+        let integration = self
+            .store
+            .by_user(actor.user_id)
+            .await?
+            .into_iter()
+            .find(|i| i.id == id)
+            .ok_or(IntegrationError::NotFound)?;
+        let at = self.app.clock.now();
+        let checked = match call::parse(body).0 {
+            Ok(e) => self.matched(&e).await,
+            Err(e) => Err(e),
+        };
+        let record = CallRecord {
+            at,
+            status: checked.as_ref().map_or_else(status_of, |_| 200),
+            error: checked.as_ref().err().map(ToString::to_string),
+            field: checked.as_ref().err().and_then(field_of),
+            payload: None,
+            item: checked.as_ref().ok().and_then(|t| t.matched.clone()),
+        };
+        self.announce(&integration, &record, true).await;
+        checked
+    }
+
+    async fn matched(&self, e: &WatchedEvent) -> Result<TestCall, IntegrationError> {
+        let t = target(e)?;
+        let kind = KindId::new(t.kind).map_err(AppError::from)?;
+        let mut found = None;
+        for ext in &t.external {
+            if let Some(item) = self
+                .app
+                .repos
+                .catalog
+                .by_external_id(&kind, ext)
+                .await
+                .map_err(AppError::from)?
+            {
+                found = Some(item);
+                break;
+            }
+        }
+        Ok(TestCall {
+            matched: found.map(|item| LastItem {
+                id: item.id,
+                title: shown(e, &item.title),
+            }),
+            title: shown(e, t.title.trim()),
+        })
     }
 
     async fn record(
@@ -330,10 +554,7 @@ impl Integrations {
             .app
             .log_progress(actor, item.id, progress, Some(at), Some(op))
             .await?;
-        let shown = match (e.kind, e.season, e.episode) {
-            (WatchedKind::Episode, Some(s), Some(n)) => format!("{} {s}x{n:02}", item.title),
-            _ => item.title.clone(),
-        };
+        let label = shown(e, &item.title);
         self.app
             .notifications
             .emit(
@@ -342,7 +563,7 @@ impl Integrations {
                     Audience::Users(vec![user.id]),
                     format!("play:{op}"),
                 )
-                .arg("title", shown)
+                .arg("title", label.clone())
                 .arg(
                     "source",
                     e.source.clone().unwrap_or_else(|| integration.name.clone()),
@@ -358,6 +579,7 @@ impl Integrations {
         Ok(Recorded {
             item_id: item.id,
             event_id: event.id.0,
+            title: label,
         })
     }
 }

@@ -16,7 +16,7 @@ pub struct Channels {
     #[cfg(feature = "http")]
     pub http: Option<http::HttpChannels>,
     #[cfg(feature = "email")]
-    pub email: Option<email::Email>,
+    pub email: std::sync::Arc<email::Mailer>,
 }
 
 fn missing(what: &str) -> SendError {
@@ -30,7 +30,7 @@ impl Notifier for Channels {
         match channel {
             ChannelConfig::Email { .. } => {
                 #[cfg(feature = "email")]
-                if let Some(e) = &self.email {
+                if let Some(e) = self.email.current() {
                     return e.send(channel, m).await;
                 }
                 Err(missing("email"))

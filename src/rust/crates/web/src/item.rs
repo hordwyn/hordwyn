@@ -625,6 +625,9 @@ fn ItemHistory(page: ItemPageDto, refresh: Callback<()>) -> impl IntoView {
         .rev()
         .map(|p| ActivityRowDto {
             at: p.occurred_at.clone(),
+            // the local day and time are filled by the server for feed rows (WP3-4 uses them)
+            local_day: String::new(),
+            local_time: String::new(),
             row_type: "progress".into(),
             item_id: page.item.id.clone(),
             title: page.item.title.clone(),

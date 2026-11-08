@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE instance_settings SET mail_password = $2\n                     WHERE id AND mail_password = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3782d35e84b3db3e2ad881a362c2f5ea1eb34342fa0330d2225a6ab17f7163ff"
+}

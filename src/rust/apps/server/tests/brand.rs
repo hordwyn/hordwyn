@@ -1,8 +1,9 @@
 //! M07 brand swap: the same binary renders a second brand from another brand directory, with
 //! no code changes (D-10).
 
+mod support;
+
 use server::{Overrides, Server};
-use tower::ServiceExt;
 
 async fn home(brand_dir: &str, accept_language: &str) -> (String, String) {
     let db = store_pg::testing::fresh_db_url().await.expect("database");
@@ -20,42 +21,33 @@ async fn home(brand_dir: &str, accept_language: &str) -> (String, String) {
     let app = srv.app_router(&options);
     // pages render once the first account exists (before it, they lead to `/setup`)
     let cookie = first_account(&app).await;
-    let resp = app
-        .oneshot(
-            axum::http::Request::builder()
-                .uri("/")
-                .header("accept-language", accept_language)
-                .body(axum::body::Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let html = String::from_utf8(
-        axum::body::to_bytes(resp.into_body(), 1 << 22)
-            .await
-            .unwrap()
-            .to_vec(),
+    let resp = support::send(
+        &app,
+        axum::http::Request::builder()
+            .uri("/")
+            .header("accept-language", accept_language)
+            .body(axum::body::Body::empty())
+            .unwrap(),
     )
-    .unwrap();
+    .await;
+    let html = String::from_utf8(resp.into_body().to_vec()).unwrap();
     (html, cookie)
 }
 
 /// Signs up the first account (`anna`) and returns its `set-cookie` header.
 async fn first_account(app: &axum::Router) -> String {
-    let resp = app
-        .clone()
-        .oneshot(
-            axum::http::Request::builder()
-                .method("POST")
-                .uri("/api/v1/auth/sign-up")
-                .header("content-type", "application/json")
-                .body(axum::body::Body::from(
-                    r#"{"username":"anna","display_name":"Anna","password":"correct horse battery"}"#,
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let resp = support::send(
+        app,
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/sign-up")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(
+                r#"{"username":"anna","display_name":"Anna","password":"correct horse battery"}"#,
+            ))
+            .unwrap(),
+    )
+    .await;
     resp.headers()["set-cookie"].to_str().unwrap().to_string()
 }
 
@@ -94,16 +86,12 @@ async fn a_second_brand_renders_without_code_changes() {
     assert!(!default_cookie.starts_with("readingroom_session="));
 }
 
-async fn get(app: &axum::Router, uri: &str) -> axum::response::Response {
-    app.clone()
-        .oneshot(
-            axum::http::Request::builder()
-                .uri(uri)
-                .body(axum::body::Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap()
+async fn get(app: &axum::Router, uri: &str) -> axum::http::Response<axum::body::Bytes> {
+    let req = axum::http::Request::builder()
+        .uri(uri)
+        .body(axum::body::Body::empty())
+        .unwrap();
+    support::send(app, req).await
 }
 
 /// design.md 2.8 / DEC-171: the default brand's font is declared in the head and served from
@@ -131,13 +119,7 @@ async fn brand_font_is_self_hosted() {
     let app = srv.app_router(&options);
     first_account(&app).await;
     let resp = get(&app, "/").await;
-    let html = String::from_utf8(
-        axum::body::to_bytes(resp.into_body(), 1 << 22)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
+    let html = String::from_utf8(resp.into_body().to_vec()).unwrap();
     assert!(html.contains("@font-face{"), "font face in the head");
     assert!(html.contains("font-display:swap"));
     // the brand style comes after the stylesheet, so its tokens win
@@ -158,9 +140,7 @@ async fn brand_font_is_self_hosted() {
         cache.contains("immutable") && cache.contains("max-age=31536000"),
         "{cache}"
     );
-    let body = axum::body::to_bytes(resp.into_body(), 1 << 22)
-        .await
-        .unwrap();
+    let body = resp.into_body();
     assert_eq!(&body[..4], b"wOF2");
 
     assert_eq!(

@@ -1,7 +1,8 @@
-//! Admin > Users and sign-up (design.md 6.13, addendum-1 3.3): the sign-up mode with a
-//! sentence per option, the open invites behind one disclosure above the table, and the
-//! users with role, disable and delete. Lock-out guards are the server's (`last_admin`,
-//! `self_*`); their sentences show inline in the row.
+//! Admin > Users (design.md 6.13, addendum-1 3.3, 3.4): the open invites behind one
+//! disclosure above the table, and the users with role, disable and delete; a role a
+//! provider manages is badged "via group" and not offered for change (DEC-313).
+//! Lock-out guards are the server's (`last_admin`, `self_*`); their sentences show inline
+//! in the row.
 
 use std::collections::BTreeMap;
 
@@ -15,9 +16,9 @@ use ui::{
 
 use super::{AdminFrame, ConfirmDialog, SettingNote};
 use crate::admin_api;
-use crate::admin_state::{Origin, find_setting, origin};
+use crate::admin_state::{Origin, origin};
 use crate::i18n::{t, use_i18n};
-use crate::reauth::{gated, use_reauth};
+use crate::reauth::{gated, gated_settings, use_reauth};
 use crate::settings::{Outcome, loaded};
 
 type Message = RwSignal<Option<Result<String, String>>>;
@@ -26,7 +27,6 @@ type Message = RwSignal<Option<Result<String, String>>>;
 pub fn Users() -> impl IntoView {
     view! {
         <AdminFrame title=t("admin-nav-users") lead=t("admin-users-lead")>
-            <SignupMode/>
             <Invites/>
             <UserTable/>
         </AdminFrame>
@@ -39,18 +39,10 @@ const MODES: [(&str, &str, &str); 3] = [
     ("closed", "admin-signup-closed", "admin-signup-closed-hint"),
 ];
 
+/// The sign-up mode with a sentence per option (shown on Admin > Instance since phase 3:
+/// one place per setting, addendum-1 3.4).
 #[component]
-fn SignupMode() -> impl IntoView {
-    let data = Resource::new(|| (), |()| admin_api::admin_settings());
-    view! {
-        <section class="mb-8 max-w-2xl">
-            {loaded(data, |s| find_setting(&s.settings, "auth.signup").cloned().map(|s| view! { <SignupForm s=s/> }))}
-        </section>
-    }
-}
-
-#[component]
-fn SignupForm(s: SettingDto) -> impl IntoView {
+pub(super) fn SignupForm(s: SettingDto) -> impl IntoView {
     let reauth = use_reauth();
     let fixed = origin(&s) != Origin::Editable;
     let value = RwSignal::new(s.value.as_str().unwrap_or("invite").to_string());
@@ -60,17 +52,11 @@ fn SignupForm(s: SettingDto) -> impl IntoView {
     let save = move || {
         let v = value.get_untracked();
         let saved = i18n.t("admin-saved");
-        let call = move || {
-            let values = BTreeMap::from([(
-                "auth.signup".to_string(),
-                serde_json::Value::from(v.clone()),
-            )]);
-            admin_api::update_admin_settings(values)
-        };
-        gated(
+        let values = BTreeMap::from([("auth.signup".to_string(), serde_json::Value::from(v))]);
+        gated_settings(
             reauth,
             busy,
-            call,
+            values,
             Callback::new(move |r: Result<_, String>| message.set(Some(r.map(|_| saved.clone())))),
         );
     };
@@ -339,6 +325,13 @@ fn UserRow(
     } else {
         t("admin-users-member")
     };
+    // a role from a provider's group rule (role_source = provider): badged, not editable
+    let via = u.role_via_provider.clone().map(|p| {
+        (
+            t("admin-users-via-group"),
+            i18n.t_args("admin-users-via-group-hint", &[("provider", p.into())]),
+        )
+    });
     let seen = u
         .last_seen_at
         .as_deref()
@@ -366,10 +359,14 @@ fn UserRow(
             </TableCell>
             <TableCell>
                 {role}
+                {via.map(|(badge, hint)| view! {
+                    " " <Badge variant=BadgeVariant::Info>{badge}</Badge>
+                    <span class="block text-xs text-muted-foreground">{hint}</span>
+                })}
                 {disabled.then(|| view! { " " <Badge variant=BadgeVariant::Secondary>{t("admin-users-disabled")}</Badge> })}
             </TableCell>
             <TableCell>{signs}</TableCell>
-            <TableCell class="whitespace-nowrap">{seen}</TableCell>
+            <TableCell class="sm:whitespace-nowrap">{seen}</TableCell>
             <TableCell>
                 {if is_self {
                     let guard = if only_admin { t("admin-users-only-admin") } else { t("admin-users-self") };
@@ -413,6 +410,7 @@ fn UserActions(
         );
     });
     let (is_admin, disabled) = (u.role == "admin", u.disabled);
+    let managed = u.role_via_provider.is_some();
     let named = |key: &str| i18n.t_args(key, &[("name", u.display_name.clone().into())]);
     let role_label = named(if is_admin {
         "admin-users-demote-named"
@@ -427,10 +425,12 @@ fn UserActions(
     let delete_label = named("admin-users-delete-named");
     view! {
         <div class="flex flex-wrap gap-1">
-            <Button variant=ButtonVariant::Outline size=ButtonSize::Sm attr:aria-label=role_label loading=busy
-                on:click=move |_| run.run(if is_admin { demote } else { promote })>
-                {if is_admin { t("admin-users-demote") } else { t("admin-users-promote") }}
-            </Button>
+            {(!managed).then(|| view! {
+                <Button variant=ButtonVariant::Outline size=ButtonSize::Sm attr:aria-label=role_label loading=busy
+                    on:click=move |_| run.run(if is_admin { demote } else { promote })>
+                    {if is_admin { t("admin-users-demote") } else { t("admin-users-promote") }}
+                </Button>
+            })}
             <Button variant=ButtonVariant::Outline size=ButtonSize::Sm attr:aria-label=disable_label loading=busy
                 on:click=move |_| run.run(if disabled { enable } else { disable })>
                 {if disabled { t("admin-users-enable") } else { t("admin-users-disable") }}

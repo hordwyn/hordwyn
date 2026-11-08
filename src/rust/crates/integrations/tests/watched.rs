@@ -101,14 +101,14 @@ async fn bad_tokens_and_events_are_refused() {
     let no_ids = event(serde_json::json!({"kind": "movie", "title": "Heat"}));
     assert!(matches!(
         i.receive(&token, &no_ids).await,
-        Err(IntegrationError::Invalid(_))
+        Err(IntegrationError::Refused { field: Some(f), .. }) if f == "ids"
     ));
     let no_episode = event(serde_json::json!({
         "kind": "episode", "title": "x", "series": {"title": "S", "ids": {"tmdb": "1"}}
     }));
     assert!(matches!(
         i.receive(&token, &no_episode).await,
-        Err(IntegrationError::Invalid(_))
+        Err(IntegrationError::Refused { field: Some(f), .. }) if f == "season"
     ));
     // the last error is kept for the settings page
     let listed = i.list(actor).await.unwrap();

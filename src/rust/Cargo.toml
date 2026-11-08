@@ -46,6 +46,7 @@ anyhow = "1.0.104"
 thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1"
+serde_path_to_error = "0.1.20"
 uuid = { version = "1.29.0", features = ["v5", "v7", "serde"] }
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "time", "sync"] }
 tracing = "0.1.44"
@@ -70,6 +71,10 @@ axum = "0.8.9"
 console_error_panic_hook = "0.1.7"
 wasm-bindgen-test = "0.3.80"
 web-sys = "0.3.107"
+# already in the tree through web-sys and leptos (phase 3 WP3-4: browser fetch, Intl)
+js-sys = "0.3.107"
+wasm-bindgen-futures = "0.4.80"
+send_wrapper = { version = "0.6.0", features = ["futures"] }
 cargo_metadata = "0.23"
 # must match wasm-bindgen-cli in flake.nix
 wasm-bindgen = "=0.2.130"
@@ -103,6 +108,13 @@ meilisearch-sdk = { version = "0.33.0", default-features = false, features = ["r
 # secrets at rest (addendum-1 2.2, OD-05): RustCrypto, Apache-2.0 OR MIT (crates.io 2026-11-07)
 aes-gcm = { version = "0.11.1", default-features = false, features = ["aes", "alloc", "zeroize"] }
 zeroize = "1.9.1"
+# OIDC (WP3-2, DEC-308): pending-cookie key and MAC (addendum-1 2.2 `cookie_key`), RustCrypto,
+# MIT OR Apache-2.0, already in the lock file (sqlx-postgres, totp-rs, openidconnect); rsa only for the
+# testkit issuer key
+hkdf = "0.13.0"
+hmac = "0.13.0"
+sha2 = "0.11.1"
+rsa = { version = "0.9.10", features = ["getrandom", "sha2"] }
 
 # Small target dirs (DEC-055): line tables for our code (backtraces), no debug info for deps.
 [profile.dev]

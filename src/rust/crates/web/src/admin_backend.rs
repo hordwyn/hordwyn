@@ -8,9 +8,9 @@ use async_trait::async_trait;
 use contracts::admin::{
     AdminInviteCreatedDto, AdminInviteDto, AdminOverviewDto, AdminSourceDto, AdminUserDto,
     AskAdminDto, AuditPageDto, AuditQueryDto, BrandCardDto, EvictionDto, InstanceSettingsDto,
-    NewAdminInviteDto, NotificationDefaultsDto, ReauthInputDto, ReauthStatusDto, RecoveryCodesDto,
-    RewrapDto, SecurityDto, SetupStateDto, SourceStatusPageDto, SourceTestDto, StorageJobsDto,
-    TotpEnrolmentDto, UserCredentialDto,
+    LinkedIdentityDto, MailSettingsDto, NewAdminInviteDto, NotificationDefaultsDto, OidcAdminDto,
+    ReauthInputDto, ReauthStatusDto, RecoveryCodesDto, RewrapDto, SecurityDto, SetupStateDto,
+    SourceStatusPageDto, SourceTestDto, StorageJobsDto, TotpEnrolmentDto, UserCredentialDto,
 };
 use contracts::{SessionDto, SignUpDto};
 
@@ -102,4 +102,12 @@ pub trait AdminBackend: Send + Sync {
     async fn security(&self, token: &str) -> BResult<SecurityDto>;
     async fn rewrap(&self, token: &str) -> BResult<RewrapDto>;
     async fn audit(&self, token: &str, q: AuditQueryDto) -> BResult<AuditPageDto>;
+
+    // phase 3 (WP3-4): sign-in pages, linked sign-ins, Instance and Sign-in and SSO
+    /// The sign-in page: the enabled providers and whether `auto` mode is on (no session).
+    async fn sign_in_page(&self) -> BResult<crate::admin_api::SignInPageDto>;
+    /// The caller's linked sign-ins (Settings > Account).
+    async fn identities(&self, token: &str) -> BResult<Vec<LinkedIdentityDto>>;
+    async fn oidc_admin(&self, token: &str) -> BResult<OidcAdminDto>;
+    async fn mail(&self, token: &str) -> BResult<MailSettingsDto>;
 }

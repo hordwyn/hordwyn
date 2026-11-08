@@ -39,6 +39,8 @@ pub trait NotifyStore: Send + Sync {
     /// Unread inbox items of the user (the bell count, design.md 3.2).
     async fn count_unread(&self, user: UserId) -> StoreResult<u32>;
     async fn mark_read(&self, user: UserId, id: Uuid, at: DateTime<Utc>) -> StoreResult<()>;
+    /// Mark every unread inbox row of the user read ("Mark all read"); how many were unread.
+    async fn mark_all_read(&self, user: UserId, at: DateTime<Utc>) -> StoreResult<u32>;
 
     /// `false` if this channel already has this event with this dedupe key.
     async fn insert_delivery(&self, d: &Delivery) -> StoreResult<bool>;
@@ -46,6 +48,9 @@ pub trait NotifyStore: Send + Sync {
     async fn update_delivery(&self, d: &Delivery) -> StoreResult<()>;
     /// Newest first.
     async fn deliveries(&self, user: UserId, limit: u32) -> StoreResult<Vec<Delivery>>;
+    /// The latest delivery of each of the user's channels that was not suppressed (channel
+    /// health, design.md 6.8), in no particular order.
+    async fn latest_deliveries(&self, user: UserId) -> StoreResult<Vec<Delivery>>;
     /// Digest entries of a channel due at or before `until`, oldest first.
     async fn due_digest(&self, channel: Uuid, until: DateTime<Utc>) -> StoreResult<Vec<Delivery>>;
     /// Deliveries of an event to a channel created since `since` that were not suppressed.
@@ -189,6 +194,24 @@ impl NotifyStore for MemNotifyStore {
         Ok(v)
     }
 
+    async fn latest_deliveries(&self, user: UserId) -> StoreResult<Vec<Delivery>> {
+        let mut latest: HashMap<Uuid, Delivery> = HashMap::new();
+        for d in self
+            .m()
+            .deliveries
+            .iter()
+            .filter(|d| d.user == user && d.state != DeliveryState::Suppressed)
+        {
+            let newer = latest
+                .get(&d.channel)
+                .is_none_or(|x| (x.created_at, x.id) < (d.created_at, d.id));
+            if newer {
+                latest.insert(d.channel, d.clone());
+            }
+        }
+        Ok(latest.into_values().collect())
+    }
+
     async fn count_unread(&self, user: UserId) -> StoreResult<u32> {
         let n = self
             .m()
@@ -206,6 +229,17 @@ impl NotifyStore for MemNotifyStore {
             }
         }
         Ok(())
+    }
+
+    async fn mark_all_read(&self, user: UserId, at: DateTime<Utc>) -> StoreResult<u32> {
+        let mut n = 0_u32;
+        for i in &mut self.m().inbox {
+            if i.user == user && i.read_at.is_none() {
+                i.read_at = Some(at);
+                n = n.saturating_add(1);
+            }
+        }
+        Ok(n)
     }
 
     async fn insert_delivery(&self, d: &Delivery) -> StoreResult<bool> {
@@ -299,5 +333,72 @@ impl NotifyStore for MemNotifyStore {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn delivery(channel: Uuid, n: i64, state: DeliveryState) -> Delivery {
+        Delivery {
+            id: Uuid::from_u128(u128::try_from(n).unwrap()),
+            user: UserId(Uuid::nil()),
+            channel,
+            event: "admin.signup".into(),
+            dedupe_key: n.to_string(),
+            title: String::new(),
+            body: String::new(),
+            link: None,
+            state,
+            attempts: 1,
+            last_error: None,
+            due_at: DateTime::from_timestamp(n, 0).unwrap(),
+            created_at: DateTime::from_timestamp(n, 0).unwrap(),
+            sent_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn latest_delivery_per_channel_skips_suppressed_and_mark_all_read_counts() {
+        let s = MemNotifyStore::default();
+        let (a, b) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        for d in [
+            delivery(a, 1, DeliveryState::Sent),
+            delivery(a, 2, DeliveryState::Failed),
+            delivery(a, 3, DeliveryState::Suppressed),
+            delivery(b, 4, DeliveryState::Sent),
+        ] {
+            s.insert_delivery(&d).await.unwrap();
+        }
+        let mut latest = s.latest_deliveries(UserId(Uuid::nil())).await.unwrap();
+        latest.sort_by_key(|d| d.created_at);
+        let states: Vec<_> = latest.iter().map(|d| (d.channel, d.state)).collect();
+        assert_eq!(
+            states,
+            vec![(a, DeliveryState::Failed), (b, DeliveryState::Sent)]
+        );
+
+        let user = UserId(Uuid::from_u128(9));
+        for n in 0..3_i64 {
+            s.insert_inbox(&InboxItem {
+                id: Uuid::from_u128(100 + u128::try_from(n).unwrap()),
+                user,
+                event: "admin.signup".into(),
+                dedupe_key: n.to_string(),
+                title: String::new(),
+                body: String::new(),
+                link: None,
+                created_at: DateTime::from_timestamp(n, 0).unwrap(),
+                read_at: None,
+            })
+            .await
+            .unwrap();
+        }
+        let now = DateTime::from_timestamp(10, 0).unwrap();
+        s.mark_read(user, Uuid::from_u128(100), now).await.unwrap();
+        assert_eq!(s.mark_all_read(user, now).await.unwrap(), 2);
+        assert_eq!(s.count_unread(user).await.unwrap(), 0);
+        assert_eq!(s.mark_all_read(user, now).await.unwrap(), 0);
     }
 }

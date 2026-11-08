@@ -23,6 +23,8 @@ pub struct ShellSession {
     pub unread: u32,
     /// The language the user chose (`None`: automatic, DEC-201).
     pub locale: Option<String>,
+    /// Today in the user's time zone (`2026-02-01`, DEC-239); `None`: UTC.
+    pub today: Option<String>,
 }
 
 /// Value of the cookie `name` in `headers`, if set and not empty.
@@ -143,9 +145,18 @@ pub trait Backend: Send + Sync {
     async fn companions(&self, token: &str) -> BResult<Vec<CompanionDto>>;
     async fn create_companion(&self, token: &str, name: &str) -> BResult<CompanionDto>;
 
+    // People and Lists pages (WP3-6)
+    async fn people_page(&self, token: &str) -> BResult<contracts::PeoplePageDto>;
+    async fn person_page(&self, token: &str, id: &str) -> BResult<contracts::PersonPageDto>;
+    async fn lists_overview(&self, token: &str) -> BResult<contracts::ListsOverviewDto>;
+    async fn list_page(&self, token: &str, id: &str) -> BResult<contracts::ListPageDto>;
+
     async fn lists(&self, token: &str) -> BResult<Vec<ListDto>>;
     async fn create_list(&self, token: &str, name: &str) -> BResult<ListDto>;
     async fn add_to_list(&self, token: &str, list_id: &str, item_id: &str) -> BResult<ListDto>;
+
+    /// The user's imports, newest first (WP3-7).
+    async fn imports(&self, token: &str) -> BResult<Vec<contracts::imports::ImportDto>>;
 
     async fn sources(&self) -> Vec<AttributionDto>;
 

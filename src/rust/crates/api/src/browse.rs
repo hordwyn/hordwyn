@@ -400,9 +400,11 @@ pub fn decode_cursor(s: &str) -> ApiResult<(Timestamp, uuid::Uuid)> {
     Ok((t, uuid::Uuid::parse_str(id).map_err(|_| bad())?))
 }
 
-fn activity_row(r: &ActivityRow) -> ActivityRowDto {
+fn activity_row(r: &ActivityRow, zone: app::time_zone::Tz) -> ActivityRowDto {
     ActivityRowDto {
         at: r.at.to_rfc3339(),
+        local_day: app::time_zone::local_day(r.at, zone),
+        local_time: app::time_zone::local_time(r.at, zone),
         row_type: match r.row_type {
             ActivityType::Progress => "progress".into(),
             ActivityType::Session => "session".into(),
@@ -432,9 +434,9 @@ fn activity_row(r: &ActivityRow) -> ActivityRowDto {
     }
 }
 
-fn activity_page(p: &ActivityPage) -> ActivityPageDto {
+fn activity_page(p: &ActivityPage, zone: app::time_zone::Tz) -> ActivityPageDto {
     ActivityPageDto {
-        rows: p.rows.iter().map(activity_row).collect(),
+        rows: p.rows.iter().map(|r| activity_row(r, zone)).collect(),
         next: p.next.map(encode_cursor),
     }
 }
@@ -462,7 +464,8 @@ pub async fn activity(s: &ApiState, a: Actor, q: ActivityQueryDto) -> ApiResult<
         shared_only: q.shared,
         year: q.year,
     };
-    Ok(activity_page(&s.app.activity_feed(a, query).await?))
+    let zone = s.app.user_zone(a.user_id).await?;
+    Ok(activity_page(&s.app.activity_feed(a, query).await?, zone))
 }
 
 // ------------------------------------------------------------ stats and home
@@ -581,7 +584,7 @@ pub async fn home(s: &ApiState, a: Actor) -> ApiResult<HomeDto> {
         library_total: counts.total,
         continue_rows,
         up_next,
-        activity: activity_page(&activity),
+        activity: activity_page(&activity, s.app.user_zone(a.user_id).await?),
         stats: stats_totals(s, a).await?,
     })
 }

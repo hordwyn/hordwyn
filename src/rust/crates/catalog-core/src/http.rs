@@ -77,9 +77,33 @@ impl ConnectorPolicy {
     }
 }
 
+/// The allowed hosts of one connector, replaceable at run time ([`GovernedHttp::host_list`]):
+/// OIDC providers are added and changed in the admin area (phase 3 WP3-2).
+#[derive(Debug, Default)]
+pub struct HostList(std::sync::RwLock<Vec<String>>);
+
+impl HostList {
+    /// Allow exactly `hosts` (`host` or `host:port`) from the next request on.
+    pub fn set(&self, hosts: Vec<String>) {
+        *self
+            .0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = hosts;
+    }
+
+    #[must_use]
+    pub fn get(&self) -> Vec<String> {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
 struct Governed {
     id: String,
     policy: ConnectorPolicy,
+    hosts: Arc<HostList>,
     limiter: DefaultDirectRateLimiter,
     gate: std::sync::Arc<Gate>,
     breaker: Breaker,
@@ -97,6 +121,7 @@ impl Governed {
             gate: Gate::new(policy.rate_limit.max_concurrency.max(1) as usize),
             breaker: Breaker::new(policy.breaker_threshold, policy.breaker_cooldown),
             paused_until: Mutex::new(None),
+            hosts: Arc::new(HostList(std::sync::RwLock::new(policy.hosts.clone()))),
             policy,
         }
     }
@@ -106,8 +131,8 @@ impl Governed {
             return false;
         };
         let with_port = url.port().map(|p| format!("{host}:{p}"));
-        self.policy
-            .hosts
+        self.hosts
+            .get()
             .iter()
             .any(|h| h == host && url.port().is_none() || with_port.as_deref() == Some(h.as_str()))
     }
@@ -200,6 +225,12 @@ impl GovernedHttp {
         self.connectors
             .insert(id.to_string(), Governed::new(id, policy));
         self
+    }
+
+    /// The run-time allowlist of connector `id` (`None` for an unknown connector).
+    #[must_use]
+    pub fn host_list(&self, id: &str) -> Option<Arc<HostList>> {
+        self.connectors.get(id).map(|g| g.hosts.clone())
     }
 
     /// Record calls, answers and circuit changes per connector (source status, design.md 4.4).

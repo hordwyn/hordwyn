@@ -189,6 +189,18 @@ impl LinkRequestRepo for MemStore {
             .cloned()
             .collect())
     }
+
+    async fn pending_from(&self, user: UserId) -> RepoResult<Vec<LinkRequest>> {
+        let mut out: Vec<LinkRequest> = self
+            .state()
+            .link_requests
+            .values()
+            .filter(|r| r.from == user && r.state == RequestState::Pending)
+            .cloned()
+            .collect();
+        out.sort_by_key(|r| (r.created_at, r.id.0));
+        Ok(out)
+    }
 }
 
 #[async_trait]
@@ -506,7 +518,8 @@ impl ProgressRepo for MemStore {
         Ok(v)
     }
 
-    async fn month_amounts(&self, user: UserId) -> RepoResult<Vec<app::MonthAmounts>> {
+    async fn month_amounts(&self, user: UserId, zone: &str) -> RepoResult<Vec<app::MonthAmounts>> {
+        let zone = app::time_zone::parse_zone(zone).unwrap_or(app::time_zone::Tz::UTC);
         let events = ProgressRepo::by_user(self, user).await?;
         let s = self.state();
         let durations: HashMap<SessionId, u64> = s
@@ -515,7 +528,7 @@ impl ProgressRepo for MemStore {
             .filter(|x| x.owner == user)
             .map(|x| (x.id, u64::from(x.duration_minutes.unwrap_or(0))))
             .collect();
-        Ok(app::month_amounts(&s.catalog, &events, &durations))
+        Ok(app::month_amounts(&s.catalog, &events, &durations, zone))
     }
 
     async fn for_items(&self, user: UserId, items: &[ItemId]) -> RepoResult<Vec<ProgressEvent>> {
@@ -615,6 +628,16 @@ impl ListRepo for MemStore {
             .values()
             .find(|l| matches!(&l.visibility, Visibility::Link { token: t } if t == token))
             .cloned())
+    }
+
+    async fn instance_visible(&self) -> RepoResult<Vec<List>> {
+        Ok(self
+            .state()
+            .lists
+            .values()
+            .filter(|l| l.visibility == Visibility::Instance)
+            .cloned()
+            .collect())
     }
 }
 

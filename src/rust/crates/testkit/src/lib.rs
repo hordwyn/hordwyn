@@ -6,6 +6,7 @@
 
 pub mod fakes;
 pub mod kinds;
+pub mod oidc;
 pub mod store;
 
 use std::sync::Arc;

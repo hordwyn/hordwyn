@@ -2,7 +2,7 @@
 
 use app::ports::{CompanionRepo, InviteRepo, LinkRequestRepo, UserRepo};
 use async_trait::async_trait;
-use domain::companion::{Companion, Invite, LinkRequest, UserSnapshot};
+use domain::companion::{Companion, Invite, LinkRequest, MergeRecord, UserSnapshot};
 use domain::ids::{CompanionId, InviteId, LinkRequestId, UserId};
 use domain::user::User;
 use sqlx::{Postgres, Transaction};
@@ -21,6 +21,7 @@ struct UserRow {
     created_at: chrono::DateTime<chrono::Utc>,
     share_sessions: bool,
     locale: Option<String>,
+    time_zone: Option<String>,
 }
 
 impl TryFrom<UserRow> for User {
@@ -35,6 +36,7 @@ impl TryFrom<UserRow> for User {
             self_companion: CompanionId(r.self_companion),
             share_sessions: r.share_sessions,
             locale: r.locale,
+            time_zone: r.time_zone,
             created_at: r.created_at,
         })
     }
@@ -51,6 +53,8 @@ struct CompanionRow {
     is_self: bool,
     merged_into: Option<uuid::Uuid>,
     created_at: chrono::DateTime<chrono::Utc>,
+    merge_record: Option<serde_json::Value>,
+    removed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl TryFrom<CompanionRow> for Companion {
@@ -69,6 +73,11 @@ impl TryFrom<CompanionRow> for Companion {
                 .transpose()?,
             is_self: r.is_self,
             merged_into: r.merged_into.map(CompanionId),
+            merge: r
+                .merge_record
+                .map(|m| json::<MergeRecord>("merge_record", m))
+                .transpose()?,
+            removed_at: r.removed_at,
             created_at: r.created_at,
         })
     }
@@ -82,13 +91,15 @@ fn companion_audience(c: &Companion) -> Vec<UserId> {
 
 async fn upsert_companion(tx: &mut Transaction<'static, Postgres>, c: &Companion) -> Res<()> {
     let snapshot = c.snapshot.as_ref().map(to_json).transpose()?;
+    let merge = c.merge.as_ref().map(to_json).transpose()?;
     sqlx::query!(
         "INSERT INTO companions (id, owner_id, name, avatar_asset, notes, linked_user, snapshot,
-                                 is_self, merged_into, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                                 is_self, merged_into, created_at, merge_record, removed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, avatar_asset = EXCLUDED.avatar_asset,
              notes = EXCLUDED.notes, linked_user = EXCLUDED.linked_user,
-             snapshot = EXCLUDED.snapshot, merged_into = EXCLUDED.merged_into",
+             snapshot = EXCLUDED.snapshot, merged_into = EXCLUDED.merged_into,
+             merge_record = EXCLUDED.merge_record, removed_at = EXCLUDED.removed_at",
         c.id.0,
         c.owner.0,
         c.name,
@@ -98,7 +109,9 @@ async fn upsert_companion(tx: &mut Transaction<'static, Postgres>, c: &Companion
         snapshot,
         c.is_self,
         c.merged_into.map(|m| m.0),
-        c.created_at
+        c.created_at,
+        merge,
+        c.removed_at
     )
     .execute(&mut **tx)
     .await
@@ -112,8 +125,8 @@ impl UserRepo for PgStore {
         let mut tx = self.begin().await?;
         sqlx::query!(
             "INSERT INTO users (id, username, display_name, email, role, self_companion, created_at,
-                                share_sessions, locale)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                                share_sessions, locale, time_zone)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
             user.id.0,
             user.username,
             user.display_name,
@@ -122,7 +135,8 @@ impl UserRepo for PgStore {
             user.self_companion.0,
             user.created_at,
             user.share_sessions,
-            user.locale
+            user.locale,
+            user.time_zone
         )
         .execute(&mut *tx)
         .await
@@ -172,14 +186,15 @@ impl UserRepo for PgStore {
         let mut tx = self.begin().await?;
         sqlx::query!(
             "UPDATE users SET username = $2, display_name = $3, email = $4, role = $5,
-                              share_sessions = $6, locale = $7 WHERE id = $1",
+                              share_sessions = $6, locale = $7, time_zone = $8 WHERE id = $1",
             user.id.0,
             user.username,
             user.display_name,
             user.email,
             role_str(user.role),
             user.share_sessions,
-            user.locale
+            user.locale,
+            user.time_zone
         )
         .execute(&mut *tx)
         .await
@@ -345,6 +360,21 @@ impl LinkRequestRepo for PgStore {
         sqlx::query_as!(
             LinkRequestRow,
             "SELECT * FROM link_requests WHERE to_user = $1 AND state = 'pending' ORDER BY created_at",
+            user.0
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?
+        .into_iter()
+        .map(LinkRequest::try_from)
+        .collect()
+    }
+
+    async fn pending_from(&self, user: UserId) -> Res<Vec<LinkRequest>> {
+        sqlx::query_as!(
+            LinkRequestRow,
+            "SELECT * FROM link_requests WHERE from_user = $1 AND state = 'pending'
+             ORDER BY created_at, id",
             user.0
         )
         .fetch_all(&self.pool)

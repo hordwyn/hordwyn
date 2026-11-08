@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, client_secret AS \"blob!\" FROM oidc_providers\n               WHERE client_secret IS NOT NULL\n                 AND ($3::uuid IS NULL OR id > $3)\n                 AND CASE WHEN length(client_secret) >= 3\n                     THEN get_byte(client_secret, 1) * 256 + get_byte(client_secret, 2) <> $1\n                     ELSE false END\n               ORDER BY id LIMIT $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "blob!",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "client_secret"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "9cb043b9cfcb85c3f53a2b0f107eb071ed65a0bbff23eb6324c24d3bbd920469"
+}

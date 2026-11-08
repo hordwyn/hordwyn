@@ -101,6 +101,17 @@
             "name": "locale"
           }
         }
+      },
+      {
+        "ordinal": 9,
+        "name": "time_zone",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "time_zone"
+          }
+        }
       }
     ],
     "parameters": {
@@ -117,6 +128,7 @@
       false,
       false,
       false,
+      true,
       true
     ]
   },

@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT connector_id, enabled FROM source_switches ORDER BY connector_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "connector_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_switches",
+            "name": "connector_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "source_switches",
+            "name": "enabled"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "1a5b9d9c067960e225131ae5391cecb63b034b0d2f7481b9baf6081917c93e01"
+}

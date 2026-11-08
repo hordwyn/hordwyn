@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO instance_settings (id, mail_password) VALUES (true, $1)\n             ON CONFLICT (id) DO UPDATE SET mail_password = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "febd6492c23fdb3d6a52e0ad2b3580cb01331a6ef99d1e006a25f1aa6a391baa"
+}

@@ -1,15 +1,15 @@
 import { test, expect, type Page } from "@playwright/test";
-import { execFileSync } from "node:child_process";
-import { createHmac } from "node:crypto";
 import {
   ADMIN,
   PASSWORD,
   REAUTH_ADMIN,
+  ageSessions,
   expectNoA11yViolations,
   expectReflow,
   hydrated,
   signIn,
   signUp,
+  totp,
 } from "./helpers";
 
 // UX phase 2, admin and settings areas (addendum-1 3.3, 3.4; design.md 6.10, 6.12, 6.13):
@@ -20,18 +20,26 @@ import {
 
 const ADMIN_PAGES: [string, string][] = [
   ["/admin", "Overview"],
-  ["/admin/users", "Users and sign-up"],
+  ["/admin/instance", "Instance"],
+  ["/admin/sso", "Sign-in and SSO"],
+  ["/admin/users", "Users"],
   ["/admin/sources", "Data sources"],
-  ["/admin/storage", "Storage and jobs"],
   ["/admin/notifications", "Notification defaults"],
-  ["/admin/brand", "Branding"],
-  ["/admin/security", "Security and sessions"],
+  ["/admin/storage", "Storage and jobs"],
   ["/admin/audit", "Audit log"],
 ];
 
 async function visit(page: Page, path: string) {
   await page.goto(path);
   await hydrated(page);
+}
+
+/** Open the "Advanced" disclosure of Admin > Instance (remembered per browser). */
+async function openAdvanced(page: Page) {
+  const toggle = page.locator("#adm-advanced").getByRole("button", { name: /^Advanced/ });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click();
+  }
 }
 
 test("an admin reaches the eight admin pages from the account menu; axe and reflow", async ({ page }) => {
@@ -59,29 +67,28 @@ test("an admin reaches the eight admin pages from the account menu; axe and refl
     await visit(page, path);
     await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
     await expectReflow(page, `360 ${path}`);
+    await expectNoA11yViolations(page, `360 ${path}`);
+  }
+  // Branding and Security were folded into Overview and Instance: 404, no redirects
+  for (const path of ["/admin/brand", "/admin/security"]) {
+    const r = await page.goto(path);
+    expect(r?.status(), path).toBe(404);
   }
 });
-
-/** Age the proof of every session of `user`, as if it signed in two hours ago. */
-function ageSessions(user: string) {
-  const db = process.env.E2E_DATABASE_URL ?? "postgres://app@127.0.0.1:55432/app_e2e";
-  const sql =
-    "UPDATE auth_sessions SET reauth_at = now() - interval '2 hours', reauth_slide_at = NULL " +
-    `WHERE user_id = (SELECT id FROM users WHERE username = '${user}')`;
-  execFileSync("psql", [db, "-v", "ON_ERROR_STOP=1", "-c", sql]);
-}
 
 test("a gated change asks to confirm it is you and is retried once confirmed", async ({ page }) => {
   await signIn(page, REAUTH_ADMIN);
   ageSessions(REAUTH_ADMIN);
-  await visit(page, "/admin/security");
+  await visit(page, "/admin/instance");
+  // sessions and cookies live in "Advanced" since phase 3 (addendum-1 3.4)
+  await openAdvanced(page);
   await expect(page.getByTestId("reauth-window")).toHaveText(/Not confirmed recently/);
   // values from the environment are read-only and name their variable
   await expect(page.getByText("Set by environment variable APP__AUTH__SECURE_COOKIES")).toBeVisible();
   await expect(page.getByRole("switch", { name: "Secure cookies" })).toBeDisabled();
   const days = page.getByLabel("Session length (days)");
   await days.fill("45");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.locator("#adm-advanced").getByRole("button", { name: "Save", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
   await expect(dialog).toBeVisible();
   // the password field has focus at once (UX2-W18)
@@ -96,7 +103,8 @@ test("a gated change asks to confirm it is you and is retried once confirmed", a
   // the change ran again after the proof and the window shows its state
   await expect(page.getByText("Saved.")).toBeVisible();
   await expect(page.getByTestId("reauth-window")).toHaveText(/^Confirmed for 1[45] more minutes\.$/);
-  await visit(page, "/admin/security");
+  await visit(page, "/admin/instance");
+  await openAdvanced(page);
   await expect(page.getByLabel("Session length (days)")).toHaveValue("45");
 
   // the audit row, found with a filter that lives in the URL
@@ -112,8 +120,8 @@ test("a gated change asks to confirm it is you and is retried once confirmed", a
     "href",
     "/api/v1/admin/audit.csv?action=setting.changed",
   );
-  // sign-up mode comes from the environment here: read-only too
-  await visit(page, "/admin/users");
+  // sign-up mode (on Instance now) comes from the environment here: read-only too
+  await visit(page, "/admin/instance");
   await expect(page.getByText("Set by environment variable APP__AUTH__SIGNUP")).toBeVisible();
   await expect(page.getByRole("radio", { name: "Anyone" })).toBeDisabled();
 });
@@ -173,22 +181,6 @@ test("a member's settings: the side nav, Ask admin, privacy, and no admin pages"
   await expectNoA11yViolations(page, "member on an admin page");
 });
 
-/** RFC 6238 TOTP (SHA-1, 6 digits, 30 s) of a base32 secret, as authenticator apps compute it. */
-function totp(base32: string, at = Date.now()): string {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  let bits = "";
-  for (const c of base32.replace(/=+$/, "").toUpperCase()) {
-    bits += alphabet.indexOf(c).toString(2).padStart(5, "0");
-  }
-  const bytes = Buffer.from((bits.match(/.{8}/g) ?? []).map((b) => parseInt(b, 2)));
-  const counter = Buffer.alloc(8);
-  counter.writeBigUInt64BE(BigInt(Math.floor(at / 30_000)));
-  const h = createHmac("sha1", bytes).update(counter).digest();
-  const o = h[h.length - 1] & 0xf;
-  const n = ((h[o] & 0x7f) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3];
-  return String(n % 1_000_000).padStart(6, "0");
-}
-
 test("TOTP enrolment shows the eight recovery codes once", async ({ page }) => {
   await signUp(page, `totp${Date.now()}`, "Tia");
   await visit(page, "/settings/account");
@@ -208,4 +200,118 @@ test("TOTP enrolment shows the eight recovery codes once", async ({ page }) => {
   // shown once: a new visit has no codes
   await visit(page, "/settings/account");
   await expect(page.getByTestId("recovery-codes")).toHaveCount(0);
+});
+
+test("Instance: the hosting mode is switched to Hosted and back", async ({ page }) => {
+  await signIn(page, ADMIN);
+  await visit(page, "/admin/instance");
+  const form = page.locator("form").filter({ has: page.getByRole("radio", { name: /^Hosted/ }) });
+  try {
+    await page.getByRole("radio", { name: /^Hosted/ }).check();
+    await form.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(form.getByText("Saved.")).toBeVisible();
+    await visit(page, "/admin/instance");
+    await expect(page.getByRole("radio", { name: /^Hosted/ })).toBeChecked();
+  } finally {
+    await visit(page, "/admin/instance");
+    await page.getByRole("radio", { name: /^Home/ }).check();
+    await form.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(form.getByText("Saved.")).toBeVisible();
+  }
+  await visit(page, "/admin/instance");
+  await expect(page.getByRole("radio", { name: /^Home/ })).toBeChecked();
+  // the public address is read-only from the configuration
+  await expect(page.getByTestId("public-url")).toContainText("APP__SERVER__PUBLIC_URL");
+});
+
+test("Instance > Mail: Save and send a test says what failed, and Overview follows", async ({ page }) => {
+  await signIn(page, ADMIN);
+  await visit(page, "/admin/instance");
+  const mail = page.locator("#adm-mail");
+  const toggle = mail.getByRole("button", { name: /^Mail/ });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click();
+  }
+  try {
+    // a sender the transport cannot use: saved, with a warning (UX3-18). The mail step is
+    // gated (DEC-397); ADMIN has just signed in, so its proof is fresh and no dialog opens
+    await mail.getByLabel("Server").fill("127.0.0.1");
+    await mail.getByLabel("Port").fill("1");
+    await mail.getByLabel("Connection security").selectOption("none");
+    await mail.getByLabel("From address").fill("shelf@@example.test");
+    await mail.getByLabel("Send the test to").fill("admin@example.test");
+    await expectNoA11yViolations(page, "mail open");
+    await mail.getByRole("button", { name: "Save and send a test" }).click();
+    await expect(mail.getByTestId("mail-warning")).toHaveText(
+      "Saved, but mail cannot be sent with these settings. Check the server, port and security.",
+    );
+    // nothing listens on port 1: the test fails at once, and says so; the warning goes
+    // the typed address outlives the refetch after the first test
+    await expect(mail.getByLabel("Send the test to")).toHaveValue("admin@example.test");
+    await mail.getByLabel("From address").fill("shelf@example.test");
+    await mail.getByRole("button", { name: "Save and send a test" }).click();
+    await expect(mail.getByTestId("mail-warning")).toHaveCount(0);
+    await expect(mail.getByRole("alert")).toContainText("The test failed:");
+    await expect(mail.getByRole("alert")).not.toContainText("sender address");
+    await visit(page, "/admin");
+    const row = page.getByTestId("health-row").filter({ hasText: "Mail" });
+    await expect(row).toContainText("The last test failed");
+  } finally {
+    const r = await page.request.put("/api/v1/admin/settings", {
+      data: { values: { "mail.host": null, "mail.port": null, "mail.security": null, "mail.from": null } },
+    });
+    expect(r.ok(), `reset mail ${r.status()} ${await r.text()}`).toBeTruthy();
+  }
+});
+
+test("Sign-in and SSO: changing the mode asks to confirm it is you, then explains the preconditions", async ({ page }) => {
+  await signIn(page, REAUTH_ADMIN);
+  ageSessions(REAUTH_ADMIN);
+  await visit(page, "/admin/sso");
+  // the URIs to register and why front-channel logout is not used
+  await expect(page.getByLabel("Redirect URI", { exact: true })).toHaveValue(/\/api\/v1\/auth\/oidc\/callback$/);
+  await expect(page.getByLabel("Post-logout redirect URI")).toHaveValue(/\/signed-out$/);
+  await expect(page.getByText(/^Front-channel logout is not used/)).toBeVisible();
+  await page.getByRole("radio", { name: /^Go straight to/ }).check();
+  const form = page.locator("form").filter({ has: page.getByRole("radio", { name: /^Go straight to/ }) });
+  await form.getByRole("button", { name: "Save", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("Password").fill(PASSWORD);
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+  await expect(dialog).toHaveCount(0);
+  // the change ran again after the proof; the server refuses auto without a tested provider
+  // or without an admin with an authenticator, and the page says which (DEC-321)
+  try {
+    await expect(form.getByRole("alert")).toHaveText(/^(Test the default provider first|First give at least one admin)/);
+  } finally {
+    // never leave a (reused) instance in auto mode for the other specs
+    await page.request.put("/api/v1/admin/settings", { data: { values: { "auth.sign_in_mode": "page" } } });
+  }
+  await visit(page, "/admin/sso");
+  await expect(page.getByRole("radio", { name: "Show the sign-in page" })).toBeChecked();
+});
+
+test("Data sources: a source is switched off and on again", async ({ page }) => {
+  // Podcast Index: no other spec searches Listen (TMDB is in use by them in parallel)
+  await signIn(page, ADMIN);
+  await visit(page, "/admin/sources");
+  const table = page.getByTestId("src-table");
+  await table.getByRole("button", { name: /^(Details of|Set up) Podcast Index$/ }).click();
+  const card = page.locator("tr#adm-src-podcastindex");
+  const on = card.getByRole("switch", { name: "Use this source" });
+  await expect(on).toBeChecked();
+  try {
+    await on.click();
+    await expect(table.getByRole("row").filter({ hasText: "Podcast Index" }).first()).toContainText("Switched off");
+    await expectNoA11yViolations(page, "source switched off");
+  } finally {
+    await visit(page, "/admin/sources");
+    await table.getByRole("button", { name: /^(Details of|Set up) Podcast Index$/ }).click();
+    const again = page.locator("tr#adm-src-podcastindex").getByRole("switch", { name: "Use this source" });
+    if ((await again.getAttribute("aria-checked")) !== "true") {
+      await again.click();
+    }
+    await expect(again).toBeChecked();
+  }
 });

@@ -63,7 +63,7 @@ async fn settings_audit_and_encrypted_credentials_on_postgres() {
         ..StoredSettings::default()
     };
     set.updated_at = Some(Utc::now());
-    s.put_settings(&set).await.unwrap();
+    s.put_settings(&set, &[]).await.unwrap();
     let back = s.settings().await.unwrap();
     assert_eq!(
         (back.hosting, back.session_days),
@@ -121,7 +121,7 @@ async fn settings_audit_and_encrypted_credentials_on_postgres() {
     let mut fields = BTreeMap::new();
     fields.insert("api_key".to_string(), "tmdb-secret-value".to_string());
     let c = s
-        .put_credential("tmdb", None, &fields, Some(user.id), now)
+        .put_credential("tmdb", None, &fields, Some(user.id), now, None)
         .await
         .unwrap();
     let raw: (Vec<u8>,) = sqlx::query_as("SELECT secret FROM connector_credentials WHERE id = $1")
@@ -141,7 +141,7 @@ async fn settings_audit_and_encrypted_credentials_on_postgres() {
     );
     // replace keeps the row id
     let again = s
-        .put_credential("tmdb", None, &fields, Some(user.id), now)
+        .put_credential("tmdb", None, &fields, Some(user.id), now, None)
         .await
         .unwrap();
     assert_eq!(again.id, c.id);
@@ -149,7 +149,7 @@ async fn settings_audit_and_encrypted_credentials_on_postgres() {
     // per-user credential next to the instance one
     let mut pin = BTreeMap::new();
     pin.insert("pin".to_string(), "1234".to_string());
-    s.put_credential("tvdb", Some(user.id), &pin, Some(user.id), now)
+    s.put_credential("tvdb", Some(user.id), &pin, Some(user.id), now, None)
         .await
         .unwrap();
     assert_eq!(s.user_credentials(user.id).await.unwrap().len(), 1);
@@ -166,15 +166,26 @@ async fn settings_audit_and_encrypted_credentials_on_postgres() {
             .fields
             .is_err()
     );
-    assert!(s.delete_credential("tvdb", Some(user.id)).await.unwrap());
-    assert!(!s.delete_credential("tvdb", Some(user.id)).await.unwrap());
+    assert!(
+        s.delete_credential("tvdb", Some(user.id), None)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !s.delete_credential("tvdb", Some(user.id), None)
+            .await
+            .unwrap()
+    );
 
-    s.put_licence(&LicenceRecord {
-        connector: "tmdb".into(),
-        agreement_on_file: true,
-        recorded_by: Some(user.id),
-        recorded_at: now,
-    })
+    s.put_licence(
+        &LicenceRecord {
+            connector: "tmdb".into(),
+            agreement_on_file: true,
+            recorded_by: Some(user.id),
+            recorded_at: now,
+        },
+        None,
+    )
     .await
     .unwrap();
     assert!(s.licences().await.unwrap()[0].agreement_on_file);
@@ -189,4 +200,105 @@ async fn settings_audit_and_encrypted_credentials_on_postgres() {
         "first seen kept"
     );
     s.ping().await.unwrap();
+}
+
+/// addendum-1 3.4: the audit row is part of the change's transaction (a row that cannot be
+/// written, here a repeated id, takes the change with it); the SMTP password is encrypted
+/// (purpose `smtp_password`); the source switches are stored.
+#[tokio::test]
+async fn audited_writes_mail_password_and_source_switches_on_postgres() {
+    let Some(pool) = store_pg::testing::fresh_db().await else {
+        return;
+    };
+    let ring = Arc::new(auth::secrets::KeyRing::generate().0);
+    let s = PgAdminStore::new(pool.clone(), ring.clone());
+    let now = Utc::now();
+    let first = entry("setting.changed", now, None);
+    s.audit(&first).await.unwrap();
+
+    let next = StoredSettings {
+        hosting: Some("hosted".into()),
+        ..StoredSettings::default()
+    };
+    assert!(
+        s.put_settings(&next, std::slice::from_ref(&first))
+            .await
+            .is_err()
+    );
+    assert_eq!(s.settings().await.unwrap().hosting, None, "rolled back");
+    let mut fields = BTreeMap::new();
+    fields.insert("api_key".to_string(), "k".to_string());
+    assert!(
+        s.put_credential("tmdb", None, &fields, None, now, Some(&first))
+            .await
+            .is_err()
+    );
+    assert_eq!(s.credential("tmdb", None).await.unwrap(), None);
+    assert!(
+        s.set_source_enabled("tmdb", false, None, now, Some(&first))
+            .await
+            .is_err()
+    );
+    assert_eq!(s.source_switches().await.unwrap().len(), 0);
+
+    let row = entry("source.disabled", now, None);
+    s.set_source_enabled("tmdb", false, None, now, Some(&row))
+        .await
+        .unwrap();
+    assert_eq!(
+        s.source_switches().await.unwrap(),
+        vec![("tmdb".to_string(), false)]
+    );
+    let all = s
+        .audit_query(&AuditFilter {
+            limit: 10,
+            ..AuditFilter::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 2, "{all:?}");
+
+    // mail: settings without the password, the password encrypted on its own
+    let mut st = s.settings().await.unwrap();
+    st.mail.host = Some("smtp.example.org".into());
+    st.mail.port = Some(465);
+    st.sign_in_mode = Some("page".into());
+    s.put_settings(&st, &[]).await.unwrap();
+    assert!(!has_encrypted_rows(&pool).await.unwrap());
+    s.put_mail_password(Some("smtp-pw"), None).await.unwrap();
+    assert!(has_encrypted_rows(&pool).await.unwrap());
+    let back = s.settings().await.unwrap();
+    assert_eq!(
+        (
+            back.mail.port,
+            back.mail.password_set,
+            back.sign_in_mode.as_deref()
+        ),
+        (Some(465), true, Some("page"))
+    );
+    // saving the settings again leaves the password alone
+    s.put_settings(&back, &[]).await.unwrap();
+    assert_eq!(
+        s.mail_password().await.unwrap().unwrap().unwrap(),
+        "smtp-pw"
+    );
+    let raw: Vec<u8> = sqlx::query_scalar("SELECT mail_password FROM instance_settings")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&raw).contains("smtp-pw"));
+    let other = PgAdminStore::new(pool.clone(), Arc::new(auth::secrets::KeyRing::generate().0));
+    assert!(
+        other.mail_password().await.unwrap().unwrap().is_err(),
+        "locked"
+    );
+    let rows = auth::admin_pg::PgMailSecret::new(pool.clone());
+    assert_eq!(rows.version_counts().await.unwrap(), vec![(1, 1)]);
+    s.record_mail_test(now, "ok").await.unwrap();
+    assert_eq!(
+        s.settings().await.unwrap().mail.last_test_result.as_deref(),
+        Some("ok")
+    );
+    s.put_mail_password(None, None).await.unwrap();
+    assert_eq!(s.mail_password().await.unwrap(), None);
 }

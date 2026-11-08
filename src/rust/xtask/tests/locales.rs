@@ -61,6 +61,7 @@ const WEB_FAMILIES: &[&str] = &[
     "notify-kind-",
     "notify-state-",
     "notify-event-",
+    "notify-section-",
     "month-short-",
     // group names on Home, Stats and History (`KindGroupDto.label_key` is `kind-group-<id>`)
     "kind-group-",
@@ -81,6 +82,19 @@ const WEB_FAMILIES: &[&str] = &[
     "admin-health-",
     "setup-checklist-",
     "admin-audit-",
+    // phase 3 (WP3-4): sign-in errors by code, re-auth round trip errors, probe outcomes,
+    // mail connection security
+    "signin-error-",
+    "signin-reset-error-",
+    "reauth-error-",
+    "admin-sso-probe-",
+    "admin-mail-security-",
+    // WP3-7 imports page: format cards, import states, mapping targets and lost-entry codes
+    // the importers name (contracts::imports)
+    "imports-format-",
+    "imports-state-",
+    "imports-target-",
+    "imports-lost-",
 ];
 
 #[test]

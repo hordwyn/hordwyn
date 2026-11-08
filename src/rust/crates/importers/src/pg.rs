@@ -1,4 +1,5 @@
-//! Postgres adapter for [`ImportStore`] (store-pg migration `0008_imports.sql`).
+//! Postgres adapter for [`ImportStore`] (store-pg migrations `0008_imports.sql`,
+//! `0022_imports_page.sql`).
 
 use app::ports::PortError;
 use async_trait::async_trait;
@@ -54,6 +55,39 @@ impl ImportStore for PgImportStore {
         .await
         .map_err(pe)?;
         Ok(())
+    }
+
+    async fn list(&self, user: Uuid, limit: u32) -> Result<Vec<ImportRecord>, PortError> {
+        let rows = sqlx::query_scalar!(
+            "SELECT record FROM imports WHERE user_id = $1 ORDER BY id DESC LIMIT $2",
+            user,
+            i64::from(limit)
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(pe)?;
+        rows.into_iter()
+            .map(|v| serde_json::from_value(v).map_err(|e| PortError(e.to_string())))
+            .collect()
+    }
+
+    async fn request_cancel(&self, id: Uuid) -> Result<(), PortError> {
+        sqlx::query!(
+            "UPDATE imports SET cancel_requested = true WHERE id = $1",
+            id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(pe)?;
+        Ok(())
+    }
+
+    async fn cancel_requested(&self, id: Uuid) -> Result<bool, PortError> {
+        let v = sqlx::query_scalar!("SELECT cancel_requested FROM imports WHERE id = $1", id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(pe)?;
+        Ok(v.unwrap_or(false))
     }
 
     async fn item_for(

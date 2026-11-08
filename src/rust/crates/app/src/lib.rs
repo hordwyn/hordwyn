@@ -12,9 +12,11 @@ mod error;
 mod library;
 mod lists;
 mod next_step;
+mod people;
 pub mod ports;
 mod sessions;
 mod stats;
+pub mod time_zone;
 mod users;
 
 use std::sync::Arc;
@@ -30,6 +32,7 @@ pub use catalog::{CatalogRefresh, NewCatalogItem, REFRESH_JOB};
 pub use error::{AppError, AppResult};
 pub use library::UNDO_WINDOW_HOURS;
 pub use next_step::{NextStep, next_step};
+pub use people::{CompanionStats, MergeSuggestion, MostPlayed, StatItem, suggest_merges};
 pub use sessions::NewSession;
 pub use stats::{
     Amounts, Bucket, GroupTotals, MonthAmounts, SeriesPoint, StatsTotals, Totals, month_amounts,

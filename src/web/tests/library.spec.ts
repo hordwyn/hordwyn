@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { expectNoA11yViolations, hydrated, signUp } from "./helpers";
+import { expectNoA11yViolations, hydrated, signUp, importDone } from "./helpers";
 
 // UX phase 1 Library page (design.md 6.2, 3.5; addendum-1 1.3): group switcher, kind chips,
 // status tabs, the one Filters button with the tag filter, sort, grid/list, the URL as the
@@ -37,9 +37,7 @@ async function importRows(page: Page, rows: object[]): Promise<Record<string, st
   });
   expect(started.status()).toBe(202);
   const { id } = await started.json();
-  await expect
-    .poll(async () => (await (await page.request.get(`/api/v1/imports/${id}`)).json()).state, { timeout: 30_000 })
-    .toBe("done");
+  await importDone(page, id);
   const lib = await (await page.request.get("/api/v1/library?limit=500")).json();
   return Object.fromEntries(lib.items.map((i: { item: { title: string; id: string } }) => [i.item.title, i.item.id]));
 }
@@ -230,6 +228,38 @@ test("the next step logs in one click and Undo takes it back; the quick menu set
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(cards(page).filter({ hasText: "Ninety Winters" })).toContainText("rainy");
+});
+
+test("a background refresh keeps an open quick menu", async ({ page }) => {
+  test.setTimeout(120_000);
+  await signUp(page, `keep${Date.now()}`, "Keep Tester");
+  await seed(page);
+  const lib = await (await page.request.get("/api/v1/library?limit=500")).json();
+  const id = (title: string) => lib.items.find((i: { item: { title: string } }) => i.item.title === title).item.id;
+  // a change elsewhere reaches the page as a server event and refetches the rows under the
+  // open menu: first another row changes (grid), then the menu's own row (list)
+  const changes = [
+    { view: "grid", change: () => page.request.put(`/api/v1/library/${id("Harbour Lights")}/status`, { data: { status: "completed" } }) },
+    { view: "list", change: () => page.request.post(`/api/v1/library/${id("Ninety Winters")}/tags`, { data: { tag: "rainy" } }) },
+  ];
+  for (const { view, change } of changes) {
+    await open(page, `/library?kind=movie&view=${view}`);
+    await page.getByRole("button", { name: "Actions for Ninety Winters" }).click();
+    const menu = page.getByRole("menu", { name: "Actions for Ninety Winters" });
+    await expect(menu).toBeVisible();
+    const refetched = page.waitForResponse((res) => res.url().includes("/_fn/library_query"));
+    expect((await change()).ok()).toBeTruthy();
+    await refetched;
+    await expect(page.locator("#lib-results")).not.toHaveAttribute("aria-busy", "true");
+    if (view === "grid") await expect(cards(page).filter({ hasText: "Harbour Lights" })).toContainText("Completed");
+    else await expect(page.getByRole("row").filter({ hasText: "Ninety Winters" })).toContainText("rainy");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("menuitem", { name: "Edit tags" }).click({ timeout: 5_000 });
+    const dialog = page.getByRole("dialog", { name: "Tags for Ninety Winters" });
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+  }
 });
 
 for (const size of [

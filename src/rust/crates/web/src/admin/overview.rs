@@ -61,7 +61,8 @@ fn health_action(id: &str) -> Option<&'static str> {
     match id {
         "storage" | "jobs" => Some("/admin/storage"),
         "data_sources" => Some("/admin/sources"),
-        "secrets" => Some("/admin/security"),
+        "mail" | "secrets" => Some("/admin/instance"),
+        "identity_provider" => Some("/admin/sso"),
         _ => None,
     }
 }
@@ -155,23 +156,26 @@ fn RecentSignups(users: Vec<AdminUserDto>) -> impl IntoView {
     }
 }
 
+/// The brand, read-only (addendum-1 3.4: the Branding page became this card): name, short
+/// name, locale, where it is configured, and the accent of both themes with its contrast.
 #[component]
 fn BrandCard(b: BrandCardDto) -> impl IntoView {
-    let line = use_i18n().t_args(
-        "admin-overview-brand",
-        &[
-            ("name", b.name.clone().into()),
-            (
-                "locale",
-                contracts::locale::locale_name(&b.default_locale).into(),
-            ),
-        ],
-    );
+    let i18n = use_i18n();
+    let edit = i18n.t_args("admin-brand-edit", &[("dir", b.dir.clone().into())]);
     view! {
         <section aria-labelledby="adm-brand-h" class="rounded-xl border bg-card p-4 text-sm">
-            <h2 id="adm-brand-h" class="mb-2 text-lg font-semibold">{t("admin-nav-brand")}</h2>
-            <p>{line}</p>
-            <p class="mt-2"><a class="underline" href="/admin/brand">{t("admin-overview-brand-link")}</a></p>
+            <h2 id="adm-brand-h" class="mb-3 text-lg font-semibold">{t("admin-overview-brand-title")}</h2>
+            <dl class="mb-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-1">
+                <dt class="font-medium">{t("admin-brand-name")}</dt><dd>{b.name.clone()}</dd>
+                <dt class="font-medium">{t("admin-brand-short-name")}</dt><dd class="font-mono">{b.short_name.clone()}</dd>
+                <dt class="font-medium">{t("admin-brand-locale")}</dt><dd>{contracts::locale::locale_name(&b.default_locale).to_string()}</dd>
+                <dt class="font-medium">{t("admin-brand-dir")}</dt><dd class="break-all font-mono">{b.dir.clone()}</dd>
+            </dl>
+            <h3 class="mb-2 font-semibold">{t("admin-brand-accent")}</h3>
+            <ul class="mb-3 grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
+                {b.swatches.into_iter().map(|s| view! { <super::Swatch s=s/> }).collect_view()}
+            </ul>
+            <p class="break-all text-muted-foreground">{edit}</p>
         </section>
     }
 }

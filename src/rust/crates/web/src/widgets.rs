@@ -139,6 +139,9 @@ pub fn PosterCard(
     /// Opens the tag editor for this row.
     #[prop(optional_no_strip, into)]
     on_tags: Option<Callback<LibraryRowDto>>,
+    /// Whether the quick menu is open, kept by the caller across rebuilds of the card.
+    #[prop(optional_no_strip, into)]
+    menu_open: Option<RwSignal<bool>>,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let item = row.item.clone();
@@ -175,7 +178,7 @@ pub fn PosterCard(
                 <span class="line-clamp-2 text-sm font-medium group-hover:underline">{item.title.clone()}</span>
             </a>
             <div class="absolute left-1.5 top-1.5 flex max-w-[calc(100%-3.5rem)] flex-col items-start gap-1">{pill}</div>
-            <QuickMenu row=row.clone() statuses=statuses on_change=on_change on_tags=on_tags
+            <QuickMenu row=row.clone() statuses=statuses on_change=on_change on_tags=on_tags open=menu_open
                 class="absolute right-1.5 top-1.5 [@media(hover:hover)]:opacity-0 group-hover/card:opacity-100 focus-within:opacity-100"/>
             <span class="text-xs text-muted-foreground">
                 {kind}
@@ -214,6 +217,9 @@ pub fn QuickMenu(
     #[prop(optional_no_strip, into)] on_change: Option<Callback<()>>,
     #[prop(optional_no_strip, into)] on_tags: Option<Callback<LibraryRowDto>>,
     #[prop(into, optional)] class: MaybeProp<String>,
+    /// Whether the menu is open, kept by the caller across rebuilds of the row.
+    #[prop(optional_no_strip, into)]
+    open: Option<RwSignal<bool>>,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let ctx = StepCtx::current();
@@ -288,7 +294,7 @@ pub fn QuickMenu(
     let label = i18n.t_args("library-actions", &[("title", title.into())]);
     view! {
         <div class=move || cn(&["flex flex-col items-end gap-1", &class.get().unwrap_or_default()])>
-            <DropdownMenu label=label items=items id=format!("actions-{}", row.entry.id)
+            <DropdownMenu label=label items=items id=format!("actions-{}", row.entry.id) open=open
                 trigger_class="size-8 rounded-full border border-border bg-background/95 px-0 shadow-sm"
                 trigger=Box::new(|| view! { <Icon name=IconName::More/> }.into_any())/>
             {move || error.get().map(|e| view! { <p role="alert" class="rounded bg-background px-1 text-xs text-destructive-text">{e}</p> })}

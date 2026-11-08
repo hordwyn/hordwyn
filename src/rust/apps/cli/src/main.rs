@@ -1,5 +1,8 @@
-//! Admin CLI: migrate, storage report and eviction, search reindex. (User management and
-//! imports are in the web app and the REST API.)
+//! Admin CLI: migrate, storage report and eviction, search reindex, and the escape hatches
+//! that need shell access (addendum-1 3.3, DEC-283): promote an admin, a one-time password
+//! reset link, remove an authenticator, back to the sign-in page, reopen the setup wizard,
+//! secrets key status, rotation and pruning. Each escape hatch writes an audit row with actor
+//! `cli`. (Everyday user management and imports are in the web app and the REST API.)
 //!
 //! `cli [--config <file>] <command>`; the configuration is the server's (file + `APP__*`).
 #![deny(unsafe_code)]
@@ -17,7 +20,15 @@ const USAGE: &str = "usage: cli [--config <file>] <command>
                                    would remove now (--dry-run: nothing is changed)
   storage evict                    run eviction now (normally a background job)
   reindex [--clear]                queue every catalog item, library entry and companion for
-                                   the search indexer (--clear: empty the indexes first)";
+                                   the search indexer (--clear: empty the indexes first)
+  admin promote <username>         make an account admin
+  admin reset-password <username>  print a one-time password reset link (1 hour)
+  admin reset-totp <username>      remove the authenticator and its recovery codes
+  admin disable-sso-only           use the sign-in page again (auth.sign_in_mode = page)
+  setup reopen                     open the setup wizard again
+  secrets status                   key versions and how many values each encrypts
+  secrets rotate                   add a new active key to the key file (then SIGHUP)
+  secrets prune                    drop key versions no stored value uses (after SIGHUP)";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Cmd {
@@ -25,6 +36,14 @@ enum Cmd {
     StorageReport { json: bool },
     StorageEvict,
     Reindex { clear: bool },
+    Promote(String),
+    ResetPassword(String),
+    ResetTotp(String),
+    DisableSsoOnly,
+    SetupReopen,
+    SecretsStatus,
+    SecretsRotate,
+    SecretsPrune,
     Help,
 }
 
@@ -82,6 +101,38 @@ fn parse(args: &[String]) -> Result<Args> {
             Cmd::Reindex {
                 clear: flags.contains(&"--clear"),
             }
+        }
+        ["admin", "promote", u] => {
+            known(&[])?;
+            Cmd::Promote((*u).to_string())
+        }
+        ["admin", "reset-password", u] => {
+            known(&[])?;
+            Cmd::ResetPassword((*u).to_string())
+        }
+        ["admin", "reset-totp", u] => {
+            known(&[])?;
+            Cmd::ResetTotp((*u).to_string())
+        }
+        ["admin", "disable-sso-only"] => {
+            known(&[])?;
+            Cmd::DisableSsoOnly
+        }
+        ["setup", "reopen"] => {
+            known(&[])?;
+            Cmd::SetupReopen
+        }
+        ["secrets", "status"] => {
+            known(&[])?;
+            Cmd::SecretsStatus
+        }
+        ["secrets", "rotate"] => {
+            known(&[])?;
+            Cmd::SecretsRotate
+        }
+        ["secrets", "prune"] => {
+            known(&[])?;
+            Cmd::SecretsPrune
         }
         [] | ["help"] => Cmd::Help,
         _ => bail!("unknown command `{}`\n\n{USAGE}", words.join(" ")),
@@ -184,6 +235,10 @@ async fn run(args: Args) -> Result<()> {
         return Ok(());
     }
     let cfg = config::AppConfig::load(args.config.as_deref())?;
+    if let Some(done) = escape(&args.cmd, &cfg).await? {
+        println!("{done}");
+        return Ok(());
+    }
     let pool = store_pg::connect(&cfg.database.url, 2)
         .await
         .context("connect to the database")?;
@@ -233,9 +288,96 @@ async fn run(args: Args) -> Result<()> {
             let n = search::indexer::Indexer::enqueue_all(&pool).await?;
             println!("queued {n} documents; the worker's indexer picks them up");
         }
-        Cmd::Help => unreachable!(),
+        _ => unreachable!("handled above"),
     }
     Ok(())
+}
+
+/// The escape hatches (`server::escape`); `None` for the other commands.
+async fn escape(cmd: &Cmd, cfg: &config::AppConfig) -> Result<Option<String>> {
+    let is_escape = matches!(
+        cmd,
+        Cmd::Promote(_)
+            | Cmd::ResetPassword(_)
+            | Cmd::ResetTotp(_)
+            | Cmd::DisableSsoOnly
+            | Cmd::SetupReopen
+            | Cmd::SecretsStatus
+            | Cmd::SecretsRotate
+            | Cmd::SecretsPrune
+    );
+    if !is_escape {
+        return Ok(None);
+    }
+    let e = server::escape::Escape::open(cfg).await?;
+    Ok(Some(match cmd {
+        Cmd::Promote(u) => {
+            e.promote(u).await?;
+            format!("{u} is an admin now")
+        }
+        Cmd::ResetPassword(u) => format!(
+            "one-time link for {u} (valid {} minutes, once):\n{}",
+            auth::PASSWORD_RESET_MINUTES,
+            e.reset_password(u).await?
+        ),
+        Cmd::ResetTotp(u) => {
+            if e.reset_totp(u).await? {
+                format!("removed the authenticator of {u}; they sign in with the password")
+            } else {
+                format!("{u} had no authenticator")
+            }
+        }
+        Cmd::DisableSsoOnly => {
+            if e.disable_sso_only().await? {
+                "sign-in mode is `page` again: the sign-in page with the password form".into()
+            } else {
+                "sign-in mode was `page` already".into()
+            }
+        }
+        Cmd::SetupReopen => {
+            e.setup_reopen().await?;
+            "the setup wizard is open again at /setup".into()
+        }
+        Cmd::SecretsStatus => status_text(&e.secrets_status().await?),
+        Cmd::SecretsRotate => format!(
+            "added key v{} as the active version; send SIGHUP to every server and worker process \
+             (or restart them) to load it; the nightly job re-encrypts stored values",
+            e.secrets_rotate().await?
+        ),
+        Cmd::SecretsPrune => {
+            let dropped = e.secrets_prune().await?;
+            if dropped.is_empty() {
+                "nothing to prune: every older version still encrypts stored values".into()
+            } else {
+                format!("dropped {dropped:?} from the key file; send SIGHUP to the server")
+            }
+        }
+        _ => unreachable!("not an escape hatch"),
+    }))
+}
+
+fn status_text(r: &server::escape::SecretsReport) -> String {
+    use std::fmt::Write;
+    let mut out = format!(
+        "key source           {} ({})\nactive version       v{}\n",
+        r.key_source, r.key_file, r.active_version
+    );
+    for v in &r.versions {
+        let _ = writeln!(
+            out,
+            "  v{:<4} {:>6} values  {}{}",
+            v.version,
+            v.rows,
+            if v.loaded { "loaded" } else { "NOT LOADED" },
+            if v.active { ", active" } else { "" }
+        );
+    }
+    let _ = write!(
+        out,
+        "to re-encrypt        {}\nlocked               {}",
+        r.rows_to_rewrap, r.locked_rows
+    );
+    out
 }
 
 /// Meilisearch documents and database size, if that backend is configured and reachable.
@@ -326,6 +468,27 @@ mod tests {
         );
         assert_eq!(p("").unwrap().cmd, Cmd::Help);
         assert!(p("storage report --force").is_err());
+        assert_eq!(
+            p("admin promote mia").unwrap().cmd,
+            Cmd::Promote("mia".into())
+        );
+        assert_eq!(
+            p("admin reset-password mia").unwrap().cmd,
+            Cmd::ResetPassword("mia".into())
+        );
+        assert_eq!(
+            p("admin reset-totp mia").unwrap().cmd,
+            Cmd::ResetTotp("mia".into())
+        );
+        assert_eq!(
+            p("admin disable-sso-only").unwrap().cmd,
+            Cmd::DisableSsoOnly
+        );
+        assert_eq!(p("setup reopen").unwrap().cmd, Cmd::SetupReopen);
+        assert_eq!(p("secrets status").unwrap().cmd, Cmd::SecretsStatus);
+        assert_eq!(p("secrets rotate").unwrap().cmd, Cmd::SecretsRotate);
+        assert_eq!(p("secrets prune").unwrap().cmd, Cmd::SecretsPrune);
+        assert!(p("admin promote").is_err());
         assert!(p("frobnicate").is_err());
     }
 

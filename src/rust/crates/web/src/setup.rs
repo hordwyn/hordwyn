@@ -343,8 +343,10 @@ fn DoneStep(w: Wizard) -> impl IntoView {
         .checklist
         .iter()
         .map(|id| {
+            // the rows the server knows are done turn green (DEC-292, DEC-305)
             let item = TaskItem::new(id.clone(), t(&format!("setup-checklist-{id}")))
-                .href(checklist_href(id));
+                .href(checklist_href(id))
+                .done(s.done.contains(id));
             match (&s.key_file, id.as_str()) {
                 (Some(file), "backup_key") => {
                     item.hint(i18n.t_args("setup-key-file", &[("file", file.clone().into())]))

@@ -30,7 +30,11 @@ first; unmatched entries become catalog stubs that are refreshed in the backgrou
 |`notes` |string |Private notes.
 |`history` |list |Progress events: `date` (RFC 3339 or `YYYY-MM-DD`) and optional
 `progress` in the API's tagged form (`{"type": "episode", "season": 1, "episode": 3}`);
-without `progress` a single-step kind (movie) records "finished".
+without `progress` a single-step kind (movie) records "finished"; optional `event_id`, the
+source's own id of the event (re-importing a newer file of the same source then adds only
+new events).
+|`lists` |list of strings |Names of the user's lists the entry is on; missing lists are
+created (private). Added in version 1 without a version bump: older files have none.
 |===
 
 The JSON Schema of an entry is published as
@@ -39,8 +43,24 @@ generated from the code (a test keeps it current).
 
 == CSV (`generic-csv`)
 
-Header row `source_id,kind,title,year,status,rating,notes,external_ids,finished_dates`;
-`external_ids` as `ns:value;ns:value`, `finished_dates` as `date;date`.
+Header row `source_id,kind,title,year,status,rating,notes,external_ids,finished_dates,lists`
+(the `lists` column is optional; files without it still read); `external_ids` as
+`ns:value;ns:value`, `finished_dates` and `lists` as `a;b`. CSV keeps only the dates of
+finished views: episodes and positions need JSON Lines. A `;` in a list name is written as
+`,`.
+
+== Other formats
+
+`legacy-json`:: the JSON export of the previous tracker the owner used (built only from the
+owner's own export file, KICKOFF Q4). One row per item; watched episodes and dated views
+become history, the built-in collections Completed, In Progress and Watchlist the status,
+other collections lists. Views without a date are logged on the day the item entered
+Completed or In Progress and reported as estimates. Workouts, measurements and the like are
+reported as not imported. Items whose source is not a known provider stay unmatched.
+`trakt-json`:: the user's own Trakt history, ratings or watchlist in the documented
+`/sync/history`, `/sync/ratings` and `/sync/watchlist` shapes (one JSON array per file);
+see `docs/connectors/trakt.md`. Rows without a TMDB, IMDb or TVDB id stay unmatched. No call
+is made to Trakt.
 
 == Running an import
 
@@ -49,13 +69,25 @@ Header row `source_id,kind,title,year,status,rating,notes,external_ids,finished_
 curl -X POST -H "Authorization: Bearer $TOKEN" --data-binary @library.jsonl \
   "$BASE/api/v1/imports?format=generic-jsonl&dry_run=true"
 curl -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/imports/<id>"
+curl -X POST -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/imports/<id>/run"
+curl -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/imports"
 curl -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/export" > library.jsonl
+curl -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/export?format=csv" > library.csv
 ----
+
+`POST /imports/<id>/run` runs the file of an earlier import for real (after a dry run, or as
+a retry); `POST /imports/<id>/cancel` stops a queued or running import at its next
+checkpoint (every 25 rows); `POST /imports/<id>/match` with `{"source_id", "item_id"}`
+matches a row of the unmatched list with a catalog item and imports it. Every import keeps a
+preview: rows per kind, history entries, five sample rows, what maps to what and what is not
+kept.
 
 Imports run as jobs in the `user_import` lane, so they never slow down interactive work.
 Progress arrives as `import.progress` events; the report lists every row that failed with
 its line number. A dry run parses and matches without writing anything. If the worker stops
-in the middle, the job is claimed again and continues at its last checkpoint. The uploaded
+in the middle, the job is claimed again and continues at its last checkpoint. Rows of the
+legacy and Trakt formats without a usable provider id are kept in the import's unmatched
+list instead of becoming title-only stubs. The uploaded
 file counts against the user's upload quota.
 
 Importing your own export back into the same account updates entries, ratings and notes, but

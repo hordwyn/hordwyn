@@ -296,6 +296,10 @@ pub struct AdminUserDto {
     pub last_seen_at: Option<String>,
     pub created_at: String,
     pub is_self: bool,
+    /// The role is managed by this provider (`role_source = provider`): badged "via group"
+    /// and not editable here.
+    #[serde(default)]
+    pub role_via_provider: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -487,6 +491,11 @@ pub struct AuditEntryDto {
     pub target_id: Option<String>,
     /// Old and new values (secrets never), proof method of gated actions.
     pub detail: serde_json::Value,
+    /// The client address (DEC-284: the peer, or the forwarded address from a trusted proxy).
+    #[serde(default)]
+    pub client_addr: Option<String>,
+    #[serde(default)]
+    pub request_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -520,13 +529,19 @@ pub struct AuditQueryDto {
 
 // ---------------------------------------------------------------- re-authentication
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ReauthInputDto {
     pub password: String,
     /// TOTP code or a recovery code, when the account has an authenticator.
     #[serde(default)]
     pub totp: Option<String>,
+}
+
+impl std::fmt::Debug for ReauthInputDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ReauthInputDto(***)")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -546,6 +561,12 @@ pub struct ReauthStatusDto {
     /// minutes".
     #[serde(default)]
     pub minutes_left: Option<i64>,
+    /// With `oidc` in `methods`: the provider's display name for "Confirm with <provider>"
+    /// and where the round trip starts (add `&next=` with the local path of the gated page).
+    #[serde(default)]
+    pub oidc_provider: Option<String>,
+    #[serde(default)]
+    pub oidc_start: Option<String>,
 }
 
 /// TOTP enrolment started: the secret to add to an authenticator app (confirm with a code).
@@ -598,6 +619,9 @@ pub struct SetupStateDto {
     /// The checklist of the Done step: ids `first_item`, `invite`, `media_server`,
     /// `notification_defaults`, `backup_key`, `identity_provider`.
     pub checklist: Vec<String>,
+    /// The checklist ids the server knows are done (DEC-292).
+    #[serde(default)]
+    pub done: Vec<String>,
     /// The secrets key file to back up (OD-06), when it was generated.
     pub key_file: Option<String>,
 }
@@ -607,4 +631,280 @@ pub struct SetupStateDto {
 pub struct HostingInputDto {
     /// `home` or `hosted`.
     pub hosting: String,
+}
+
+/// Admin > Instance > Mail (addendum-1 3.2): the `mail.*` settings with provenance, whether a
+/// password is stored (never the password) and the last test.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct MailSettingsDto {
+    pub settings: Vec<SettingDto>,
+    /// Host and sender are set.
+    pub configured: bool,
+    pub password_set: bool,
+    /// `db`, `env` (the configuration sets it) or `none`.
+    pub password_source: String,
+    pub last_test_at: Option<String>,
+    /// `ok` or `failed: <reason>`.
+    pub last_test_result: Option<String>,
+}
+
+/// Replace the SMTP password; `null` removes it. Write-only.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct MailPasswordDto {
+    pub password: Option<String>,
+}
+
+impl std::fmt::Debug for MailPasswordDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MailPasswordDto")
+            .field("password", &self.password.as_ref().map(|_| "***"))
+            .finish()
+    }
+}
+
+/// "Send a test" to `to` (default: the admin's own address).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct MailTestInputDto {
+    #[serde(default)]
+    pub to: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct MailTestDto {
+    pub ok: bool,
+    /// `ok` or `failed: <reason>`.
+    pub result: String,
+    pub at: String,
+}
+
+/// The Disabled switch of a source (DEC-289).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct SourceEnabledDto {
+    pub enabled: bool,
+}
+
+// ---------------------------------------------------------------- OIDC providers (WP3-2)
+
+/// Admin > Sign-in and SSO: the providers and the exact URIs to register at each provider
+/// (addendum-1 4.2). Error codes: `invalid_slug`, `slug_taken`, `insecure_issuer`,
+/// `invalid_issuer`, `admin_groups_required`, `self_demotion`, `fixed_by_config`,
+/// `last_sign_in_method`, `role_managed_by_provider`, `identity_in_use`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct OidcAdminDto {
+    pub providers: Vec<OidcProviderDto>,
+    /// `<public_url>/api/v1/auth/oidc/callback`, one for every provider.
+    pub redirect_uri: String,
+    /// `<public_url>/signed-out` (RP-initiated logout, WP3-3).
+    pub post_logout_redirect_uri: String,
+    /// `<public_url>/api/v1/auth/oidc/backchannel-logout` (WP3-3).
+    pub backchannel_logout_uri: String,
+}
+
+/// One provider. The client secret is write-only: only whether one is stored.
+// Wire format: independent yes/no fields the admin page shows one by one.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct OidcProviderDto {
+    pub id: String,
+    pub slug: String,
+    pub display_name: String,
+    pub issuer: String,
+    pub client_id: String,
+    pub secret_set: bool,
+    /// The stored secret cannot be decrypted (its key version is not loaded).
+    pub secret_locked: bool,
+    pub scopes: Vec<String>,
+    pub enabled: bool,
+    pub is_default: bool,
+    pub auto_create: bool,
+    pub groups_claim: String,
+    pub allowed_groups: Vec<String>,
+    pub admin_groups: Vec<String>,
+    /// `local` or `provider`.
+    pub role_source: String,
+    /// `db`, or `env` (from `auth.oidc` in the configuration, read-only).
+    pub provenance: String,
+    /// `APP__AUTH__OIDC` for the environment provider.
+    pub env_var: Option<String>,
+    pub capabilities: OidcCapabilitiesDto,
+    pub discovery_fetched_at: Option<String>,
+    pub last_test_at: Option<String>,
+    pub last_test: Option<OidcTestDto>,
+    pub last_callback_at: Option<String>,
+    /// `ok` or `failed: <code>`.
+    pub last_callback_result: Option<String>,
+}
+
+/// What the provider's discovery document advertises.
+// Wire format: one flag per advertised capability (Discovery 1.0, the logout specs).
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct OidcCapabilitiesDto {
+    pub end_session: bool,
+    pub backchannel_logout: bool,
+    pub backchannel_logout_session: bool,
+    pub frontchannel_logout: bool,
+    pub pkce_s256: bool,
+    /// RFC 9207 `authorization_response_iss_parameter_supported`.
+    pub iss_parameter: bool,
+}
+
+/// Create or change a provider. `client_secret` is only read on create; change it with
+/// `PUT /admin/oidc/providers/{id}/secret`.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct OidcProviderInputDto {
+    pub slug: String,
+    pub display_name: String,
+    pub issuer: String,
+    pub client_id: String,
+    #[serde(default)]
+    pub client_secret: Option<String>,
+    /// Default `openid profile email`; `openid` is always added.
+    #[serde(default)]
+    pub scopes: Option<Vec<String>>,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub is_default: bool,
+    #[serde(default)]
+    pub auto_create: bool,
+    #[serde(default)]
+    pub groups_claim: Option<String>,
+    #[serde(default)]
+    pub allowed_groups: Vec<String>,
+    #[serde(default)]
+    pub admin_groups: Vec<String>,
+    /// `local` (default) or `provider` (needs `admin_groups`, OD-16).
+    #[serde(default)]
+    pub role_source: Option<String>,
+}
+
+const fn yes() -> bool {
+    true
+}
+
+impl std::fmt::Debug for OidcProviderInputDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OidcProviderInputDto")
+            .field("slug", &self.slug)
+            .field("issuer", &self.issuer)
+            .field("client_id", &self.client_id)
+            .field("client_secret", &self.client_secret.as_ref().map(|_| "***"))
+            .finish_non_exhaustive()
+    }
+}
+
+/// Replace the client secret; `null` removes it. Write-only.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct OidcSecretDto {
+    pub secret: Option<String>,
+}
+
+impl std::fmt::Debug for OidcSecretDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OidcSecretDto")
+            .field("secret", &self.secret.as_ref().map(|_| "***"))
+            .finish()
+    }
+}
+
+/// Outcome of a provider Test: a fresh discovery and what it advertises, and whether the
+/// testing admin's last sign-in through it carried the groups claim (`null`: the admin has
+/// no identity at this provider).
+// Wire format: one flag per Test outcome.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct OidcTestDto {
+    pub ok: bool,
+    /// `ok` or `failed: <reason>`.
+    pub discovery: String,
+    pub end_session: bool,
+    pub backchannel_logout: bool,
+    pub frontchannel_logout: bool,
+    pub pkce_s256: bool,
+    pub iss_parameter: bool,
+    pub groups_claim_seen: Option<bool>,
+    pub at: String,
+    /// OD-19, from the last silent probe (a `prompt=none` round trip by an admin):
+    /// `silent_ok`, `silent_login_required` or `silent_unsupported`; `None`: not probed. A
+    /// provider that shows its own page instead of answering never comes back, which also
+    /// means `silent_unsupported`. Auto mode goes silent only after `silent_ok`.
+    #[serde(default)]
+    pub silent_probe: Option<String>,
+    #[serde(default)]
+    pub silent_probe_at: Option<String>,
+    /// od-12 4.4 step 5, from the last `max_age=0` round trip: did the provider report a
+    /// fresh `auth_time`? `None`: not probed.
+    #[serde(default)]
+    pub max_age_probe: Option<bool>,
+    #[serde(default)]
+    pub max_age_probe_at: Option<String>,
+    /// Where the admin's browser starts the probes (top-level navigation; add `&next=` with
+    /// a local path to come back to, which then gets `?probe=<outcome>`).
+    #[serde(default)]
+    pub silent_probe_url: Option<String>,
+    #[serde(default)]
+    pub max_age_probe_url: Option<String>,
+}
+
+/// A provider button on the sign-in page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct OidcButtonDto {
+    pub slug: String,
+    pub display_name: String,
+    pub is_default: bool,
+}
+
+/// "Is this your account?" (addendum-1 4.2 step 3): the account the provider's verified
+/// email matches, to be confirmed with its password.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct OidcLinkPendingDto {
+    pub username: String,
+    pub display_name: String,
+    /// The provider's display name.
+    pub provider: String,
+    /// The account has a password (else: "ask your admin to link it").
+    pub has_password: bool,
+}
+
+/// The password (and TOTP when enrolled) of the matched account.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct OidcLinkConfirmDto {
+    pub password: String,
+    #[serde(default)]
+    pub totp: Option<String>,
+}
+
+impl std::fmt::Debug for OidcLinkConfirmDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("OidcLinkConfirmDto(***)")
+    }
+}
+
+/// Settings > Account > Linked sign-ins.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct LinkedIdentityDto {
+    pub id: String,
+    /// The provider's display name, or the issuer when the provider is gone.
+    pub provider: String,
+    pub provider_slug: Option<String>,
+    pub issuer: String,
+    pub linked_at: String,
+    /// Unlinking would leave a way to sign in (a password or another provider).
+    pub can_unlink: bool,
 }

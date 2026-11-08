@@ -4,6 +4,7 @@
 
 mod admin_wiring;
 mod csrf;
+pub mod escape;
 mod handlers;
 pub mod infra;
 pub mod web_admin;
@@ -45,6 +46,8 @@ pub struct Server {
     pub search: Arc<dyn SearchIndex>,
     pub notify: Arc<notify::Engine>,
     pub deliverer: Arc<notify::Deliverer>,
+    /// Proxies whose forwarded client address and request id are believed (DEC-284).
+    pub trusted_proxies: Arc<api::request_meta::TrustedProxies>,
 }
 
 /// Test and embedding hooks; production uses the defaults.
@@ -77,7 +80,7 @@ async fn notify_engine(
     bus: &realtime::Bus,
     clock: Arc<dyn app::ports::Clock>,
     cipher: Arc<dyn app::ports::SecretCipher>,
-) -> anyhow::Result<(Arc<notify::Engine>, Arc<notify::Deliverer>, Option<String>)> {
+) -> anyhow::Result<NotifyParts> {
     let engine = Arc::new(notify::Engine::new(
         Arc::new(notify::pg::PgNotifyStore::new(pool.clone(), cipher)),
         Arc::new(queue.clone()),
@@ -92,7 +95,7 @@ async fn notify_engine(
         .reload_templates()
         .await
         .context("notification templates")?;
-    let (channels, web_push_key) =
+    let (channels, web_push_key, mailer) =
         notify_channels(config, &brand.user_agent(env!("CARGO_PKG_VERSION")))?;
     let deliverer = Arc::new(notify::Deliverer::new(
         engine.clone(),
@@ -101,7 +104,19 @@ async fn notify_engine(
         &config.server.public_url,
         config.notify.max_attempts,
     ));
-    Ok((engine, deliverer, web_push_key))
+    Ok(NotifyParts {
+        engine,
+        deliverer,
+        web_push_key,
+        mailer,
+    })
+}
+
+struct NotifyParts {
+    engine: Arc<notify::Engine>,
+    deliverer: Arc<notify::Deliverer>,
+    web_push_key: Option<String>,
+    mailer: Arc<notify::channels::email::Mailer>,
 }
 
 /// Notification channels from the configuration, and the VAPID public key if web push is on
@@ -109,7 +124,11 @@ async fn notify_engine(
 fn notify_channels(
     cfg: &AppConfig,
     user_agent: &str,
-) -> anyhow::Result<(notify::channels::Channels, Option<String>)> {
+) -> anyhow::Result<(
+    notify::channels::Channels,
+    Option<String>,
+    Arc<notify::channels::email::Mailer>,
+)> {
     use notify::channels::{Channels, email, http};
     let n = &cfg.notify;
     let email = n
@@ -131,6 +150,7 @@ fn notify_channels(
         })
         .transpose()
         .map_err(|e| anyhow::anyhow!("notify.smtp: {e}"))?;
+    let mailer = Arc::new(email::Mailer::new(email));
     Ok((
         Channels {
             http: Some(http::HttpChannels::new(
@@ -140,10 +160,11 @@ fn notify_channels(
                 )),
                 n.allow_private_targets,
             )),
-            email,
+            email: mailer.clone(),
         },
         // web push is not built yet (DEC-141)
         None,
+        mailer,
     ))
 }
 
@@ -223,7 +244,12 @@ impl Server {
         let queue = jobs::PgQueue::new(pool.clone());
         let clock: Arc<dyn app::ports::Clock> = Arc::new(infra::SystemClock::default());
         let (kinds, kind_ids) = enabled_kinds(&config);
-        let (engine, deliverer, web_push_key) = notify_engine(
+        let NotifyParts {
+            engine,
+            deliverer,
+            web_push_key,
+            mailer,
+        } = notify_engine(
             &config,
             &brand,
             &pool,
@@ -261,9 +287,11 @@ impl Server {
             None => default_registry(&config),
         };
         let registry = registry.with_stats(stats.clone());
-        let http: Arc<dyn HttpFetch> = o.http.unwrap_or_else(|| {
+        let (http, oidc_hosts): (Arc<dyn HttpFetch>, _) = if let Some(h) = o.http {
+            (h, None)
+        } else {
             governed_http(&config, &brand, &registry, &pool, budget.clone(), stats)
-        });
+        };
         let assets = Arc::new(assets::AssetService::new(
             budget.clone(),
             Arc::new(assets::pg::PgAssetRepo::new(pool.clone())),
@@ -277,8 +305,17 @@ impl Server {
             auth_store.clone(),
             auth_settings(&config, &brand),
         )
-        .with_invites(auth_store.clone());
-        let oidc = oidc(&config, http.clone());
+        .with_invites(auth_store);
+        let oidc = oidc(OidcWiring {
+            config: &config,
+            pool: &pool,
+            cipher: cipher.clone(),
+            keys: keys.ring.clone(),
+            clock: clock.clone(),
+            http: http.clone(),
+            hosts: oidc_hosts,
+        })
+        .await?;
         let (search, search_backend) = match o.search {
             Some(s) => (s, "override"),
             None => search_index(&config, &pool).await,
@@ -315,14 +352,7 @@ impl Server {
             default_kinds: kind_ids,
             admin: None,
         };
-        let secret_rows: Vec<Arc<dyn app::ports::SecretRows>> = vec![
-            auth_store,
-            Arc::new(notify::pg::PgNotifyStore::new(pool.clone(), cipher.clone())),
-            Arc::new(auth::admin_pg::PgAdminStore::new(
-                pool.clone(),
-                cipher.clone(),
-            )),
-        ];
+        let secret_rows = admin_wiring::secret_rows(&pool, &cipher);
         admin_wiring::seal_plaintext(&secret_rows, cipher.as_ref(), &keys.source).await?;
         let api = admin_wiring::with_admin(
             api,
@@ -337,11 +367,17 @@ impl Server {
                 http: http.clone(),
                 search_backend,
                 disabled_sources,
+                mailer,
             },
         )
         .await?;
+        let trusted_proxies = Arc::new(
+            api::request_meta::TrustedProxies::parse(&config.server.trusted_proxies)
+                .map_err(anyhow::Error::msg)?,
+        );
         Ok(Self {
             config,
+            trusted_proxies,
             brand,
             app,
             api,
@@ -375,10 +411,15 @@ impl Server {
     }
 
     /// Cross-site request protection for cookie-authenticated mutations (G2-1).
+    /// Also gives every request its client address and request id (DEC-284).
     fn guarded(&self, r: Router) -> Router {
         r.layer(axum::middleware::from_fn_with_state(
             csrf::public_origin(&self.config.server.public_url),
             csrf::guard,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            self.trusted_proxies.clone(),
+            api::request_meta::layer,
         ))
     }
 
@@ -388,9 +429,15 @@ impl Server {
         handlers::worker(self)
     }
 
+    /// Register the cron entries of the admin jobs (audit retention, re-wrap); the worker
+    /// does it on start.
+    pub async fn schedule_admin_jobs(&self) {
+        handlers::schedule_admin_jobs(self).await;
+    }
+
     /// Run the worker and the cron ticker until `stop` is cancelled.
     pub async fn run_worker(&self, stop: CancellationToken) {
-        handlers::schedule_admin_jobs(self).await;
+        self.schedule_admin_jobs().await;
         let ticker = {
             let queue = self.queue.clone();
             let stop = stop.clone();
@@ -507,7 +554,8 @@ async fn serve_asset(
 }
 
 /// The production `HttpFetch`: governed client with HTTP cache in the storage budget and one
-/// policy (allowlist, rate limit) per connector, plus the OIDC issuer.
+/// policy (allowlist, rate limit) per connector, plus the OIDC connector whose allowlist
+/// follows the configured providers at run time (the returned handle).
 fn governed_http(
     config: &AppConfig,
     brand: &brand::Brand,
@@ -515,7 +563,7 @@ fn governed_http(
     pool: &sqlx::PgPool,
     budget: Arc<assets::StorageBudget>,
     stats: Arc<catalog_core::SourceStats>,
-) -> Arc<dyn HttpFetch> {
+) -> (Arc<dyn HttpFetch>, Option<Arc<catalog_core::HostList>>) {
     let cache = HttpCache {
         index: Arc::new(catalog_core::pg::PgCacheIndex::new(pool.clone())),
         blobs: budget,
@@ -525,13 +573,24 @@ fn governed_http(
     for info in registry.infos() {
         g.add_connector(&info.id, ConnectorPolicy::from_info(&info));
     }
-    if let Some(oidc) = &config.auth.oidc
-        && let Ok(u) = url::Url::parse(&oidc.issuer)
-        && let Some(host) = u.host_str()
-    {
-        g.add_connector(auth::oidc::CONNECTOR, ConnectorPolicy::oidc(host, u.port()));
-    }
-    Arc::new(g.with_stats(stats))
+    let mut policy = ConnectorPolicy::oidc("", None);
+    policy.hosts = config
+        .auth
+        .oidc
+        .as_ref()
+        .and_then(|o| url::Url::parse(&o.issuer).ok())
+        .and_then(|u| {
+            let host = u.host_str()?.to_string();
+            Some(match u.port() {
+                Some(p) => format!("{host}:{p}"),
+                None => host,
+            })
+        })
+        .into_iter()
+        .collect();
+    g.add_connector(auth::oidc::CONNECTOR, policy);
+    let hosts = g.host_list(auth::oidc::CONNECTOR);
+    (Arc::new(g.with_stats(stats)), hosts)
 }
 
 fn auth_settings(config: &AppConfig, brand: &brand::Brand) -> auth::AuthSettings {
@@ -546,22 +605,82 @@ fn auth_settings(config: &AppConfig, brand: &brand::Brand) -> auth::AuthSettings
     }
 }
 
-fn oidc(config: &AppConfig, http: Arc<dyn HttpFetch>) -> Option<Arc<auth::oidc::Oidc>> {
-    config.auth.oidc.as_ref().map(|c| {
-        Arc::new(auth::oidc::Oidc::new(
-            auth::oidc::OidcSettings {
-                issuer: c.issuer.clone(),
-                client_id: c.client_id.clone(),
-                client_secret: c.client_secret.as_ref().map(|s| s.expose().to_string()),
-                redirect_url: format!(
-                    "{}/api/v1/auth/oidc/callback",
-                    config.server.public_url.trim_end_matches('/')
-                ),
-                auto_create: c.auto_create,
-            },
-            http,
-        ))
-    })
+/// The governed client's run-time OIDC allowlist as the `auth` port.
+struct OidcHosts(Arc<catalog_core::HostList>);
+
+impl auth::oidc::HostAllowlist for OidcHosts {
+    fn set_hosts(&self, hosts: Vec<String>) {
+        self.0.set(hosts);
+    }
+}
+
+struct OidcWiring<'a> {
+    config: &'a AppConfig,
+    pool: &'a sqlx::PgPool,
+    cipher: Arc<dyn app::ports::SecretCipher>,
+    keys: Arc<auth::secrets::LiveKeys>,
+    clock: Arc<dyn app::ports::Clock>,
+    http: Arc<dyn HttpFetch>,
+    hosts: Option<Arc<catalog_core::HostList>>,
+}
+
+/// The OIDC providers (admin area plus the environment's `auth.oidc` as a read-only row).
+async fn oidc(w: OidcWiring<'_>) -> anyhow::Result<Option<Arc<auth::oidc::Oidc>>> {
+    use auth::oidc::{EnvProvider, Provider, RoleSource};
+    let config = w.config;
+    let oidc = Arc::new(auth::oidc::Oidc::new(auth::oidc::OidcParts {
+        store: Arc::new(auth::oidc::PgProviderStore::new(
+            w.pool.clone(),
+            w.cipher.clone(),
+        )),
+        http: w.http,
+        keys: w.keys,
+        clock: w.clock.clone(),
+        hosts: w
+            .hosts
+            .map(|h| Arc::new(OidcHosts(h)) as Arc<dyn auth::oidc::HostAllowlist>),
+        audit: Some(Arc::new(auth::admin_pg::PgAdminStore::new(
+            w.pool.clone(),
+            w.cipher,
+        ))),
+        public_url: config.server.public_url.trim_end_matches('/').to_string(),
+    }));
+    let env = config.auth.oidc.as_ref().map(|c| {
+        let now = w.clock.now();
+        let mut p = Provider::new(
+            auth::oidc::ENV_PROVIDER_ID,
+            &c.slug,
+            &c.issuer,
+            &c.client_id,
+            now,
+        );
+        p.display_name.clone_from(&c.display_name);
+        p.auto_create = c.auto_create;
+        p.is_default = true;
+        if !c.scopes.is_empty() {
+            p.scopes = std::iter::once("openid".to_string())
+                .chain(c.scopes.iter().filter(|s| *s != "openid").cloned())
+                .collect();
+        }
+        p.groups_claim.clone_from(&c.groups_claim);
+        p.allowed_groups.clone_from(&c.allowed_groups);
+        p.admin_groups.clone_from(&c.admin_groups);
+        p.role_source = match c.role_source {
+            config::OidcRoleSource::Local => RoleSource::Local,
+            config::OidcRoleSource::Provider => RoleSource::Provider,
+        };
+        EnvProvider {
+            provider: p,
+            secret: c
+                .client_secret
+                .as_ref()
+                .map(|s| zeroize::Zeroizing::new(s.expose().to_string())),
+        }
+    });
+    oidc.install_env(env)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(Some(oidc))
 }
 
 /// The configured search backend. If Meilisearch cannot be reached at start-up the process
@@ -622,7 +741,7 @@ impl Server {
     /// is right on the first render (design.md 3.2).
     pub fn app_router(&self, options: &leptos::prelude::LeptosOptions) -> Router {
         use leptos_axum::LeptosRoutes;
-        let routes = leptos_axum::generate_route_list(web::App);
+        let routes = page_routes();
         let context = self.web_context();
         let pages = Router::new()
             .route(
@@ -641,6 +760,14 @@ impl Server {
                 web::shell,
             ))
             .with_state(options.clone())
+            // inner: runs after the session is resolved (signed-in visits pass untouched)
+            .layer(axum::middleware::from_fn_with_state(
+                SsoPages {
+                    api: self.api.clone(),
+                    brand: Arc::new(self.brand.clone()),
+                },
+                sso_redirect,
+            ))
             .layer(axum::middleware::from_fn_with_state(
                 self.web_backend(),
                 web::backend::resolve_shell_session,
@@ -648,6 +775,19 @@ impl Server {
         let pages = self.guarded(pages);
         self.base_router().merge(pages)
     }
+}
+
+/// The app's page routes, listed once per process. Listing renders the app with a
+/// process-wide flag set (`leptos_server::SuppressResourceLoad`, set by
+/// `leptos_router::RouteList::generate`) under which every resource created anywhere in the
+/// process waits forever; a page rendered by another router at that moment never finished
+/// (DEC-384). Listing once, before the first router exists, leaves no page in flight.
+fn page_routes() -> Vec<leptos_axum::AxumRouteListing> {
+    static ROUTES: std::sync::OnceLock<Vec<leptos_axum::AxumRouteListing>> =
+        std::sync::OnceLock::new();
+    ROUTES
+        .get_or_init(|| leptos_axum::generate_route_list(web::App))
+        .clone()
 }
 
 /// Every repository port on Postgres.
@@ -665,4 +805,51 @@ fn pg_repos(pool: &sqlx::PgPool) -> Repos {
         lists: store.clone(),
         sessions: store,
     }
+}
+
+/// What [`sso_redirect`] needs.
+#[derive(Clone)]
+struct SsoPages {
+    api: api::ApiState,
+    brand: Arc<brand::Brand>,
+}
+
+/// Sign-in mode `auto` (addendum-1 4.3, 4.4; phase 3 WP3-3): a signed-out visit of a page
+/// answers `302` to the default provider (or the outage page) with the `role=status`
+/// interstitial as body (4.5 state 2). Signed-in visits, other methods, non-page paths and
+/// the exemptions of `api::auto_redirect` (`/signed-out` above all, OD-20) pass through.
+async fn sso_redirect(
+    State(p): State<SsoPages>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let signed_in = req
+        .extensions()
+        .get::<web::backend::ShellSession>()
+        .is_some();
+    let page = matches!(
+        *req.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD
+    ) && web::backend::is_page(req.uri().path());
+    if signed_in || !page {
+        return next.run(req).await;
+    }
+    let target = req
+        .uri()
+        .path_and_query()
+        .map_or_else(|| "/".to_string(), |pq| pq.as_str().to_string());
+    let Some(r) = api::auto_redirect(&p.api, req.headers(), &target).await else {
+        return next.run(req).await;
+    };
+    let Some((provider, url)) = r.provider.clone() else {
+        return r.response;
+    };
+    let accept = req
+        .headers()
+        .get(header::ACCEPT_LANGUAGE)
+        .and_then(|v| v.to_str().ok());
+    let locale = web::i18n::negotiate(accept, &p.brand.default_locale);
+    let overrides = p.brand.strings.get(&locale).cloned().unwrap_or_default();
+    let html = web::auth_redirect::interstitial(&locale, overrides, &provider, &url);
+    api::with_body(r, html)
 }

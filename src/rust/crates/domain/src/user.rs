@@ -29,6 +29,10 @@ pub struct User {
     /// and then the brand default (DEC-201).
     #[serde(default)]
     pub locale: Option<String>,
+    /// IANA time zone (`Europe/Berlin`) for days, "today" and times (DEC-239); `None` follows
+    /// the brand default, then UTC.
+    #[serde(default)]
+    pub time_zone: Option<String>,
     pub created_at: Timestamp,
 }
 

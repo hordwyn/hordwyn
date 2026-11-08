@@ -56,11 +56,12 @@ async fn sign_up_sign_in_and_sessions_on_postgres() {
     assert!(creds.totp_secret.is_some() && !creds.totp_enabled);
     auth::AuthStore::link_identity(
         pg.as_ref(),
-        &auth::OidcIdentity {
-            issuer: "https://id.example.org".into(),
-            subject: "abc".into(),
-            user_id: user.id,
-        },
+        &auth::OidcIdentity::new(
+            "https://id.example.org",
+            "abc",
+            user.id,
+            app::ports::Clock::now(t.app.clock.as_ref()),
+        ),
     )
     .await
     .unwrap();
@@ -273,10 +274,10 @@ async fn signup_invites_are_claimed_once() {
     let expired = invite(2, now - chrono::Duration::minutes(1));
     let mut revoked = invite(3, now + chrono::Duration::days(1));
     for i in [&open, &expired, &revoked] {
-        pg.insert_signup_invite(i).await.unwrap();
+        pg.insert_signup_invite(i, None).await.unwrap();
     }
     revoked.revoked_at = Some(now);
-    pg.update_signup_invite(&revoked).await.unwrap();
+    pg.update_signup_invite(&revoked, None).await.unwrap();
     assert!(pg.claim_signup_invite(open.id, now).await.unwrap());
     assert!(
         !pg.claim_signup_invite(open.id, now).await.unwrap(),
@@ -287,4 +288,84 @@ async fn signup_invites_are_claimed_once() {
     // a failed account creation gives the claim back
     pg.finish_signup_invite(open.id, None).await.unwrap();
     assert!(pg.claim_signup_invite(open.id, now).await.unwrap());
+}
+
+/// addendum-1 3.3: a reset link works once, not after an hour, and ends the sessions;
+/// `reset_totp` removes the authenticator.
+#[tokio::test]
+async fn a_password_reset_link_works_once_and_ends_the_sessions() {
+    let Some(pool) = store_pg::testing::fresh_db().await else {
+        return;
+    };
+    let mut t = testkit::TestEnv::new();
+    let store = Arc::new(store_pg::PgStore::new(pool.clone()));
+    t.app.repos.users = store.clone();
+    t.app.repos.companions = store;
+    let pg = Arc::new(PgAuthStore::new(
+        pool.clone(),
+        Arc::new(auth::secrets::KeyRing::generate().0),
+    ));
+    let auth = Auth::new(
+        t.app.clone(),
+        pg.clone(),
+        AuthSettings {
+            signup: SignupMode::Open,
+            ..AuthSettings::default()
+        },
+    );
+    let (user, token) = auth
+        .sign_up(SignUp {
+            username: "anna".into(),
+            display_name: "Anna".into(),
+            email: None,
+            password: "correct horse battery".into(),
+            invite: None,
+        })
+        .await
+        .unwrap();
+    let link = auth.create_password_reset(user.id).await.unwrap();
+    let stored: String = sqlx::query_scalar("SELECT token_hash FROM password_resets")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_ne!(stored, link, "only the hash is stored");
+    assert!(matches!(
+        auth.reset_password(&link, "short").await,
+        Err(auth::AuthError::PasswordTooShort)
+    ));
+    assert_eq!(
+        auth.reset_password(&link, "a new long passphrase")
+            .await
+            .unwrap(),
+        Some(user.id)
+    );
+    assert_eq!(
+        auth.session(&token.0).await.unwrap(),
+        None,
+        "sessions ended"
+    );
+    assert_eq!(
+        auth.reset_password(&link, "another passphrase")
+            .await
+            .unwrap(),
+        None,
+        "single use"
+    );
+    auth.sign_in("anna", "a new long passphrase", None)
+        .await
+        .unwrap();
+
+    let late = auth.create_password_reset(user.id).await.unwrap();
+    sqlx::query("UPDATE password_resets SET expires_at = created_at")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        auth.reset_password(&late, "a third passphrase")
+            .await
+            .unwrap(),
+        None,
+        "expired after the hour"
+    );
+    assert!(!auth.reset_totp(user.id).await.unwrap());
 }

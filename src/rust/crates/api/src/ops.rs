@@ -452,17 +452,19 @@ pub async fn create_companion(s: &ApiState, a: Actor, name: &str) -> ApiResult<C
     Ok(dto::companion(&s.app.create_companion(a, name).await?))
 }
 
-fn list_dto(l: &List) -> ListDto {
+/// A list as its owner sees it (with the public link of a link-shared list).
+#[must_use]
+pub fn list_dto(l: &List) -> ListDto {
     ListDto {
         id: l.id.0.to_string(),
         name: l.name.clone(),
         description: l.description.clone(),
-        visibility: match l.visibility {
-            Visibility::Private => "private".into(),
-            Visibility::Instance => "instance".into(),
-            Visibility::Link { .. } => "link".into(),
-        },
+        visibility: l.visibility.choice().as_str().into(),
         item_ids: l.items.iter().map(|i| i.item_id.0.to_string()).collect(),
+        share_path: match &l.visibility {
+            Visibility::Link { token } => Some(crate::sharing::shared_list_path(token)),
+            _ => None,
+        },
     }
 }
 
@@ -508,13 +510,10 @@ pub async fn add_to_list(
     Ok(list_dto(&l))
 }
 
-/// The user's library in the generic format (JSON Lines), importable again.
-///
-/// # Errors
-/// Storage errors.
-pub async fn export(s: &ApiState, a: Actor) -> ApiResult<String> {
-    let mut out = importers::generic::header_line();
-    out.push('\n');
+/// The user's library as rows of the generic format, with the lists each entry is on.
+async fn export_rows(s: &ApiState, a: Actor) -> ApiResult<Vec<importers::ImportRow>> {
+    let lists = s.app.lists(a).await?;
+    let mut rows = Vec::new();
     for e in s.app.library(a).await? {
         let item = s.app.catalog_item(e.item_id).await?;
         let history = s
@@ -525,9 +524,10 @@ pub async fn export(s: &ApiState, a: Actor) -> ApiResult<String> {
             .map(|p| importers::row::HistoryEntry {
                 date: p.occurred_at.to_rfc3339(),
                 progress: serde_json::to_value(&p.progress).ok(),
+                event_id: None,
             })
             .collect();
-        let row = importers::ImportRow {
+        rows.push(importers::ImportRow {
             source_id: e.id.0.to_string(),
             kind: e.kind.to_string(),
             title: item.title,
@@ -541,11 +541,36 @@ pub async fn export(s: &ApiState, a: Actor) -> ApiResult<String> {
             rating: e.rating.value.map(Rating::value),
             notes: e.notes.value,
             history,
-        };
+            lists: lists
+                .iter()
+                .filter(|l| l.items.iter().any(|i| i.item_id == e.item_id))
+                .map(|l| l.name.clone())
+                .collect(),
+        });
+    }
+    Ok(rows)
+}
+
+/// The user's library in the generic format (JSON Lines), importable again.
+///
+/// # Errors
+/// Storage errors.
+pub async fn export(s: &ApiState, a: Actor) -> ApiResult<String> {
+    let mut out = importers::generic::header_line();
+    out.push('\n');
+    for row in export_rows(s, a).await? {
         out.push_str(&serde_json::to_string(&row).unwrap_or_default());
         out.push('\n');
     }
     Ok(out)
+}
+
+/// The user's library as generic CSV (importable again; keeps finished dates only).
+///
+/// # Errors
+/// Storage errors.
+pub async fn export_csv(s: &ApiState, a: Actor) -> ApiResult<String> {
+    Ok(importers::generic::csv_text(&export_rows(s, a).await?))
 }
 
 fn importer(s: &ApiState) -> ApiResult<&std::sync::Arc<importers::Importer>> {
@@ -567,8 +592,14 @@ fn import_error(e: importers::ImportError) -> ApiError {
         importers::ImportError::Unknown(_) => {
             ApiError::new(StatusCode::NOT_FOUND, "not_found", "import not found")
         }
+        importers::ImportError::UnknownRow(_) => {
+            ApiError::new(StatusCode::NOT_FOUND, "not_found", "no such unmatched row")
+        }
         importers::ImportError::Forbidden => {
             ApiError::new(StatusCode::FORBIDDEN, "forbidden", "forbidden")
+        }
+        importers::ImportError::Conflict { code, message } => {
+            ApiError::new(StatusCode::CONFLICT, code, message)
         }
         importers::ImportError::App(a) => a.into(),
         other => {
@@ -591,6 +622,17 @@ fn import_error(e: importers::ImportError) -> ApiError {
     }
 }
 
+/// The record as the imports page reads it (`contracts::imports::ImportDto`), without the
+/// internal storage key of the file and the owner id (UX3-26).
+fn record(r: &importers::ImportRecord) -> serde_json::Value {
+    let mut v = serde_json::to_value(r).unwrap_or_default();
+    if let Some(o) = v.as_object_mut() {
+        o.remove("source_key");
+        o.remove("user_id");
+    }
+    v
+}
+
 /// Queue an import of `bytes` in `format`.
 ///
 /// # Errors
@@ -606,7 +648,7 @@ pub async fn start_import(
         .start(a, format, bytes, dry_run)
         .await
         .map_err(import_error)?;
-    Ok(serde_json::to_value(r).unwrap_or_default())
+    Ok(record(&r))
 }
 
 /// # Errors
@@ -614,5 +656,60 @@ pub async fn start_import(
 pub async fn import_status(s: &ApiState, a: Actor, id: &str) -> ApiResult<serde_json::Value> {
     let id = parse_id(id, |u| u)?;
     let r = importer(s)?.status(a, id).await.map_err(import_error)?;
-    Ok(serde_json::to_value(r).unwrap_or_default())
+    Ok(record(&r))
+}
+
+/// Imports listed on the imports page.
+pub const IMPORTS_LISTED: u32 = 20;
+
+/// The user's imports, newest first (reports, previews and unmatched rows).
+///
+/// # Errors
+/// Storage errors.
+pub async fn imports(s: &ApiState, a: Actor) -> ApiResult<Vec<serde_json::Value>> {
+    let list = importer(s)?
+        .list(a, IMPORTS_LISTED)
+        .await
+        .map_err(import_error)?;
+    Ok(list.iter().map(record).collect())
+}
+
+/// Run an import's file again for real (after a dry run, or as a retry).
+///
+/// # Errors
+/// Unknown import or not the owner.
+pub async fn rerun_import(s: &ApiState, a: Actor, id: &str) -> ApiResult<serde_json::Value> {
+    let id = parse_id(id, |u| u)?;
+    let r = importer(s)?.rerun(a, id).await.map_err(import_error)?;
+    Ok(record(&r))
+}
+
+/// Ask a running import to stop at its next checkpoint.
+///
+/// # Errors
+/// Unknown import, not the owner, finished (409 `import_finished`).
+pub async fn cancel_import(s: &ApiState, a: Actor, id: &str) -> ApiResult<serde_json::Value> {
+    let id = parse_id(id, |u| u)?;
+    let r = importer(s)?.cancel(a, id).await.map_err(import_error)?;
+    Ok(record(&r))
+}
+
+/// Match an unmatched row with a catalog item and import it.
+///
+/// # Errors
+/// Unknown import, row or item; a dry run or another kind (409).
+pub async fn match_import_row(
+    s: &ApiState,
+    a: Actor,
+    id: &str,
+    source_id: &str,
+    item_id: &str,
+) -> ApiResult<serde_json::Value> {
+    let id = parse_id(id, |u| u)?;
+    let item = parse_id(item_id, ItemId)?;
+    let r = importer(s)?
+        .match_row(a, id, source_id, item)
+        .await
+        .map_err(import_error)?;
+    Ok(record(&r))
 }

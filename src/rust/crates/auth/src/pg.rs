@@ -13,13 +13,18 @@ use domain::ids::UserId;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use zeroize::Zeroizing;
+
 use crate::store::{
-    AuthStore, Credentials, InviteStore, OidcIdentity, RecoveryCode, Session, SignupInvite,
+    AuthStore, Credentials, InviteStore, OidcIdentity, RecoveryCode, Session, SessionSecret,
+    SignupInvite,
 };
 
 /// Purpose of the encrypted TOTP seed.
 pub const TOTP_PURPOSE: &str = "totp_secret";
 const TOTP_FIELD: &str = "totp_secret";
+/// Purpose of the secrets kept per session (`session_secrets`, DEC-317); the field is the kind.
+pub const SESSION_SECRET_PURPOSE: &str = "session_secret";
 
 // Takes the error by value so it can be passed to `map_err` directly.
 #[allow(clippy::needless_pass_by_value)]
@@ -38,6 +43,14 @@ fn totp_slot(row: &str) -> SecretSlot<'_> {
         purpose: TOTP_PURPOSE,
         row,
         field: TOTP_FIELD,
+    }
+}
+
+fn session_slot<'a>(row: &'a str, kind: &'static str) -> SecretSlot<'a> {
+    SecretSlot {
+        purpose: SESSION_SECRET_PURPOSE,
+        row,
+        field: kind,
     }
 }
 
@@ -155,8 +168,9 @@ impl AuthStore for PgAuthStore {
     async fn insert_session(&self, s: &Session) -> Result<(), PortError> {
         sqlx::query!(
             "INSERT INTO auth_sessions (token_hash, user_id, created_at, last_seen_at, expires_at,
-                                        reauth_at, reauth_method, reauth_slide_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                                        reauth_at, reauth_method, reauth_slide_at, provider_id,
+                                        oidc_sid)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
             s.token_hash,
             s.user_id.0,
             s.created_at,
@@ -164,7 +178,9 @@ impl AuthStore for PgAuthStore {
             s.expires_at,
             s.reauth_at,
             s.reauth_method,
-            s.reauth_slide_at
+            s.reauth_slide_at,
+            s.provider_id,
+            s.oidc_sid
         )
         .execute(&self.pool)
         .await
@@ -176,7 +192,7 @@ impl AuthStore for PgAuthStore {
         let r = sqlx::query_as!(
             SessionRow,
             "SELECT token_hash, user_id, created_at, last_seen_at, expires_at, reauth_at,
-                    reauth_method, reauth_slide_at
+                    reauth_method, reauth_slide_at, provider_id, oidc_sid
              FROM auth_sessions WHERE token_hash = $1",
             token_hash
         )
@@ -223,11 +239,116 @@ impl AuthStore for PgAuthStore {
         Ok(())
     }
 
+    async fn delete_sessions_by_sid(&self, provider: Uuid, sid: &str) -> Result<u64, PortError> {
+        Ok(sqlx::query!(
+            "DELETE FROM auth_sessions WHERE provider_id = $1 AND oidc_sid = $2",
+            provider,
+            sid
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(pe)?
+        .rows_affected())
+    }
+
+    async fn delete_sessions_via(&self, user: UserId, provider: Uuid) -> Result<u64, PortError> {
+        Ok(sqlx::query!(
+            "DELETE FROM auth_sessions WHERE user_id = $1 AND provider_id = $2",
+            user.0,
+            provider
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(pe)?
+        .rows_affected())
+    }
+
+    async fn set_session_secret(
+        &self,
+        token_hash: &str,
+        kind: SessionSecret,
+        value: Option<&str>,
+    ) -> Result<(), PortError> {
+        let Some(v) = value else {
+            sqlx::query!(
+                "DELETE FROM session_secrets WHERE token_hash = $1 AND kind = $2",
+                token_hash,
+                kind.as_str()
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(pe)?;
+            return Ok(());
+        };
+        // a new id per value: the id is the row of the associated data
+        let id = Uuid::now_v7();
+        let row = id.to_string();
+        let enc = self
+            .cipher
+            .seal(session_slot(&row, kind.as_str()), v.as_bytes());
+        // no row when the session is gone meanwhile (it ended in between)
+        sqlx::query!(
+            "INSERT INTO session_secrets (id, token_hash, kind, value, created_at)
+             SELECT $1, $2, $3, $4, now() WHERE EXISTS
+                 (SELECT 1 FROM auth_sessions WHERE token_hash = $2)
+             ON CONFLICT (token_hash, kind) DO UPDATE SET id = $1, value = $4, created_at = now()",
+            id,
+            token_hash,
+            kind.as_str(),
+            enc
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(pe)?;
+        Ok(())
+    }
+
+    async fn session_secret(
+        &self,
+        token_hash: &str,
+        kind: SessionSecret,
+    ) -> Result<Option<Zeroizing<String>>, PortError> {
+        let r = sqlx::query!(
+            "SELECT id, value FROM session_secrets WHERE token_hash = $1 AND kind = $2",
+            token_hash,
+            kind.as_str()
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(pe)?;
+        Ok(r.and_then(|r| {
+            let row = r.id.to_string();
+            match self
+                .cipher
+                .open(session_slot(&row, kind.as_str()), &r.value)
+            {
+                Ok(b) => String::from_utf8(b).ok().map(Zeroizing::new),
+                Err(e) => {
+                    // a key version that is not loaded: as if nothing were kept
+                    tracing::warn!(error = %e, kind = kind.as_str(), "session secret locked");
+                    None
+                }
+            }
+        }))
+    }
+
+    async fn move_session_secrets(&self, from: &str, to: &str) -> Result<(), PortError> {
+        sqlx::query!(
+            "UPDATE session_secrets SET token_hash = $2 WHERE token_hash = $1",
+            from,
+            to
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(pe)?;
+        Ok(())
+    }
+
     async fn sessions_for(&self, user: UserId) -> Result<Vec<Session>, PortError> {
         Ok(sqlx::query_as!(
             SessionRow,
             "SELECT token_hash, user_id, created_at, last_seen_at, expires_at, reauth_at,
-                    reauth_method, reauth_slide_at
+                    reauth_method, reauth_slide_at, provider_id, oidc_sid
              FROM auth_sessions WHERE user_id = $1 ORDER BY last_seen_at DESC",
             user.0
         )
@@ -244,28 +365,54 @@ impl AuthStore for PgAuthStore {
         issuer: &str,
         subject: &str,
     ) -> Result<Option<OidcIdentity>, PortError> {
-        let r = sqlx::query!(
-            "SELECT user_id FROM oidc_identities WHERE issuer = $1 AND subject = $2",
+        Ok(sqlx::query_as!(
+            IdentityRow,
+            "SELECT id, issuer, subject, user_id, provider_id, sid, linked_at, last_claims_hash,
+                    last_groups
+             FROM oidc_identities WHERE issuer = $1 AND subject = $2",
             issuer,
             subject
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(pe)?;
-        Ok(r.map(|r| OidcIdentity {
-            issuer: issuer.to_string(),
-            subject: subject.to_string(),
-            user_id: UserId(r.user_id),
-        }))
+        .map_err(pe)?
+        .map(OidcIdentity::from))
     }
 
-    async fn link_identity(&self, i: &OidcIdentity) -> Result<(), PortError> {
-        sqlx::query!(
-            "INSERT INTO oidc_identities (issuer, subject, user_id) VALUES ($1, $2, $3)
-             ON CONFLICT (issuer, subject) DO UPDATE SET user_id = $3",
+    async fn link_identity(&self, i: &OidcIdentity) -> Result<bool, PortError> {
+        Ok(sqlx::query!(
+            "INSERT INTO oidc_identities (id, issuer, subject, user_id, provider_id, sid,
+                                          linked_at, last_claims_hash, last_groups)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             ON CONFLICT (issuer, subject) DO NOTHING",
+            i.id,
             i.issuer,
             i.subject,
-            i.user_id.0
+            i.user_id.0,
+            i.provider_id,
+            i.sid,
+            i.linked_at,
+            i.last_claims_hash,
+            i.last_groups.as_deref()
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(pe)?
+        .rows_affected()
+            == 1)
+    }
+
+    async fn touch_identity(&self, i: &OidcIdentity) -> Result<(), PortError> {
+        sqlx::query!(
+            "UPDATE oidc_identities SET provider_id = $3, sid = $4, last_claims_hash = $5,
+                 last_groups = $6
+             WHERE issuer = $1 AND subject = $2",
+            i.issuer,
+            i.subject,
+            i.provider_id,
+            i.sid,
+            i.last_claims_hash,
+            i.last_groups.as_deref()
         )
         .execute(&self.pool)
         .await
@@ -273,20 +420,32 @@ impl AuthStore for PgAuthStore {
         Ok(())
     }
 
-    async fn identities_of(&self, user: UserId) -> Result<Vec<OidcIdentity>, PortError> {
+    async fn unlink_identity(&self, user: UserId, id: Uuid) -> Result<bool, PortError> {
         Ok(sqlx::query!(
-            "SELECT issuer, subject FROM oidc_identities WHERE user_id = $1 ORDER BY issuer",
+            "DELETE FROM oidc_identities WHERE id = $1 AND user_id = $2",
+            id,
+            user.0
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(pe)?
+        .rows_affected()
+            == 1)
+    }
+
+    async fn identities_of(&self, user: UserId) -> Result<Vec<OidcIdentity>, PortError> {
+        Ok(sqlx::query_as!(
+            IdentityRow,
+            "SELECT id, issuer, subject, user_id, provider_id, sid, linked_at, last_claims_hash,
+                    last_groups
+             FROM oidc_identities WHERE user_id = $1 ORDER BY linked_at, issuer",
             user.0
         )
         .fetch_all(&self.pool)
         .await
         .map_err(pe)?
         .into_iter()
-        .map(|r| OidcIdentity {
-            issuer: r.issuer,
-            subject: r.subject,
-            user_id: user,
-        })
+        .map(OidcIdentity::from)
         .collect())
     }
 
@@ -363,7 +522,9 @@ impl AuthStore for PgAuthStore {
         user: UserId,
         by: Option<UserId>,
         at: Option<DateTime<Utc>>,
+        audit: Option<&crate::admin::AuditEntry>,
     ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(pe)?;
         if let Some(at) = at {
             sqlx::query!(
                 "INSERT INTO user_disabled (user_id, disabled_by, disabled_at) VALUES ($1, $2, $3)
@@ -372,16 +533,118 @@ impl AuthStore for PgAuthStore {
                 by.map(|b| b.0),
                 at
             )
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
             .map_err(pe)?;
         } else {
             sqlx::query!("DELETE FROM user_disabled WHERE user_id = $1", user.0)
-                .execute(&self.pool)
+                .execute(&mut *tx)
                 .await
                 .map_err(pe)?;
         }
-        Ok(())
+        audit_opt(&mut tx, audit).await?;
+        tx.commit().await.map_err(pe)
+    }
+
+    async fn insert_password_reset(
+        &self,
+        r: &crate::store::PasswordReset,
+    ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(pe)?;
+        sqlx::query!(
+            "DELETE FROM password_resets WHERE user_id = $1 AND used_at IS NULL",
+            r.user.0
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(pe)?;
+        sqlx::query!(
+            "INSERT INTO password_resets (id, user_id, token_hash, created_at, expires_at)
+             VALUES ($1, $2, $3, $4, $5)",
+            r.id,
+            r.user.0,
+            r.token_hash,
+            r.created_at,
+            r.expires_at
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(pe)?;
+        tx.commit().await.map_err(pe)
+    }
+
+    async fn open_password_reset(
+        &self,
+        token_hash: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Option<UserId>, PortError> {
+        Ok(sqlx::query_scalar!(
+            "SELECT user_id FROM password_resets
+             WHERE token_hash = $1 AND used_at IS NULL AND expires_at > $2",
+            token_hash,
+            now
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(pe)?
+        .map(UserId))
+    }
+
+    async fn complete_password_reset(
+        &self,
+        token_hash: &str,
+        now: DateTime<Utc>,
+        password_hash: &str,
+    ) -> Result<Option<UserId>, PortError> {
+        let mut tx = self.pool.begin().await.map_err(pe)?;
+        let Some(user) = sqlx::query_scalar!(
+            "UPDATE password_resets SET used_at = $2
+             WHERE token_hash = $1 AND used_at IS NULL AND expires_at > $2
+             RETURNING user_id",
+            token_hash,
+            now
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(pe)?
+        else {
+            return Ok(None);
+        };
+        sqlx::query!(
+            "INSERT INTO credentials (user_id, password_hash) VALUES ($1, $2)
+             ON CONFLICT (user_id) DO UPDATE SET password_hash = $2",
+            user,
+            password_hash
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(pe)?;
+        sqlx::query!("DELETE FROM auth_sessions WHERE user_id = $1", user)
+            .execute(&mut *tx)
+            .await
+            .map_err(pe)?;
+        tx.commit().await.map_err(pe)?;
+        Ok(Some(UserId(user)))
+    }
+
+    async fn purge_password_resets(&self, now: DateTime<Utc>) -> Result<u64, PortError> {
+        Ok(
+            sqlx::query!("DELETE FROM password_resets WHERE expires_at <= $1", now)
+                .execute(&self.pool)
+                .await
+                .map_err(pe)?
+                .rows_affected(),
+        )
+    }
+}
+
+async fn audit_opt(
+    tx: &mut sqlx::PgConnection,
+    audit: Option<&crate::admin::AuditEntry>,
+) -> Result<(), PortError> {
+    match audit {
+        Some(e) => crate::admin_pg::insert_audit(tx, e).await,
+        None => Ok(()),
     }
 }
 
@@ -394,6 +657,8 @@ struct SessionRow {
     reauth_at: Option<DateTime<Utc>>,
     reauth_method: Option<String>,
     reauth_slide_at: Option<DateTime<Utc>>,
+    provider_id: Option<Uuid>,
+    oidc_sid: Option<String>,
 }
 
 impl From<SessionRow> for Session {
@@ -407,6 +672,36 @@ impl From<SessionRow> for Session {
             reauth_at: r.reauth_at,
             reauth_method: r.reauth_method,
             reauth_slide_at: r.reauth_slide_at,
+            provider_id: r.provider_id,
+            oidc_sid: r.oidc_sid,
+        }
+    }
+}
+
+struct IdentityRow {
+    id: Uuid,
+    issuer: String,
+    subject: String,
+    user_id: Uuid,
+    provider_id: Option<Uuid>,
+    sid: Option<String>,
+    linked_at: DateTime<Utc>,
+    last_claims_hash: Option<String>,
+    last_groups: Option<Vec<String>>,
+}
+
+impl From<IdentityRow> for OidcIdentity {
+    fn from(r: IdentityRow) -> Self {
+        Self {
+            id: r.id,
+            issuer: r.issuer,
+            subject: r.subject,
+            user_id: UserId(r.user_id),
+            provider_id: r.provider_id,
+            sid: r.sid,
+            linked_at: r.linked_at,
+            last_claims_hash: r.last_claims_hash,
+            last_groups: r.last_groups,
         }
     }
 }
@@ -443,7 +738,12 @@ impl From<InviteRow> for SignupInvite {
 
 #[async_trait]
 impl InviteStore for PgAuthStore {
-    async fn insert_signup_invite(&self, i: &SignupInvite) -> Result<(), PortError> {
+    async fn insert_signup_invite(
+        &self,
+        i: &SignupInvite,
+        audit: Option<&crate::admin::AuditEntry>,
+    ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(pe)?;
         sqlx::query!(
             "INSERT INTO signup_invites (id, token_hash, email, note, created_by, created_at,
                                          expires_at)
@@ -456,10 +756,11 @@ impl InviteStore for PgAuthStore {
             i.created_at,
             i.expires_at
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(pe)?;
-        Ok(())
+        audit_opt(&mut tx, audit).await?;
+        tx.commit().await.map_err(pe)
     }
 
     async fn signup_invite_by_hash(&self, hash: &str) -> Result<Option<SignupInvite>, PortError> {
@@ -491,7 +792,12 @@ impl InviteStore for PgAuthStore {
         .collect())
     }
 
-    async fn update_signup_invite(&self, i: &SignupInvite) -> Result<(), PortError> {
+    async fn update_signup_invite(
+        &self,
+        i: &SignupInvite,
+        audit: Option<&crate::admin::AuditEntry>,
+    ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(pe)?;
         sqlx::query!(
             "UPDATE signup_invites SET used_by = $2, used_at = $3, revoked_at = $4 WHERE id = $1",
             i.id,
@@ -499,10 +805,11 @@ impl InviteStore for PgAuthStore {
             i.used_at,
             i.revoked_at
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(pe)?;
-        Ok(())
+        audit_opt(&mut tx, audit).await?;
+        tx.commit().await.map_err(pe)
     }
 
     async fn claim_signup_invite(&self, id: Uuid, now: DateTime<Utc>) -> Result<bool, PortError> {
@@ -646,4 +953,87 @@ pub async fn version_counts(
         .into_iter()
         .filter_map(|(v, n)| Some((u16::try_from(v).ok()?, u64::try_from(n).ok()?)))
         .collect())
+}
+
+/// The secrets kept per session as a [`SecretRows`] purpose (re-wrap job, key status):
+/// [`SESSION_SECRET_PURPOSE`], table `session_secrets`.
+#[derive(Clone)]
+pub struct PgSessionSecrets {
+    pool: PgPool,
+}
+
+impl PgSessionSecrets {
+    #[must_use]
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl SecretRows for PgSessionSecrets {
+    fn purpose(&self) -> &'static str {
+        SESSION_SECRET_PURPOSE
+    }
+
+    /// Never stored in plain text.
+    async fn seal_plaintext(&self, _cipher: &dyn SecretCipher) -> RepoResult<u64> {
+        Ok(0)
+    }
+
+    async fn version_counts(&self) -> RepoResult<Vec<(u16, u64)>> {
+        version_counts(&self.pool, "session_secrets", "value").await
+    }
+
+    async fn rewrap_batch(
+        &self,
+        cipher: &dyn SecretCipher,
+        active: u16,
+        after: Option<Uuid>,
+        limit: u32,
+    ) -> RepoResult<RewrapBatch> {
+        let rows = sqlx::query!(
+            r#"SELECT id, kind, value FROM session_secrets
+               WHERE ($3::uuid IS NULL OR id > $3)
+                 AND CASE WHEN length(value) >= 3
+                     THEN get_byte(value, 1) * 256 + get_byte(value, 2) <> $1
+                     ELSE false END
+               ORDER BY id LIMIT $2"#,
+            i32::from(active),
+            i64::from(limit),
+            after
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(re)?;
+        let last = rows.last().map(|r| r.id);
+        let (mut done, mut locked) = (0, 0);
+        for r in rows {
+            let row = r.id.to_string();
+            let kind = match r.kind.as_str() {
+                "id_token" => SessionSecret::IdToken,
+                _ => SessionSecret::PendingAction,
+            };
+            match cipher.rewrap(session_slot(&row, kind.as_str()), &r.value) {
+                Ok(Some(new)) => {
+                    done += sqlx::query!(
+                        "UPDATE session_secrets SET value = $3 WHERE id = $1 AND value = $2",
+                        r.id,
+                        r.value,
+                        new
+                    )
+                    .execute(&self.pool)
+                    .await
+                    .map_err(re)?
+                    .rows_affected();
+                }
+                Ok(None) => {}
+                Err(_) => locked += 1,
+            }
+        }
+        Ok(RewrapBatch {
+            rewrapped: done,
+            locked,
+            last,
+        })
+    }
 }

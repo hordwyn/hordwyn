@@ -49,7 +49,7 @@ fn err(line: u64, source_id: Option<String>, message: String) -> RowError {
 }
 
 /// CSV columns of the generic format (header row required).
-pub const CSV_COLUMNS: [&str; 9] = [
+pub const CSV_COLUMNS: [&str; 10] = [
     "source_id",
     "kind",
     "title",
@@ -59,10 +59,12 @@ pub const CSV_COLUMNS: [&str; 9] = [
     "notes",
     "external_ids",
     "finished_dates",
+    // added later; files without it still read (the column is optional)
+    "lists",
 ];
 
-/// Rows of a CSV file: `external_ids` as `ns:value;ns:value`, `finished_dates` as
-/// `date;date`.
+/// Rows of a CSV file: `external_ids` as `ns:value;ns:value`, `finished_dates` and `lists`
+/// as `a;b`.
 pub fn csv<R: Read + 'static>(input: R) -> Box<dyn Iterator<Item = Parsed>> {
     let reader = ::csv::ReaderBuilder::new()
         .flexible(false)
@@ -74,7 +76,7 @@ pub fn csv<R: Read + 'static>(input: R) -> Box<dyn Iterator<Item = Parsed>> {
         let get = |c: &str| -> Option<String> {
             let idx = CSV_COLUMNS.iter().position(|x| *x == c)?;
             rec.get(idx)
-                .map(str::trim)
+                .map(|v| crate::cell::unguard(v.trim()))
                 .filter(|v| !v.is_empty())
                 .map(String::from)
         };
@@ -121,6 +123,7 @@ pub fn csv<R: Read + 'static>(input: R) -> Box<dyn Iterator<Item = Parsed>> {
                     .map(|d| HistoryEntry {
                         date: d.to_string(),
                         progress: None,
+                        event_id: None,
                     })
                     .collect()
             })
@@ -137,8 +140,58 @@ pub fn csv<R: Read + 'static>(input: R) -> Box<dyn Iterator<Item = Parsed>> {
             rating,
             notes: get("notes"),
             history,
+            lists: get("lists")
+                .map(|v| {
+                    v.split(';')
+                        .map(str::trim)
+                        .filter(|l| !l.is_empty())
+                        .map(String::from)
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
     }))
+}
+
+/// Rows as CSV with the columns of [`CSV_COLUMNS`] (the CSV export). CSV keeps the dates of
+/// finished views only (`finished_dates`); episodes and positions need JSON Lines. A `;`
+/// inside a list name becomes `,` (the separator of the column).
+#[must_use]
+pub fn csv_text(rows: &[ImportRow]) -> String {
+    let mut w = ::csv::Writer::from_writer(Vec::new());
+    let _ = w.write_record(CSV_COLUMNS);
+    for r in rows {
+        let finished: Vec<&str> = r
+            .history
+            .iter()
+            .filter(|h| h.progress.as_ref().is_none_or(|p| p["type"] == "finished"))
+            .map(|h| h.date.as_str())
+            .collect();
+        let ids: Vec<String> = r
+            .external_ids
+            .iter()
+            .map(|(k, v)| format!("{k}:{v}"))
+            .collect();
+        let lists: Vec<String> = r.lists.iter().map(|l| l.replace(';', ",")).collect();
+        // free-text cells are spreadsheet-safe (UX3-5); numbers and dates are our own
+        let text = |v: &str| crate::cell::guard(v).into_owned();
+        let _ = w.write_record([
+            text(&r.source_id),
+            text(&r.kind),
+            text(&r.title),
+            r.year.map(|y| y.to_string()).unwrap_or_default(),
+            text(r.status.as_deref().unwrap_or_default()),
+            r.rating.map(|v| v.to_string()).unwrap_or_default(),
+            text(r.notes.as_deref().unwrap_or_default()),
+            text(&ids.join(";")),
+            finished.join(";"),
+            text(&lists.join(";")),
+        ]);
+    }
+    w.into_inner()
+        .ok()
+        .and_then(|b| String::from_utf8(b).ok())
+        .unwrap_or_default()
 }
 
 /// The header line of an export.
@@ -209,5 +262,80 @@ mod tests {
         let e = out[1].as_ref().unwrap_err();
         assert_eq!(e.line, 3);
         assert!(e.message.contains("year"));
+    }
+
+    #[test]
+    fn csv_export_reads_back() {
+        let row = ImportRow {
+            source_id: "s1".into(),
+            kind: "movie".into(),
+            title: "Heat, the film".into(),
+            year: Some(1995),
+            external_ids: [("tmdb".to_string(), "949".to_string())].into(),
+            status: Some("completed".into()),
+            rating: Some(90),
+            notes: Some("line one\nline \"two\"".into()),
+            history: vec![
+                HistoryEntry {
+                    date: "2024-05-01".into(),
+                    progress: None,
+                    event_id: None,
+                },
+                HistoryEntry {
+                    date: "2024-06-01".into(),
+                    progress: Some(
+                        serde_json::json!({"type": "episode", "season": 1, "episode": 2}),
+                    ),
+                    event_id: None,
+                },
+            ],
+            lists: vec!["Picks".into(), "A;B".into()],
+        };
+        let text = csv_text(std::slice::from_ref(&row));
+        assert!(text.starts_with(
+            "source_id,kind,title,year,status,rating,notes,external_ids,finished_dates,lists\n"
+        ));
+        let back = rows(csv(std::io::Cursor::new(text)));
+        let back = back[0].as_ref().unwrap();
+        assert_eq!(back.title, row.title);
+        assert_eq!(back.notes, row.notes);
+        assert_eq!(back.external_ids, row.external_ids);
+        assert_eq!(back.history.len(), 1, "episodes need JSON Lines");
+        assert_eq!(back.lists, vec!["Picks".to_string(), "A,B".into()]);
+    }
+
+    /// UX3-5: a free-text cell a spreadsheet would run as a formula gets a leading `'`, and
+    /// our own reader takes it off again, so an export still reads back unchanged.
+    #[test]
+    fn formula_cells_are_neutralised_and_read_back() {
+        let row = ImportRow {
+            source_id: "@s1".into(),
+            kind: "movie".into(),
+            title: "=HYPERLINK(\"http://x.example\",\"Heat\")".into(),
+            year: None,
+            external_ids: std::collections::BTreeMap::new(),
+            status: Some("+planned".into()),
+            rating: None,
+            notes: Some("-1 star".into()),
+            history: Vec::new(),
+            lists: vec!["@home".into(), "'=quoted".into()],
+        };
+        let text = csv_text(std::slice::from_ref(&row));
+        let line = text.lines().nth(1).unwrap();
+        for cell in [
+            "'@s1",
+            "'=HYPERLINK",
+            "'+planned",
+            "'-1 star",
+            "'@home;'=quoted",
+        ] {
+            assert!(line.contains(cell), "{cell}: {line}");
+        }
+        let back = rows(csv(std::io::Cursor::new(text)));
+        let back = back[0].as_ref().unwrap();
+        assert_eq!(back.title, row.title);
+        assert_eq!(back.notes, row.notes);
+        assert_eq!(back.source_id, row.source_id);
+        assert_eq!(back.lists, row.lists);
     }
 }

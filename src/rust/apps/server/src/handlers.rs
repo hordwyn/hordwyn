@@ -135,8 +135,9 @@ impl Handler for Digest {
     }
 }
 
-/// `admin.audit_retention`: delete audit rows older than 365 days (OD-13).
-struct AuditRetention(api::admin::AdminApi);
+/// `admin.audit_retention`: delete audit rows older than 365 days (OD-13) and expired
+/// password reset links (UX3-12).
+struct AuditRetention(api::admin::AdminApi, auth::Auth);
 
 #[async_trait]
 impl Handler for AuditRetention {
@@ -146,6 +147,14 @@ impl Handler for AuditRetention {
             .map_err(|e| e.to_string())?;
         if n > 0 {
             tracing::info!(count = n, "deleted audit rows past the retention period");
+        }
+        let n = self
+            .1
+            .purge_password_resets()
+            .await
+            .map_err(|e| e.to_string())?;
+        if n > 0 {
+            tracing::info!(count = n, "deleted expired password reset links");
         }
         Ok(())
     }
@@ -177,7 +186,7 @@ impl Handler for Rewrap {
                 target_type: None,
                 target_id: None,
                 detail: serde_json::json!({
-                    "rewrapped": r.rewrapped, "locked": r.locked, "key_version": self.0.keys.active
+                    "rewrapped": r.rewrapped, "locked": r.locked, "key_version": self.0.keys.active()
                 }),
                 client_addr: None,
                 request_id: None,
@@ -235,7 +244,7 @@ pub fn worker(s: &Server) -> Worker {
         w = w
             .handle(
                 crate::admin_wiring::AUDIT_RETENTION_JOB,
-                Arc::new(AuditRetention(a.clone())),
+                Arc::new(AuditRetention(a.clone(), s.api.auth.clone())),
             )
             .handle(crate::admin_wiring::REWRAP_JOB, Arc::new(Rewrap(a.clone())));
     }

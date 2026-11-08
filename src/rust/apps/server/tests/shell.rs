@@ -2,8 +2,9 @@
 //! a signed-in page never shows "Create account", and the renamed routes (`/history`,
 //! `/people`) render while the old ones fall through to the 404 page (no redirects).
 
+mod support;
+
 use server::{Overrides, Server};
-use tower::ServiceExt;
 
 fn repo(p: &str) -> String {
     format!("{}/../../../../{p}", env!("CARGO_MANIFEST_DIR"))
@@ -33,15 +34,9 @@ async fn page(app: &axum::Router, uri: &str, cookie: Option<&str>) -> (u16, Stri
     if let Some(c) = cookie {
         req = req.header("cookie", c);
     }
-    let resp = app
-        .clone()
-        .oneshot(req.body(axum::body::Body::empty()).unwrap())
-        .await
-        .unwrap();
+    let resp = support::send(app, req.body(axum::body::Body::empty()).unwrap()).await;
     let status = resp.status().as_u16();
-    let body = axum::body::to_bytes(resp.into_body(), 1 << 22)
-        .await
-        .unwrap();
+    let body = resp.into_body();
     (status, String::from_utf8(body.to_vec()).unwrap())
 }
 
@@ -50,18 +45,16 @@ async fn sign_up(app: &axum::Router, username: &str, display_name: &str) -> Stri
     let body = format!(
         r#"{{"username":"{username}","display_name":"{display_name}","password":"correct horse battery"}}"#
     );
-    let resp = app
-        .clone()
-        .oneshot(
-            axum::http::Request::builder()
-                .method("POST")
-                .uri("/api/v1/auth/sign-up")
-                .header("content-type", "application/json")
-                .body(axum::body::Body::from(body))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let resp = support::send(
+        app,
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/sign-up")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body))
+            .unwrap(),
+    )
+    .await;
     assert_eq!(resp.status(), 201, "sign-up");
     let cookie = resp.headers()["set-cookie"].to_str().unwrap();
     cookie.split(';').next().unwrap().to_string()
@@ -156,18 +149,17 @@ async fn the_page_follows_the_users_language() {
         let (app, cookie) = (app.clone(), cookie.clone());
         let body = format!(r#"{{"locale":{locale}}}"#);
         async move {
-            let resp = app
-                .oneshot(
-                    axum::http::Request::builder()
-                        .method("PUT")
-                        .uri("/api/v1/auth/me/locale")
-                        .header("cookie", cookie)
-                        .header("content-type", "application/json")
-                        .body(axum::body::Body::from(body))
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
+            let resp = support::send(
+                &app,
+                axum::http::Request::builder()
+                    .method("PUT")
+                    .uri("/api/v1/auth/me/locale")
+                    .header("cookie", cookie)
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await;
             assert_eq!(resp.status(), 200, "set locale {locale}");
         }
     };

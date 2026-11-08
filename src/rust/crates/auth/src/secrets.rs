@@ -195,6 +195,26 @@ impl KeyRing {
         self.keys.iter().map(|(v, _)| *v).collect()
     }
 
+    /// Keys derived from every loaded KEK with HKDF-SHA256 (RFC 5869, no salt) for `info`,
+    /// active version first: derived, never stored (addendum-1 2.2 purpose `cookie_key`).
+    ///
+    /// # Panics
+    /// Never: 32 bytes are far below the HKDF-SHA256 output limit.
+    #[must_use]
+    pub fn derive(&self, info: &[u8]) -> Vec<Zeroizing<[u8; KEY]>> {
+        self.keys
+            .iter()
+            .map(|(_, kek)| {
+                let mut okm = Zeroizing::new([0u8; KEY]);
+                // 32 bytes is far below the 255 * 32 limit of HKDF-SHA256
+                hkdf::Hkdf::<sha2::Sha256>::new(None, &kek[..])
+                    .expand(info, &mut okm[..])
+                    .expect("hkdf length");
+                okm
+            })
+            .collect()
+    }
+
     fn key(&self, version: u16) -> Option<&[u8; KEY]> {
         self.keys
             .iter()
@@ -365,6 +385,178 @@ impl SecretCipher for KeyRing {
     fn rewrap(&self, slot: SecretSlot<'_>, blob: &[u8]) -> Result<Option<Vec<u8>>, SecretLocked> {
         Self::rewrap(self, slot, blob)
     }
+}
+
+/// A reload was refused; the previous ring stays in use.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ReloadError {
+    /// Stored values are still encrypted with these versions (re-encrypt first).
+    #[error("the new key set drops {0:?}, still used by stored values; keeping the loaded keys")]
+    DropsVersionInUse(Vec<u16>),
+    #[error(transparent)]
+    Source(#[from] SecretsError),
+}
+
+/// The key ring the process uses, replaceable at run time (SIGHUP, DEC-283) behind the
+/// [`SecretCipher`] port; every reader sees either the old or the new ring, never a mix.
+pub struct LiveKeys {
+    ring: std::sync::RwLock<std::sync::Arc<KeyRing>>,
+}
+
+impl std::fmt::Debug for LiveKeys {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LiveKeys")
+            .field("versions", &self.versions())
+            .finish()
+    }
+}
+
+impl LiveKeys {
+    #[must_use]
+    pub fn new(ring: KeyRing) -> Self {
+        Self {
+            ring: std::sync::RwLock::new(std::sync::Arc::new(ring)),
+        }
+    }
+
+    /// The ring in use now.
+    #[must_use]
+    pub fn ring(&self) -> std::sync::Arc<KeyRing> {
+        self.ring
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    #[must_use]
+    pub fn active_version(&self) -> u16 {
+        self.ring().active_version()
+    }
+
+    #[must_use]
+    pub fn versions(&self) -> Vec<u16> {
+        self.ring().versions()
+    }
+
+    /// Use `next` from now on, unless it lacks a version in `in_use` (versions that still
+    /// encrypt stored values): then nothing changes.
+    ///
+    /// # Errors
+    /// [`ReloadError::DropsVersionInUse`].
+    pub fn replace(&self, next: KeyRing, in_use: &[u16]) -> Result<(), ReloadError> {
+        let have = next.versions();
+        let mut missing: Vec<u16> = in_use
+            .iter()
+            .copied()
+            .filter(|v| !have.contains(v))
+            .collect();
+        missing.sort_unstable();
+        missing.dedup();
+        if !missing.is_empty() {
+            return Err(ReloadError::DropsVersionInUse(missing));
+        }
+        *self
+            .ring
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = std::sync::Arc::new(next);
+        Ok(())
+    }
+}
+
+impl SecretCipher for LiveKeys {
+    fn seal(&self, slot: SecretSlot<'_>, plaintext: &[u8]) -> Vec<u8> {
+        self.ring().encrypt(slot, plaintext)
+    }
+
+    fn open(&self, slot: SecretSlot<'_>, blob: &[u8]) -> Result<Vec<u8>, SecretLocked> {
+        self.ring()
+            .decrypt(slot, blob)
+            .map(|mut z| std::mem::take(&mut *z))
+    }
+
+    fn rewrap(&self, slot: SecretSlot<'_>, blob: &[u8]) -> Result<Option<Vec<u8>>, SecretLocked> {
+        self.ring().rewrap(slot, blob)
+    }
+}
+
+/// Read the configured keys again (key file, else `APP__SECRETS__KEYS`) without generating
+/// anything: the reload path and the CLI.
+///
+/// # Errors
+/// [`SecretsError::NoKeys`] when neither exists, or a malformed source.
+pub fn read_keys(opts: &KeyOptions) -> Result<KeyRing, SecretsError> {
+    let path = &opts.key_file;
+    if path.exists() {
+        let text = Zeroizing::new(std::fs::read_to_string(path).map_err(|e| io_err(path, &e))?);
+        return KeyRing::parse(&text);
+    }
+    match &opts.env_keys {
+        Some(env) => KeyRing::parse(env),
+        None => Err(SecretsError::NoKeys),
+    }
+}
+
+impl KeyRing {
+    /// Key-file text of this ring, newest first.
+    fn file_text(&self) -> Zeroizing<String> {
+        use std::fmt::Write;
+        let mut out = Zeroizing::new(String::from(
+            "# Secrets key: back it up together with the database. Newest version first.\n",
+        ));
+        for (v, k) in &self.keys {
+            let _ = writeln!(&mut *out, "v{v}:{}", STANDARD.encode(**k));
+        }
+        out
+    }
+}
+
+/// Replace the key file with `ring` (a new file next to it, mode 0600, then renamed).
+fn replace_key_file(path: &Path, ring: &KeyRing) -> Result<(), SecretsError> {
+    let tmp = path.with_extension("key.new");
+    let _ = std::fs::remove_file(&tmp);
+    write_key_file(&tmp, &ring.file_text())?;
+    std::fs::rename(&tmp, path).map_err(|e| io_err(path, &e))
+}
+
+/// `cli secrets rotate`: add a new random key as the active version (highest + 1) to the key
+/// file; the old versions stay so stored values remain readable until re-encrypted.
+/// Returns the new version.
+///
+/// # Errors
+/// No key file (keys from the environment are rotated by editing the variable), I/O.
+pub fn rotate_key_file(path: &Path) -> Result<u16, SecretsError> {
+    let text = Zeroizing::new(std::fs::read_to_string(path).map_err(|e| io_err(path, &e))?);
+    let mut ring = KeyRing::parse(&text)?;
+    let next = ring
+        .versions()
+        .into_iter()
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    ring.keys.insert(0, (next, Zeroizing::new(random::<KEY>())));
+    replace_key_file(path, &ring)?;
+    Ok(next)
+}
+
+/// `cli secrets prune`: drop every version from the key file that is neither active nor in
+/// `in_use`. Returns the dropped versions.
+///
+/// # Errors
+/// No key file, I/O.
+pub fn prune_key_file(path: &Path, in_use: &[u16]) -> Result<Vec<u16>, SecretsError> {
+    let text = Zeroizing::new(std::fs::read_to_string(path).map_err(|e| io_err(path, &e))?);
+    let mut ring = KeyRing::parse(&text)?;
+    let active = ring.active_version();
+    let dropped: Vec<u16> = ring
+        .versions()
+        .into_iter()
+        .filter(|v| *v != active && !in_use.contains(v))
+        .collect();
+    if !dropped.is_empty() {
+        ring.keys.retain(|(v, _)| !dropped.contains(v));
+        replace_key_file(path, &ring)?;
+    }
+    Ok(dropped)
 }
 
 /// How to find the keys at start-up (addendum-1 2.2: key file first, then the environment).

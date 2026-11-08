@@ -62,6 +62,28 @@ async fn shutdown_signal(stop: CancellationToken) {
     stop.cancel();
 }
 
+/// SIGHUP re-reads the secrets key set (DEC-283): a set that drops a version still in use is
+/// refused and the loaded keys stay (logged).
+#[cfg(unix)]
+async fn reload_on_sighup(server: Server) {
+    use tokio::signal::unix::{SignalKind, signal};
+    let Ok(mut hup) = signal(SignalKind::hangup()) else {
+        tracing::warn!("cannot listen for SIGHUP; a new secrets key needs a restart");
+        return;
+    };
+    while hup.recv().await.is_some() {
+        match api::admin::reload_keys(&server.api).await {
+            Ok(v) => tracing::info!(versions = ?v, "reloaded the secrets key set"),
+            Err(e) => {
+                tracing::warn!(error = %e, "secrets key set not reloaded; keeping the loaded keys");
+            }
+        }
+    }
+}
+
+#[cfg(not(unix))]
+async fn reload_on_sighup(_server: Server) {}
+
 /// Worker stack size: server-side rendering of the deepest pages needs just over the 2 MiB
 /// default in debug builds (DEC-188).
 const STACK_SIZE: usize = 8 * 1024 * 1024;
@@ -82,6 +104,7 @@ async fn run() -> anyhow::Result<()> {
     let server = Server::build(cfg, role, Overrides::default()).await?;
     let stop = CancellationToken::new();
     tokio::spawn(shutdown_signal(stop.clone()));
+    tokio::spawn(reload_on_sighup(server.clone()));
 
     let worker = role.runs_worker().then(|| {
         let stop = stop.clone();
@@ -100,13 +123,16 @@ async fn run() -> anyhow::Result<()> {
         tracing::info!(addr = %options.site_addr, ?role, "listening");
         let s = stop.clone();
         let bus = server.bus.clone();
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                s.cancelled().await;
-                // open SSE streams would otherwise keep graceful shutdown waiting forever
-                bus.shutdown();
-            })
-            .await?;
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            s.cancelled().await;
+            // open SSE streams would otherwise keep graceful shutdown waiting forever
+            bus.shutdown();
+        })
+        .await?;
     } else {
         tracing::info!(?role, "worker running");
         stop.cancelled().await;

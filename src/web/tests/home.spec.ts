@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { expectNoA11yViolations, hydrated, signUp } from "./helpers";
+import { expectNoA11yViolations, hydrated, signUp, importDone } from "./helpers";
 
 // UX phase 1 Home, Stats and History (design.md 6.1, 6.6; addendum-1 1.3): Home sections and
 // the activity link, the next step with Undo, Stats tabs with the table equivalent, History
@@ -35,9 +35,7 @@ async function seed(page: Page): Promise<Record<string, string>> {
   });
   expect(started.status()).toBe(202);
   const { id } = await started.json();
-  await expect
-    .poll(async () => (await (await page.request.get(`/api/v1/imports/${id}`)).json()).state, { timeout: 30_000 })
-    .toBe("done");
+  await importDone(page, id);
   const lib = await (await page.request.get("/api/v1/library?limit=50")).json();
   return Object.fromEntries(lib.items.map((i: { item: { title: string; id: string } }) => [i.item.title, i.item.id]));
 }
@@ -128,8 +126,10 @@ test("history keeps its filters in the URL, pages and undoes", async ({ page }) 
   test.setTimeout(180_000);
   await signUp(page, `hist${Date.now()}`, "Hugo");
   const ids = await seed(page);
-  for (let d = 1; d <= 30; d++) {
-    await log(page, ids["Milk Teeth"], { type: "finished" }, `2025-06-${String(d).padStart(2, "0")}T12:00:00Z`);
+  // 61 views in June and July 2025: three pages of history with the 4 other rows
+  for (let d = 0; d < 61; d++) {
+    const day = new Date(Date.UTC(2025, 5, 1 + d, 12)).toISOString();
+    await log(page, ids["Milk Teeth"], { type: "finished" }, day);
   }
   await log(page, ids["Downstream"], { type: "episode", season: 1, episode: 2 });
   await log(page, ids["Downstream"], { type: "episode", season: 1, episode: 3 });
@@ -137,9 +137,15 @@ test("history keeps its filters in the URL, pages and undoes", async ({ page }) 
   await open(page, "/history");
   await expect(page.getByRole("heading", { level: 3, name: "Today" })).toBeVisible();
   await expect(rows(page)).toHaveCount(30);
-  await page.getByRole("button", { name: "Show more" }).click();
-  await expect(rows(page)).toHaveCount(34);
-  await expect(page.getByRole("button", { name: "Show more" })).toHaveCount(0);
+  // "Show more" appends the next page and keeps the keyboard focus (UX3-3)
+  const more = page.getByRole("button", { name: "Show more" });
+  await more.focus();
+  await page.keyboard.press("Enter");
+  await expect(rows(page)).toHaveCount(60);
+  await expect(more).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(rows(page)).toHaveCount(65);
+  await expect(more).toHaveCount(0);
 
   // undo the two episodes logged today, one after the other: the second click lands on the
   // row rendered after the first refetch (UX1-2)

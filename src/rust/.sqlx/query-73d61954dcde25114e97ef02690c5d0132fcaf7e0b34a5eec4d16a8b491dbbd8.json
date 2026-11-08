@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO oidc_providers (id, slug, display_name, issuer, client_id, client_secret,\n                 scopes, enabled, is_default, auto_create, groups_claim, allowed_groups,\n                 admin_groups, role_source, provenance, created_by, updated_by, created_at,\n                 updated_at)\n             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,\n                     $18, $19)\n             ON CONFLICT (id) DO UPDATE SET slug = $2, display_name = $3, issuer = $4,\n                 client_id = $5,\n                 client_secret = CASE WHEN $20 THEN $6 ELSE oidc_providers.client_secret END,\n                 scopes = $7, enabled = $8, is_default = $9, auto_create = $10,\n                 groups_claim = $11, allowed_groups = $12, admin_groups = $13,\n                 role_source = $14, provenance = $15, updated_by = $17, updated_at = $19",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bytea",
+        "TextArray",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Text",
+        "TextArray",
+        "TextArray",
+        "Text",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "73d61954dcde25114e97ef02690c5d0132fcaf7e0b34a5eec4d16a8b491dbbd8"
+}

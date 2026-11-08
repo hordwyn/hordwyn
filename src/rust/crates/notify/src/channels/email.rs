@@ -18,7 +18,7 @@ pub enum SmtpSecurity {
     None,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SmtpSettings {
     pub host: String,
     pub port: u16,
@@ -27,6 +27,19 @@ pub struct SmtpSettings {
     pub password: Option<String>,
     /// Sender, e.g. `Shelf <noreply@example.org>`.
     pub from: String,
+}
+
+impl std::fmt::Debug for SmtpSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SmtpSettings")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("security", &self.security)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "***"))
+            .field("from", &self.from)
+            .finish()
+    }
 }
 
 pub struct Email {
@@ -54,6 +67,26 @@ impl Email {
             transport: b.build(),
             from: s.from.parse().map_err(|e| format!("sender address: {e}"))?,
         })
+    }
+
+    /// One plain-text message to `to` (the admin's "send a test").
+    ///
+    /// # Errors
+    /// A bad address or the SMTP error, as text.
+    pub async fn send_text(&self, to: &str, subject: &str, body: &str) -> Result<(), String> {
+        let to: Mailbox = to.parse().map_err(|e| format!("recipient address: {e}"))?;
+        let mail = lettre::Message::builder()
+            .from(self.from.clone())
+            .to(to)
+            .subject(subject)
+            .header(ContentType::TEXT_PLAIN)
+            .body(body.to_string())
+            .map_err(|e| e.to_string())?;
+        self.transport
+            .send(mail)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 
     /// # Errors
@@ -84,5 +117,54 @@ impl Email {
                 SendError::Retry(e.to_string())
             }
         })
+    }
+}
+
+/// The email transport in use, replaceable at run time when an admin changes the SMTP
+/// settings (addendum-1 3.2); `None` while mail is not configured.
+#[derive(Default)]
+pub struct Mailer(std::sync::RwLock<Option<std::sync::Arc<Email>>>);
+
+impl Mailer {
+    #[must_use]
+    pub fn new(email: Option<Email>) -> Self {
+        Self(std::sync::RwLock::new(email.map(std::sync::Arc::new)))
+    }
+
+    /// Use `email` from now on (deliveries already sending finish with the old one).
+    pub fn set(&self, email: Option<Email>) {
+        *self
+            .0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = email.map(std::sync::Arc::new);
+    }
+
+    #[must_use]
+    pub fn current(&self) -> Option<std::sync::Arc<Email>> {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// UX3-26: the SMTP password never shows in a `{:?}`.
+    #[test]
+    fn smtp_settings_hide_the_password_in_debug() {
+        let s = SmtpSettings {
+            host: "mail.example.org".into(),
+            port: 587,
+            security: SmtpSecurity::StartTls,
+            username: Some("relay".into()),
+            password: Some("smtp-secret-1".into()),
+            from: "Shelf <noreply@example.org>".into(),
+        };
+        let printed = format!("{s:?}");
+        assert!(!printed.contains("smtp-secret-1"), "{printed}");
+        assert!(printed.contains("mail.example.org"), "{printed}");
     }
 }

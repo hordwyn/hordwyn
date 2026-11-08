@@ -11,10 +11,10 @@ use std::collections::BTreeMap;
 use contracts::UserDto;
 use contracts::admin::{
     AdminInviteCreatedDto, AdminInviteDto, AdminOverviewDto, AdminSourceDto, AdminUserDto,
-    AuditPageDto, AuditQueryDto, BrandCardDto, EvictionDto, InstanceSettingsDto,
-    NotificationDefaultsDto, ReauthStatusDto, RecoveryCodesDto, RewrapDto, SecurityDto,
-    SetupStateDto, SourceStatusPageDto, SourceTestDto, StorageJobsDto, TotpEnrolmentDto,
-    UserCredentialDto,
+    AuditPageDto, AuditQueryDto, BrandCardDto, EvictionDto, InstanceSettingsDto, LinkedIdentityDto,
+    MailSettingsDto, NotificationDefaultsDto, OidcAdminDto, OidcButtonDto, ReauthStatusDto,
+    RecoveryCodesDto, RewrapDto, SecurityDto, SetupStateDto, SourceStatusPageDto, SourceTestDto,
+    StorageJobsDto, TotpEnrolmentDto, UserCredentialDto,
 };
 use leptos::prelude::*;
 use leptos::server_fn::codec::Json;
@@ -363,4 +363,52 @@ pub async fn rewrap_secrets() -> Result<RewrapDto, ServerFnError> {
 pub async fn audit_log(query: AuditQueryDto) -> Result<AuditPageDto, ServerFnError> {
     let (a, t) = server::admin_token().await?;
     a.audit(&t, query).await.map_err(server::code)
+}
+
+// ---------------------------------------------------------------- phase 3 (WP3-4)
+
+/// What the sign-in page needs before anyone is signed in (addendum-1 4.3, 4.5).
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct SignInPageDto {
+    /// Enabled providers, for "Continue with <name>" (display name only, rule 11).
+    pub providers: Vec<OidcButtonDto>,
+    /// `auth.sign_in_mode = auto`: password sign-in only at `/sign-in/local`, for admins.
+    pub auto: bool,
+}
+
+impl SignInPageDto {
+    /// The provider "Try again" and the outage message name: the default one, else the first.
+    #[must_use]
+    pub fn default_provider(&self) -> Option<&OidcButtonDto> {
+        self.providers
+            .iter()
+            .find(|p| p.is_default)
+            .or_else(|| self.providers.first())
+    }
+}
+
+#[server(prefix = "/_fn")]
+pub async fn sign_in_page() -> Result<SignInPageDto, ServerFnError> {
+    server::admin()?.sign_in_page().await.map_err(server::code)
+}
+
+/// Settings > Account > Linked sign-ins.
+#[server(prefix = "/_fn")]
+pub async fn my_identities() -> Result<Vec<LinkedIdentityDto>, ServerFnError> {
+    let (a, t) = server::admin_token().await?;
+    a.identities(&t).await.map_err(server::code)
+}
+
+/// Admin > Sign-in and SSO: providers and the URIs to register.
+#[server(prefix = "/_fn")]
+pub async fn admin_oidc() -> Result<OidcAdminDto, ServerFnError> {
+    let (a, t) = server::admin_token().await?;
+    a.oidc_admin(&t).await.map_err(server::code)
+}
+
+/// Admin > Instance > Mail.
+#[server(prefix = "/_fn")]
+pub async fn admin_mail() -> Result<MailSettingsDto, ServerFnError> {
+    let (a, t) = server::admin_token().await?;
+    a.mail(&t).await.map_err(server::code)
 }

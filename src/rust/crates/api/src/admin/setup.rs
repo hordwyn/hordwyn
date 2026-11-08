@@ -15,7 +15,7 @@ use contracts::{SessionDto, SignUpDto};
 use domain::user::Actor;
 use serde_json::json;
 
-use super::{admin, audit, invalid, pe, require_admin, ts};
+use super::{admin, entry, invalid, pe, require_admin, ts};
 use crate::error::ApiResult;
 use crate::{ApiError, ApiState};
 
@@ -136,6 +136,10 @@ pub async fn setup_state(s: &ApiState, actor: Option<Actor>) -> ApiResult<SetupS
         checklist.push("backup_key");
     }
     checklist.push("identity_provider");
+    let done = match actor {
+        Some(x) if !first => done_items(s, x).await?,
+        _ => Vec::new(),
+    };
     Ok(SetupStateDto {
         step: step.into(),
         steps: STEPS.iter().map(|x| (*x).to_string()).collect(),
@@ -144,9 +148,43 @@ pub async fn setup_state(s: &ApiState, actor: Option<Actor>) -> ApiResult<SetupS
         sources,
         sources_read_only: read_only,
         checklist: checklist.into_iter().map(String::from).collect(),
+        done,
         key_file: (a.keys.source == "generated" || a.keys.source == "file")
             .then(|| a.keys.key_file.clone()),
     })
+}
+
+/// The checklist rows the server can tell are done (DEC-292): an item in the admin's
+/// library, an invite created, a media-server integration of the admin, a notification
+/// default rule, an identity provider configured. "Back up the key" cannot be known.
+async fn done_items(s: &ApiState, actor: Actor) -> ApiResult<Vec<String>> {
+    let mut done = Vec::new();
+    if !s
+        .app
+        .repos
+        .library
+        .counts(actor.user_id)
+        .await
+        .map_err(app::AppError::from)?
+        .is_empty()
+    {
+        done.push("first_item");
+    }
+    if !s.auth.signup_invites().await?.is_empty() {
+        done.push("invite");
+    }
+    if let Some(i) = &s.integrations
+        && i.list(actor).await.is_ok_and(|l| !l.is_empty())
+    {
+        done.push("media_server");
+    }
+    if s.notify.is_some() && !crate::notifications::instance_defaults(s).await?.is_empty() {
+        done.push("notification_defaults");
+    }
+    if super::oidc::any_enabled(s).await {
+        done.push("identity_provider");
+    }
+    Ok(done.into_iter().map(String::from).collect())
 }
 
 /// Step 1: the first account (becomes admin and is signed in). Refused once any account
@@ -178,7 +216,7 @@ pub async fn setup_account(s: &ApiState, b: SignUpDto) -> ApiResult<SessionDto> 
     let a = admin(s)?;
     let mut st = a.store.settings().await.map_err(pe)?;
     st.setup_step = Some("account".into());
-    a.store.put_settings(&st).await.map_err(pe)?;
+    a.store.put_settings(&st, &[]).await.map_err(pe)?;
     Ok(SessionDto {
         token: token.0,
         user: crate::dto_user(&user),
@@ -203,21 +241,24 @@ pub async fn setup_hosting(
     }
     let a = admin(s)?;
     let mut st = a.store.settings().await.map_err(pe)?;
+    let mut rows = Vec::new();
     if !a.config.fixed.contains_key("instance.hosting") {
         let from = st.hosting.clone();
         st.hosting = Some(b.hosting.clone());
         let detail = json!({"key": "instance.hosting", "from": from, "to": b.hosting});
-        audit(
-            s,
-            Some(actor),
-            "setting.changed",
-            Some(("setting", "instance.hosting".into())),
-            detail,
-        )
-        .await;
+        rows.push(
+            entry(
+                s,
+                Some(actor),
+                "setting.changed",
+                Some(("setting", "instance.hosting".into())),
+                detail,
+            )
+            .await,
+        );
     }
     st.setup_step = Some("hosting".into());
-    a.store.put_settings(&st).await.map_err(pe)?;
+    a.store.put_settings(&st, &rows).await.map_err(pe)?;
     super::apply(s, &st);
     setup_state(s, Some(actor)).await
 }
@@ -234,7 +275,7 @@ pub async fn setup_sources(s: &ApiState, actor: Actor) -> ApiResult<SetupStateDt
     let a = admin(s)?;
     let mut st = a.store.settings().await.map_err(pe)?;
     st.setup_step = Some("sources".into());
-    a.store.put_settings(&st).await.map_err(pe)?;
+    a.store.put_settings(&st, &[]).await.map_err(pe)?;
     setup_state(s, Some(actor)).await
 }
 
@@ -252,8 +293,7 @@ pub async fn setup_complete(s: &ApiState, actor: Actor) -> ApiResult<()> {
     let now = s.app.clock.now();
     st.setup_completed_at = Some(now);
     st.setup_step = Some("done".into());
-    a.store.put_settings(&st).await.map_err(pe)?;
-    audit(
+    let row = entry(
         s,
         Some(actor),
         "wizard.completed",
@@ -261,15 +301,24 @@ pub async fn setup_complete(s: &ApiState, actor: Actor) -> ApiResult<()> {
         json!({"hosting": a.hosting()}),
     )
     .await;
+    a.store.put_settings(&st, &[row]).await.map_err(pe)?;
     Ok(())
 }
 
 // ---------------------------------------------------------------- re-authentication
 
-fn status_dto(r: auth::ReauthStatus, now: chrono::DateTime<chrono::Utc>) -> ReauthStatusDto {
+fn status_dto(
+    r: auth::ReauthStatus,
+    now: chrono::DateTime<chrono::Utc>,
+    oidc_provider: Option<String>,
+) -> ReauthStatusDto {
     let mut methods = Vec::new();
     if r.has_password {
         methods.push("password".to_string());
+    }
+    // od-12 4.4: a provider round trip with `max_age=0` (phase 3 WP3-3)
+    if oidc_provider.is_some() {
+        methods.push("oidc".to_string());
     }
     ReauthStatusDto {
         fresh: r.fresh,
@@ -282,6 +331,10 @@ fn status_dto(r: auth::ReauthStatus, now: chrono::DateTime<chrono::Utc>) -> Reau
             .until
             .filter(|_| r.fresh)
             .map(|u| (u - now).num_minutes().max(0)),
+        oidc_start: oidc_provider
+            .as_ref()
+            .map(|_| "/api/v1/auth/oidc/start?mode=reauth".to_string()),
+        oidc_provider,
     }
 }
 
@@ -290,10 +343,15 @@ fn status_dto(r: auth::ReauthStatus, now: chrono::DateTime<chrono::Utc>) -> Reau
 /// # Errors
 /// `reauth_required` for an unknown session.
 pub async fn reauth_status(s: &ApiState, token: &str) -> ApiResult<ReauthStatusDto> {
-    Ok(status_dto(
-        s.auth.reauth_status(token).await?,
-        s.app.clock.now(),
-    ))
+    let r = s.auth.reauth_status(token).await?;
+    let provider = match (s.oidc.as_deref(), s.auth.session(token).await?) {
+        (Some(o), Some(a)) => o
+            .reauth_provider(&s.auth, a.user_id, token)
+            .await?
+            .map(|p| p.display_name),
+        _ => None,
+    };
+    Ok(status_dto(r, s.app.clock.now(), provider))
 }
 
 /// Prove it again (password, then TOTP or a recovery code). Returns the new status and the

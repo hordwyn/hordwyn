@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oidc_providers SET discovery = $2, capabilities = $3, discovery_fetched_at = $4\n             WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "73f7db6e472fa586fbc97703d304371d24551783fae2108a3577fa3260ac65e4"
+}

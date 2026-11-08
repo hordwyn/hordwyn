@@ -10,8 +10,10 @@ yanked = "deny"
 ignore = [
     { id = "RUSTSEC-2024-0436", reason = "transitive via leptos 0.8; compile-time macro only" },
     # rsa via openidconnect: only public-key signature verification of ID tokens, no private
-    # key exists in the process, so the timing side channel has nothing to leak (DEC-082).
-    { id = "RUSTSEC-2023-0071", reason = "rsa used only to verify OIDC ID-token signatures with public keys" },
+    # key exists in the server process, so the timing side channel has nothing to leak
+    # (DEC-082). The only private key is the throw-away key of the testkit OIDC issuer
+    # (dev-dependency, tests only, DEC-308).
+    { id = "RUSTSEC-2023-0071", reason = "rsa verifies OIDC ID-token signatures with public keys; signing only in testkit tests" },
 ]
 
 [licenses]

@@ -86,7 +86,7 @@ pub struct SeriesPoint {
     pub amounts: Amounts,
 }
 
-/// The amounts of one kind in one UTC month, with seconds not yet turned into minutes. The
+/// The amounts of one kind in one month of the user's zone, with seconds not yet turned into minutes. The
 /// repositories answer these (Postgres sums them in SQL), so the totals and series cost one
 /// row per kind and month, not one per event.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,6 +164,7 @@ pub fn month_amounts<S: BuildHasher, T: BuildHasher>(
     items: &HashMap<ItemId, CatalogItem, S>,
     events: &[ProgressEvent],
     durations: &HashMap<SessionId, u64, T>,
+    zone: crate::time_zone::Tz,
 ) -> Vec<MonthAmounts> {
     let mut by_item: BTreeMap<ItemId, Vec<ProgressEvent>> = BTreeMap::new();
     for e in events {
@@ -176,7 +177,7 @@ pub fn month_amounts<S: BuildHasher, T: BuildHasher>(
         live.sort_by_key(|e| (e.occurred_at, e.id));
         for (at, a, secs) in contributions(item, &live, durations) {
             let (sum, s) = out
-                .entry((item.kind.clone(), bucket_of(at, Bucket::Month)))
+                .entry((item.kind.clone(), bucket_of(at, zone, Bucket::Month)))
                 .or_default();
             sum.add(&a);
             *s += secs;
@@ -192,10 +193,11 @@ pub fn month_amounts<S: BuildHasher, T: BuildHasher>(
         .collect()
 }
 
-fn bucket_of(t: Timestamp, b: Bucket) -> String {
+fn bucket_of(t: Timestamp, zone: crate::time_zone::Tz, b: Bucket) -> String {
+    let local = t.with_timezone(&zone);
     match b {
-        Bucket::Month => t.format("%Y-%m").to_string(),
-        Bucket::Year => t.format("%Y").to_string(),
+        Bucket::Month => local.format("%Y-%m").to_string(),
+        Bucket::Year => local.format("%Y").to_string(),
     }
 }
 
@@ -221,7 +223,13 @@ impl App {
                 _ => {}
             }
         }
-        for m in self.repos.progress.month_amounts(actor.user_id).await? {
+        let zone = self.user_zone(actor.user_id).await?;
+        for m in self
+            .repos
+            .progress
+            .month_amounts(actor.user_id, zone.name())
+            .await?
+        {
             let (t, secs) = per.entry(self.group_of(&m.kind)).or_default();
             t.amounts.add(&m.amounts);
             *secs += m.seconds;
@@ -257,7 +265,13 @@ impl App {
         bucket: Bucket,
     ) -> AppResult<Vec<SeriesPoint>> {
         let mut per: BTreeMap<String, (Amounts, u64)> = BTreeMap::new();
-        for m in self.repos.progress.month_amounts(actor.user_id).await? {
+        let zone = self.user_zone(actor.user_id).await?;
+        for m in self
+            .repos
+            .progress
+            .month_amounts(actor.user_id, zone.name())
+            .await?
+        {
             if group.is_some_and(|g| g != self.group_of(&m.kind)) {
                 continue;
             }

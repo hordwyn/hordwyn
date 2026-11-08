@@ -1,0 +1,26 @@
+[
+  {
+    "rank": 1,
+    "id": 101,
+    "listed_at": "2014-09-01T09:10:11.000Z",
+    "notes": "Need to catch up before TRON 3 is out.",
+    "type": "movie",
+    "movie": {
+      "title": "TRON: Legacy",
+      "year": 2010,
+      "ids": { "trakt": 1, "slug": "tron-legacy-2010", "imdb": "tt1104001", "tmdb": 20526 }
+    }
+  },
+  {
+    "rank": 2,
+    "id": 102,
+    "listed_at": "2014-09-01T09:10:11.000Z",
+    "notes": null,
+    "type": "show",
+    "show": {
+      "title": "The Walking Dead",
+      "year": 2010,
+      "ids": { "trakt": 2, "slug": "the-walking-dead", "tvdb": 153021, "imdb": "tt1520211", "tmdb": 1402 }
+    }
+  }
+]

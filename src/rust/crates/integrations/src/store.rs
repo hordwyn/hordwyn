@@ -4,11 +4,10 @@ use std::sync::Mutex;
 
 use app::ports::PortError;
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use domain::ids::UserId;
 use uuid::Uuid;
 
-use crate::Integration;
+use crate::{CallRecord, Integration};
 
 #[async_trait]
 pub trait IntegrationStore: Send + Sync {
@@ -16,13 +15,10 @@ pub trait IntegrationStore: Send + Sync {
     async fn by_token_hash(&self, hash: &str) -> Result<Option<Integration>, PortError>;
     async fn by_user(&self, user: UserId) -> Result<Vec<Integration>, PortError>;
     async fn delete(&self, id: Uuid) -> Result<(), PortError>;
-    /// Record a call: when, and the error if it failed (`None` clears it).
-    async fn touch(
-        &self,
-        id: Uuid,
-        at: DateTime<Utc>,
-        error: Option<String>,
-    ) -> Result<(), PortError>;
+    /// Record an attributed call: when, its status, the error and field if it was refused
+    /// (`None` clears them), the redacted body, and the item it recorded (`None` keeps the
+    /// earlier one).
+    async fn touch(&self, id: Uuid, call: &CallRecord) -> Result<(), PortError>;
 }
 
 #[derive(Default)]
@@ -61,12 +57,7 @@ impl IntegrationStore for MemIntegrationStore {
         Ok(())
     }
 
-    async fn touch(
-        &self,
-        id: Uuid,
-        at: DateTime<Utc>,
-        error: Option<String>,
-    ) -> Result<(), PortError> {
+    async fn touch(&self, id: Uuid, call: &CallRecord) -> Result<(), PortError> {
         for i in self
             .0
             .lock()
@@ -74,8 +65,14 @@ impl IntegrationStore for MemIntegrationStore {
             .iter_mut()
             .filter(|i| i.id == id)
         {
-            i.last_seen_at = Some(at);
-            i.last_error.clone_from(&error);
+            i.last_seen_at = Some(call.at);
+            i.last_error.clone_from(&call.error);
+            i.last_status = Some(call.status);
+            i.last_error_field.clone_from(&call.field);
+            i.last_payload.clone_from(&call.payload);
+            if call.item.is_some() {
+                i.last_item.clone_from(&call.item);
+            }
         }
         Ok(())
     }

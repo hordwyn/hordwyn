@@ -11,14 +11,15 @@ macro_rules! simple {
     };
 }
 
-/// Scrollable table wrapper.
+/// Scrollable table wrapper. It takes focus (`tabindex=0`), so a table wider than a small
+/// screen can be scrolled with the keyboard (WCAG 2.1.1; axe `scrollable-region-focusable`).
 #[component]
 pub fn Table(
     #[prop(into, optional)] class: MaybeProp<String>,
     children: Children,
 ) -> impl IntoView {
     view! {
-        <div class="relative w-full overflow-auto">
+        <div tabindex="0" class="relative w-full overflow-auto rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <table class=move || cn(&["w-full caption-bottom text-sm", &class.get().unwrap_or_default()])>
                 {children()}
             </table>

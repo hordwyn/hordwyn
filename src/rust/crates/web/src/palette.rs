@@ -23,6 +23,65 @@ use crate::source_hints::{
 #[derive(Clone, Copy)]
 pub struct PaletteOpen(pub RwSignal<bool>);
 
+/// When set (list id, list name), choosing a result adds it to that list instead of opening
+/// it: the list page's "Add" (design.md 6.5). The list page clears it when it goes away.
+#[derive(Clone, Copy)]
+pub struct PaletteTarget(pub RwSignal<Option<(String, String)>>);
+
+/// An unmatched import row the palette is matching (Settings > Imports, design.md 6.11):
+/// choosing a result matches the row with it and replays the row; `done` hears the outcome
+/// (`None` on success, else the message). The palette opens with the row's title as query.
+#[derive(Clone)]
+pub struct MatchTarget {
+    pub import_id: String,
+    pub source_id: String,
+    pub title: String,
+    pub done: Callback<Option<String>>,
+}
+
+/// The row being matched, if any; cleared when the palette closes.
+#[derive(Clone, Copy)]
+pub struct PaletteMatch(pub RwSignal<Option<MatchTarget>>);
+
+/// Match the row with the chosen item (`POST /imports/{id}/match`).
+fn match_row(m: MatchTarget, item: CommandItem) {
+    leptos::task::spawn_local(async move {
+        let path = format!("/imports/{}/match", m.import_id);
+        let body = serde_json::json!({"source_id": m.source_id, "item_id": item.id});
+        let r = crate::rest::send("POST", &path, Some(body)).await;
+        m.done
+            .run(r.err().map(|e| crate::settings::admin_error(&e)));
+    });
+}
+
+/// Add the chosen item to the list the palette is scoped to; the answer is a toast.
+fn add_to_list(
+    (toasts, i18n): (ui::Toasts, std::sync::Arc<crate::i18n::I18n>),
+    list: String,
+    name: String,
+    item: CommandItem,
+) {
+    leptos::task::spawn_local(async move {
+        let path = format!("/lists/{list}/items");
+        let body = serde_json::json!({"item_id": item.id});
+        match crate::rest::send("POST", &path, Some(body)).await {
+            Ok(()) => toasts.push(
+                i18n.t_args(
+                    "lists-added",
+                    &[("title", item.label.into()), ("name", name.into())],
+                ),
+                None,
+                ui::ToastVariant::Default,
+            ),
+            Err(e) => toasts.push(
+                crate::sharing::share_error(&e),
+                None,
+                ui::ToastVariant::Destructive,
+            ),
+        }
+    });
+}
+
 /// The palette fills the screen below 47.5rem (design.md 6.4, UX2-W13).
 const FULL_SCREEN_ON_PHONES: &str = "max-[47.5rem]:inset-0 max-[47.5rem]:left-0 max-[47.5rem]:top-0 max-[47.5rem]:h-dvh max-[47.5rem]:max-w-none \
     max-[47.5rem]:translate-x-0 max-[47.5rem]:translate-y-0 max-[47.5rem]:rounded-none \
@@ -179,6 +238,42 @@ fn debounced_search(s: State) {
     });
 }
 
+/// Choosing a result opens its page, or adds it to the list the palette is scoped to. The
+/// scope lasts one opening of the palette.
+fn select_handler(
+    open: RwSignal<bool>,
+    query: RwSignal<String>,
+    target: RwSignal<Option<(String, String)>>,
+    i18n: std::sync::Arc<crate::i18n::I18n>,
+) -> Callback<CommandItem> {
+    let matching = expect_context::<PaletteMatch>().0;
+    let navigate = use_navigate();
+    Effect::new(move |_| {
+        if !open.get() {
+            target.set(None);
+            matching.set(None);
+        }
+    });
+    let notify = (ui::use_toasts(), i18n);
+    Callback::new(move |item: CommandItem| {
+        open.set(false);
+        query.set(String::new());
+        if let Some(m) = matching.get_untracked() {
+            matching.set(None);
+            match_row(m, item);
+            return;
+        }
+        if let Some((list, name)) = target.get_untracked() {
+            add_to_list(notify.clone(), list, name, item);
+            return;
+        }
+        navigate(
+            &format!("/items/{}", item.id),
+            leptos_router::NavigateOptions::default(),
+        );
+    })
+}
+
 #[component]
 pub fn SearchPalette() -> impl IntoView {
     let open = expect_context::<PaletteOpen>().0;
@@ -203,14 +298,14 @@ pub fn SearchPalette() -> impl IntoView {
     });
     stream_results(events, search_id, waiting, items);
 
-    let navigate = use_navigate();
-    let on_select = Callback::new(move |item: CommandItem| {
-        open.set(false);
-        query.set(String::new());
-        navigate(
-            &format!("/items/{}", item.id),
-            leptos_router::NavigateOptions::default(),
-        );
+    let target = expect_context::<PaletteTarget>().0;
+    let on_select = select_handler(open, query, target, i18n.clone());
+    // matching an import row: search for its title
+    let matching = expect_context::<PaletteMatch>().0;
+    Effect::new(move |_| {
+        if let Some(m) = matching.get() {
+            query.set(m.title);
+        }
     });
     // the no-results card shows once every asked source has answered with nothing
     let empty_answer = Memo::new(move |_| {
@@ -248,6 +343,12 @@ pub fn SearchPalette() -> impl IntoView {
         .collect();
     view! {
         <Dialog open=open title=i18n.t("search-title") close_label=i18n.t("dialog-close") class=FULL_SCREEN_ON_PHONES>
+            {move || target.get().map(|(_, name)| view! {
+                <p class="mb-2 text-sm" data-testid="palette-target">{use_i18n().t_args("lists-add-target", &[("name", name.into())])}</p>
+            })}
+            {move || matching.get().map(|m| view! {
+                <p class="mb-2 text-sm" data-testid="palette-match">{use_i18n().t_args("imports-match-target", &[("title", m.title.into())])}</p>
+            })}
             <Segmented id="palette-scope" label=i18n.t("search-scope") value=scope options=scopes.clone() class="mb-3"/>
             <Command
                 id="search"

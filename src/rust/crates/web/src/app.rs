@@ -4,7 +4,7 @@ use std::sync::Arc;
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
 use leptos_router::components::{Route, Router, Routes};
-use leptos_router::path;
+use leptos_router::{SsrMode, path};
 use serde::{Deserialize, Serialize};
 
 use crate::i18n::I18n;
@@ -39,6 +39,9 @@ pub struct ClientConfig {
     /// Today (UTC) when the server rendered the page: History groups by day with it on both
     /// sides, so hydration sees the same Today and Yesterday.
     pub today: String,
+    /// The browser sent a session cookie that is no longer a session (expired, ended by the
+    /// provider): the sign-in page says "Your session ended" (addendum-1 4.4).
+    pub session_ended: bool,
 }
 
 impl ClientConfig {
@@ -69,6 +72,11 @@ fn server_config() -> ClientConfig {
     let default = brand
         .as_ref()
         .map_or_else(|| "en".to_string(), |b| b.default_locale.clone());
+    let backend = use_context::<Arc<dyn crate::backend::Backend>>();
+    let session_ended = session.is_none()
+        && parts.as_ref().zip(backend.as_ref()).is_some_and(|(p, b)| {
+            crate::backend::session_token(&p.headers, &b.session_cookie()).is_some()
+        });
     let setting = session.as_ref().and_then(|s| s.locale.clone());
     let locale = crate::i18n::effective_locale(setting.as_deref(), accept.as_deref(), &default);
     ClientConfig {
@@ -95,7 +103,12 @@ fn server_config() -> ClientConfig {
             .as_ref()
             .map(|b| b.legal.clone().into_iter().collect())
             .unwrap_or_default(),
-        today: crate::history_state::Day::today_utc().iso(),
+        // the server knows the user's zone (DEC-239); the browser has no tz database
+        today: session
+            .as_ref()
+            .and_then(|s| s.today.clone())
+            .unwrap_or_else(|| crate::history_state::Day::today_utc().iso()),
+        session_ended,
     }
 }
 
@@ -172,42 +185,49 @@ pub fn App() -> impl IntoView {
     // settings area `/settings/*` replaced `/notifications`, `/integrations` and `/sources`,
     // without redirects (owner ruling, DEC-171); the old paths are 404s.
     view! {
-        <Stylesheet id="leptos" href="/pkg/app.css"/>
-        <Title text=cfg.product_name.clone()/>
-        <Router>
-            <crate::shell::AppShell>
-                <Routes fallback=crate::shell::NotFound>
-                    <Route path=path!("/") view=crate::home::Home/>
-                    <Route path=path!("/setup") view=crate::setup::SetupPage/>
-                    <Route path=path!("/sign-in") view=crate::pages::SignIn/>
-                    <Route path=path!("/sign-up") view=crate::pages::SignUp/>
-                    <Route path=path!("/invite/:token") view=crate::pages::SignUp/>
-                    <Route path=path!("/library") view=crate::library::Library/>
-                    <Route path=path!("/items/:id") view=crate::item::ItemPage/>
-                    <Route path=path!("/people") view=crate::sharing::Companions/>
-                    <Route path=path!("/history") view=crate::history::History/>
-                    <Route path=path!("/stats") view=crate::home::Stats/>
-                    <Route path=path!("/you") view=crate::shell::You/>
-                    <Route path=path!("/shared/lists/:token") view=crate::sharing::SharedList/>
-                    <Route path=path!("/lists") view=crate::pages::Lists/>
-                    <Route path=path!("/settings/account") view=crate::settings::SettingsAccount/>
-                    <Route path=path!("/settings/notifications") view=crate::settings::SettingsNotifications/>
-                    <Route path=path!("/settings/integrations") view=crate::settings::SettingsIntegrations/>
-                    <Route path=path!("/settings/sources") view=crate::settings::SettingsSources/>
-                    <Route path=path!("/settings/privacy") view=crate::settings::SettingsPrivacy/>
-                    <Route path=path!("/admin") view=crate::admin::Overview/>
-                    <Route path=path!("/admin/users") view=crate::admin::Users/>
-                    <Route path=path!("/admin/sources") view=crate::admin::Sources/>
-                    <Route path=path!("/admin/storage") view=crate::admin::Storage/>
-                    <Route path=path!("/admin/notifications") view=crate::admin::NotificationDefaults/>
-                    <Route path=path!("/admin/brand") view=crate::admin::Branding/>
-                    <Route path=path!("/admin/security") view=crate::admin::Security/>
-                    <Route path=path!("/admin/audit") view=crate::admin::Audit/>
-                    <Route path=path!("/dev/gallery") view=GalleryPage/>
-                </Routes>
-            </crate::shell::AppShell>
-        </Router>
-    }
+            <Stylesheet id="leptos" href="/pkg/app.css"/>
+            <Title text=cfg.product_name.clone()/>
+            <Router>
+                <crate::shell::AppShell>
+                    <Routes fallback=crate::shell::NotFound>
+                        <Route path=path!("/") view=crate::home::Home/>
+                        <Route path=path!("/setup") view=crate::setup::SetupPage/>
+                        <Route path=path!("/sign-in") view=crate::pages::SignIn/>
+                        <Route path=path!("/sign-in/local") view=crate::sign_in::LocalSignIn/>
+                        <Route path=path!("/sign-in/link") view=crate::sign_in::LinkAccount/>
+                        <Route path=path!("/signed-out") view=crate::sign_in::SignedOut/>
+                        <Route path=path!("/reset-password/:token") view=crate::sign_in::ResetPassword/>
+                        <Route path=path!("/sign-up") view=crate::pages::SignUp/>
+                        <Route path=path!("/invite/:token") view=crate::pages::SignUp/>
+                        <Route path=path!("/library") view=crate::library::Library/>
+                        <Route path=path!("/items/:id") view=crate::item::ItemPage/>
+                        <Route path=path!("/people") view=crate::people::People/>
+                        <Route path=path!("/people/:id") view=crate::people::PersonPage/>
+                        <Route path=path!("/history") view=crate::history::History/>
+                        <Route path=path!("/stats") view=crate::home::Stats/>
+                        <Route path=path!("/you") view=crate::shell::You/>
+                        <Route path=path!("/shared/lists/:token") view=crate::lists::SharedList ssr=SsrMode::Async/>
+                        <Route path=path!("/lists") view=crate::lists::Lists/>
+                        <Route path=path!("/lists/:id") view=crate::lists::ListPage/>
+                        <Route path=path!("/settings/account") view=crate::settings::SettingsAccount/>
+                        <Route path=path!("/settings/notifications") view=crate::settings::SettingsNotifications/>
+                        <Route path=path!("/settings/integrations") view=crate::settings::SettingsIntegrations/>
+                        <Route path=path!("/settings/sources") view=crate::settings::SettingsSources/>
+                        <Route path=path!("/settings/privacy") view=crate::settings::SettingsPrivacy/>
+    <Route path=path!("/settings/imports") view=crate::imports::SettingsImports/>
+                        <Route path=path!("/admin") view=crate::admin::Overview/>
+                        <Route path=path!("/admin/instance") view=crate::admin::Instance/>
+                        <Route path=path!("/admin/sso") view=crate::admin::SignInSso/>
+                        <Route path=path!("/admin/users") view=crate::admin::Users/>
+                        <Route path=path!("/admin/sources") view=crate::admin::Sources/>
+                        <Route path=path!("/admin/storage") view=crate::admin::Storage/>
+                        <Route path=path!("/admin/notifications") view=crate::admin::NotificationDefaults/>
+                        <Route path=path!("/admin/audit") view=crate::admin::Audit/>
+                        <Route path=path!("/dev/gallery") view=GalleryPage/>
+                    </Routes>
+                </crate::shell::AppShell>
+            </Router>
+        }
 }
 
 /// The signed-in user (shared resource).

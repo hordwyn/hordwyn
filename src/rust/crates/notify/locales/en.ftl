@@ -67,6 +67,8 @@ admin-job_backlog-body = { $count ->
 }
 admin-source_requested-title = Data source requested: { $source }
 admin-source_requested-body = { $user } asked for { $source } to be set up. Add it under Admin > Data sources.
+admin-local_sign_in-title = Local sign-in used: { $username }
+admin-local_sign_in-body = Local sign-in used by { $username } from { $address }. Check the audit log if this was not you.
 
 test-title = Test from { $product }
 test-body = The channel "{ $name }" works.

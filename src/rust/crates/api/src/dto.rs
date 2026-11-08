@@ -29,6 +29,7 @@ pub fn user(u: &User) -> UserDto {
         self_companion: u.self_companion.0.to_string(),
         share_sessions: u.share_sessions,
         locale: u.locale.clone(),
+        time_zone: u.time_zone.clone(),
     }
 }
 

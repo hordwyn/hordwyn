@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
 
 use crate::connector::Connector;
@@ -14,6 +14,8 @@ pub struct Registry {
     order: Vec<String>,
     connectors: BTreeMap<String, Arc<dyn Connector>>,
     states: Arc<RwLock<BTreeMap<String, CredentialState>>>,
+    /// Sources an admin switched off (DEC-289); shared by clones like the states.
+    disabled: Arc<RwLock<BTreeSet<String>>>,
     stats: Option<Arc<SourceStats>>,
 }
 
@@ -93,6 +95,29 @@ impl Registry {
             .insert(id.to_string(), state);
     }
 
+    /// Switch a source off or on (the admin's Disabled switch, DEC-289): a disabled source
+    /// serves no search and no lookup, and is not reported as skipped.
+    pub fn set_enabled(&self, id: &str, enabled: bool) {
+        let mut d = self
+            .disabled
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if enabled {
+            d.remove(id);
+        } else {
+            d.insert(id.to_string());
+        }
+    }
+
+    #[must_use]
+    pub fn is_enabled(&self, id: &str) -> bool {
+        !self
+            .disabled
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(id)
+    }
+
     #[must_use]
     pub fn infos(&self) -> Vec<ConnectorInfo> {
         self.order
@@ -107,7 +132,9 @@ impl Registry {
             .map(|id| &self.connectors[id])
             .filter(|c| {
                 let i = c.info();
-                i.kinds.iter().any(|k| k == kind) && i.capabilities.contains(&capability)
+                i.kinds.iter().any(|k| k == kind)
+                    && i.capabilities.contains(&capability)
+                    && self.is_enabled(&i.id)
             })
             .collect()
     }

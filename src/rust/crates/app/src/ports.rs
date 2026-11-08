@@ -71,6 +71,8 @@ pub trait LinkRequestRepo: Send + Sync {
     async fn get(&self, id: LinkRequestId) -> RepoResult<Option<LinkRequest>>;
     async fn update(&self, r: &LinkRequest) -> RepoResult<()>;
     async fn pending_for(&self, user: UserId) -> RepoResult<Vec<LinkRequest>>;
+    /// Pending requests `user` sent, oldest first.
+    async fn pending_from(&self, user: UserId) -> RepoResult<Vec<LinkRequest>>;
 }
 
 #[async_trait]
@@ -215,9 +217,11 @@ pub trait ProgressRepo: Send + Sync {
     async fn for_items(&self, user: UserId, items: &[ItemId]) -> RepoResult<Vec<ProgressEvent>>;
     /// Effective events (no undo events, none that were undone) in `window`, newest first.
     async fn recent(&self, user: UserId, window: &HistoryWindow) -> RepoResult<Vec<ProgressEvent>>;
-    /// The user's statistics per kind and UTC month, by the rules of
-    /// [`crate::month_amounts`] (sessions counted with the user's own sessions' durations).
-    async fn month_amounts(&self, user: UserId) -> RepoResult<Vec<crate::MonthAmounts>>;
+    /// The user's statistics per kind and month in `zone` (an IANA name, DEC-239), by the
+    /// rules of [`crate::month_amounts`] (sessions counted with the user's own sessions'
+    /// durations).
+    async fn month_amounts(&self, user: UserId, zone: &str)
+    -> RepoResult<Vec<crate::MonthAmounts>>;
 }
 
 #[async_trait]
@@ -238,6 +242,8 @@ pub trait ListRepo: Send + Sync {
     async fn by_owner(&self, owner: UserId) -> RepoResult<Vec<List>>;
     /// The list shared with visibility `link` and this token.
     async fn by_share_token(&self, token: &str) -> RepoResult<Option<List>>;
+    /// Every list with visibility `instance`, of any owner.
+    async fn instance_visible(&self) -> RepoResult<Vec<List>>;
 }
 
 #[async_trait]

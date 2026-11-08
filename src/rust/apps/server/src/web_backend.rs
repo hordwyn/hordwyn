@@ -1,7 +1,7 @@
 //! `web::Backend` for the web app's server functions, on top of the same operations as the
 //! REST API (`api::ops`).
 
-use api::{ApiError, ApiState, browse, notifications, ops, sharing};
+use api::{ApiError, ApiState, browse, notifications, ops, people, sharing};
 use async_trait::async_trait;
 use contracts::{
     AttributionDto, CompanionDto, ErrorDto, InviteDto, ItemPageDto, LibraryEntryDto,
@@ -24,6 +24,7 @@ fn unauthorized() -> ErrorDto {
         code: "unauthorized".into(),
         message: "sign in first".into(),
         retry_after_secs: None,
+        field: None,
     }
 }
 
@@ -86,6 +87,13 @@ impl Backend for WebBackend {
             username: user.username,
             is_admin: a.is_admin(),
             unread,
+            today: self
+                .0
+                .app
+                .today_for(a.user_id)
+                .await
+                .ok()
+                .map(|d| d.format("%Y-%m-%d").to_string()),
             locale: user.locale,
         })
     }
@@ -98,12 +106,10 @@ impl Backend for WebBackend {
     }
 
     async fn sign_in(&self, b: SignInDto) -> BResult<SessionDto> {
-        let t = self
-            .0
-            .auth
-            .sign_in(&b.username, &b.password, b.totp.as_deref())
+        // the sign-in mode applies here too (`sso_only` in `auto` mode, WP3-3)
+        let t = api::password_sign_in(&self.0, &b, false)
             .await
-            .map_err(|e| err(e.into()))?;
+            .map_err(err)?;
         self.session(t.0).await
     }
 
@@ -202,6 +208,35 @@ impl Backend for WebBackend {
     async fn create_companion(&self, token: &str, name: &str) -> BResult<CompanionDto> {
         let a = self.actor(token).await?;
         ops::create_companion(&self.0, a, name).await.map_err(err)
+    }
+
+    async fn people_page(&self, token: &str) -> BResult<contracts::PeoplePageDto> {
+        let a = self.actor(token).await?;
+        people::people_page(&self.0, a).await.map_err(err)
+    }
+
+    async fn person_page(&self, token: &str, id: &str) -> BResult<contracts::PersonPageDto> {
+        let a = self.actor(token).await?;
+        people::person_page(&self.0, a, id).await.map_err(err)
+    }
+
+    async fn imports(&self, token: &str) -> BResult<Vec<contracts::imports::ImportDto>> {
+        let a = self.actor(token).await?;
+        let list = ops::imports(&self.0, a).await.map_err(err)?;
+        Ok(list
+            .into_iter()
+            .filter_map(|v| serde_json::from_value(v).ok())
+            .collect())
+    }
+
+    async fn lists_overview(&self, token: &str) -> BResult<contracts::ListsOverviewDto> {
+        let a = self.actor(token).await?;
+        people::lists_overview(&self.0, a).await.map_err(err)
+    }
+
+    async fn list_page(&self, token: &str, id: &str) -> BResult<contracts::ListPageDto> {
+        let a = self.actor(token).await?;
+        people::list_page(&self.0, a, id).await.map_err(err)
     }
 
     async fn lists(&self, token: &str) -> BResult<Vec<ListDto>> {

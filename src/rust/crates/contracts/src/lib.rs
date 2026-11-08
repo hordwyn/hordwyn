@@ -6,9 +6,12 @@
 pub mod admin;
 pub mod auth;
 pub mod browse;
+pub mod imports;
 pub mod locale;
+pub mod sharing;
 
 pub use browse::*;
+pub use sharing::*;
 
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +34,9 @@ pub struct UserDto {
     /// Chosen language (`en`, `de`); `null` follows the browser, then the brand default.
     #[serde(default)]
     pub locale: Option<String>,
+    /// IANA time zone; `null` follows the instance default, then UTC (DEC-239).
+    #[serde(default)]
+    pub time_zone: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,7 +190,7 @@ pub struct SearchResultsEventDto {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct SignUpDto {
     pub username: String,
@@ -194,12 +200,35 @@ pub struct SignUpDto {
     pub invite: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct SignInDto {
     pub username: String,
     pub password: String,
     pub totp: Option<String>,
+}
+
+// the password, code and invite never print (UX3-26)
+impl std::fmt::Debug for SignUpDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SignUpDto")
+            .field("username", &self.username)
+            .field("display_name", &self.display_name)
+            .field("password", &"***")
+            .field("email", &self.email)
+            .field("invite", &self.invite.as_ref().map(|_| "***"))
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for SignInDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SignInDto")
+            .field("username", &self.username)
+            .field("password", &"***")
+            .field("totp", &self.totp.as_ref().map(|_| "***"))
+            .finish()
+    }
 }
 
 /// Session token for non-browser clients (browsers get an `HttpOnly` cookie as well).
@@ -220,6 +249,10 @@ pub struct ErrorDto {
     /// the `Retry-After` header.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after_secs: Option<u64>,
+    /// The request field the error is about (`season`, `series.ids`), when the server can
+    /// tell; the watched webhook names the offending field of a refused body (R-38).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -262,6 +295,9 @@ pub struct ListDto {
     /// `private`, `instance` or `link`.
     pub visibility: String,
     pub item_ids: Vec<String>,
+    /// The public page's path; only for the owner of a link-shared list.
+    #[serde(default)]
+    pub share_path: Option<String>,
 }
 
 // ---------------------------------------------------------------- sharing (D-9)
@@ -337,6 +373,28 @@ pub struct LoggedSessionDto {
 pub struct PrivacyDto {
     /// Linked participants see the sessions you log.
     pub share_sessions: bool,
+}
+
+/// The caller's time zone (`PUT /auth/me/time-zone`, DEC-239): an IANA name such as
+/// `Europe/Berlin`; `null` goes back to the instance default.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct TimeZoneDto {
+    pub time_zone: Option<String>,
+}
+
+/// Use a one-time reset link (`POST /auth/reset-password`, addendum-1 3.3).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct ResetPasswordDto {
+    pub token: String,
+    pub password: String,
+}
+
+impl std::fmt::Debug for ResetPasswordDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ResetPasswordDto { .. }")
+    }
 }
 
 /// The caller's language (`PUT /auth/me/locale`); `null` goes back to the automatic choice.
@@ -450,6 +508,7 @@ mod tests {
             code: "not_found".into(),
             message: "item not found".into(),
             retry_after_secs: None,
+            field: None,
         };
         let json = serde_json::to_string(&e).unwrap();
         assert!(
@@ -460,6 +519,44 @@ mod tests {
         assert_eq!(back, e);
         let old: ErrorDto = serde_json::from_str(r#"{"code":"x","message":"y"}"#).unwrap();
         assert_eq!(old.retry_after_secs, None);
+    }
+
+    /// UX3-26: input DTOs with a password never print it (a stray `{:?}` in a log line).
+    #[test]
+    fn password_inputs_hide_the_password_in_debug() {
+        let printed = [
+            format!(
+                "{:?}",
+                SignInDto {
+                    username: "anna".into(),
+                    password: "pw-secret-1".into(),
+                    totp: Some("123456".into()),
+                }
+            ),
+            format!(
+                "{:?}",
+                SignUpDto {
+                    username: "anna".into(),
+                    display_name: "Anna".into(),
+                    password: "pw-secret-1".into(),
+                    email: None,
+                    invite: Some("inv-secret".into()),
+                }
+            ),
+            format!(
+                "{:?}",
+                admin::ReauthInputDto {
+                    password: "pw-secret-1".into(),
+                    totp: Some("123456".into()),
+                }
+            ),
+        ];
+        for p in &printed {
+            for secret in ["pw-secret-1", "123456", "inv-secret"] {
+                assert!(!p.contains(secret), "{p}");
+            }
+        }
+        assert!(printed[0].contains("anna"), "{}", printed[0]);
     }
 }
 
@@ -486,6 +583,12 @@ pub struct InboxItemDto {
     pub body: String,
     pub link: Option<String>,
     pub created_at: String,
+    /// The day and time of `created_at` in the reader's time zone (DEC-306), for the
+    /// inbox grouped by day.
+    #[serde(default)]
+    pub local_day: String,
+    #[serde(default)]
+    pub local_time: String,
     pub read: bool,
 }
 
@@ -504,6 +607,24 @@ pub struct ChannelDto {
     /// Only in the answer that created a webhook without a secret: the generated signing
     /// secret (Standard Webhooks `whsec_...`). It is not shown again.
     pub secret: Option<String>,
+    /// Health from the delivery log (design.md 6.8): the channel's latest delivery.
+    #[serde(default)]
+    pub health: ChannelHealthDto,
+}
+
+/// How a channel is doing, from its latest delivery that was not suppressed.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct ChannelHealthDto {
+    /// `never` (nothing delivered yet), `working` (the latest was sent), `waiting` (the latest
+    /// is queued or in a digest), `failing` (the latest failed or is being retried).
+    pub state: String,
+    /// When: sent for `working`, created for the others; `null` for `never`.
+    #[serde(default)]
+    pub at: Option<String>,
+    /// What the channel answered, as it said it (`failing` only).
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -585,6 +706,11 @@ pub struct DeliveryDto {
     pub last_error: Option<String>,
     pub due_at: String,
     pub created_at: String,
+    /// Day and time of `created_at` in the reader's time zone (DEC-306).
+    #[serde(default)]
+    pub local_day: String,
+    #[serde(default)]
+    pub local_time: String,
     pub sent_at: Option<String>,
 }
 
@@ -628,6 +754,40 @@ pub struct IntegrationDto {
     pub last_seen_at: Option<String>,
     /// Why the last call was refused, if it was.
     pub last_error: Option<String>,
+    /// HTTP status of the last call attributed to this sender (200 or 422; a 401 has no
+    /// known token and is attributed to nothing).
+    #[serde(default)]
+    pub last_status: Option<u16>,
+    /// The offending field of the last refused call (`episode_title`, `season`).
+    #[serde(default)]
+    pub last_error_field: Option<String>,
+    /// The body of the last call, secrets redacted, at most 4 KiB.
+    #[serde(default)]
+    pub last_payload: Option<String>,
+    /// What the last accepted call recorded.
+    #[serde(default)]
+    pub last_item: Option<RecordedItemDto>,
+}
+
+/// An item a webhook call recorded or matched.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct RecordedItemDto {
+    pub id: String,
+    /// As shown: the title, for episodes with `2x04`.
+    pub title: String,
+}
+
+/// Answer of "Send a test call from here": the sample was valid; nothing was recorded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct IntegrationTestDto {
+    /// Always `true`: a test call records nothing.
+    pub test: bool,
+    /// The catalog item the sample's ids point to, if it is already known.
+    pub matched: Option<RecordedItemDto>,
+    /// The title the sample names, as shown.
+    pub title: String,
 }
 
 /// A new integration with its token, which is shown only here.

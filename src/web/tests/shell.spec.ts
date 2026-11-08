@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { expectNoA11yViolations, hydrated, PASSWORD, signUp } from "./helpers";
+import { addPerson, expectNoA11yViolations, hydrated, PASSWORD, requestLink, signUp } from "./helpers";
 
 // UX phase 0 review (docs/reviews/2026-11-06-ux0-review.md): the real shell signed in, in
 // light and dark, on desktop and at 360 px with the tab bar (UX0-3); the APG menu button and
@@ -17,6 +17,7 @@ const PAGES = [
   "/settings/notifications",
   "/settings/integrations",
   "/settings/sources",
+  "/settings/imports",
   "/settings/privacy",
   // a member on an admin page: the "admins only" page
   "/admin",
@@ -188,11 +189,15 @@ test("single-key shortcuts, but not while typing; aria-current marks the section
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
-  const name = page.getByLabel("Name", { exact: true });
+  // typing in a field (the "Add a person" sheet, WP3-6) is not a shortcut
+  await page.getByRole("button", { name: "Add a person" }).click();
+  const name = page.getByRole("dialog", { name: "Add a person" }).getByLabel("Name", { exact: true });
   await name.click();
   await page.keyboard.type("n?");
   await expect(name).toHaveValue("n?");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Search" })).toHaveCount(0);
 
   await page.goto("/history");
   await hydrated(page);
@@ -225,12 +230,8 @@ test("an unread notification shows on the bell", async ({ page, browser }) => {
   await signUp(page, `umax${stamp}`, "Max");
   await page.goto("/people");
   await hydrated(page);
-  await page.getByLabel("Name", { exact: true }).fill("P.");
-  await page.getByRole("button", { name: "Add person" }).click();
-  await page.getByLabel("Person", { exact: true }).selectOption({ label: "P." });
-  await page.getByLabel("Username").fill(`upia${stamp}`);
-  await page.getByRole("button", { name: "Send link request" }).click();
-  await expect(page.getByText("Link request sent.")).toBeVisible();
+  await addPerson(page, "P.");
+  await requestLink(page, "P.", `upia${stamp}`);
   await pia.goto("/library");
   await hydrated(pia);
   await expect(pia.getByRole("link", { name: /^Notifications, \d+ unread$/ })).toBeVisible();

@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT mail_password FROM instance_settings WHERE id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "mail_password",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "instance_settings",
+            "name": "mail_password"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "6f43680509787aef3e1e4d2401cb66ad2bf53fb146716a8c9e9734e7fc97de1a"
+}

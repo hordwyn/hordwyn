@@ -3,11 +3,12 @@
 //! stored their own subscriber PIN under Settings > Data sources searches with it; others
 //! search with the instance key alone.
 
+mod support;
+
 use std::time::Duration;
 
 use serde_json::{Value, json};
 use server::{Overrides, Server};
-use tower::ServiceExt;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -30,11 +31,7 @@ async fn call(
         req = req.header("cookie", c);
     }
     let body = body.map_or_else(String::new, |b| b.to_string());
-    let resp = app
-        .clone()
-        .oneshot(req.body(axum::body::Body::from(body)).unwrap())
-        .await
-        .unwrap();
+    let resp = support::send(app, req.body(axum::body::Body::from(body)).unwrap()).await;
     let cookie = resp
         .headers()
         .get("set-cookie")
@@ -146,11 +143,9 @@ async fn json_of(app: &axum::Router, m: &str, uri: &str, cookie: &str) -> (u16, 
         .header("cookie", cookie)
         .body(axum::body::Body::empty())
         .unwrap();
-    let resp = app.clone().oneshot(req).await.unwrap();
+    let resp = support::send(app, req).await;
     let status = resp.status().as_u16();
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
-        .await
-        .unwrap();
+    let bytes = resp.into_body();
     (
         status,
         serde_json::from_slice(&bytes).unwrap_or(Value::Null),

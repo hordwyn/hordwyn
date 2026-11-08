@@ -117,7 +117,7 @@ impl Deliverer {
             event: "test".into(),
             title: r.title,
             body: r.body,
-            link: self.link(Some(&"/notifications".to_string())),
+            link: self.link(Some(&"/settings/notifications".to_string())),
             at: self.clock.now(),
         };
         self.notifier.send(&channel.config, &m).await
@@ -228,7 +228,7 @@ impl Deliverer {
             event: "digest".into(),
             title: t.digest_title(&locale, items.len()),
             body,
-            link: self.link(Some(&"/notifications".to_string())),
+            link: self.link(Some(&"/settings/notifications".to_string())),
             at: self.clock.now(),
         };
         let result = self.notifier.send(&channel.config, &m).await;

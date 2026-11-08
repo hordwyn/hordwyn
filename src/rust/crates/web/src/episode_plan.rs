@@ -7,6 +7,8 @@ use std::collections::BTreeSet;
 
 use contracts::ProgressEventDto;
 
+use crate::history_state::Day;
+
 /// `(season, episode)`.
 pub type Ep = (u32, u32);
 
@@ -116,6 +118,69 @@ pub fn unwatched_in_season(rows: &[SeasonRow], season: u32) -> Vec<Ep> {
             (1..=r.count)
                 .filter(|e| !r.watched.contains(e))
                 .map(|e| (r.number, e))
+        })
+        .collect()
+}
+
+/// Unwatched episodes of every season, in order ("Mark show").
+#[must_use]
+pub fn unwatched_in_show(rows: &[SeasonRow]) -> Vec<Ep> {
+    rows.iter()
+        .flat_map(|r| unwatched_in_season(rows, r.number))
+        .collect()
+}
+
+/// Why a backfill range cannot be used; each names its Fluent message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RangeError {
+    Missing,
+    Reversed,
+    Future,
+}
+
+impl RangeError {
+    #[must_use]
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Missing => "episodes-range-missing",
+            Self::Reversed => "episodes-range-reversed",
+            Self::Future => "episodes-range-future",
+        }
+    }
+}
+
+/// The days of a backfill range ("Spread over a date range", design.md 5.4 R-09): both
+/// `YYYY-MM-DD`, in order, not after today.
+///
+/// # Errors
+/// A missing or malformed day, the end before the start, a day after today.
+pub fn parse_range(from: &str, to: &str, today: Day) -> Result<(Day, Day), RangeError> {
+    let (Some(a), Some(b)) = (Day::parse(from.trim()), Day::parse(to.trim())) else {
+        return Err(RangeError::Missing);
+    };
+    if b.days() < a.days() {
+        return Err(RangeError::Reversed);
+    }
+    if b.days() > today.days() {
+        return Err(RangeError::Future);
+    }
+    Ok((a, b))
+}
+
+/// When each of `n` bulk-marked episodes happened, spread evenly from `from` to `to`
+/// (first and last on the range's ends, noon UTC like the log sheet's picked days), oldest
+/// first.
+#[must_use]
+pub fn spread_over(n: usize, from: Day, to: Day) -> Vec<String> {
+    let span = to.days() - from.days();
+    let steps = i64::try_from(n.saturating_sub(1))
+        .unwrap_or(i64::MAX)
+        .max(1);
+    (0..n)
+        .map(|i| {
+            let i = i64::try_from(i).unwrap_or(0);
+            let day = Day::from_days(from.days() + span * i / steps);
+            format!("{}T12:00:00Z", day.iso())
         })
         .collect()
 }
@@ -260,6 +325,59 @@ mod tests {
         assert_eq!(unwatched_in_season(&r, 1), vec![(1, 2)]);
         assert_eq!(unwatched_in_season(&r, 2), vec![(2, 1), (2, 3), (2, 4)]);
         assert_eq!(unwatched_in_season(&r, 9), Vec::<Ep>::new());
+    }
+
+    #[test]
+    fn marking_the_show_takes_every_gap() {
+        let r = rows();
+        assert_eq!(unwatched_in_show(&r), vec![(1, 2), (2, 1), (2, 3), (2, 4)]);
+    }
+
+    fn day(s: &str) -> Day {
+        Day::parse(s).unwrap()
+    }
+
+    #[test]
+    fn a_range_spreads_the_episodes_evenly() {
+        let today = day("2026-03-10");
+        let (a, b) = parse_range("2026-03-01", "2026-03-09", today).unwrap();
+        assert_eq!(
+            spread_over(5, a, b),
+            [
+                "2026-03-01T12:00:00Z",
+                "2026-03-03T12:00:00Z",
+                "2026-03-05T12:00:00Z",
+                "2026-03-07T12:00:00Z",
+                "2026-03-09T12:00:00Z"
+            ]
+        );
+        // more episodes than days: several on one day, still in order
+        let (a, b) = parse_range("2026-02-27", "2026-03-01", today).unwrap();
+        let days = spread_over(6, a, b);
+        assert_eq!(
+            days.first().map(String::as_str),
+            Some("2026-02-27T12:00:00Z")
+        );
+        assert_eq!(
+            days.last().map(String::as_str),
+            Some("2026-03-01T12:00:00Z")
+        );
+        assert!(days.windows(2).all(|w| w[0] <= w[1]));
+        assert_eq!(spread_over(1, a, b), ["2026-02-27T12:00:00Z"]);
+        assert_eq!(spread_over(0, a, b).len(), 0);
+        assert_eq!(
+            parse_range("", "2026-03-01", today),
+            Err(RangeError::Missing)
+        );
+        assert_eq!(
+            parse_range("2026-03-05", "2026-03-01", today),
+            Err(RangeError::Reversed)
+        );
+        assert_eq!(
+            parse_range("2026-03-05", "2026-03-11", today),
+            Err(RangeError::Future)
+        );
+        assert_eq!(RangeError::Future.key(), "episodes-range-future");
     }
 
     #[test]

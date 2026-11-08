@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO companions (id, owner_id, name, avatar_asset, notes, linked_user, snapshot,\n                                 is_self, merged_into, created_at, merge_record, removed_at)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)\n         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, avatar_asset = EXCLUDED.avatar_asset,\n             notes = EXCLUDED.notes, linked_user = EXCLUDED.linked_user,\n             snapshot = EXCLUDED.snapshot, merged_into = EXCLUDED.merged_into,\n             merge_record = EXCLUDED.merge_record, removed_at = EXCLUDED.removed_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Jsonb",
+        "Bool",
+        "Uuid",
+        "Timestamptz",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9ca3f63cdb0aa4c2f04e570935dc21cc7d6d4c4a6f5bdaf25df2c0f553c425f1"
+}

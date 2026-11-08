@@ -66,6 +66,8 @@ admin-job_backlog-body = { $count ->
 }
 admin-source_requested-title = Datenquelle gewünscht: { $source }
 admin-source_requested-body = { $user } bittet darum, { $source } einzurichten. Das geht unter Admin > Datenquellen.
+admin-local_sign_in-title = Lokale Anmeldung verwendet: { $username }
+admin-local_sign_in-body = { $username } hat sich von { $address } aus lokal angemeldet. Prüfe das Protokoll, falls du das nicht warst.
 
 test-title = Test von { $product }
 test-body = Der Kanal "{ $name }" funktioniert.

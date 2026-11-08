@@ -9,10 +9,10 @@ use async_trait::async_trait;
 use contracts::admin::{
     AdminInviteCreatedDto, AdminInviteDto, AdminOverviewDto, AdminSourceDto, AdminUserDto,
     AskAdminDto, AuditPageDto, AuditQueryDto, BrandCardDto, CredentialInputDto, EvictionDto,
-    HostingInputDto, InstanceSettingsDto, LicenceInputDto, NewAdminInviteDto,
-    NotificationDefaultsDto, ReauthInputDto, ReauthStatusDto, RecoveryCodesDto, RewrapDto,
-    SecurityDto, SettingsPatchDto, SetupStateDto, SourceStatusPageDto, SourceTestDto,
-    SourceTestInputDto, StorageJobsDto, TotpEnrolmentDto, UserCredentialDto,
+    HostingInputDto, InstanceSettingsDto, LicenceInputDto, LinkedIdentityDto, MailSettingsDto,
+    NewAdminInviteDto, NotificationDefaultsDto, OidcAdminDto, ReauthInputDto, ReauthStatusDto,
+    RecoveryCodesDto, RewrapDto, SecurityDto, SettingsPatchDto, SetupStateDto, SourceStatusPageDto,
+    SourceTestDto, SourceTestInputDto, StorageJobsDto, TotpEnrolmentDto, UserCredentialDto,
 };
 use contracts::{ErrorDto, SessionDto, SignUpDto};
 use domain::user::Actor;
@@ -287,5 +287,29 @@ impl AdminBackend for WebAdmin {
     async fn audit(&self, token: &str, q: AuditQueryDto) -> BResult<AuditPageDto> {
         let a = self.actor(token).await?;
         admin::audit_log(&self.0, a, q).await.map_err(err)
+    }
+
+    async fn sign_in_page(&self) -> BResult<web::admin_api::SignInPageDto> {
+        Ok(web::admin_api::SignInPageDto {
+            providers: admin::oidc_buttons(&self.0).await.map_err(err)?,
+            auto: admin::sign_in_auto(&self.0).await,
+        })
+    }
+
+    async fn identities(&self, token: &str) -> BResult<Vec<LinkedIdentityDto>> {
+        let a = self.actor(token).await?;
+        admin::linked_identities(&self.0, a.user_id)
+            .await
+            .map_err(err)
+    }
+
+    async fn oidc_admin(&self, token: &str) -> BResult<OidcAdminDto> {
+        let a = self.actor(token).await?;
+        admin::oidc_admin(&self.0, a).await.map_err(err)
+    }
+
+    async fn mail(&self, token: &str) -> BResult<MailSettingsDto> {
+        let a = self.actor(token).await?;
+        admin::mail(&self.0, a).await.map_err(err)
     }
 }

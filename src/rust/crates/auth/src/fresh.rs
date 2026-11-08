@@ -11,7 +11,7 @@ use uuid::Uuid;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
-use crate::store::{InviteStore, RecoveryCode, Session, SignupInvite};
+use crate::store::{InviteStore, RecoveryCode, Session, SessionSecret, SignupInvite};
 use crate::{Auth, AuthError, SessionToken, hash_password, token_hash, verify_password};
 
 /// The window slides by this much from the last proof or gated action.
@@ -24,6 +24,10 @@ pub const OIDC_AUTH_TIME_MAX_AGE_SECS: i64 = 300;
 pub const RECOVERY_CODES: usize = 8;
 /// Days an admin invite stays valid (like companion invites).
 pub const SIGNUP_INVITE_DAYS: i64 = 14;
+/// How long a gated action waits for its OIDC re-authentication (like a pending sign-in).
+pub const PENDING_ACTION_MINUTES: i64 = 10;
+/// Largest pending action kept (JSON).
+pub const PENDING_ACTION_MAX_BYTES: usize = 16 * 1024;
 
 /// What the re-authentication dialog needs to know.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,6 +148,10 @@ impl Auth {
                 ..old.clone()
             })
             .await?;
+        let new_hash = token_hash(&token);
+        self.store
+            .move_session_secrets(&old.token_hash, &new_hash)
+            .await?;
         self.store.delete_session(&old.token_hash).await?;
         Ok(SessionToken(token))
     }
@@ -214,6 +222,57 @@ impl Auth {
         self.regenerate(&s, &format!("oidc:{provider}")).await
     }
 
+    /// Keep a gated action on the server while the browser does the OIDC round trip
+    /// (od-12 4.4 step 2, D12 "never ask twice"); encrypted with the session, replaced by a
+    /// newer one, handed back once by [`Auth::take_pending_action`] within
+    /// [`PENDING_ACTION_MINUTES`].
+    ///
+    /// # Errors
+    /// [`AuthError::ReauthRequired`] for an unknown session, [`AuthError::Store`] for an
+    /// action above [`PENDING_ACTION_MAX_BYTES`].
+    pub async fn keep_pending_action(
+        &self,
+        token: &str,
+        action: &serde_json::Value,
+    ) -> Result<(), AuthError> {
+        let s = self.live_session(token).await?;
+        let kept = serde_json::json!({"at": self.now().timestamp(), "action": action}).to_string();
+        if kept.len() > PENDING_ACTION_MAX_BYTES {
+            return Err(AuthError::Store("the pending action is too large".into()));
+        }
+        self.store
+            .set_session_secret(&s.token_hash, SessionSecret::PendingAction, Some(&kept))
+            .await?;
+        Ok(())
+    }
+
+    /// The pending action of the session, once (`None`: none, or older than
+    /// [`PENDING_ACTION_MINUTES`]).
+    ///
+    /// # Errors
+    /// [`AuthError::ReauthRequired`] for an unknown session, storage errors.
+    pub async fn take_pending_action(
+        &self,
+        token: &str,
+    ) -> Result<Option<serde_json::Value>, AuthError> {
+        let s = self.live_session(token).await?;
+        let kept = self
+            .store
+            .session_secret(&s.token_hash, SessionSecret::PendingAction)
+            .await?;
+        if kept.is_some() {
+            self.store
+                .set_session_secret(&s.token_hash, SessionSecret::PendingAction, None)
+                .await?;
+        }
+        let Some(v) = kept.and_then(|k| serde_json::from_str::<serde_json::Value>(&k).ok()) else {
+            return Ok(None);
+        };
+        let at = v["at"].as_i64().unwrap_or(0);
+        let young = self.now().timestamp() - at <= PENDING_ACTION_MINUTES * 60;
+        Ok(young.then(|| v["action"].clone()))
+    }
+
     pub(crate) async fn new_recovery_codes(&self, user: UserId) -> Result<Vec<String>, AuthError> {
         let plain: Vec<String> = (0..RECOVERY_CODES).map(|_| new_code()).collect();
         let mut stored = Vec::with_capacity(plain.len());
@@ -254,9 +313,10 @@ impl Auth {
         user: UserId,
         by: Option<UserId>,
         disabled: bool,
+        audit: Option<&crate::admin::AuditEntry>,
     ) -> Result<(), AuthError> {
         let at = disabled.then(|| self.now());
-        self.store.set_disabled(user, by, at).await?;
+        self.store.set_disabled(user, by, at, audit).await?;
         if disabled {
             self.store.delete_sessions_for(user).await?;
         }
@@ -310,6 +370,7 @@ impl Auth {
     }
 
     /// A new admin invite; returns it and the token (shown once, only its hash is stored).
+    /// `audit` is written in the same transaction, with the new invite as its target.
     ///
     /// # Errors
     /// Storage errors.
@@ -318,6 +379,7 @@ impl Auth {
         by: UserId,
         email: Option<String>,
         note: Option<String>,
+        audit: Option<crate::admin::AuditEntry>,
     ) -> Result<(SignupInvite, String), AuthError> {
         let token = format!(
             "inv_{}",
@@ -336,7 +398,14 @@ impl Auth {
             used_at: None,
             revoked_at: None,
         };
-        self.invites.insert_signup_invite(&invite).await?;
+        let audit = audit.map(|mut e| {
+            e.target_type = Some("invite".into());
+            e.target_id = Some(invite.id.to_string());
+            e
+        });
+        self.invites
+            .insert_signup_invite(&invite, audit.as_ref())
+            .await?;
         Ok((invite, token))
     }
 
@@ -352,7 +421,11 @@ impl Auth {
     ///
     /// # Errors
     /// Storage errors.
-    pub async fn revoke_signup_invite(&self, id: Uuid) -> Result<Option<SignupInvite>, AuthError> {
+    pub async fn revoke_signup_invite(
+        &self,
+        id: Uuid,
+        audit: Option<&crate::admin::AuditEntry>,
+    ) -> Result<Option<SignupInvite>, AuthError> {
         let Some(mut i) = self
             .invites
             .signup_invites()
@@ -364,7 +437,7 @@ impl Auth {
         };
         if i.revoked_at.is_none() && i.used_at.is_none() {
             i.revoked_at = Some(self.now());
-            self.invites.update_signup_invite(&i).await?;
+            self.invites.update_signup_invite(&i, audit).await?;
         }
         Ok(Some(i))
     }

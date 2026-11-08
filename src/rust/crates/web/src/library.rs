@@ -698,6 +698,72 @@ fn FacetFilters(lib: Lib) -> impl IntoView {
     }
 }
 
+/// The key of the results area. A page of rows keeps one key per view mode, so a refetch (a
+/// change on a card, a server event) updates the rows in place and an open quick menu stays
+/// open (DEC-398); the empty, error and sign-in states render afresh each time.
+fn results_key(
+    r: &Result<LibraryRowsDto, ServerFnError>,
+    mode: View,
+    renders: StoredValue<u32>,
+) -> String {
+    match r {
+        Ok(page) if !page.rows.is_empty() => {
+            if mode == View::Grid { "grid" } else { "list" }.into()
+        }
+        _ => format!("x{}", fresh(renders)),
+    }
+}
+
+/// The rows of a page, keyed by entry (DEC-398). Each entry owns its quick menu's open state
+/// for as long as it is on the page; a refetch leaves rows with unchanged data alone and
+/// renders a changed row afresh (so its handlers carry the new data, UX1-2) with that state,
+/// so a background refresh does not close a menu the user has open.
+fn keyed_rows<V: IntoView + 'static>(
+    rows: Signal<Vec<LibraryRowDto>>,
+    row_view: impl Fn(LibraryRowDto, RwSignal<bool>) -> V + Clone + Send + Sync + 'static,
+) -> impl IntoView {
+    let by_id = Memo::new(move |_| {
+        rows.with(|v| {
+            v.iter()
+                .map(|r| (r.entry.id.clone(), r.clone()))
+                .collect::<std::collections::HashMap<_, _>>()
+        })
+    });
+    let ids = move || rows.with(|v| v.iter().map(|r| r.entry.id.clone()).collect::<Vec<_>>());
+    view! {
+        <For each=ids key=String::clone children=move |id| {
+            let open = RwSignal::new(false);
+            let row = Memo::new(move |_| by_id.with(|m| m.get(&id).cloned()));
+            let renders = StoredValue::new(0u32);
+            let row_view = row_view.clone();
+            view! {
+                <For each=move || row.get().map(|r| (fresh(renders), r)) key=|(k, _)| *k
+                    children=move |(_, r)| row_view(r, open)/>
+            }
+        }/>
+    }
+}
+
+/// The latest loaded page for a rows view that outlives refetches. In the browser it follows
+/// the resource (keeping the last page while an error or empty result replaces the view); on
+/// the server nothing refetches, so it is the first page. (Every resource read under a
+/// Suspense registers a suspense task; with this second read the server panicked now and then
+/// in the Transition, "tried to access a reactive value ... already disposed", which cut the
+/// SSR stream. DEC-398.)
+fn latest_page(rows: Res<LibraryRowsDto>, first: LibraryRowsDto) -> Memo<LibraryRowsDto> {
+    #[cfg(feature = "hydrate")]
+    let page = Memo::new(move |prev: Option<&LibraryRowsDto>| match rows.get() {
+        Some(Ok(p)) => p,
+        _ => prev.cloned().unwrap_or_else(|| first.clone()),
+    });
+    #[cfg(not(feature = "hydrate"))]
+    let page = {
+        let _ = rows;
+        Memo::new(move |_| first.clone())
+    };
+    page
+}
+
 /// The grid or list, "Load more", and the loading, empty and error states.
 #[component]
 fn Results(lib: Lib, shown: RwSignal<(String, u32)>, limit: Memo<u32>) -> impl IntoView {
@@ -716,7 +782,7 @@ fn Results(lib: Lib, shown: RwSignal<(String, u32)>, limit: Memo<u32>) -> impl I
         <section id="lib-results" role="tabpanel" aria-labelledby=labelled aria-busy=move || pending.get().then_some("true")>
             <h2 class="sr-only">{i18n.t("library-results")}</h2>
             <Transition fallback=|| view! { <PosterSkeletons/> } set_pending=pending>
-                <For each=move || lib.rows.get().map(|r| (fresh(renders), r, view_mode.get())) key=|(k, _, _)| *k
+                <For each=move || lib.rows.get().map(|r| (results_key(&r, view_mode.get(), renders), r, view_mode.get())) key=|(k, _, _)| k.clone()
                     children=move |(_, r, mode)| match r {
                     Err(e) if needs_sign_in(&e) => {
                         go("/sign-in?next=/library");
@@ -733,7 +799,10 @@ fn Results(lib: Lib, shown: RwSignal<(String, u32)>, limit: Memo<u32>) -> impl I
                         }.into_any()
                     }
                     Ok(page) if page.rows.is_empty() => view! { <NoRows lib=lib/> }.into_any(),
-                    Ok(page) => view! { <RowsPage lib=lib page=page grid={mode == View::Grid} shown=shown limit=limit/> }.into_any(),
+                    Ok(first) => {
+                        let page = latest_page(lib.rows, first);
+                        view! { <RowsPage lib=lib page=page grid={mode == View::Grid} shown=shown limit=limit/> }.into_any()
+                    }
                 }/>
             </Transition>
         </section>
@@ -744,28 +813,30 @@ fn Results(lib: Lib, shown: RwSignal<(String, u32)>, limit: Memo<u32>) -> impl I
 #[component]
 fn RowsPage(
     lib: Lib,
-    page: contracts::LibraryRowsDto,
+    page: Memo<LibraryRowsDto>,
     grid: bool,
     shown: RwSignal<(String, u32)>,
     limit: Memo<u32>,
 ) -> impl IntoView {
-    let more = page.total > page.rows.len() as u64;
-    let showing = use_i18n().t_args(
-        "library-showing",
-        &[
-            ("shown", page.rows.len().into()),
-            ("total", page.total.into()),
-        ],
-    );
+    let rows = Signal::derive(move || page.with(|p| p.rows.clone()));
+    let showing = move || {
+        page.with(|p| {
+            use_i18n().t_args(
+                "library-showing",
+                &[("shown", p.rows.len().into()), ("total", p.total.into())],
+            )
+        })
+    };
+    let more = move || page.with(|p| p.total > p.rows.len() as u64);
     view! {
         {if grid {
-            view! { <Grid lib=lib rows=page.rows/> }.into_any()
+            view! { <Grid lib=lib rows=rows/> }.into_any()
         } else {
-            view! { <ListView lib=lib rows=page.rows/> }.into_any()
+            view! { <ListView lib=lib rows=rows/> }.into_any()
         }}
         <div class="mt-6 flex flex-col items-center gap-2">
             <p class="text-sm text-muted-foreground" role="status">{showing}</p>
-            {more.then(|| view! {
+            {move || more().then(|| view! {
                 <Button variant=ButtonVariant::Outline on:click=move |_| {
                     let href = lib.state.with_untracked(LibraryState::href);
                     shown.set((href, limit.get_untracked() + PAGE_SIZE));
@@ -794,20 +865,20 @@ fn PosterSkeletons() -> impl IntoView {
 }
 
 #[component]
-fn Grid(lib: Lib, rows: Vec<LibraryRowDto>) -> impl IntoView {
+fn Grid(lib: Lib, rows: Signal<Vec<LibraryRowDto>>) -> impl IntoView {
     let label = t("library-results");
     view! {
         <ul class=GRID aria-label=label>
-            {rows.into_iter().map(|row| {
+            {keyed_rows(rows, move |row, open| {
                 let statuses = lib.statuses_of(&row.item.kind);
-                view! { <PosterCard row=row statuses=statuses on_change=lib.refresh on_tags=lib.edit_tags/> }
-            }).collect_view()}
+                view! { <PosterCard row=row statuses=statuses on_change=lib.refresh on_tags=lib.edit_tags menu_open=open/> }
+            })}
         </ul>
     }
 }
 
 #[component]
-fn ListView(lib: Lib, rows: Vec<LibraryRowDto>) -> impl IntoView {
+fn ListView(lib: Lib, rows: Signal<Vec<LibraryRowDto>>) -> impl IntoView {
     let i18n = use_i18n();
     let head: Vec<String> = [
         "library-col-title",
@@ -829,14 +900,14 @@ fn ListView(lib: Lib, rows: Vec<LibraryRowDto>) -> impl IntoView {
                 </TableRow>
             </TableHeader>
             <TableBody>
-                {rows.into_iter().map(|row| view! { <ListRow lib=lib row=row/> }).collect_view()}
+                {keyed_rows(rows, move |row, open| view! { <ListRow lib=lib row=row open=open/> })}
             </TableBody>
         </Table>
     }
 }
 
 #[component]
-fn ListRow(lib: Lib, row: LibraryRowDto) -> impl IntoView {
+fn ListRow(lib: Lib, row: LibraryRowDto, open: RwSignal<bool>) -> impl IntoView {
     let i18n = use_i18n();
     let item = row.item.clone();
     let progress = progress_text(&i18n, &row.summary, &row.next_step)
@@ -874,7 +945,7 @@ fn ListRow(lib: Lib, row: LibraryRowDto) -> impl IntoView {
             <TableCell>
                 <div class="flex items-center gap-1">
                     <NextStepButton item_id=id title=title step=step on_done=lib.refresh/>
-                    <QuickMenu row=row statuses=statuses on_change=lib.refresh on_tags=lib.edit_tags/>
+                    <QuickMenu row=row statuses=statuses on_change=lib.refresh on_tags=lib.edit_tags open=open/>
                 </div>
             </TableCell>
         </TableRow>

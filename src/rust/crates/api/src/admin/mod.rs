@@ -4,6 +4,8 @@
 //! setup wizard (design.md 5.1). REST routes (`admin_routes`) and the web app's server
 //! functions call these operations.
 
+mod mail;
+mod oidc;
 mod setup;
 mod sources;
 
@@ -26,14 +28,22 @@ use domain::user::{Actor, Role};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+pub use mail::{
+    MAIL_KEYS, MailSettings, MailTransport, SharedTransport, mail, rebuild as rebuild_mail,
+    send_test_mail, set_mail_password,
+};
+pub use oidc::{
+    ENV_VAR as OIDC_ENV_VAR, create_provider, delete_provider, linked_identities, oidc_admin,
+    oidc_buttons, set_provider_secret, test_provider, unlink_identity, update_provider,
+};
 pub use setup::{
     change_password, reauth, reauth_status, setup_account, setup_complete, setup_gate,
     setup_hosting, setup_sources, setup_state, totp_begin, totp_confirm,
 };
 pub use sources::{
-    ask_admin, clear_my_credential, clear_source_credential, load_credentials, my_credentials,
-    search_reasons, set_my_credential, set_source_credential, set_source_licence, source_status,
-    sources, test_source, user_keys,
+    ask_admin, clear_my_credential, clear_source_credential, load_credentials,
+    load_source_switches, my_credentials, search_reasons, set_my_credential, set_source_credential,
+    set_source_enabled, set_source_licence, source_status, sources, test_source, user_keys,
 };
 
 use crate::error::ApiResult;
@@ -64,7 +74,7 @@ pub struct SettingDef {
     pub next_session: bool,
 }
 
-pub const SETTINGS: [SettingDef; 7] = [
+pub const SETTINGS: [SettingDef; 13] = [
     SettingDef {
         key: "instance.hosting",
         env: "APP__INSTANCE__HOSTING",
@@ -107,6 +117,43 @@ pub const SETTINGS: [SettingDef; 7] = [
         gated: false,
         next_session: false,
     },
+    // addendum-1 4.3: defined here, enforced with the OIDC providers (phase 3 WP3-3)
+    SettingDef {
+        key: "auth.sign_in_mode",
+        env: "APP__AUTH__SIGN_IN_MODE",
+        gated: true,
+        next_session: false,
+    },
+    SettingDef {
+        key: "mail.host",
+        env: "APP__NOTIFY__SMTP__HOST",
+        gated: true,
+        next_session: false,
+    },
+    SettingDef {
+        key: "mail.port",
+        env: "APP__NOTIFY__SMTP__PORT",
+        gated: true,
+        next_session: false,
+    },
+    SettingDef {
+        key: "mail.security",
+        env: "APP__NOTIFY__SMTP__SECURITY",
+        gated: true,
+        next_session: false,
+    },
+    SettingDef {
+        key: "mail.username",
+        env: "APP__NOTIFY__SMTP__USERNAME",
+        gated: true,
+        next_session: false,
+    },
+    SettingDef {
+        key: "mail.from",
+        env: "APP__NOTIFY__SMTP__FROM",
+        gated: true,
+        next_session: false,
+    },
 ];
 
 /// Values from the config file and environment: the defaults, and the keys they fix.
@@ -121,6 +168,18 @@ pub struct ConfigValues {
     pub source_env: BTreeMap<String, String>,
     /// Compiled-in sources switched off in the configuration: (id, name, kinds).
     pub disabled_sources: Vec<(String, String, Vec<String>)>,
+    /// `[notify.smtp] password` from env or file (used when the configuration sets mail).
+    pub mail_password: Option<EnvSecret>,
+}
+
+/// A secret value from the configuration; `Debug` never prints it.
+#[derive(Clone, Default)]
+pub struct EnvSecret(pub zeroize::Zeroizing<String>);
+
+impl std::fmt::Debug for EnvSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("***")
+    }
 }
 
 /// The parts of the overview that come from the process configuration.
@@ -128,18 +187,30 @@ pub struct ConfigValues {
 pub struct HealthInputs {
     /// `meilisearch`, `postgres`, `postgres_fallback`.
     pub search_backend: String,
-    pub mail_configured: bool,
     pub oidc_configured: bool,
 }
 
-/// The loaded secrets key ring as the security page shows it.
+/// The loaded secrets key ring (replaceable by SIGHUP, DEC-283) and where it came from.
 #[derive(Debug, Clone)]
 pub struct KeyInfo {
-    pub active: u16,
-    pub loaded: Vec<u16>,
+    pub live: Arc<auth::secrets::LiveKeys>,
+    /// Where a reload reads the keys again.
+    pub options: auth::secrets::KeyOptions,
     /// `file`, `env`, `generated`, `ephemeral`.
     pub source: String,
     pub key_file: String,
+}
+
+impl KeyInfo {
+    #[must_use]
+    pub fn active(&self) -> u16 {
+        self.live.active_version()
+    }
+
+    #[must_use]
+    pub fn loaded(&self) -> Vec<u16> {
+        self.live.versions()
+    }
 }
 
 /// Everything the admin operations need besides [`ApiState`].
@@ -159,6 +230,9 @@ pub struct AdminApi {
     /// Live values the request path reads.
     pub secure_cookies: Arc<AtomicBool>,
     pub hosting: Arc<RwLock<String>>,
+    /// The email transport (swapped when the mail settings change); `None` without the
+    /// email channel.
+    pub mail: Option<SharedTransport>,
 }
 
 impl AdminApi {
@@ -254,17 +328,16 @@ pub(crate) fn parse_uuid(s: &str, what: &'static str) -> ApiResult<Uuid> {
     })
 }
 
-/// Write an audit row (best effort: a failed audit write is logged, never shown).
-pub(crate) async fn audit(
+/// An audit row for `actor` (or the system), with the client address and request id of the
+/// request being handled (DEC-284). Pass it to the store write of the change, which writes
+/// it in the same transaction (addendum-1 3.4).
+pub(crate) async fn entry(
     s: &ApiState,
     actor: Option<Actor>,
     action: &str,
     target: Option<(&str, String)>,
     detail: Value,
-) {
-    let Some(a) = s.admin.as_ref() else {
-        return;
-    };
+) -> AuditEntry {
     let name = match actor {
         Some(x) => s
             .app
@@ -275,7 +348,8 @@ pub(crate) async fn audit(
             .map(|u| u.username),
         None => None,
     };
-    let entry = AuditEntry {
+    let meta = crate::request_meta::current();
+    AuditEntry {
         id: Uuid::now_v7(),
         at: s.app.clock.now(),
         actor_id: actor.map(|x| x.user_id),
@@ -289,11 +363,28 @@ pub(crate) async fn audit(
         target_type: target.as_ref().map(|(t, _)| (*t).to_string()),
         target_id: target.map(|(_, id)| id),
         detail,
-        client_addr: None,
-        request_id: None,
+        client_addr: meta.as_ref().and_then(|m| m.client_addr.clone()),
+        request_id: meta.map(|m| m.request_id),
+    }
+}
+
+/// Write an audit row on its own, after the change: for operations that are not one
+/// database write (role changes and account deletion go through the domain repositories
+/// with their own transaction, re-encryption, eviction, job retries; DEC-298). A failed
+/// write is logged, never shown.
+pub(crate) async fn audit(
+    s: &ApiState,
+    actor: Option<Actor>,
+    action: &str,
+    target: Option<(&str, String)>,
+    detail: Value,
+) {
+    let Some(a) = s.admin.as_ref() else {
+        return;
     };
-    if let Err(e) = a.store.audit(&entry).await {
-        tracing::error!(error = %e, action, "audit write failed");
+    let e = entry(s, actor, action, target, detail).await;
+    if let Err(err) = a.store.audit(&e).await {
+        tracing::error!(error = %err, action, "audit write failed");
     }
 }
 
@@ -324,6 +415,12 @@ fn stored_value(st: &StoredSettings, key: &str) -> Option<Value> {
         "storage.max_total_bytes" => st.storage_max_total_bytes.map(Value::from),
         "storage.high_watermark" => st.storage_high_watermark.map(Value::from),
         "storage.low_watermark" => st.storage_low_watermark.map(Value::from),
+        "auth.sign_in_mode" => st.sign_in_mode.clone().map(Value::String),
+        "mail.host" => st.mail.host.clone().map(Value::String),
+        "mail.port" => st.mail.port.map(Value::from),
+        "mail.security" => st.mail.security.clone().map(Value::String),
+        "mail.username" => st.mail.username.clone().map(Value::String),
+        "mail.from" => st.mail.from.clone().map(Value::String),
         _ => None,
     }
 }
@@ -387,6 +484,65 @@ fn set_stored(st: &mut StoredSettings, key: &str, v: Option<&Value>) -> ApiResul
         }
         "storage.high_watermark" => st.storage_high_watermark = v.map(fraction).transpose()?,
         "storage.low_watermark" => st.storage_low_watermark = v.map(fraction).transpose()?,
+        "auth.sign_in_mode" => {
+            st.sign_in_mode = v.map(|v| one_of(v, &["page", "auto"])).transpose()?;
+        }
+        k if k.starts_with("mail.") => set_mail(st, k, v)?,
+        _ => {
+            return Err(invalid(
+                "unknown_setting",
+                format!("unknown setting `{key}`"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// A short single-line text (host names, addresses).
+fn line(v: &Value, what: &str) -> ApiResult<String> {
+    v.as_str()
+        .map(str::trim)
+        .filter(|t| !t.is_empty() && t.len() <= 320 && !t.contains(['\n', '\r']))
+        .map(String::from)
+        .ok_or_else(|| invalid("invalid_setting", what.to_string()))
+}
+
+fn set_mail(st: &mut StoredSettings, key: &str, v: Option<&Value>) -> ApiResult<()> {
+    let m = &mut st.mail;
+    match key {
+        "mail.host" => {
+            m.host = v.map(|v| line(v, "a host name")).transpose()?;
+            if m.host.as_ref().is_some_and(|h| h.contains(' ')) {
+                return Err(invalid("invalid_setting", "a host name"));
+            }
+        }
+        "mail.port" => {
+            m.port = v
+                .map(|v| {
+                    v.as_u64()
+                        .and_then(|p| u16::try_from(p).ok())
+                        .filter(|p| *p > 0)
+                        .ok_or_else(|| invalid("invalid_setting", "a port from 1 to 65535"))
+                })
+                .transpose()?;
+        }
+        "mail.security" => {
+            m.security = v
+                .map(|v| one_of(v, &["tls", "starttls", "none"]))
+                .transpose()?;
+        }
+        "mail.username" => m.username = v.map(|v| line(v, "a user name")).transpose()?,
+        "mail.from" => {
+            m.from = v
+                .map(|v| line(v, "an address such as Shelf <noreply@example.org>"))
+                .transpose()?;
+            if m.from.as_ref().is_some_and(|f| !f.contains('@')) {
+                return Err(invalid(
+                    "invalid_setting",
+                    "an address such as Shelf <noreply@example.org>",
+                ));
+            }
+        }
         _ => {
             return Err(invalid(
                 "unknown_setting",
@@ -411,6 +567,22 @@ fn effective(a: &AdminApi, st: &StoredSettings) -> BTreeMap<String, Value> {
             (d.key.to_string(), v)
         })
         .collect()
+}
+
+/// Is sign-in mode `auto` in force (addendum-1 4.3)? Read from the database on each call,
+/// so `cli admin disable-sso-only` and other processes take effect at once; storage errors
+/// count as `page` (the sign-in page is never hidden by a hiccup).
+pub async fn sign_in_auto(s: &ApiState) -> bool {
+    let Some(a) = s.admin.as_ref() else {
+        return false;
+    };
+    match a.store.settings().await {
+        Ok(st) => effective(a, &st).get("auth.sign_in_mode") == Some(&Value::from("auto")),
+        Err(e) => {
+            tracing::warn!(error = %e, "reading the sign-in mode failed; using the sign-in page");
+            false
+        }
+    }
 }
 
 fn setting_dtos(a: &AdminApi, st: &StoredSettings, keys: &[&str]) -> Vec<SettingDto> {
@@ -579,25 +751,41 @@ pub async fn update_settings(
             "secure cookies need an https public address",
         ));
     }
+    // addendum-1 4.3: the preconditions of `auto` (the fresh proof was checked above)
+    if patch.values.contains_key("auth.sign_in_mode")
+        && eff.get("auth.sign_in_mode") == Some(&Value::from("auto"))
+    {
+        oidc::check_auto(s).await?;
+    }
     check_storage(a, &eff)?;
     next.updated_at = Some(s.app.clock.now());
     next.updated_by = Some(c.actor.user_id);
-    a.store.put_settings(&next).await.map_err(pe)?;
-    apply(s, &next);
     let before = effective(a, &old);
     let method = proof(s, c.token).await;
+    let mut rows = Vec::with_capacity(patch.values.len());
     for k in patch.values.keys() {
         let detail = json!({"key": k, "from": before.get(k), "to": eff.get(k), "proof": method});
-        audit(
-            s,
-            Some(c.actor),
-            "setting.changed",
-            Some(("setting", k.clone())),
-            detail,
-        )
-        .await;
+        rows.push(
+            entry(
+                s,
+                Some(c.actor),
+                "setting.changed",
+                Some(("setting", k.clone())),
+                detail,
+            )
+            .await,
+        );
     }
-    settings(s, c.actor).await
+    a.store.put_settings(&next, &rows).await.map_err(pe)?;
+    apply(s, &next);
+    let mail_ok =
+        !patch.values.keys().any(|k| k.starts_with("mail.")) || mail::rebuild(s).await.is_ok();
+    let mut out = settings(s, c.actor).await?;
+    if !mail_ok {
+        // stored, but mail is off until the settings are fixed (UX3-18)
+        out.warnings.push("mail_transport_unusable".into());
+    }
+    Ok(out)
 }
 
 fn check_storage(a: &AdminApi, eff: &BTreeMap<String, Value>) -> ApiResult<()> {
@@ -656,6 +844,7 @@ async fn admin_user(s: &ApiState, u: &domain::user::User, me: UserId) -> ApiResu
         last_seen_at: last_seen.map(ts),
         created_at: ts(u.created_at),
         is_self: u.id == me,
+        role_via_provider: oidc::role_via_provider(s, u.id).await?,
     })
 }
 
@@ -730,6 +919,12 @@ pub async fn set_role(
             "you cannot change your own role",
         ));
     }
+    if let Some(p) = oidc::role_via_provider(s, target.id).await? {
+        return Err(refused(
+            "role_managed_by_provider",
+            &format!("this role comes from the groups at {p}"),
+        ));
+    }
     if role == Role::Member {
         guard_last_admin(s, &target).await?;
     }
@@ -770,16 +965,13 @@ pub async fn set_disabled(
         guard_last_admin(s, &target).await?;
     }
     fresh(s, c).await?;
-    s.auth
-        .set_disabled(target.id, Some(c.actor.user_id), disabled)
-        .await?;
     let action = if disabled {
         "user.disabled"
     } else {
         "user.enabled"
     };
     let detail = json!({"username": target.username, "proof": proof(s, c.token).await});
-    audit(
+    let row = entry(
         s,
         Some(c.actor),
         action,
@@ -787,6 +979,9 @@ pub async fn set_disabled(
         detail,
     )
     .await;
+    s.auth
+        .set_disabled(target.id, Some(c.actor.user_id), disabled, Some(&row))
+        .await?;
     admin_user(s, &target, c.actor.user_id).await
 }
 
@@ -867,18 +1062,12 @@ pub async fn create_invite(
     require_admin(actor)?;
     let email = b.email.filter(|e| !e.trim().is_empty());
     let note = b.note.filter(|n| !n.trim().is_empty());
+    // the target id is filled in with the new invite's id
+    let row = entry(s, Some(actor), "invite.created", None, json!({})).await;
     let (inv, token) = s
         .auth
-        .create_signup_invite(actor.user_id, email, note)
+        .create_signup_invite(actor.user_id, email, note, Some(row))
         .await?;
-    audit(
-        s,
-        Some(actor),
-        "invite.created",
-        Some(("invite", inv.id.to_string())),
-        json!({}),
-    )
-    .await;
     Ok(AdminInviteCreatedDto {
         invite: invite_dto(&inv, s.app.clock.now()),
         url: format!(
@@ -893,12 +1082,7 @@ pub async fn create_invite(
 /// Not an admin, unknown invite, storage errors.
 pub async fn revoke_invite(s: &ApiState, actor: Actor, id: &str) -> ApiResult<AdminInviteDto> {
     require_admin(actor)?;
-    let inv = s
-        .auth
-        .revoke_signup_invite(parse_uuid(id, "invite")?)
-        .await?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "invite not found"))?;
-    audit(
+    let row = entry(
         s,
         Some(actor),
         "invite.revoked",
@@ -906,6 +1090,11 @@ pub async fn revoke_invite(s: &ApiState, actor: Actor, id: &str) -> ApiResult<Ad
         json!({}),
     )
     .await;
+    let inv = s
+        .auth
+        .revoke_signup_invite(parse_uuid(id, "invite")?, Some(&row))
+        .await?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "invite not found"))?;
     Ok(invite_dto(&inv, s.app.clock.now()))
 }
 
@@ -922,6 +1111,8 @@ fn audit_dto(e: AuditEntry) -> AuditEntryDto {
         target_type: e.target_type,
         target_id: e.target_id,
         detail: e.detail,
+        client_addr: e.client_addr,
+        request_id: e.request_id,
     }
 }
 
@@ -955,15 +1146,11 @@ pub async fn audit_log(s: &ApiState, actor: Actor, q: AuditQueryDto) -> ApiResul
     })
 }
 
-/// One CSV cell. A value a spreadsheet would run as a formula (`=`, `+`, `-`, `@`, tab, CR
-/// first) gets a leading `'` (OWASP "CSV injection"; usernames and invite notes are free
-/// text, UX2-9); commas, quotes and line breaks are quoted.
+/// One CSV cell. A value a spreadsheet would run as a formula gets a leading `'` (the
+/// helper the library export shares, UX2-9, UX3-5; usernames and invite notes are free
+/// text); commas, quotes and line breaks are quoted.
 fn csv_field(v: &str) -> String {
-    let v = if v.starts_with(['=', '+', '-', '@', '\t', '\r']) {
-        format!("'{v}")
-    } else {
-        v.to_string()
-    };
+    let v = importers::cell::guard(v).into_owned();
     if v.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", v.replace('"', "\"\""))
     } else {
@@ -977,7 +1164,8 @@ fn csv_field(v: &str) -> String {
 /// As [`audit_log`].
 pub async fn audit_csv(s: &ApiState, actor: Actor, q: AuditQueryDto) -> ApiResult<String> {
     let page = audit_log(s, actor, q).await?;
-    let mut out = String::from("at,actor,action,target_type,target_id,detail\n");
+    let mut out =
+        String::from("at,actor,action,target_type,target_id,detail,client_addr,request_id\n");
     for e in page.entries {
         let actor = e.actor_name.unwrap_or(e.actor_kind);
         let cols = [
@@ -987,6 +1175,8 @@ pub async fn audit_csv(s: &ApiState, actor: Actor, q: AuditQueryDto) -> ApiResul
             e.target_type.unwrap_or_default(),
             e.target_id.unwrap_or_default(),
             e.detail.to_string(),
+            e.client_addr.unwrap_or_default(),
+            e.request_id.unwrap_or_default(),
         ];
         let line: Vec<String> = cols.iter().map(|c| csv_field(c)).collect();
         out.push_str(&line.join(","));
@@ -1033,8 +1223,10 @@ pub async fn secrets_status(s: &ApiState) -> ApiResult<SecretsStatusDto> {
         .map_err(pe)?
         .into_iter()
         .collect();
-    let mut versions: Vec<u16> = a.keys.loaded.clone();
-    versions.extend(rows.keys().copied().filter(|v| !a.keys.loaded.contains(v)));
+    let loaded = a.keys.loaded();
+    let active = a.keys.active();
+    let mut versions: Vec<u16> = loaded.clone();
+    versions.extend(rows.keys().copied().filter(|v| !loaded.contains(v)));
     versions.sort_unstable_by(|x, y| y.cmp(x));
     let now = s.app.clock.now();
     let dtos: Vec<KeyVersionDto> = versions
@@ -1043,11 +1235,11 @@ pub async fn secrets_status(s: &ApiState) -> ApiResult<SecretsStatusDto> {
             let n = rows.get(v).copied().unwrap_or(0);
             KeyVersionDto {
                 version: *v,
-                active: *v == a.keys.active,
-                loaded: a.keys.loaded.contains(v),
+                active: *v == active,
+                loaded: loaded.contains(v),
                 rows: n,
                 first_seen_at: seen.get(v).copied().map(ts),
-                removable: *v != a.keys.active && a.keys.loaded.contains(v) && n == 0,
+                removable: *v != active && loaded.contains(v) && n == 0,
             }
         })
         .collect();
@@ -1058,12 +1250,12 @@ pub async fn secrets_status(s: &ApiState) -> ApiResult<SecretsStatusDto> {
         .map(|d| d.rows)
         .sum();
     let rotation_due = seen
-        .get(&a.keys.active)
+        .get(&active)
         .is_some_and(|t| now - *t > Duration::days(KEY_ROTATION_DAYS));
     Ok(SecretsStatusDto {
         key_source: a.keys.source.clone(),
         key_file: a.keys.key_file.clone(),
-        active_version: a.keys.active,
+        active_version: active,
         versions: dtos,
         locked_rows,
         rows_to_rewrap,
@@ -1083,7 +1275,7 @@ pub async fn rewrap_all(a: &AdminApi) -> Result<RewrapDto, app::ports::RepoError
         let mut after = None;
         loop {
             let b = r
-                .rewrap_batch(a.cipher.as_ref(), a.keys.active, after, REWRAP_BATCH)
+                .rewrap_batch(a.cipher.as_ref(), a.keys.active(), after, REWRAP_BATCH)
                 .await?;
             rewrapped += b.rewrapped;
             locked += b.locked;
@@ -1107,9 +1299,55 @@ pub async fn rewrap(s: &ApiState, actor: Actor) -> ApiResult<RewrapDto> {
         .await
         .map_err(|e| port(&app::ports::PortError(e.to_string())))?;
     let detail =
-        json!({"rewrapped": r.rewrapped, "locked": r.locked, "key_version": a.keys.active});
+        json!({"rewrapped": r.rewrapped, "locked": r.locked, "key_version": a.keys.active()});
     audit(s, Some(actor), "secrets.rewrapped", None, detail).await;
     Ok(r)
+}
+
+/// Key versions that still encrypt at least one stored value.
+///
+/// # Errors
+/// Storage errors.
+pub async fn versions_in_use(a: &AdminApi) -> Result<Vec<u16>, app::ports::RepoError> {
+    let mut used = Vec::new();
+    for r in &a.secret_rows {
+        for (v, n) in r.version_counts().await? {
+            if n > 0 && !used.contains(&v) {
+                used.push(v);
+            }
+        }
+    }
+    used.sort_unstable();
+    Ok(used)
+}
+
+/// SIGHUP (DEC-283): read the key file / `APP__SECRETS__KEYS` again and use the new ring,
+/// unless it drops a version that still encrypts stored values; then the loaded ring stays
+/// and the reason is returned (and logged by the caller). Audited as the system.
+///
+/// # Errors
+/// A temporary key (nothing to re-read), an unreadable key source, a dropped version in use,
+/// storage errors; the loaded keys are kept in every case.
+pub async fn reload_keys(s: &ApiState) -> Result<Vec<u16>, String> {
+    let a = admin(s).map_err(|e| e.message)?;
+    if a.keys.source == "ephemeral" {
+        return Err("a temporary key is in use; there is nothing to re-read".into());
+    }
+    let next = auth::secrets::read_keys(&a.keys.options).map_err(|e| e.to_string())?;
+    let in_use = versions_in_use(a).await.map_err(|e| e.to_string())?;
+    let before = a.keys.loaded();
+    a.keys
+        .live
+        .replace(next, &in_use)
+        .map_err(|e| e.to_string())?;
+    let loaded = a.keys.loaded();
+    a.store
+        .record_key_versions(&loaded, s.app.clock.now())
+        .await
+        .map_err(|e| e.to_string())?;
+    let detail = json!({"from": before, "to": loaded, "active": a.keys.active()});
+    audit(s, None, "secrets.reloaded", None, detail).await;
+    Ok(loaded)
 }
 
 /// Admin > Security and sessions.
@@ -1449,16 +1687,8 @@ pub async fn overview(s: &ApiState, actor: Actor) -> ApiResult<AdminOverviewDto>
         "postgres_fallback" => row("search", "warning", "fallback", &[]),
         b => row("search", "ok", "backend", &[("backend", b.to_string())]),
     };
-    let mail = if a.health.mail_configured {
-        row("mail", "ok", "configured", &[])
-    } else {
-        row("mail", "off", "off", &[])
-    };
-    let idp = if a.health.oidc_configured {
-        row("identity_provider", "ok", "configured", &[])
-    } else {
-        row("identity_provider", "off", "off", &[])
-    };
+    let mail = mail::health_row(a, &a.store.settings().await.map_err(pe)?);
+    let idp = oidc::health_row(s).await;
     let sources = sources_row(s, actor).await?;
     let secrets = secrets_row(s).await?;
     let health = vec![

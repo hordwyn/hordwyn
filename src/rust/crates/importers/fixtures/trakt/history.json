@@ -1,0 +1,69 @@
+[
+  {
+    "id": 1982346,
+    "watched_at": "2014-03-31T09:28:53.000Z",
+    "action": "scrobble",
+    "type": "movie",
+    "movie": {
+      "title": "The Dark Knight",
+      "year": 2008,
+      "ids": { "trakt": 4, "slug": "the-dark-knight-2008", "imdb": "tt0468569", "tmdb": 155 }
+    }
+  },
+  {
+    "id": 1982347,
+    "watched_at": "2014-02-27T09:28:53.000Z",
+    "action": "checkin",
+    "type": "episode",
+    "episode": {
+      "season": 2,
+      "number": 1,
+      "title": "Pawnee Zoo",
+      "ids": { "trakt": 251, "tvdb": 797571, "imdb": null, "tmdb": 397629 }
+    },
+    "show": {
+      "title": "Parks and Recreation",
+      "year": 2009,
+      "ids": { "trakt": 4, "slug": "parks-and-recreation", "tvdb": 84912, "imdb": "tt1266020", "tmdb": 8592 }
+    }
+  },
+  {
+    "id": 1982348,
+    "watched_at": "2014-02-28T09:28:53.000Z",
+    "action": "watch",
+    "type": "episode",
+    "episode": {
+      "season": 2,
+      "number": 2,
+      "title": "The Stakeout",
+      "ids": { "trakt": 252, "tvdb": null, "imdb": null, "tmdb": null }
+    },
+    "show": {
+      "title": "Parks and Recreation",
+      "year": 2009,
+      "ids": { "trakt": 4, "slug": "parks-and-recreation", "tvdb": 84912, "imdb": "tt1266020", "tmdb": 8592 }
+    }
+  },
+  {
+    "id": 1982349,
+    "watched_at": "2013-12-24T20:00:00.000Z",
+    "action": "watch",
+    "type": "movie",
+    "movie": {
+      "title": "The Dark Knight",
+      "year": 2008,
+      "ids": { "trakt": 4, "slug": "the-dark-knight-2008", "imdb": "tt0468569", "tmdb": 155 }
+    }
+  },
+  {
+    "id": 1982350,
+    "watched_at": "2014-01-05T20:00:00.000Z",
+    "action": "watch",
+    "type": "movie",
+    "movie": {
+      "title": "A Home Movie",
+      "year": 2013,
+      "ids": { "trakt": 99001, "slug": "a-home-movie-2013", "imdb": null, "tmdb": null }
+    }
+  }
+]

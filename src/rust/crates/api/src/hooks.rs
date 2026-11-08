@@ -1,9 +1,14 @@
-//! Inbound integrations (M14): managing integrations and the watched webhook.
+//! Inbound integrations (M14): managing integrations and the watched webhook. Calls are
+//! attributed to their integration once the token is known, so a refused body (422) keeps
+//! its offending field and its redacted body on the sender's card (design.md 6.9, R-38); a
+//! 401 has no known token and is attributed to nothing.
 
 use axum::http::StatusCode;
-use contracts::{IntegrationCreatedDto, IntegrationDto, WatchedRecordedDto};
+use contracts::{
+    IntegrationCreatedDto, IntegrationDto, IntegrationTestDto, RecordedItemDto, WatchedRecordedDto,
+};
 use domain::user::Actor;
-use integrations::{Integration, IntegrationError, Integrations, WatchedEvent};
+use integrations::{Integration, IntegrationError, Integrations, LastItem};
 
 use crate::error::ApiResult;
 use crate::ops::parse_id;
@@ -29,6 +34,13 @@ impl From<IntegrationError> for ApiError {
             IntegrationError::Invalid(m) => {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid", m)
             }
+            IntegrationError::Refused { field, message } => {
+                let e = Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid", message);
+                match field {
+                    Some(f) => e.with_field(f),
+                    None => e,
+                }
+            }
             IntegrationError::NotFound => {
                 Self::new(StatusCode::NOT_FOUND, "not_found", "integration not found")
             }
@@ -40,6 +52,13 @@ impl From<IntegrationError> for ApiError {
     }
 }
 
+fn item(i: &LastItem) -> RecordedItemDto {
+    RecordedItemDto {
+        id: i.id.0.to_string(),
+        title: i.title.clone(),
+    }
+}
+
 fn dto(i: &Integration) -> IntegrationDto {
     IntegrationDto {
         id: i.id.to_string(),
@@ -47,6 +66,10 @@ fn dto(i: &Integration) -> IntegrationDto {
         created_at: i.created_at.to_rfc3339(),
         last_seen_at: i.last_seen_at.map(|t| t.to_rfc3339()),
         last_error: i.last_error.clone(),
+        last_status: i.last_status,
+        last_error_field: i.last_error_field.clone(),
+        last_payload: i.last_payload.clone(),
+        last_item: i.last_item.as_ref().map(item),
     }
 }
 
@@ -76,10 +99,23 @@ pub async fn delete(s: &ApiState, a: Actor, id: &str) -> ApiResult<()> {
     Ok(api(s)?.delete(a, parse_id(id, |u| u)?).await?)
 }
 
+/// "Send a test call from here": validate and match a sample body, record nothing.
+///
 /// # Errors
-/// Unknown token, invalid event.
-pub async fn watched(s: &ApiState, token: &str, e: &WatchedEvent) -> ApiResult<WatchedRecordedDto> {
-    let r = api(s)?.receive(token, e).await?;
+/// Integrations disabled, not the caller's integration, a refused sample (422 with `field`).
+pub async fn test(s: &ApiState, a: Actor, id: &str, body: &[u8]) -> ApiResult<IntegrationTestDto> {
+    let t = api(s)?.test_call(a, parse_id(id, |u| u)?, body).await?;
+    Ok(IntegrationTestDto {
+        test: true,
+        matched: t.matched.as_ref().map(item),
+        title: t.title,
+    })
+}
+
+/// # Errors
+/// Unknown token, a refused body (422 with `field`).
+pub async fn watched(s: &ApiState, token: &str, body: &[u8]) -> ApiResult<WatchedRecordedDto> {
+    let r = api(s)?.receive_body(token, body).await?;
     Ok(WatchedRecordedDto {
         item_id: r.item_id.0.to_string(),
         event_id: r.event_id.to_string(),

@@ -28,7 +28,7 @@ pub use breaker::Breaker;
 pub use connector::{Connector, Ctx, Details, Images, Search};
 pub use credentials::{CredentialSpec, CredentialState, KeySlot};
 pub use gate::Gate;
-pub use http::{ConnectorPolicy, GovernedHttp};
+pub use http::{ConnectorPolicy, GovernedHttp, HostList};
 pub use model::{
     Attribution, Auth, Capability, ConnectorError, ConnectorInfo, DetailsRequest, ImageKind,
     ImageRef, RateLimit, SearchRequest, Snapshot,

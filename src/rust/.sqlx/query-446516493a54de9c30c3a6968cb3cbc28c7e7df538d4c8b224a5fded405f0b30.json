@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT (EXISTS (SELECT 1 FROM credentials WHERE totp_secret_enc IS NOT NULL)\n                OR EXISTS (SELECT 1 FROM notify_channels WHERE secret IS NOT NULL)\n                OR EXISTS (SELECT 1 FROM connector_credentials)\n                OR EXISTS (SELECT 1 FROM instance_settings WHERE mail_password IS NOT NULL)\n                OR EXISTS (SELECT 1 FROM oidc_providers WHERE client_secret IS NOT NULL))\n               AS \"e!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "e!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "446516493a54de9c30c3a6968cb3cbc28c7e7df538d4c8b224a5fded405f0b30"
+}

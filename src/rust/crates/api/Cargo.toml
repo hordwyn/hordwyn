@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 app.workspace = true
+async-trait.workspace = true
 assets.workspace = true
 auth.workspace = true
 axum.workspace = true
@@ -31,11 +32,11 @@ tokio.workspace = true
 tracing.workspace = true
 utoipa.workspace = true
 utoipa-axum.workspace = true
+url.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
-async-trait.workspace = true
 http-body-util = "0.1.5"
 testkit.workspace = true
 notify.workspace = true

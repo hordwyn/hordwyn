@@ -8,6 +8,13 @@
           "description": "RFC 3339 timestamp or `YYYY-MM-DD`.",
           "type": "string"
         },
+        "event_id": {
+          "description": "Stable id of the event in the source (optional): re-importing a newer file of the\nsame source keys the event by it instead of its position in the row.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "progress": {
           "default": null,
           "description": "Progress in the tagged form of the API, e.g. `{\"type\": \"finished\"}`; default finished."
@@ -41,6 +48,13 @@
     "kind": {
       "description": "Media kind id (`movie`, `book`, ...).",
       "type": "string"
+    },
+    "lists": {
+      "description": "Names of the user's lists the entry belongs to (optional, added in version 1\nwithout a version bump: older files have none); missing lists are created.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "notes": {
       "default": null,

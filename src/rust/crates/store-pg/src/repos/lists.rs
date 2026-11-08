@@ -149,4 +149,16 @@ impl ListRepo for PgStore {
         .map_err(be)?;
         Ok(self.load_lists(rows).await?.pop())
     }
+
+    async fn instance_visible(&self) -> Res<Vec<List>> {
+        let rows = sqlx::query_as!(
+            ListRow,
+            "SELECT * FROM lists WHERE visibility ->> 'type' = 'instance'
+             ORDER BY updated_at DESC, id"
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?;
+        self.load_lists(rows).await
+    }
 }

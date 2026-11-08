@@ -4,9 +4,11 @@
 //! server refuses them anyway (`forbidden`).
 
 mod audit;
+mod instance;
 mod overview;
 mod security;
 mod sources;
+mod sso;
 mod storage;
 mod users;
 
@@ -18,13 +20,14 @@ use ui::{
 };
 
 pub use audit::Audit;
+pub use instance::Instance;
 pub use overview::Overview;
-pub use security::Security;
 pub use sources::Sources;
 pub(crate) use sources::{
     Credential as SourceCredential, KeyHowTo as SourceKeyHowTo, Licence as SourceLicence,
     Sources as SourcesResource,
 };
+pub use sso::SignInSso;
 pub use storage::Storage;
 pub use users::Users;
 
@@ -122,7 +125,7 @@ fn SettingNote(s: SettingDto) -> impl IntoView {
 /// Confirmation for a destructive action (D15: dialogs only for these, re-auth and what
 /// the person asked for).
 #[component]
-fn ConfirmDialog(
+pub(crate) fn ConfirmDialog(
     open: RwSignal<bool>,
     #[prop(into)] title: Signal<String>,
     #[prop(into)] body: Signal<String>,
@@ -186,7 +189,7 @@ fn AuditTable(entries: Vec<AuditEntryDto>, #[prop(into)] caption: String) -> imp
                     let (when, who, what, detail) = (i18n.datetime(&e.at), audit_who(&e), audit_what(&e), audit_detail(&e.detail));
                     view! {
                         <TableRow attr:data-testid="audit-row">
-                            <TableCell class="whitespace-nowrap">{when}</TableCell>
+                            <TableCell class="sm:whitespace-nowrap">{when}</TableCell>
                             <TableCell>{who}</TableCell>
                             <TableCell>{what}</TableCell>
                             <TableCell class="break-all text-muted-foreground">{detail}</TableCell>
@@ -250,41 +253,9 @@ fn DefaultsBody() -> impl IntoView {
     })
 }
 
-// ---------------------------------------------------------------- branding
+// ---------------------------------------------------------------- brand card
 
-/// Admin > Branding (design.md 6.13): a read-only summary of the brand with the contrast
-/// of its accent in both themes.
-#[component]
-pub fn Branding() -> impl IntoView {
-    view! {
-        <AdminFrame title=t("admin-nav-brand") lead=t("admin-brand-lead")>
-            <BrandBody/>
-        </AdminFrame>
-    }
-}
-
-#[component]
-fn BrandBody() -> impl IntoView {
-    let data = Resource::new(|| (), |()| admin_api::admin_brand());
-    loaded(data, |b| {
-        let i18n = use_i18n();
-        let edit = i18n.t_args("admin-brand-edit", &[("dir", b.dir.clone().into())]);
-        view! {
-            <dl class="mb-6 grid max-w-xl grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
-                <dt class="font-medium">{t("admin-brand-name")}</dt><dd>{b.name.clone()}</dd>
-                <dt class="font-medium">{t("admin-brand-short-name")}</dt><dd class="font-mono">{b.short_name.clone()}</dd>
-                <dt class="font-medium">{t("admin-brand-locale")}</dt><dd>{contracts::locale::locale_name(&b.default_locale).to_string()}</dd>
-                <dt class="font-medium">{t("admin-brand-dir")}</dt><dd class="break-all font-mono">{b.dir.clone()}</dd>
-            </dl>
-            <h2 class="mb-3 text-lg font-semibold">{t("admin-brand-accent")}</h2>
-            <ul class="mb-6 grid max-w-3xl gap-3 sm:grid-cols-2">
-                {b.swatches.into_iter().map(|s| view! { <Swatch s=s/> }).collect_view()}
-            </ul>
-            <p class="max-w-2xl text-sm text-muted-foreground">{edit}</p>
-        }
-    })
-}
-
+/// One theme's accent with its contrast (the brand card on Overview, design.md 6.13).
 #[component]
 fn Swatch(s: contracts::admin::BrandSwatchDto) -> impl IntoView {
     let i18n = use_i18n();
@@ -307,13 +278,13 @@ fn Swatch(s: contracts::admin::BrandSwatchDto) -> impl IntoView {
     };
     let style = format!("background-color: {}; color: {}", s.primary, s.foreground);
     view! {
-        <li data-testid="brand-swatch" class="flex items-center gap-3 rounded-xl border bg-card p-3">
+        <li data-testid="brand-swatch" class="flex min-w-0 items-center gap-3 rounded-xl border bg-card p-3">
             <span aria-hidden="true" class="inline-flex size-12 shrink-0 items-center justify-center rounded-md border text-lg font-semibold" style=style>
                 {t("admin-brand-sample")}
             </span>
-            <span class="grid gap-0.5 text-sm">
+            <span class="grid min-w-0 gap-0.5 text-sm">
                 <span class="font-medium">{theme}</span>
-                <span class="font-mono text-xs text-muted-foreground">{format!("{} / {}", s.primary, s.foreground)}</span>
+                <span class="break-all font-mono text-xs text-muted-foreground">{format!("{} / {}", s.primary, s.foreground)}</span>
                 <span>{ratio} " " {if ok {
                     view! { <Badge variant=BadgeVariant::Success>{verdict}</Badge> }.into_any()
                 } else {

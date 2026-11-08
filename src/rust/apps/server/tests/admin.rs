@@ -6,9 +6,10 @@
 // names (t: server, a/m: admin/member cookie, r: answer) keep the many calls readable.
 #![allow(clippy::too_many_lines, clippy::many_single_char_names)]
 
+mod support;
+
 use serde_json::{Value, json};
 use server::{Overrides, Server};
-use tower::ServiceExt;
 
 fn repo(p: &str) -> String {
     format!("{}/../../../../{p}", env!("CARGO_MANIFEST_DIR"))
@@ -53,12 +54,7 @@ async fn call(t: &T, method: &str, uri: &str, cookie: Option<&str>, body: Option
         req = req.header("cookie", c);
     }
     let body = body.map_or_else(String::new, |b| b.to_string());
-    let resp = t
-        .app
-        .clone()
-        .oneshot(req.body(axum::body::Body::from(body)).unwrap())
-        .await
-        .unwrap();
+    let resp = support::send(&t.app, req.body(axum::body::Body::from(body)).unwrap()).await;
     let status = resp.status().as_u16();
     let cookie = resp
         .headers()
@@ -68,9 +64,7 @@ async fn call(t: &T, method: &str, uri: &str, cookie: Option<&str>, body: Option
         .headers()
         .get("content-disposition")
         .map(|v| v.to_str().unwrap().to_string());
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 22)
-        .await
-        .unwrap();
+    let bytes = resp.into_body();
     Resp {
         status,
         body: serde_json::from_slice(&bytes).unwrap_or(Value::Null),

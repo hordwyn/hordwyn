@@ -494,10 +494,22 @@ fn count(n: Option<i64>) -> u64 {
 
 #[async_trait]
 impl ProgressRepo for PgStore {
-    async fn month_amounts(&self, user: UserId) -> Res<Vec<app::MonthAmounts>> {
+    async fn month_amounts(&self, user: UserId, zone: &str) -> Res<Vec<app::MonthAmounts>> {
         // the rules of `app::month_amounts` in one statement: effective events, forward
         // moves of pages and positions per item in (occurred_at, id) order, runtimes as
         // whole numbers, durations of the user's own sessions
+        // a zone chrono-tz knows but this server's tzdata does not buckets in UTC (UX3-20)
+        let known = sqlx::query_scalar!(
+            r#"SELECT EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = $1) AS "known!""#,
+            zone
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(be)?;
+        if !known {
+            tracing::warn!(zone, "time zone unknown to Postgres; statistics use UTC");
+        }
+        let zone = if known { zone } else { "UTC" };
         let rows = sqlx::query!(
             r#"WITH live AS (
                  SELECT x.id, x.item_id, x.occurred_at, x.status_change, c.kind, c.attributes,
@@ -524,7 +536,7 @@ impl ProgressRepo for PgStore {
                  FROM live l
                )
                SELECT kind AS "kind!",
-                      to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM') AS "month!",
+                      to_char(occurred_at AT TIME ZONE $2, 'YYYY-MM') AS "month!",
                       COUNT(*) AS events,
                       COUNT(*) FILTER (WHERE status_change ->> 'to' = 'completed') AS completions,
                       COUNT(*) FILTER (WHERE t = 'finished') AS finished,
@@ -543,7 +555,8 @@ impl ProgressRepo for PgStore {
                FROM moves
                GROUP BY 1, 2
                ORDER BY kind COLLATE "C", 2"#,
-            user.0
+            user.0,
+            zone
         )
         .fetch_all(&self.pool)
         .await

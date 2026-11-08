@@ -426,7 +426,7 @@ mod tests {
             for key in [
                 "companions-title",
                 "companions-add",
-                "companions-companion",
+                "companions-add-open",
                 "companions-lead",
             ] {
                 let text = i.t(key).to_lowercase();

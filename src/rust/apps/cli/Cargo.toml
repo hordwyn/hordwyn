@@ -10,6 +10,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+auth.workspace = true
+server = { path = "../server" }
 anyhow.workspace = true
 app.workspace = true
 assets.workspace = true

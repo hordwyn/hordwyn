@@ -9,11 +9,15 @@ pub struct LastEvent(pub RwSignal<Option<(String, String)>>);
 
 /// Topics the page listens to (browser only).
 #[cfg_attr(not(feature = "hydrate"), allow(dead_code))]
-pub const TOPICS: [&str; 4] = [
+pub const TOPICS: [&str; 6] = [
     "entity.updated",
     "search.results",
     "job.progress",
     "import.progress",
+    // a new inbox row (the notifications page refetches)
+    "notification.new",
+    // a call attributed to one of the user's senders (Settings > Integrations, design.md 5.9)
+    "integration.call",
 ];
 
 /// Provide [`LastEvent`] and, in the browser, connect the event stream.

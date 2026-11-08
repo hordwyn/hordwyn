@@ -222,3 +222,47 @@ async fn plays_watched_with_and_shared_sessions_with_filters() {
         "privacy: alice no longer shares sessions"
     );
 }
+
+/// UX3-16 (b): the person filter (History, the person page) also finds the plays of the
+/// people merged into that person, through a merge chain too.
+#[tokio::test]
+async fn the_person_filter_follows_merges() {
+    let env = TestEnv::new();
+    let (alice_user, alice) = common::user(&env, "alice").await;
+    let bob = env.app.create_companion(alice, "Bob").await.unwrap();
+    let bobby = env.app.create_companion(alice, "Bobby").await.unwrap();
+    let rob = env.app.create_companion(alice, "Rob").await.unwrap();
+    let game = common::item(&env.app, "board_game", "Azul").await;
+    for c in [bob.id, bobby.id, rob.id] {
+        env.app
+            .log_session(
+                alice,
+                NewSession::new(
+                    game.id,
+                    vec![
+                        Participant::new(alice_user.self_companion),
+                        Participant::new(c),
+                    ],
+                ),
+            )
+            .await
+            .unwrap();
+        env.clock.advance(chrono::Duration::hours(1));
+    }
+    // Rob into Bobby, then Bobby into Bob: a chain
+    env.app
+        .merge_companions(alice, bobby.id, rob.id)
+        .await
+        .unwrap();
+    env.app
+        .merge_companions(alice, bob.id, bobby.id)
+        .await
+        .unwrap();
+    let with = |p| ActivityQuery {
+        person: Some(p),
+        ..ActivityQuery::default()
+    };
+    let n = |q| async { env.app.activity_feed(alice, q).await.unwrap().rows.len() };
+    assert_eq!(n(with(bob.id)).await, 3, "Bob, Bobby and Rob");
+    assert_eq!(n(with(bobby.id)).await, 2, "Bobby and Rob");
+}

@@ -1,7 +1,8 @@
 //! The History page's state in the URL and its pure helpers (design.md 6.6): filters
 //! (`group`, `kind`, `person`, `type`, `shared`, `year`), day groups with Today and
-//! Yesterday, and the side counts for the rows on screen. Days are UTC days: there is no
-//! per-user time zone yet (DEC-200), and the server and the browser must agree on them.
+//! Yesterday, and the side counts for the rows on screen. Days are the viewer's days: the
+//! server sends each row's `local_day` and Today in the user's time zone (DEC-306), so the
+//! server and the browser agree on them without a time zone database in the browser.
 
 use contracts::{ActivityQueryDto, ActivityRowDto};
 
@@ -229,12 +230,19 @@ pub struct DayGroup {
     pub rows: Vec<ActivityRowDto>,
 }
 
+/// The day of a row in the viewer's time zone: the server's `local_day` (DEC-306), else the
+/// UTC day of `at` (older servers, tests).
+#[must_use]
+pub fn row_day(r: &ActivityRowDto) -> Option<Day> {
+    Day::parse(&r.local_day).or_else(|| Day::parse(&r.at))
+}
+
 /// Consecutive rows of the same day, in feed order (newest first).
 #[must_use]
 pub fn group_by_day(rows: Vec<ActivityRowDto>, today: Day) -> Vec<DayGroup> {
     let mut groups: Vec<DayGroup> = Vec::new();
     for r in rows {
-        let Some(day) = Day::parse(&r.at) else {
+        let Some(day) = row_day(&r) else {
             continue;
         };
         match groups.last_mut() {
@@ -294,7 +302,7 @@ pub fn side_counts(rows: &[ActivityRowDto]) -> SideCounts {
             Some((_, n)) => *n += 1,
             None => c.groups.push((r.group.clone(), 1)),
         }
-        if let Some(d) = Day::parse(&r.at) {
+        if let Some(d) = row_day(r) {
             c.range = Some(c.range.map_or((d, d), |(a, b)| (a.min(d), b.max(d))));
         }
     }
@@ -339,6 +347,8 @@ mod tests {
     fn row(at: &str, group: &str, progress: Option<serde_json::Value>) -> ActivityRowDto {
         ActivityRowDto {
             at: at.into(),
+            local_day: String::new(),
+            local_time: String::new(),
             row_type: if progress.is_some() {
                 "progress"
             } else {
@@ -357,6 +367,22 @@ mod tests {
             owner_name: None,
             undoable: false,
         }
+    }
+
+    /// DEC-306: a play at 23:30 UTC on 6 Nov is on 7 Nov in Berlin; the server says so.
+    #[test]
+    fn rows_group_by_the_viewers_local_day() {
+        let mut late = row("2026-11-06T23:30:00Z", "watch", None);
+        late.local_day = "2026-11-07".into();
+        late.local_time = "00:30".into();
+        let today = Day::parse("2026-11-07").unwrap();
+        let groups = group_by_day(
+            vec![late, row("2026-11-06T10:00:00Z", "watch", None)],
+            today,
+        );
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].label, DayLabel::Today);
+        assert_eq!(groups[1].label, DayLabel::Yesterday);
     }
 
     #[test]

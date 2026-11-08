@@ -3,8 +3,8 @@
 
 use axum::http::StatusCode;
 use contracts::{
-    ChannelDto, DeliveryDto, EventTypeDto, InboxItemDto, NewChannelDto, SubscriptionDto,
-    TemplateOverrideDto,
+    ChannelDto, ChannelHealthDto, DeliveryDto, EventTypeDto, InboxItemDto, NewChannelDto,
+    SubscriptionDto, TemplateOverrideDto,
 };
 use domain::user::Actor;
 use notify::catalogue::{CATALOGUE, EventAudience};
@@ -70,7 +70,7 @@ pub fn catalogue(a: Actor) -> Vec<EventTypeDto> {
         .collect()
 }
 
-fn inbox_dto(i: &InboxItem) -> InboxItemDto {
+fn inbox_dto(i: &InboxItem, zone: app::time_zone::Tz) -> InboxItemDto {
     InboxItemDto {
         id: i.id.to_string(),
         event: i.event.clone(),
@@ -78,6 +78,8 @@ fn inbox_dto(i: &InboxItem) -> InboxItemDto {
         body: i.body.clone(),
         link: i.link.clone(),
         created_at: i.created_at.to_rfc3339(),
+        local_day: app::time_zone::local_day(i.created_at, zone),
+        local_time: app::time_zone::local_time(i.created_at, zone),
         read: i.read_at.is_some(),
     }
 }
@@ -99,6 +101,7 @@ pub async fn unread_count(s: &ApiState, a: Actor) -> ApiResult<u32> {
 /// Notifications disabled, storage errors.
 pub async fn inbox(s: &ApiState, a: Actor) -> ApiResult<Vec<InboxItemDto>> {
     let na = api(s)?;
+    let zone = s.app.user_zone(a.user_id).await?;
     Ok(na
         .engine
         .store()
@@ -106,7 +109,7 @@ pub async fn inbox(s: &ApiState, a: Actor) -> ApiResult<Vec<InboxItemDto>> {
         .await
         .map_err(port)?
         .iter()
-        .map(inbox_dto)
+        .map(|i| inbox_dto(i, zone))
         .collect())
 }
 
@@ -121,7 +124,45 @@ pub async fn mark_read(s: &ApiState, a: Actor, id: &str) -> ApiResult<()> {
         .map_err(port)
 }
 
-fn channel_dto(c: &Channel, secret: Option<String>) -> ChannelDto {
+/// Mark every unread inbox row of the caller read ("Mark all read", design.md 6.8); how
+/// many were unread.
+///
+/// # Errors
+/// Notifications disabled, storage errors.
+pub async fn mark_all_read(s: &ApiState, a: Actor) -> ApiResult<u32> {
+    api(s)?
+        .engine
+        .store()
+        .mark_all_read(a.user_id, s.app.clock.now())
+        .await
+        .map_err(port)
+}
+
+/// Health of a channel from its latest delivery that was not suppressed (design.md 6.8).
+#[must_use]
+pub fn health(latest: Option<&Delivery>) -> ChannelHealthDto {
+    use notify::model::DeliveryState as S;
+    let Some(d) = latest else {
+        return ChannelHealthDto {
+            state: "never".into(),
+            ..ChannelHealthDto::default()
+        };
+    };
+    let (state, at, error) = match d.state {
+        S::Sent => ("working", d.sent_at.unwrap_or(d.created_at), None),
+        // a queued delivery with an error waits for its retry: the last attempt failed
+        S::Failed => ("failing", d.created_at, d.last_error.clone()),
+        S::Queued if d.last_error.is_some() => ("failing", d.created_at, d.last_error.clone()),
+        S::Queued | S::Digest | S::Suppressed => ("waiting", d.created_at, None),
+    };
+    ChannelHealthDto {
+        state: state.into(),
+        at: Some(at.to_rfc3339()),
+        error,
+    }
+}
+
+fn channel_dto(c: &Channel, secret: Option<String>, latest: Option<&Delivery>) -> ChannelDto {
     ChannelDto {
         id: c.id.to_string(),
         name: c.name.clone(),
@@ -129,21 +170,23 @@ fn channel_dto(c: &Channel, secret: Option<String>) -> ChannelDto {
         enabled: c.enabled,
         config: serde_json::to_value(c.config.redacted()).unwrap_or_default(),
         secret,
+        health: health(latest),
     }
 }
 
+/// The caller's channels, each with its health.
+///
 /// # Errors
 /// Notifications disabled, storage errors.
 pub async fn channels(s: &ApiState, a: Actor) -> ApiResult<Vec<ChannelDto>> {
-    let na = api(s)?;
-    Ok(na
-        .engine
-        .store()
+    let store = api(s)?.engine.store();
+    let latest = store.latest_deliveries(a.user_id).await.map_err(port)?;
+    Ok(store
         .channels(a.user_id)
         .await
         .map_err(port)?
         .iter()
-        .map(|c| channel_dto(c, None))
+        .map(|c| channel_dto(c, None, latest.iter().find(|d| d.channel == c.id)))
         .collect())
 }
 
@@ -186,7 +229,7 @@ pub async fn create_channel(s: &ApiState, a: Actor, b: NewChannelDto) -> ApiResu
         .put_channel(&channel)
         .await
         .map_err(port)?;
-    Ok(channel_dto(&channel, shown))
+    Ok(channel_dto(&channel, shown, None))
 }
 
 async fn own_channel(na: &NotifyApi, a: Actor, id: &str) -> ApiResult<Channel> {
@@ -224,7 +267,17 @@ pub async fn update_channel(
         .put_channel(&channel)
         .await
         .map_err(port)?;
-    Ok(channel_dto(&channel, None))
+    let latest = na
+        .engine
+        .store()
+        .latest_deliveries(a.user_id)
+        .await
+        .map_err(port)?;
+    Ok(channel_dto(
+        &channel,
+        None,
+        latest.iter().find(|d| d.channel == channel.id),
+    ))
 }
 
 /// # Errors
@@ -390,7 +443,7 @@ pub async fn delete_subscription(s: &ApiState, a: Actor, id: &str) -> ApiResult<
     store.delete_subscription(id).await.map_err(port)
 }
 
-fn delivery_dto(d: &Delivery) -> DeliveryDto {
+fn delivery_dto(d: &Delivery, zone: app::time_zone::Tz) -> DeliveryDto {
     DeliveryDto {
         id: d.id.to_string(),
         channel_id: d.channel.to_string(),
@@ -401,6 +454,8 @@ fn delivery_dto(d: &Delivery) -> DeliveryDto {
         last_error: d.last_error.clone(),
         due_at: d.due_at.to_rfc3339(),
         created_at: d.created_at.to_rfc3339(),
+        local_day: app::time_zone::local_day(d.created_at, zone),
+        local_time: app::time_zone::local_time(d.created_at, zone),
         sent_at: d.sent_at.map(|t| t.to_rfc3339()),
     }
 }
@@ -411,6 +466,7 @@ fn delivery_dto(d: &Delivery) -> DeliveryDto {
 /// Notifications disabled, storage errors.
 pub async fn deliveries(s: &ApiState, a: Actor) -> ApiResult<Vec<DeliveryDto>> {
     let na = api(s)?;
+    let zone = s.app.user_zone(a.user_id).await?;
     Ok(na
         .engine
         .store()
@@ -418,7 +474,7 @@ pub async fn deliveries(s: &ApiState, a: Actor) -> ApiResult<Vec<DeliveryDto>> {
         .await
         .map_err(port)?
         .iter()
-        .map(delivery_dto)
+        .map(|d| delivery_dto(d, zone))
         .collect())
 }
 

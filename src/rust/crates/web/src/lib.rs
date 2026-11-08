@@ -9,6 +9,7 @@
 // each with its reason (DEC-234).
 #![allow(clippy::needless_pass_by_value, clippy::must_use_candidate)]
 
+mod account;
 mod admin;
 pub mod admin_api;
 #[cfg(feature = "ssr")]
@@ -18,6 +19,8 @@ pub mod api;
 mod app;
 mod auth;
 mod auth_pages;
+#[cfg(feature = "ssr")]
+pub mod auth_redirect;
 #[cfg(feature = "ssr")]
 pub mod backend;
 pub mod charts;
@@ -30,23 +33,33 @@ mod history;
 pub mod history_state;
 mod home;
 pub mod i18n;
+pub mod imports;
 mod integrations;
 mod item;
 mod library;
 pub mod library_state;
+pub mod list_share;
+mod lists;
 pub mod log_form;
 pub mod log_sheet;
 pub mod next_step;
 mod notifications;
+mod notify_channels;
+pub mod notify_rules;
+mod notify_rules_view;
 mod nudge;
 mod pages;
 mod palette;
+mod people;
+mod people_dialogs;
 mod reauth;
+mod rest;
 mod settings;
 mod setup;
 pub mod setup_state;
 mod sharing;
 mod shell;
+mod sign_in;
 pub mod source_hints;
 pub mod widgets;
 
@@ -59,6 +72,8 @@ pub fn provide_page_context(cfg: &ClientConfig) {
     provide_context(cfg.i18n());
     provide_context(cfg.clone());
     provide_context(palette::PaletteOpen(RwSignal::new(false)));
+    provide_context(palette::PaletteTarget(RwSignal::new(None)));
+    provide_context(palette::PaletteMatch(RwSignal::new(None)));
 }
 
 /// Browser entry point: read the server's config, then hydrate the server-rendered page.

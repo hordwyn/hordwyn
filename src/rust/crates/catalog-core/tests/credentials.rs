@@ -108,3 +108,20 @@ fn key_slots_bump_their_version_and_hide_the_value_in_debug() {
     assert!(s.version() > v);
     assert!(!format!("{s:?}").contains("other"));
 }
+
+/// DEC-289: an admin's Disabled switch takes the source out of search at once, and back in.
+#[test]
+fn a_disabled_source_serves_nothing_until_enabled_again() {
+    let mut r = Registry::default();
+    r.register(Arc::new(Fake::new("tmdb", Some("k"))));
+    let shared = r.clone();
+    assert_eq!(r.for_kind("movie", Capability::Search).len(), 1);
+    shared.set_enabled("tmdb", false);
+    assert!(!r.is_enabled("tmdb"));
+    assert_eq!(r.for_kind("movie", Capability::Search).len(), 0);
+    // a switched-off source is not "skipped for a missing key" either
+    assert_eq!(r.skipped(&["movie".into()], Capability::Search).len(), 0);
+    shared.set_enabled("tmdb", true);
+    assert!(r.is_enabled("tmdb"));
+    assert_eq!(r.for_kind("movie", Capability::Search).len(), 1);
+}

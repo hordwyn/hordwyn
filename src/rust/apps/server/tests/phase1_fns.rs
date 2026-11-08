@@ -1,8 +1,9 @@
 //! UX phase 1 server functions over HTTP, wired through the server's `web::Backend`.
 
+mod support;
+
 use leptos::server_fn::ServerFn;
 use server::{Overrides, Server};
-use tower::ServiceExt;
 
 fn repo(p: &str) -> String {
     format!("{}/../../../../{p}", env!("CARGO_MANIFEST_DIR"))
@@ -40,15 +41,9 @@ async fn send(
     if let Some(c) = cookie {
         req = req.header("cookie", c);
     }
-    let resp = app
-        .clone()
-        .oneshot(req.body(axum::body::Body::from(body)).unwrap())
-        .await
-        .unwrap();
+    let resp = support::send(app, req.body(axum::body::Body::from(body)).unwrap()).await;
     let status = resp.status().as_u16();
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 22)
-        .await
-        .unwrap();
+    let bytes = resp.into_body();
     (
         status,
         serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
@@ -56,20 +51,18 @@ async fn send(
 }
 
 async fn sign_up(app: &axum::Router) -> String {
-    let resp = app
-        .clone()
-        .oneshot(
-            axum::http::Request::builder()
-                .method("POST")
-                .uri("/api/v1/auth/sign-up")
-                .header("content-type", "application/json")
-                .body(axum::body::Body::from(
-                    r#"{"username":"anna","display_name":"Anna","password":"correct horse battery"}"#,
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let resp = support::send(
+        app,
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/sign-up")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(
+                r#"{"username":"anna","display_name":"Anna","password":"correct horse battery"}"#,
+            ))
+            .unwrap(),
+    )
+    .await;
     assert_eq!(resp.status(), 201, "sign-up");
     let cookie = resp.headers()["set-cookie"].to_str().unwrap();
     cookie.split(';').next().unwrap().to_string()

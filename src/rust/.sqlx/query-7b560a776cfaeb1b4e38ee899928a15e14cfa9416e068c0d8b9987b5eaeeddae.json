@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE session_secrets SET value = $3 WHERE id = $1 AND value = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7b560a776cfaeb1b4e38ee899928a15e14cfa9416e068c0d8b9987b5eaeeddae"
+}

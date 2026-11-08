@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO oidc_used_states (state_hash, expires_at) VALUES ($1, $2)\n             ON CONFLICT (state_hash) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1f9c3e986e7f0f0af1a2af99114494b968620593ef2a06a3bcc41d3f935e47e7"
+}

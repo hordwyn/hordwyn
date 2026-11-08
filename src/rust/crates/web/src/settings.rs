@@ -32,6 +32,12 @@ const NAV_CLASS: &str = "max-[47.5rem]:flex max-[47.5rem]:items-center max-[47.5
     max-[47.5rem]:[&_li]:shrink-0 max-[47.5rem]:[&_a]:whitespace-nowrap \
     max-[47.5rem]:[&_p]:whitespace-nowrap";
 
+/// The side nav's column from 47.5rem: sticky below the top bar, scrolling on its own when
+/// it is taller than the window.
+const STICKY_NAV: &str = "min-w-0 min-[47.5rem]:sticky \
+    min-[47.5rem]:top-[calc(var(--top-bar-height)+1rem)] min-[47.5rem]:self-start \
+    min-[47.5rem]:max-h-[calc(100dvh-var(--top-bar-height)-2rem)] min-[47.5rem]:overflow-y-auto";
+
 /// The side nav groups: "You" for everyone, the admin pages for admins only.
 #[must_use]
 pub fn nav_groups(is_admin: bool) -> Vec<NavGroup> {
@@ -57,8 +63,12 @@ pub fn SettingsLayout(children: Children) -> impl IntoView {
     let location = use_location();
     view! {
         <div class="grid gap-6 min-[47.5rem]:grid-cols-[13rem_minmax(0,1fr)]">
-            <SideNav id="set-nav" label=t("settings-nav-label") groups=nav_groups(cfg.is_admin)
-                current=Signal::derive(move || location.pathname.get()) class=NAV_CLASS/>
+            // on wide screens the nav stays in view below the sticky top bar instead of
+            // scrolling under it (a link half under the bar is too small a target, WCAG 2.5.8)
+            <div class=STICKY_NAV>
+                <SideNav id="set-nav" label=t("settings-nav-label") groups=nav_groups(cfg.is_admin)
+                    current=Signal::derive(move || location.pathname.get()) class=NAV_CLASS/>
+            </div>
             <div class="min-w-0">{children()}</div>
         </div>
     }
@@ -201,6 +211,9 @@ pub fn SettingsPrivacy() -> impl IntoView {
 #[component]
 pub fn SettingsAccount() -> impl IntoView {
     let cfg = expect_context::<ClientConfig>();
+    // a failed link round trip comes back here (`?error=<code>`, DEC-311): open Sign-in
+    let link_error = leptos_router::hooks::use_query_map().with_untracked(|q| q.get("error"));
+    let force = link_error.is_some();
     let user = expect_context::<crate::app::UserResource>();
     let email = move || {
         user.get()
@@ -228,12 +241,14 @@ pub fn SettingsAccount() -> impl IntoView {
                 <crate::shell::ThemeChoiceControl/>
                 <crate::shell::LanguageChoice/>
             </div>
+            <div class="mb-6"><crate::account::TimeZone/></div>
             <Disclosure id="set-signin" title=t("settings-signin") summary=t("settings-signin-summary")
                 mode=DisclosureMode::Button level=2 storage_key=disclosure_storage_key("account", "signin")
-                class="max-w-2xl">
+                force_open=force class="max-w-2xl">
                 <div class="grid gap-8">
                     <PasswordForm/>
                     <Authenticator/>
+                    <crate::account::LinkedSignIns error=link_error/>
                 </div>
             </Disclosure>
         </SettingsLayout>
@@ -682,7 +697,7 @@ mod tests {
             let member = nav_groups(false);
             assert_eq!(member.len(), 1);
             assert_eq!(member[0].heading.as_deref(), Some("You"));
-            assert_eq!(member[0].items.len(), 5);
+            assert_eq!(member[0].items.len(), 6);
             assert_eq!(member[0].items[0].label, "Account");
             let admin = nav_groups(true);
             assert_eq!(admin.len(), 2);
@@ -692,12 +707,12 @@ mod tests {
                 labels,
                 [
                     "Overview",
-                    "Users and sign-up",
+                    "Instance",
+                    "Sign-in and SSO",
+                    "Users",
                     "Data sources",
-                    "Storage and jobs",
                     "Notification defaults",
-                    "Branding",
-                    "Security and sessions",
+                    "Storage and jobs",
                     "Audit log"
                 ]
             );

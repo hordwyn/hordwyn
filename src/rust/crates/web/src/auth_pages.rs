@@ -20,8 +20,8 @@ use crate::api;
 use crate::auth::{
     Placement, SignUpValues, check_throttled_message, display_name_error, field_id, form_message,
     form_message_after, password_error, password_hint, password_rules, placement,
-    server_field_message, sign_in_errors, sign_up_errors, summary_title, username_error,
-    username_hint, username_rules, username_saved_as,
+    server_field_message, sign_up_errors, summary_title, username_error, username_hint,
+    username_rules, username_saved_as,
 };
 use crate::i18n::{I18n, use_i18n};
 use crate::pages::{PageTitle, go};
@@ -31,21 +31,21 @@ use crate::pages::{PageTitle, go};
 const CHECK_DELAY: Duration = Duration::from_millis(400);
 
 /// Messages per field, in field order.
-type FieldErrors = RwSignal<Vec<(AuthField, String)>>;
+pub(crate) type FieldErrors = RwSignal<Vec<(AuthField, String)>>;
 
-fn summary_links(errors: &[(AuthField, String)]) -> Vec<ErrorLink> {
+pub(crate) fn summary_links(errors: &[(AuthField, String)]) -> Vec<ErrorLink> {
     errors
         .iter()
         .map(|(f, m)| ErrorLink::new(field_id(*f), m.clone()))
         .collect()
 }
 
-fn error_of(errors: FieldErrors, field: AuthField) -> Option<String> {
+pub(crate) fn error_of(errors: FieldErrors, field: AuthField) -> Option<String> {
     errors.with(|e| e.iter().find(|(f, _)| *f == field).map(|(_, m)| m.clone()))
 }
 
 /// Drop the stored (server) error of `field` once its value changes.
-fn clear_on_change(errors: FieldErrors, field: AuthField, value: RwSignal<String>) {
+pub(crate) fn clear_on_change(errors: FieldErrors, field: AuthField, value: RwSignal<String>) {
     Effect::new(move |prev: Option<String>| {
         let v = value.get();
         if prev.is_some_and(|p| p != v) {
@@ -56,7 +56,7 @@ fn clear_on_change(errors: FieldErrors, field: AuthField, value: RwSignal<String
 }
 
 /// Move focus to the element `id` (browser only).
-fn focus(id: &str) {
+pub(crate) fn focus(id: &str) {
     #[cfg(feature = "hydrate")]
     {
         use wasm_bindgen::JsCast;
@@ -82,7 +82,7 @@ fn legal_label(i18n: &I18n, key: &str) -> String {
 /// The frame of the auth pages (design.md 6.14): the brand mark above a centred 28 rem card
 /// and a footer with the brand's legal links.
 #[component]
-fn AuthFrame(children: Children) -> impl IntoView {
+pub(crate) fn AuthFrame(children: Children) -> impl IntoView {
     let cfg = expect_context::<crate::ClientConfig>();
     let i18n = use_i18n();
     let legal = cfg.legal.clone();
@@ -116,7 +116,7 @@ fn AuthFrame(children: Children) -> impl IntoView {
 /// The submit button of an auth form; disabled with "You are offline" under it while the
 /// browser is offline (design.md 5.2).
 #[component]
-fn SubmitButton(#[prop(into)] pending: Signal<bool>, label: String) -> impl IntoView {
+pub(crate) fn SubmitButton(#[prop(into)] pending: Signal<bool>, label: String) -> impl IntoView {
     let online = use_context::<crate::shell::Online>().map_or_else(|| RwSignal::new(true), |o| o.0);
     let offline_text = use_i18n().t("auth-offline");
     view! {
@@ -134,7 +134,7 @@ fn SubmitButton(#[prop(into)] pending: Signal<bool>, label: String) -> impl Into
 
 /// The error summary; rebuilt on every submit with errors, so it takes focus each time.
 #[component]
-fn Summary(errors: RwSignal<Vec<ErrorLink>>) -> impl IntoView {
+pub(crate) fn Summary(errors: RwSignal<Vec<ErrorLink>>) -> impl IntoView {
     let i18n = use_i18n();
     move || {
         let list = errors.get();
@@ -145,7 +145,7 @@ fn Summary(errors: RwSignal<Vec<ErrorLink>>) -> impl IntoView {
 
 /// One alert for errors about the whole form (closed sign-up, wrong credentials, throttle).
 #[component]
-fn FormAlert(error: RwSignal<Option<String>>) -> impl IntoView {
+pub(crate) fn FormAlert(error: RwSignal<Option<String>>) -> impl IntoView {
     move || {
         error.get().map(|e| {
             view! {
@@ -157,7 +157,7 @@ fn FormAlert(error: RwSignal<Option<String>>) -> impl IntoView {
 
 /// Password input with a Show toggle (`aria-pressed`) in the trailing slot.
 #[component]
-fn PasswordInput(
+pub(crate) fn PasswordInput(
     value: RwSignal<String>,
     autocomplete: &'static str,
     #[prop(into)] invalid: Signal<bool>,
@@ -572,18 +572,18 @@ pub(crate) fn SignUpFields(
 }
 
 #[derive(Clone, Copy)]
-struct SignInForm {
-    username: RwSignal<String>,
-    password: RwSignal<String>,
-    totp: RwSignal<String>,
-    need_totp: RwSignal<bool>,
-    errors: FieldErrors,
-    summary: RwSignal<Vec<ErrorLink>>,
-    form_error: RwSignal<Option<String>>,
+pub(crate) struct SignInForm {
+    pub(crate) username: RwSignal<String>,
+    pub(crate) password: RwSignal<String>,
+    pub(crate) totp: RwSignal<String>,
+    pub(crate) need_totp: RwSignal<bool>,
+    pub(crate) errors: FieldErrors,
+    pub(crate) summary: RwSignal<Vec<ErrorLink>>,
+    pub(crate) form_error: RwSignal<Option<String>>,
 }
 
 impl SignInForm {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let f = Self {
             username: RwSignal::new(String::new()),
             password: RwSignal::new(String::new()),
@@ -599,12 +599,12 @@ impl SignInForm {
         f
     }
 
-    fn show(self, errs: Vec<(AuthField, String)>) {
+    pub(crate) fn show(self, errs: Vec<(AuthField, String)>) {
         self.summary.set(summary_links(&errs));
         self.errors.set(errs);
     }
 
-    fn server_error(self, i18n: &I18n, code: &str, retry_after_secs: Option<u64>) {
+    pub(crate) fn server_error(self, i18n: &I18n, code: &str, retry_after_secs: Option<u64>) {
         match placement(code) {
             Placement::TotpStep => {
                 self.need_totp.set(true);
@@ -624,7 +624,7 @@ impl SignInForm {
 
 /// Step two of sign-in: the one-time code, with its own heading.
 #[component]
-fn TotpStep(f: SignInForm) -> impl IntoView {
+pub(crate) fn TotpStep(f: SignInForm) -> impl IntoView {
     let i18n = use_i18n();
     view! {
         <h2 class="text-lg font-semibold">{i18n.t("auth-totp-title")}</h2>
@@ -639,76 +639,5 @@ fn TotpStep(f: SignInForm) -> impl IntoView {
             f.totp.set(String::new());
             f.show(Vec::new());
         }>{i18n.t("auth-back")}</Button>
-    }
-}
-
-#[component]
-pub fn SignIn() -> impl IntoView {
-    let i18n = use_i18n();
-    let f = SignInForm::new();
-    let submit = {
-        let i18n = i18n.clone();
-        Action::new(move |creds: &(String, String, String)| {
-            let ((user, pass, code), i18n) = (creds.clone(), i18n.clone());
-            async move {
-                match api::sign_in(user, pass, Some(code)).await {
-                    Ok(_) => go("/library"),
-                    Err(err) => {
-                        f.server_error(&i18n, &api::error_code(&err), api::retry_after_secs(&err));
-                    }
-                }
-            }
-        })
-    };
-    let on_submit = {
-        let i18n = i18n.clone();
-        move |ev: SubmitEvent| {
-            ev.prevent_default();
-            f.form_error.set(None);
-            let (u, p, c) = (
-                f.username.get_untracked(),
-                f.password.get_untracked(),
-                f.totp.get_untracked(),
-            );
-            let mut errs = sign_in_errors(&i18n, &u, &p);
-            if f.need_totp.get_untracked() && c.trim().is_empty() {
-                errs.push((AuthField::Totp, i18n.t("auth-totp-required")));
-            }
-            let ok = errs.is_empty();
-            f.show(errs);
-            if ok {
-                submit.dispatch((u, p, c.trim().to_string()));
-            }
-        }
-    };
-    let user_err = Signal::derive(move || error_of(f.errors, AuthField::Username));
-    let pass_err = Signal::derive(move || error_of(f.errors, AuthField::Password));
-    let (link, have) = (i18n.t("nav-sign-up"), i18n.t("auth-no-account"));
-    view! {
-        <AuthFrame>
-            <PageTitle text=i18n.t("auth-sign-in-title")/>
-            <form class="grid gap-4 rounded-xl border border-border bg-card p-6 shadow-sm" novalidate on:submit=on_submit>
-                <Summary errors=f.summary/>
-                <div class="grid gap-4" hidden=move || f.need_totp.get()>
-                    <FormField id="username" label=i18n.t("auth-username") error=user_err>
-                        <Input id="username" value=f.username autocomplete="username"
-                            described_by=field_described_by("username")
-                            invalid=Signal::derive(move || user_err.with(Option::is_some))/>
-                    </FormField>
-                    <FormField id="password" label=i18n.t("auth-password") error=pass_err>
-                        <PasswordInput value=f.password autocomplete="current-password"
-                            invalid=Signal::derive(move || pass_err.with(Option::is_some))/>
-                    </FormField>
-                </div>
-                <Show when=move || f.need_totp.get()>
-                    <TotpStep f=f/>
-                </Show>
-                <SubmitButton pending=submit.pending() label=i18n.t("auth-sign-in-submit")/>
-                <FormAlert error=f.form_error/>
-                <p class="text-sm text-muted-foreground">
-                    {have} " " <A href="/sign-up" attr:class="underline">{link}</A>
-                </p>
-            </form>
-        </AuthFrame>
     }
 }

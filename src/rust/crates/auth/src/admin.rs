@@ -31,9 +31,33 @@ pub struct StoredSettings {
     pub setup_completed_at: Option<DateTime<Utc>>,
     /// Last completed wizard step (resumable wizard).
     pub setup_step: Option<String>,
+    /// `page` or `auto` (addendum-1 4.3); `None` is `page`.
+    pub sign_in_mode: Option<String>,
+    /// SMTP settings stored by an admin (the password is kept apart, encrypted).
+    pub mail: StoredMail,
     pub updated_at: Option<DateTime<Utc>>,
     pub updated_by: Option<UserId>,
 }
+
+/// SMTP as stored in the database (addendum-1 3.2). The password is never part of it:
+/// [`AdminStore::mail_password`] opens it, [`AdminStore::put_mail_password`] replaces it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StoredMail {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    /// `tls`, `starttls` or `none`.
+    pub security: Option<String>,
+    pub username: Option<String>,
+    pub from: Option<String>,
+    /// Is an encrypted password stored?
+    pub password_set: bool,
+    pub last_test_at: Option<DateTime<Utc>>,
+    /// `ok` or `failed: <reason>`.
+    pub last_test_result: Option<String>,
+}
+
+/// Purpose of the encrypted SMTP password.
+pub const MAIL_PURPOSE: &str = "smtp_password";
 
 /// Who did it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,7 +179,11 @@ pub struct LicenceRecord {
 #[async_trait]
 pub trait AdminStore: Send + Sync {
     async fn settings(&self) -> Result<StoredSettings, PortError>;
-    async fn put_settings(&self, s: &StoredSettings) -> Result<(), PortError>;
+    /// Store the settings and, in the same transaction, their audit rows (addendum-1 3.4):
+    /// when an audit row cannot be written the change is rolled back. The mail password and
+    /// the mail test result are not written here.
+    async fn put_settings(&self, s: &StoredSettings, audit: &[AuditEntry])
+    -> Result<(), PortError>;
 
     async fn audit(&self, e: &AuditEntry) -> Result<(), PortError>;
     async fn audit_query(&self, f: &AuditFilter) -> Result<Vec<AuditEntry>, PortError>;
@@ -178,17 +206,45 @@ pub trait AdminStore: Send + Sync {
         fields: &BTreeMap<String, String>,
         by: Option<UserId>,
         at: DateTime<Utc>,
+        audit: Option<&AuditEntry>,
     ) -> Result<StoredCredential, PortError>;
     async fn delete_credential(
         &self,
         connector: &str,
         user: Option<UserId>,
+        audit: Option<&AuditEntry>,
     ) -> Result<bool, PortError>;
     async fn record_test(&self, id: Uuid, at: DateTime<Utc>, result: &str)
     -> Result<(), PortError>;
 
     async fn licences(&self) -> Result<Vec<LicenceRecord>, PortError>;
-    async fn put_licence(&self, l: &LicenceRecord) -> Result<(), PortError>;
+    async fn put_licence(
+        &self,
+        l: &LicenceRecord,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), PortError>;
+
+    /// Sources an admin switched off or on again (DEC-289): (connector id, enabled).
+    async fn source_switches(&self) -> Result<Vec<(String, bool)>, PortError>;
+    async fn set_source_enabled(
+        &self,
+        connector: &str,
+        enabled: bool,
+        by: Option<UserId>,
+        at: DateTime<Utc>,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), PortError>;
+
+    /// The stored SMTP password: `None` when none is stored, `Some(Err)` when it is locked.
+    async fn mail_password(&self) -> Result<Option<Result<String, SecretLocked>>, PortError>;
+    /// Replace (or with `None` remove) the SMTP password, encrypted, with its audit row.
+    async fn put_mail_password(
+        &self,
+        password: Option<&str>,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), PortError>;
+    /// "Save and send a test": when and how the last test went.
+    async fn record_mail_test(&self, at: DateTime<Utc>, result: &str) -> Result<(), PortError>;
 
     /// Key versions and when each was first seen (OD-09 reminder).
     async fn key_versions(&self) -> Result<Vec<(u16, DateTime<Utc>)>, PortError>;
@@ -209,6 +265,8 @@ struct MemState {
     creds: Vec<(StoredCredential, BTreeMap<String, String>)>,
     licences: BTreeMap<String, LicenceRecord>,
     keys: BTreeMap<u16, DateTime<Utc>>,
+    switches: BTreeMap<String, bool>,
+    mail_password: Option<String>,
 }
 
 /// In-memory admin store (tests). Credentials are kept in plain text here.
@@ -229,8 +287,18 @@ impl AdminStore for MemAdminStore {
         Ok(self.s().settings.clone())
     }
 
-    async fn put_settings(&self, s: &StoredSettings) -> Result<(), PortError> {
-        self.s().settings = s.clone();
+    async fn put_settings(
+        &self,
+        s: &StoredSettings,
+        audit: &[AuditEntry],
+    ) -> Result<(), PortError> {
+        let mut st = self.s();
+        let keep = st.settings.mail.clone();
+        st.settings = s.clone();
+        st.settings.mail.password_set = keep.password_set;
+        st.settings.mail.last_test_at = keep.last_test_at;
+        st.settings.mail.last_test_result = keep.last_test_result;
+        st.audit.extend(audit.iter().cloned());
         Ok(())
     }
 
@@ -299,8 +367,10 @@ impl AdminStore for MemAdminStore {
         fields: &BTreeMap<String, String>,
         by: Option<UserId>,
         at: DateTime<Utc>,
+        audit: Option<&AuditEntry>,
     ) -> Result<StoredCredential, PortError> {
         let mut s = self.s();
+        s.audit.extend(audit.cloned());
         s.creds
             .retain(|(c, _)| !(c.connector == connector && c.user == user));
         let c = StoredCredential {
@@ -321,8 +391,10 @@ impl AdminStore for MemAdminStore {
         &self,
         connector: &str,
         user: Option<UserId>,
+        audit: Option<&AuditEntry>,
     ) -> Result<bool, PortError> {
         let mut s = self.s();
+        s.audit.extend(audit.cloned());
         let n = s.creds.len();
         s.creds
             .retain(|(c, _)| !(c.connector == connector && c.user == user));
@@ -348,8 +420,60 @@ impl AdminStore for MemAdminStore {
         Ok(self.s().licences.values().cloned().collect())
     }
 
-    async fn put_licence(&self, l: &LicenceRecord) -> Result<(), PortError> {
-        self.s().licences.insert(l.connector.clone(), l.clone());
+    async fn put_licence(
+        &self,
+        l: &LicenceRecord,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), PortError> {
+        let mut s = self.s();
+        s.licences.insert(l.connector.clone(), l.clone());
+        s.audit.extend(audit.cloned());
+        Ok(())
+    }
+
+    async fn source_switches(&self) -> Result<Vec<(String, bool)>, PortError> {
+        Ok(self
+            .s()
+            .switches
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect())
+    }
+
+    async fn set_source_enabled(
+        &self,
+        connector: &str,
+        enabled: bool,
+        _by: Option<UserId>,
+        _at: DateTime<Utc>,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), PortError> {
+        let mut s = self.s();
+        s.switches.insert(connector.to_string(), enabled);
+        s.audit.extend(audit.cloned());
+        Ok(())
+    }
+
+    async fn mail_password(&self) -> Result<Option<Result<String, SecretLocked>>, PortError> {
+        Ok(self.s().mail_password.clone().map(Ok))
+    }
+
+    async fn put_mail_password(
+        &self,
+        password: Option<&str>,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), PortError> {
+        let mut s = self.s();
+        s.mail_password = password.map(String::from);
+        s.settings.mail.password_set = password.is_some();
+        s.audit.extend(audit.cloned());
+        Ok(())
+    }
+
+    async fn record_mail_test(&self, at: DateTime<Utc>, result: &str) -> Result<(), PortError> {
+        let mut s = self.s();
+        s.settings.mail.last_test_at = Some(at);
+        s.settings.mail.last_test_result = Some(result.to_string());
         Ok(())
     }
 

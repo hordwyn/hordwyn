@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oidc_identities SET provider_id = $3, sid = $4, last_claims_hash = $5,\n                 last_groups = $6\n             WHERE issuer = $1 AND subject = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "06c921fc0cd03c1cc298451fb861b48b0c099325931f8b8bb291dd32a431d1aa"
+}

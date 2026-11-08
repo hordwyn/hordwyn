@@ -1,0 +1,326 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, slug, display_name, issuer, client_id, client_secret, scopes, enabled,\n                    is_default, auto_create, groups_claim, allowed_groups, admin_groups,\n                    role_source, provenance, discovery, discovery_fetched_at, capabilities,\n                    last_test, last_test_at, last_callback_at, last_callback_result,\n                    created_by, updated_by, created_at, updated_at\n             FROM oidc_providers ORDER BY display_name, slug",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "issuer",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "issuer"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "client_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "client_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "client_secret",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "client_secret"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "scopes",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "scopes"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "is_default",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "is_default"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "auto_create",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "auto_create"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "groups_claim",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "groups_claim"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "allowed_groups",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "allowed_groups"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "admin_groups",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "admin_groups"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "role_source",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "role_source"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "provenance",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "provenance"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "discovery",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "discovery"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "discovery_fetched_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "discovery_fetched_at"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "capabilities",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "capabilities"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "last_test",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "last_test"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "last_test_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "last_test_at"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "last_callback_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "last_callback_at"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "last_callback_result",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "last_callback_result"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "created_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "created_by"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "updated_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "updated_by"
+          }
+        }
+      },
+      {
+        "ordinal": 24,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 25,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "oidc_providers",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "b0d9d538d8a493918850501e6ce868cbe33f20c7d48d82a10723c8b49590f484"
+}

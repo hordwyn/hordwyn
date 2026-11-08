@@ -112,6 +112,28 @@
             "name": "created_at"
           }
         }
+      },
+      {
+        "ordinal": 10,
+        "name": "merge_record",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "companions",
+            "name": "merge_record"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "removed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "companions",
+            "name": "removed_at"
+          }
+        }
       }
     ],
     "parameters": {
@@ -129,7 +151,9 @@
       true,
       false,
       true,
-      false
+      false,
+      true,
+      true
     ]
   },
   "hash": "694dbebc0a4792ccd496cd88d8734612aae7266bc26cd5a60805a8cb86f0bd8f"

@@ -4,9 +4,10 @@
 // One end-to-end scenario on purpose: the steps share one server and database.
 #![allow(clippy::too_many_lines)]
 
+mod support;
+
 use leptos::server_fn::ServerFn;
 use server::{Overrides, Server};
-use tower::ServiceExt;
 
 fn repo(p: &str) -> String {
     format!("{}/../../../../{p}", env!("CARGO_MANIFEST_DIR"))
@@ -30,19 +31,13 @@ async fn send(
     if let Some(c) = cookie {
         req = req.header("cookie", c);
     }
-    let resp = app
-        .clone()
-        .oneshot(req.body(axum::body::Body::from(body)).unwrap())
-        .await
-        .unwrap();
+    let resp = support::send(app, req.body(axum::body::Body::from(body)).unwrap()).await;
     let status = resp.status().as_u16();
     let cookie = resp
         .headers()
         .get("set-cookie")
         .map(|v| v.to_str().unwrap().split(';').next().unwrap().to_string());
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 22)
-        .await
-        .unwrap();
+    let bytes = resp.into_body();
     (status, String::from_utf8_lossy(&bytes).into_owned(), cookie)
 }
 

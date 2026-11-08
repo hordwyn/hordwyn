@@ -16,13 +16,14 @@ use ui::{
 
 use crate::api;
 use crate::events::use_events;
-use crate::history_state::{Day, HistoryState, day_heading, group_by_day, side_counts};
+use crate::history_state::{Day, DayGroup, HistoryState, day_heading, group_by_day, side_counts};
 use crate::i18n::{I18n, kind_label, t, use_i18n};
 use crate::next_step::{StepCtx, undo_event};
-use crate::pages::{PageTitle, bad_query, error_text, fresh, go, needs_sign_in};
+use crate::pages::{PageTitle, bad_query, error_text, go, needs_sign_in};
 use crate::widgets::progress_label;
 
-type Res<T> = Resource<Result<T, ServerFnError>>;
+/// The feed's first page and the History address it was asked for.
+type Loaded = (String, Result<ActivityPageDto, ServerFnError>);
 
 /// Today as the server saw it when it rendered the page (so both sides group alike).
 pub(crate) fn today() -> Day {
@@ -52,10 +53,34 @@ fn what(i: &I18n, row: &ActivityRowDto) -> String {
         .map_or_else(|| i.t("history-session"), |p| progress_label(i, p))
 }
 
-/// The `HH:MM` (UTC) of a timestamp.
-fn clock(i: &I18n, at: &str) -> Option<String> {
-    let (h, m) = (at.get(11..13)?.parse().ok()?, at.get(14..16)?.parse().ok()?);
+/// The time of a row: the server's `local_time` in the viewer's zone (DEC-306), unmarked;
+/// without it the UTC time of `at`, marked as UTC.
+fn clock(i: &I18n, row: &ActivityRowDto) -> Option<String> {
+    let hm = |s: &str, at: usize| -> Option<(u32, u32)> {
+        Some((
+            s.get(at..at + 2)?.parse().ok()?,
+            s.get(at + 3..at + 5)?.parse().ok()?,
+        ))
+    };
+    if let Some((h, m)) = hm(&row.local_time, 0) {
+        return Some(i.time(h, m));
+    }
+    let (h, m) = hm(&row.at, 11)?;
     Some(i.t_args("history-time-utc", &[("time", i.time(h, m).into())]))
+}
+
+/// Date and time of a row for Home (no day headings there): local when the server sent it.
+fn dated_text(i: &I18n, row: &ActivityRowDto) -> String {
+    match clock(i, row) {
+        Some(time) if !row.local_day.is_empty() => i.t_args(
+            "datetime-local",
+            &[
+                ("date", i.date(&row.local_day).into()),
+                ("time", time.into()),
+            ],
+        ),
+        _ => i.datetime(&row.at),
+    }
 }
 
 /// One activity row as a sentence (Home and History): kind icon, title link, what happened,
@@ -75,9 +100,9 @@ pub fn ActivityRow(
     let with = (!names.is_empty())
         .then(|| i18n.t_args("history-with", &[("names", names.join(", ").into())]));
     let when = if dated {
-        Some(i18n.datetime(&row.at))
+        Some(dated_text(&i18n, &row))
     } else {
-        clock(&i18n, &row.at)
+        clock(&i18n, &row)
     };
     let kind = kind_label(&row.kind);
     let by = row
@@ -164,7 +189,7 @@ struct More {
 struct Hist {
     state: Memo<HistoryState>,
     go: Callback<HistoryState>,
-    first: Res<ActivityPageDto>,
+    first: Resource<Loaded>,
     more: RwSignal<More>,
     /// "Show more" is loading; why it failed.
     loading: RwSignal<bool>,
@@ -173,9 +198,8 @@ struct Hist {
 }
 
 impl Hist {
-    /// Rows on screen and the cursor for the next page.
-    fn shown(&self, first: &ActivityPageDto) -> (Vec<ActivityRowDto>, Option<String>) {
-        let href = self.state.with(HistoryState::href);
+    /// Rows on screen and the cursor for the next page, for the answer of address `href`.
+    fn shown(&self, href: &str, first: &ActivityPageDto) -> (Vec<ActivityRowDto>, Option<String>) {
         let mut rows = first.rows.clone();
         let more = self.more.get();
         if more.href == href {
@@ -234,7 +258,15 @@ pub fn History() -> impl IntoView {
             );
         });
     });
-    let first = Resource::new(move || state.get().query_dto(None), api::activity_feed);
+    // the answer carries the address it belongs to (UX3-3): the stream never shows the
+    // previous address's result under the new one
+    let first = Resource::new(
+        move || state.get(),
+        |s: HistoryState| async move {
+            let href = s.href();
+            (href, api::activity_feed(s.query_dto(None)).await)
+        },
+    );
     let more = RwSignal::new(More::default());
     let refresh = Callback::new(move |()| {
         more.set(More::default());
@@ -258,7 +290,13 @@ pub fn History() -> impl IntoView {
         refresh,
     };
     view! {
-        <PageTitle text=i18n.t("history-title")/>
+        // the H1 carries a text link to the export (DEC-237)
+        <div class="flex flex-wrap items-baseline justify-between gap-x-4">
+            <PageTitle text=i18n.t("history-title")/>
+            <a href="/settings/imports#export" class="mb-6 text-sm underline" data-testid="hist-export">
+                {i18n.t("history-export")}
+            </a>
+        </div>
         <p class="-mt-4 mb-4 text-sm text-muted-foreground">{i18n.t("history-lead")}</p>
         <Filters h=h/>
         <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
@@ -529,38 +567,60 @@ fn bind<T: Clone + PartialEq + Send + Sync + 'static>(
 #[component]
 fn Stream(h: Hist) -> impl IntoView {
     let i18n = use_i18n();
-    let renders = StoredValue::new(0u32);
+    // one item per answer; the key changes only with the answer or when the address on
+    // screen moves away from it, so "Load more" and other signals never remount the list
     let each = move || {
-        h.first.get().map(|r| {
-            let shown = r.as_ref().ok().map(|f| h.shown(f));
-            let filtered = h.state.with(|s| *s != HistoryState::default());
-            (fresh(renders), r, shown, filtered)
+        h.first.get().map(|(href, r)| {
+            let stale = h.state.with(HistoryState::href) != href;
+            (stream_key(&href, stale, &r), href, r, stale)
         })
     };
     view! {
         <section aria-labelledby="hist-stream-title" class="min-w-0">
             <h2 id="hist-stream-title" class="sr-only">{i18n.t("history-stream")}</h2>
             <Transition fallback=|| view! { <RowSkeletons/> }>
-                <For each=each key=|(k, _, _, _)| *k children=move |(_, r, shown, filtered)| match (r, shown) {
-                    (Err(e), _) if needs_sign_in(&e) => {
-                        go("/sign-in?next=/history");
-                        ().into_any()
-                    }
-                    (Err(e), _) if bad_query(&e) => view! { <NoRows h=h filtered=true/> }.into_any(),
-                    (Err(e), _) => view! {
-                        <Alert variant=AlertVariant::Destructive role=AlertRole::Alert title=t("history-error")
-                            actions=move || view! { <Button variant=ButtonVariant::Outline size=ButtonSize::Sm on:click=move |_| h.refresh.run(())>{t("library-retry")}</Button> }>
-                            {error_text(&e)}
-                        </Alert>
-                    }.into_any(),
-                    (Ok(_), Some((rows, _))) if rows.is_empty() => view! { <NoRows h=h filtered=filtered/> }.into_any(),
-                    (Ok(_), shown) => {
-                        let (rows, next) = shown.unwrap_or_default();
-                        view! { <Days h=h rows=rows next=next/> }.into_any()
-                    }
+                <For each=each key=|(k, _, _, _)| k.clone() children=move |(_, href, r, stale)| {
+                    stream_body(h, href, r, stale)
                 }/>
             </Transition>
         </section>
+    }
+}
+
+/// The key of one rendering of the stream (UX3-3): the address the answer belongs to,
+/// whether the address on screen has moved on (a new one is loading), and the answer itself.
+fn stream_key(href: &str, stale: bool, r: &Result<ActivityPageDto, ServerFnError>) -> String {
+    let data = serde_json::to_string(r).unwrap_or_default();
+    format!("{stale}|{href}|{data}")
+}
+
+/// The stream for one answer: skeletons while the next address loads, else the rows, the
+/// empty or no-match state, or the error.
+fn stream_body(
+    h: Hist,
+    href: String,
+    r: Result<ActivityPageDto, ServerFnError>,
+    stale: bool,
+) -> AnyView {
+    if stale {
+        return view! { <RowSkeletons/> }.into_any();
+    }
+    // "no match" belongs to the address of this answer, not to the one on screen
+    let filtered = href != HistoryState::default().href();
+    match r {
+        Err(e) if needs_sign_in(&e) => {
+            go("/sign-in?next=/history");
+            ().into_any()
+        }
+        Err(e) if bad_query(&e) => view! { <NoRows h=h filtered=true/> }.into_any(),
+        Err(e) => view! {
+            <Alert variant=AlertVariant::Destructive role=AlertRole::Alert title=t("history-error")
+                actions=move || view! { <Button variant=ButtonVariant::Outline size=ButtonSize::Sm on:click=move |_| h.refresh.run(())>{t("library-retry")}</Button> }>
+                {error_text(&e)}
+            </Alert>
+        }.into_any(),
+        Ok(page) if page.rows.is_empty() => view! { <NoRows h=h filtered=filtered/> }.into_any(),
+        Ok(page) => view! { <Days h=h href=href page=page/> }.into_any(),
     }
 }
 
@@ -581,32 +641,53 @@ fn NoRows(h: Hist, filtered: bool) -> impl IntoView {
     }
 }
 
-/// The day groups and "Show more".
+/// The day groups and "Show more". Pages loaded by "Show more" are appended: only a day
+/// group that gains rows is rendered again, and the button stays (it keeps the focus, UX3-3).
 #[component]
-fn Days(h: Hist, rows: Vec<ActivityRowDto>, next: Option<String>) -> impl IntoView {
-    let groups = group_by_day(rows, today());
+fn Days(h: Hist, href: String, page: ActivityPageDto) -> impl IntoView {
+    let today = today();
+    let shown = Memo::new(move |_| h.shown(&href, &page));
+    let groups = Memo::new(move |_| shown.with(|(rows, _)| group_by_day(rows.clone(), today)));
+    let next = Memo::new(move |_| shown.with(|(_, next)| next.clone()));
     view! {
         <div class="flex flex-col gap-6">
-            {groups.into_iter().map(|g| {
-                let heading = day_heading(&use_i18n(), &g);
-                let id = format!("hist-day-{}", g.day.iso());
-                let labelled = id.clone();
-                view! {
-                    <section aria-labelledby=labelled>
-                        <h3 id=id class="mb-2 text-sm font-semibold">{heading}</h3>
-                        <ul class="flex flex-col gap-2">
-                            {g.rows.into_iter().map(|row| view! { <ActivityRow row=row on_change=h.refresh/> }).collect_view()}
-                        </ul>
-                    </section>
-                }
-            }).collect_view()}
-            {next.map(|n| view! {
+            <For each=move || groups.get() key=|g: &DayGroup| (g.day.iso(), g.rows.len()) let:g>
+                <DaySection h=h g=g/>
+            </For>
+            <Show when=move || next.with(Option::is_some)>
                 <div class="flex flex-col items-center gap-2">
-                    <Button variant=ButtonVariant::Outline loading=h.loading on:click=move |_| h.load_more(n.clone())>{t("library-more")}</Button>
+                    // busy, not disabled, while a page loads: a disabled button loses the
+                    // keyboard focus (UX3-3)
+                    <Button variant=ButtonVariant::Outline
+                        attr:aria-busy=move || h.loading.get().then_some("true")
+                        attr:aria-disabled=move || h.loading.get().then_some("true")
+                        on:click=move |_| {
+                            if h.loading.get_untracked() {
+                                return;
+                            }
+                            if let Some(n) = next.get_untracked() {
+                                h.load_more(n);
+                            }
+                        }>{t("library-more")}</Button>
                     {move || h.more_error.get().map(|e| view! { <p role="alert" class="text-sm text-destructive-text">{e}</p> })}
                 </div>
-            })}
+            </Show>
         </div>
+    }
+}
+
+#[component]
+fn DaySection(h: Hist, g: DayGroup) -> impl IntoView {
+    let heading = day_heading(&use_i18n(), &g);
+    let id = format!("hist-day-{}", g.day.iso());
+    let labelled = id.clone();
+    view! {
+        <section aria-labelledby=labelled>
+            <h3 id=id class="mb-2 text-sm font-semibold">{heading}</h3>
+            <ul class="flex flex-col gap-2">
+                {g.rows.into_iter().map(|row| view! { <ActivityRow row=row on_change=h.refresh/> }).collect_view()}
+            </ul>
+        </section>
     }
 }
 
@@ -629,8 +710,8 @@ fn Side(h: Hist) -> impl IntoView {
         <aside aria-labelledby="hist-side-title" class="flex flex-col gap-3 self-start rounded-xl border border-border p-4" data-testid="history-side">
             <h2 id="hist-side-title" class="text-sm font-semibold">{i18n.t("history-side-title")}</h2>
             <Suspense fallback=|| view! { <Skeleton class="h-24 w-full"/> }>
-                {move || h.first.get().and_then(Result::ok).map(|first| {
-                    let (rows, _) = h.shown(&first);
+                {move || h.first.get().and_then(|(href, r)| r.ok().map(|f| (href, f))).map(|(href, first)| {
+                    let (rows, _) = h.shown(&href, &first);
                     let i = use_i18n();
                     let c = side_counts(&rows);
                     let range = c.range.map(|(a, b)| i.t_args("history-side-range", &[("from", i.date(&a.iso()).into()), ("to", i.date(&b.iso()).into())]));
@@ -658,5 +739,56 @@ fn Side(h: Hist) -> impl IntoView {
             </Suspense>
             <a href="/stats" class="text-sm font-medium underline underline-offset-2">{i18n.t("home-all-stats")}</a>
         </aside>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(at: &str, day: &str, time: &str) -> ActivityRowDto {
+        let mut r: ActivityRowDto = serde_json::from_value(serde_json::json!({
+            "at": at, "row_type": "session", "item_id": "i", "title": "T", "kind": "movie",
+            "group": "watch", "participants": [], "shared": false, "undoable": false
+        }))
+        .unwrap();
+        r.local_day = day.into();
+        r.local_time = time.into();
+        r
+    }
+
+    /// UX3-3: the stream is rendered afresh for a new answer or when the address moves away
+    /// from it, never for the same answer again (Load more, filters panel, side counts).
+    #[test]
+    fn the_stream_key_follows_the_answer_and_its_address() {
+        let page = |n: usize| -> Result<ActivityPageDto, ServerFnError> {
+            Ok(ActivityPageDto {
+                rows: (0..n)
+                    .map(|_| row("2026-11-06T10:00:00Z", "2026-11-06", "10:00"))
+                    .collect(),
+                next: None,
+            })
+        };
+        let a = stream_key("/history", false, &page(1));
+        assert_eq!(a, stream_key("/history", false, &page(1)));
+        assert_ne!(a, stream_key("/history", false, &page(2)));
+        assert_ne!(a, stream_key("/history", true, &page(1)));
+        assert_ne!(a, stream_key("/history?group=watch", false, &page(1)));
+        let failed: Result<ActivityPageDto, ServerFnError> = Err(ServerFnError::new("internal"));
+        assert_ne!(a, stream_key("/history", false, &failed));
+    }
+
+    /// DEC-306: with the viewer's zone known the times carry no "UTC" marker any more.
+    #[test]
+    fn times_are_local_without_a_utc_marker() {
+        let i = I18n::new("en", std::collections::BTreeMap::new());
+        let late = row("2026-11-06T23:30:00Z", "2026-11-07", "00:30");
+        assert_eq!(clock(&i, &late).as_deref(), Some("12:30 AM"));
+        assert_eq!(dated_text(&i, &late), "Nov 7, 2026, 12:30 AM");
+        // an answer without the local fields still says which zone it is
+        let old = row("2026-11-06T23:30:00Z", "", "");
+        assert_eq!(clock(&i, &old).as_deref(), Some("11:30 PM UTC"));
+        let de = I18n::new("de", std::collections::BTreeMap::new());
+        assert_eq!(dated_text(&de, &late), "07.11.2026, 00:30");
     }
 }

@@ -70,7 +70,8 @@ pub fn checklist_href(id: &str) -> &'static str {
         "invite" => "/people",
         "media_server" => "/settings/integrations",
         "notification_defaults" => "/admin/notifications",
-        "backup_key" | "identity_provider" => "/admin/security",
+        "backup_key" => "/admin/instance",
+        "identity_provider" => "/admin/sso",
         _ => "/admin",
     }
 }
@@ -99,6 +100,7 @@ mod tests {
             sources: vec![],
             sources_read_only: false,
             checklist: vec![],
+            done: vec![],
             key_file: None,
         }
     }
@@ -182,7 +184,8 @@ mod tests {
             checklist_href("notification_defaults"),
             "/admin/notifications"
         );
-        assert_eq!(checklist_href("backup_key"), "/admin/security");
+        assert_eq!(checklist_href("backup_key"), "/admin/instance");
+        assert_eq!(checklist_href("identity_provider"), "/admin/sso");
         assert_eq!(landing("home"), "/");
         assert_eq!(landing("hosted"), "/admin/users");
         assert_eq!(HOSTING[0], "home", "home is the default");

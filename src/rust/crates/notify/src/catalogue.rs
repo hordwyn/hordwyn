@@ -60,6 +60,8 @@ pub const CATALOGUE: &[EventDef] = &[
     admin("admin.job_backlog", &["lane", "count"]),
     // a member asked for a data source (design.md 4.4, "Ask admin")
     admin("admin.source_requested", &["source", "user"]),
+    // the break-glass `/sign-in/local` was used (addendum-1 4.3, OD-17)
+    admin("admin.local_sign_in", &["username", "address"]),
 ];
 
 #[must_use]

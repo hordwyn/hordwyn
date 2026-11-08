@@ -100,6 +100,9 @@ pub struct ServerConfig {
     pub role: ServerRole,
     /// Optional CDN base URL for `/assets/...` (D-7).
     pub assets_base_url: Option<String>,
+    /// Reverse proxies (addresses or CIDR networks, e.g. `10.0.0.0/8`) whose `X-Forwarded-For`
+    /// and `X-Request-Id` are believed for audit rows (DEC-284). Empty: the socket address.
+    pub trusted_proxies: Vec<String>,
 }
 
 impl Default for ServerConfig {
@@ -109,6 +112,7 @@ impl Default for ServerConfig {
             public_url: "http://localhost:3000".into(),
             role: ServerRole::All,
             assets_base_url: None,
+            trusted_proxies: Vec::new(),
         }
     }
 }
@@ -188,6 +192,27 @@ pub struct OidcConfig {
     pub display_name: String,
     /// Create an account on first OIDC sign-in even when sign-up is not open.
     pub auto_create: bool,
+    /// Short name in URLs (`/api/v1/auth/oidc/start?provider=<slug>`).
+    pub slug: String,
+    /// Scopes to request; `openid` is always added. Empty: `openid profile email`.
+    pub scopes: Vec<String>,
+    /// Claim that lists the groups (ID token, else `UserInfo`).
+    pub groups_claim: String,
+    /// Only members of these groups may sign in (empty: everyone).
+    pub allowed_groups: Vec<String>,
+    /// Members of these groups are admins when `role_source = "provider"`.
+    pub admin_groups: Vec<String>,
+    /// `local` (roles are set in the admin area) or `provider` (recomputed from
+    /// `admin_groups` at every sign-in; needs `admin_groups`, OD-16).
+    pub role_source: OidcRoleSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OidcRoleSource {
+    #[default]
+    Local,
+    Provider,
 }
 
 impl Default for OidcConfig {
@@ -198,6 +223,12 @@ impl Default for OidcConfig {
             client_secret: None,
             display_name: "Single sign-on".into(),
             auto_create: false,
+            slug: "sso".into(),
+            scopes: Vec::new(),
+            groups_claim: "groups".into(),
+            allowed_groups: Vec::new(),
+            admin_groups: Vec::new(),
+            role_source: OidcRoleSource::Local,
         }
     }
 }
@@ -211,6 +242,29 @@ pub struct AuthConfig {
     /// Send cookies with `Secure` (disable only for plain-HTTP development).
     pub secure_cookies: bool,
     pub oidc: Option<OidcConfig>,
+    /// `page` (sign-in page) or `auto` (straight to the default identity provider,
+    /// addendum-1 4.3; needs a tested provider). `cli admin disable-sso-only` sets `page`.
+    pub sign_in_mode: SignInMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SignInMode {
+    /// The sign-in page with provider buttons first.
+    #[default]
+    Page,
+    /// Go straight to the default provider.
+    Auto,
+}
+
+impl SignInMode {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Page => "page",
+            Self::Auto => "auto",
+        }
+    }
 }
 
 impl Default for AuthConfig {
@@ -220,6 +274,7 @@ impl Default for AuthConfig {
             session_days: 30,
             secure_cookies: true,
             oidc: None,
+            sign_in_mode: SignInMode::Page,
         }
     }
 }
@@ -608,11 +663,41 @@ impl AppConfig {
         {
             return bad("auth.oidc needs issuer and client_id".into());
         }
+        if let Some(o) = &self.auth.oidc
+            && o.role_source == OidcRoleSource::Provider
+            && o.admin_groups.is_empty()
+        {
+            return bad("auth.oidc.role_source = \"provider\" needs admin_groups (OD-16)".into());
+        }
+        if let Some(p) = self.server.trusted_proxies.iter().find(|p| !is_network(p)) {
+            return bad(format!(
+                "server.trusted_proxies: `{p}` is no IP address or CIDR network"
+            ));
+        }
         if self.jobs.concurrency == 0 {
             return bad("jobs.concurrency must be positive".into());
         }
         self.storage.validate().map_err(ConfigError::Invalid)
     }
+}
+
+/// `10.0.0.0/8`, `192.0.2.1`, `fd00::/8`.
+fn is_network(s: &str) -> bool {
+    let (addr, bits) = s.split_once('/').map_or((s, None), |(a, b)| (a, Some(b)));
+    let Ok(ip) = addr.trim().parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    let max = if ip.is_ipv4() { 32 } else { 128 };
+    // an IPv4-mapped IPv6 network folds to IPv4 on the server, so its prefix is 96..=128
+    let min = match ip {
+        std::net::IpAddr::V6(v6) if v6.to_ipv4_mapped().is_some() => 96,
+        _ => 0,
+    };
+    bits.is_none_or(|b| {
+        b.trim()
+            .parse::<u8>()
+            .is_ok_and(|b| (min..=max).contains(&b))
+    })
 }
 
 #[cfg(test)]
@@ -629,6 +714,35 @@ mod tests {
     #[test]
     fn defaults_are_valid() {
         AppConfig::from_sources("", env(&[])).unwrap();
+    }
+
+    /// DEC-284 and addendum-1 4.3: trusted proxies (empty by default, CIDR checked) and the
+    /// sign-in mode (`page` by default).
+    #[test]
+    fn trusted_proxies_and_sign_in_mode() {
+        let d = AppConfig::from_sources("", env(&[])).unwrap();
+        assert_eq!(d.server.trusted_proxies.len(), 0);
+        assert_eq!(d.auth.sign_in_mode, SignInMode::Page);
+        let c = AppConfig::from_sources(
+            "[server]\ntrusted_proxies = [\"10.0.0.0/8\", \"::1\"]\n",
+            env(&[("APP__AUTH__SIGN_IN_MODE", "auto")]),
+        )
+        .unwrap();
+        assert_eq!(c.server.trusted_proxies, ["10.0.0.0/8", "::1"]);
+        assert_eq!(c.auth.sign_in_mode, SignInMode::Auto);
+        assert!(
+            AppConfig::from_sources("[server]\ntrusted_proxies = [\"10.0.0.0/40\"]\n", env(&[]))
+                .is_err()
+        );
+        // UX3-20: a mapped IPv6 network needs a prefix of 96 or more, as the server checks
+        let mapped = |n: &str| {
+            AppConfig::from_sources(
+                &format!("[server]\ntrusted_proxies = [\"{n}\"]\n"),
+                env(&[]),
+            )
+        };
+        assert!(mapped("::ffff:10.0.0.0/104").is_ok());
+        assert!(mapped("::ffff:10.0.0.0/90").is_err());
     }
 
     #[test]

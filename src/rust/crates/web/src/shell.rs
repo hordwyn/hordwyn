@@ -228,12 +228,13 @@ fn provide_theme() -> ThemeChoice {
     theme
 }
 
-fn sign_out_action() -> Action<(), ()> {
-    Action::new(|(): &()| async {
-        let _ = crate::api::sign_out().await;
-        crate::pages::go("/");
-    })
-}
+/// Where the account menu and the You hub sign out: a form post, so the server ends the
+/// session first and then sends the browser to the provider's end-session page or straight
+/// to `/signed-out` (addendum-1 4.2 "Logout", DEC-318). Works before hydration too.
+const SIGN_OUT_ACTION: &str = "/api/v1/auth/logout";
+
+/// The id of the account menu's sign-out form (the menu item is its submit button).
+const SIGN_OUT_FORM: &str = "sign-out-form";
 
 /// Global single-key shortcuts (design.md 3.2): `?` help, `N` add; never while typing.
 fn shortcut_keys(signed_in: bool, palette: RwSignal<bool>, help: RwSignal<bool>) {
@@ -292,6 +293,23 @@ pub fn AppShell(children: Children) -> impl IntoView {
     }
 }
 
+/// The unread count as the bell shows it (design.md 6.8): nothing for none, capped at
+/// `9+`.
+#[must_use]
+pub fn unread_label(n: u32) -> Option<String> {
+    match n {
+        0 => None,
+        1..=9 => Some(n.to_string()),
+        _ => Some("9+".into()),
+    }
+}
+
+/// The count for the unread messages (`shell-notifications`, `shell-unread`): the number up
+/// to 9, else `9+` like the bell.
+fn unread_arg(n: u32) -> fluent_bundle::FluentValue<'static> {
+    if n > 9 { "9+".into() } else { n.into() }
+}
+
 const ICON_BTN: &str = "relative inline-flex size-11 shrink-0 items-center justify-center rounded-md \
     hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring \
     min-[47.5rem]:size-9 cursor-pointer";
@@ -340,7 +358,8 @@ fn SignedInBar(current: Signal<String>) -> impl IntoView {
     let cfg = expect_context::<ClientConfig>();
     let i18n = use_i18n();
     let palette = expect_context::<PaletteOpen>().0;
-    let bell = i18n.t_args("shell-notifications", &[("count", cfg.unread.into())]);
+    let bell = i18n.t_args("shell-notifications", &[("count", unread_arg(cfg.unread))]);
+    let badge = unread_label(cfg.unread);
     view! {
         <nav aria-label=i18n.t("nav-main") class="hidden flex-1 items-center gap-0.5 min-[47.5rem]:flex">
             {sections().into_iter().map(|(href, key)| view! {
@@ -371,8 +390,8 @@ fn SignedInBar(current: Signal<String>) -> impl IntoView {
         </button>
         <a href=NOTIFICATIONS_HREF aria-label=bell class=ICON_BTN>
             <Icon name=IconName::Bell class="size-5"/>
-            {(cfg.unread > 0).then(|| view! {
-                <span class="absolute right-2 top-2 size-2 rounded-full border-2 border-background bg-destructive"></span>
+            {badge.map(|n| view! {
+                <span aria-hidden="true" class="absolute right-0.5 top-0.5 min-w-4 rounded-full border border-background bg-destructive px-1 text-center text-[0.625rem] font-semibold leading-4 text-destructive-foreground">{n}</span>
             })}
         </a>
         <div class="hidden min-[47.5rem]:block">
@@ -497,7 +516,6 @@ fn AccountMenuItems(open: RwSignal<bool>, close: Callback<()>) -> impl IntoView 
     let cfg = expect_context::<ClientConfig>();
     let theme = expect_context::<ThemeChoice>().0;
     let help = expect_context::<ShortcutsOpen>().0;
-    let sign_out = sign_out_action();
     let links = account_links(cfg.is_admin);
     view! {
         {links.iter().map(|(href, key)| view! {
@@ -510,8 +528,8 @@ fn AccountMenuItems(open: RwSignal<bool>, close: Callback<()>) -> impl IntoView 
         <div role="separator" class=SEPARATOR></div>
         <LanguageItems close=close/>
         <div role="separator" class=SEPARATOR></div>
-        <button type="button" role="menuitem" tabindex="-1" class=MENU_ITEM
-            on:click=move |_| { open.set(false); sign_out.dispatch(()); }>
+        <form id=SIGN_OUT_FORM method="post" action=SIGN_OUT_ACTION hidden></form>
+        <button type="submit" form=SIGN_OUT_FORM role="menuitem" tabindex="-1" class=MENU_ITEM>
             <Icon name=IconName::LogOut/>
             {t("nav-sign-out")}
         </button>
@@ -684,7 +702,7 @@ fn MobileTabs(current: Signal<String>) -> impl IntoView {
     let palette = expect_context::<PaletteOpen>().0;
     let mut you = NavItem::new("/you", i18n.t("nav-you")).icon(IconName::User);
     if cfg.unread > 0 {
-        you = you.count(i18n.t_args("shell-unread", &[("count", cfg.unread.into())]));
+        you = you.count(i18n.t_args("shell-unread", &[("count", unread_arg(cfg.unread))]));
     }
     let items = vec![
         NavItem::new("/", i18n.t("nav-home")).icon(IconName::Home),
@@ -778,12 +796,11 @@ pub fn You() -> impl IntoView {
         .into_any();
     }
     let help = expect_context::<ShortcutsOpen>().0;
-    let sign_out = sign_out_action();
     let mut notifications =
         NavItem::new(NOTIFICATIONS_HREF, i18n.t("nav-notifications")).icon(IconName::Bell);
     if cfg.unread > 0 {
         notifications =
-            notifications.count(i18n.t_args("shell-unread", &[("count", cfg.unread.into())]));
+            notifications.count(i18n.t_args("shell-unread", &[("count", unread_arg(cfg.unread))]));
     }
     let mut items = vec![
         NavItem::new("/stats", i18n.t("nav-stats")).icon(IconName::History),
@@ -815,10 +832,12 @@ pub fn You() -> impl IntoView {
                     </a>
                 })}
             </div>
-            <button type="button" class="inline-flex min-h-11 w-fit items-center gap-2 rounded-md border border-input px-4 text-sm font-medium cursor-pointer" on:click=move |_| { sign_out.dispatch(()); }>
-                <Icon name=IconName::LogOut/>
-                {t("nav-sign-out")}
-            </button>
+            <form method="post" action=SIGN_OUT_ACTION>
+                <button type="submit" class="inline-flex min-h-11 w-fit items-center gap-2 rounded-md border border-input px-4 text-sm font-medium cursor-pointer">
+                    <Icon name=IconName::LogOut/>
+                    {t("nav-sign-out")}
+                </button>
+            </form>
         </div>
     }
     .into_any()
@@ -843,6 +862,15 @@ pub fn NotFound() -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_bell_caps_its_count() {
+        assert_eq!(unread_label(0), None);
+        assert_eq!(unread_label(3).as_deref(), Some("3"));
+        assert_eq!(unread_label(9).as_deref(), Some("9"));
+        assert_eq!(unread_label(10).as_deref(), Some("9+"));
+        assert_eq!(unread_label(250).as_deref(), Some("9+"));
+    }
 
     #[test]
     fn paths_map_to_their_section() {

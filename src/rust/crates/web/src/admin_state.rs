@@ -7,25 +7,26 @@ use contracts::admin::{AuditQueryDto, SettingDto};
 use serde_json::Value;
 use ui::StatusState;
 
-/// The eight admin pages (path, nav label key), in the side nav's order (addendum-1 3.4;
-/// the entries this build has, DEC-255).
+/// The eight admin pages (path, nav label key) in the order of addendum-1 3.4 (DEC-255
+/// reversed in phase 3: Branding is the Overview card, Security moved into Instance).
 pub const ADMIN_PAGES: [(&str, &str); 8] = [
     ("/admin", "admin-nav-overview"),
+    ("/admin/instance", "admin-nav-instance"),
+    ("/admin/sso", "admin-nav-sso"),
     ("/admin/users", "admin-nav-users"),
     ("/admin/sources", "admin-nav-sources"),
-    ("/admin/storage", "admin-nav-storage"),
     ("/admin/notifications", "admin-nav-notifications"),
-    ("/admin/brand", "admin-nav-brand"),
-    ("/admin/security", "admin-nav-security"),
+    ("/admin/storage", "admin-nav-storage"),
     ("/admin/audit", "admin-nav-audit"),
 ];
 
 /// The personal settings pages ("You", design.md 3.3 and 6.12).
-pub const SETTINGS_PAGES: [(&str, &str); 5] = [
+pub const SETTINGS_PAGES: [(&str, &str); 6] = [
     ("/settings/account", "settings-nav-account"),
     ("/settings/notifications", "nav-notifications"),
     ("/settings/integrations", "nav-integrations"),
     ("/settings/sources", "nav-sources"),
+    ("/settings/imports", "settings-nav-imports"),
     ("/settings/privacy", "settings-nav-privacy"),
 ];
 
@@ -344,12 +345,12 @@ mod tests {
             hrefs,
             [
                 "/admin",
+                "/admin/instance",
+                "/admin/sso",
                 "/admin/users",
                 "/admin/sources",
-                "/admin/storage",
                 "/admin/notifications",
-                "/admin/brand",
-                "/admin/security",
+                "/admin/storage",
                 "/admin/audit"
             ]
         );
@@ -361,6 +362,7 @@ mod tests {
                 "/settings/notifications",
                 "/settings/integrations",
                 "/settings/sources",
+                "/settings/imports",
                 "/settings/privacy"
             ]
         );

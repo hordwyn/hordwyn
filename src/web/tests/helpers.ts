@@ -1,5 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { execFileSync } from "node:child_process";
+import { createHmac } from "node:crypto";
 
 // Shared by the specs: hydration marker, the WCAG A/AA axe check (design.md 8) and sign-up.
 
@@ -48,4 +50,76 @@ export async function signIn(page: Page, user: string) {
 export async function expectReflow(page: Page, where = "") {
   const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(over, `${where} horizontal overflow`).toBeLessThanOrEqual(1);
+}
+
+/** The e2e database (`cargo xtask e2e` passes a fresh one). */
+export const E2E_DB = process.env.E2E_DATABASE_URL ?? "postgres://app@127.0.0.1:55432/app_e2e";
+
+/** Run one SQL statement against the e2e database (test set-up only). */
+export function sql(statement: string) {
+  execFileSync("psql", [E2E_DB, "-v", "ON_ERROR_STOP=1", "-c", statement]);
+}
+
+/** Age the proof of every session of `user`, as if it signed in two hours ago. */
+export function ageSessions(user: string) {
+  sql(
+    "UPDATE auth_sessions SET reauth_at = now() - interval '2 hours', reauth_slide_at = NULL " +
+      `WHERE user_id = (SELECT id FROM users WHERE username = '${user}')`,
+  );
+}
+
+/** RFC 6238 TOTP (SHA-1, 6 digits, 30 s) of a base32 secret, as authenticator apps compute it. */
+export function totp(base32: string, at = Date.now()): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const c of base32.replace(/=+$/, "").toUpperCase()) {
+    bits += alphabet.indexOf(c).toString(2).padStart(5, "0");
+  }
+  const bytes = Buffer.from((bits.match(/.{8}/g) ?? []).map((b) => parseInt(b, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(at / 30_000)));
+  const h = createHmac("sha1", bytes).update(counter).digest();
+  const o = h[h.length - 1] & 0xf;
+  const n = ((h[o] & 0x7f) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3];
+  return String(n % 1_000_000).padStart(6, "0");
+}
+
+/** People page (WP3-6): "Add a person" opens a sheet with the name; the card appears. */
+export async function addPerson(page: Page, name: string) {
+  await page.getByRole("button", { name: "Add a person" }).click();
+  const sheet = page.getByRole("dialog", { name: "Add a person" });
+  await sheet.getByLabel("Name", { exact: true }).fill(name);
+  await sheet.getByRole("button", { name: "Add person" }).click();
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByTestId("pp-card").filter({ has: page.getByRole("link", { name, exact: true }) })).toBeVisible();
+}
+
+/** People page: ask `username` to confirm that the person `name` is them (card menu). */
+export async function requestLink(page: Page, name: string, username: string) {
+  await page.getByRole("button", { name: `More actions for ${name}` }).click();
+  await page.getByRole("menuitem", { name: "Link to account" }).click();
+  const dialog = page.getByRole("dialog", { name: `Link ${name} to an account` });
+  await dialog.getByLabel("Their username").fill(username);
+  await dialog.getByRole("button", { name: "Send link request" }).click();
+  await expect(page.getByText("Link request sent.")).toBeVisible();
+}
+
+/**
+ * Wait until import `id` has ended (done, failed or cancelled), then require "done". The import
+ * lane is shared by every spec running in parallel and runs strictly in order, so the wait is
+ * generous, and a failed import fails at once with its state instead of polling to the end
+ * (UX3-22).
+ */
+export async function importDone(page: Page, id: string) {
+  let state = "";
+  await expect
+    .poll(
+      async () => {
+        state = (await (await page.request.get(`/api/v1/imports/${id}`)).json()).state;
+        return ["done", "failed", "cancelled"].includes(state);
+      },
+      { timeout: 120_000 },
+    )
+    .toBe(true);
+  expect(state, `import ${id}`).toBe("done");
 }

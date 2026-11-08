@@ -115,11 +115,18 @@ async fn merge_does_not_rewrite_history() {
             .await
             .is_err()
     );
-    // a companion referenced by sessions cannot be deleted, only merged
-    assert!(matches!(
-        env.app.delete_companion(me, a1.id).await,
-        Err(AppError::Conflict(_))
-    ));
+    // a companion named in sessions is removed, not deleted: the history keeps it (WP3-6,
+    // design.md 6.7 "delete keeps history")
+    env.app.delete_companion(me, a1.id).await.unwrap();
+    assert!(
+        env.app
+            .companion(me, a1.id)
+            .await
+            .unwrap()
+            .removed_at
+            .is_some()
+    );
+    assert_eq!(env.app.companions(me).await.unwrap().len(), 1, "self only");
 }
 
 #[tokio::test]
@@ -175,4 +182,81 @@ async fn deleting_a_user_demotes_companions_linked_to_them() {
     let after = env.app.companion(me, c.id).await.unwrap();
     assert!(after.linked_user.is_none());
     assert_eq!(after.snapshot.unwrap().display_name, "BOB");
+}
+
+/// Alice's "Bob" linked to bob and bob's "Alice" linked to alice.
+async fn linked_both_ways(
+    env: &TestEnv,
+) -> (
+    domain::user::Actor,
+    domain::user::Actor,
+    domain::companion::Companion,
+    domain::companion::Companion,
+) {
+    let (alice_user, alice) = common::user(env, "alice").await;
+    let (bob_user, bob) = common::user(env, "bob").await;
+    let c = env.app.create_companion(alice, "Bob").await.unwrap();
+    let r = env
+        .app
+        .request_link(alice, c.id, bob_user.id)
+        .await
+        .unwrap();
+    env.app.accept_link(bob, r.id).await.unwrap();
+    let d = env.app.create_companion(bob, "Alice").await.unwrap();
+    let r = env
+        .app
+        .request_link(bob, d.id, alice_user.id)
+        .await
+        .unwrap();
+    env.app.accept_link(alice, r.id).await.unwrap();
+    (alice, bob, c, d)
+}
+
+async fn linked(env: &TestEnv, id: domain::ids::CompanionId) -> bool {
+    env.app
+        .repos
+        .companions
+        .get(id)
+        .await
+        .unwrap()
+        .is_some_and(|c| c.linked_user.is_some())
+}
+
+/// UX3-17: unlinking ends the link on both sides, whoever acts.
+#[tokio::test]
+async fn unlinking_ends_the_counterpart_link_too() {
+    let env = TestEnv::new();
+    let (alice, _bob, c, d) = linked_both_ways(&env).await;
+    assert!(linked(&env, c.id).await && linked(&env, d.id).await);
+    env.app.unlink_companion(alice, c.id).await.unwrap();
+    assert!(!linked(&env, c.id).await);
+    assert!(!linked(&env, d.id).await, "bob's Alice is unlinked as well");
+}
+
+/// UX3-17: removing a linked person (kept for history, or deleted) ends both links.
+#[tokio::test]
+async fn removing_a_linked_person_ends_the_counterpart_link_too() {
+    let env = TestEnv::new();
+    let (alice, _bob, c, d) = linked_both_ways(&env).await;
+    env.app.delete_companion(alice, c.id).await.unwrap();
+    assert!(
+        !linked(&env, d.id).await,
+        "deleted: bob's Alice is unlinked"
+    );
+
+    let env = TestEnv::new();
+    let (alice, _bob, c, d) = linked_both_ways(&env).await;
+    let game = common::item(&env.app, "board_game", "Azul").await;
+    env.app
+        .log_session(
+            alice,
+            NewSession::new(game.id, vec![Participant::new(c.id)]),
+        )
+        .await
+        .unwrap();
+    env.app.delete_companion(alice, c.id).await.unwrap();
+    assert!(
+        !linked(&env, d.id).await,
+        "kept for history: bob's Alice is unlinked"
+    );
 }

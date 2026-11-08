@@ -257,3 +257,40 @@ pub async fn shared_list(s: &ApiState, token: &str) -> ApiResult<SharedListDto> 
         items,
     })
 }
+
+/// Set the caller's time zone (DEC-239): an IANA name, or `null` for the default (UTC).
+///
+/// # Errors
+/// `invalid_time_zone` for a name the tz database does not know.
+pub async fn set_time_zone(
+    s: &ApiState,
+    a: Actor,
+    b: contracts::TimeZoneDto,
+) -> ApiResult<UserDto> {
+    let zone = match b.time_zone.as_deref().filter(|z| !z.is_empty()) {
+        Some(name) => Some(app::time_zone::parse_zone(name).ok_or_else(|| {
+            crate::error::ApiError::new(
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_time_zone",
+                format!("`{name}` is no IANA time zone (for example Europe/Berlin)"),
+            )
+        })?),
+        None => None,
+    };
+    Ok(dto::user(&s.app.set_time_zone(a, zone).await?))
+}
+
+/// Use a one-time reset link (addendum-1 3.3): sets the password and ends every session.
+///
+/// # Errors
+/// The password rules, `reset_link_invalid` for an unknown, used or expired token.
+pub async fn reset_password(s: &ApiState, b: contracts::ResetPasswordDto) -> ApiResult<()> {
+    match s.auth.reset_password(&b.token, &b.password).await? {
+        Some(_) => Ok(()),
+        None => Err(crate::error::ApiError::new(
+            axum::http::StatusCode::NOT_FOUND,
+            "reset_link_invalid",
+            "this reset link is unknown, used or expired; ask your admin for a new one",
+        )),
+    }
+}

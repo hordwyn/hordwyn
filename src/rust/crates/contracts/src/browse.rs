@@ -238,6 +238,13 @@ pub struct ActivityPersonDto {
 pub struct ActivityRowDto {
     /// RFC 3339; group rows by the viewer's local day from it.
     pub at: String,
+    /// The day of `at` in the viewer's time zone (`2026-02-01`, DEC-239), computed on the
+    /// server so the browser needs no time zone database.
+    #[serde(default)]
+    pub local_day: String,
+    /// The time of `at` in the viewer's time zone (`00:30`).
+    #[serde(default)]
+    pub local_time: String,
     /// `progress` or `session`.
     pub row_type: String,
     pub item_id: String,

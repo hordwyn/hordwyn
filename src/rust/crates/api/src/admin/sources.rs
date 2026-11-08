@@ -21,7 +21,7 @@ use domain::user::Actor;
 use serde_json::json;
 use zeroize::Zeroizing;
 
-use super::{admin, audit, invalid, pe, require_admin, ts};
+use super::{admin, entry, invalid, pe, require_admin, ts};
 use crate::error::ApiResult;
 use crate::{ApiError, ApiState};
 
@@ -101,7 +101,11 @@ fn status_dto(
     let spec = c.credentials();
     let state = s.registry.credential(&info.id);
     let cnt = counters(s, &info.id);
-    let a_state = admin_state(state, &cnt);
+    let a_state = if s.registry.is_enabled(&info.id) {
+        admin_state(state, &cnt)
+    } else {
+        "disabled"
+    };
     let hosted = s.admin.as_ref().is_some_and(super::AdminApi::hosted);
     let needs_account = hosted && !spec.user_fields.is_empty() && !user_set;
     let mut dto = SourceStatusDto {
@@ -502,14 +506,9 @@ pub async fn set_source_credential(
         return Err(invalid("unknown_field", "this source needs no key"));
     }
     let fields = check_fields(&b.fields, spec.instance_fields)?;
-    let stored = a
-        .store
-        .put_credential(id, None, &fields, Some(actor.user_id), s.app.clock.now())
-        .await
-        .map_err(pe)?;
-    apply_credential(s, id, Some(&stored));
-    let detail = json!({"purpose": auth::admin::CREDENTIAL_PURPOSE, "key_version": a.keys.active});
-    audit(
+    let detail =
+        json!({"purpose": auth::admin::CREDENTIAL_PURPOSE, "key_version": a.keys.active()});
+    let row = entry(
         s,
         Some(actor),
         "secret.replaced",
@@ -517,6 +516,13 @@ pub async fn set_source_credential(
         detail,
     )
     .await;
+    let now = s.app.clock.now();
+    let stored = a
+        .store
+        .put_credential(id, None, &fields, Some(actor.user_id), now, Some(&row))
+        .await
+        .map_err(pe)?;
+    apply_credential(s, id, Some(&stored));
     admin_source(s, &c, actor).await
 }
 
@@ -532,10 +538,8 @@ pub async fn clear_source_credential(
     require_admin(actor)?;
     let a = admin(s)?;
     let c = connector(s, id)?;
-    a.store.delete_credential(id, None).await.map_err(pe)?;
-    apply_credential(s, id, None);
     let detail = json!({"purpose": auth::admin::CREDENTIAL_PURPOSE});
-    audit(
+    let row = entry(
         s,
         Some(actor),
         "secret.cleared",
@@ -543,6 +547,11 @@ pub async fn clear_source_credential(
         detail,
     )
     .await;
+    a.store
+        .delete_credential(id, None, Some(&row))
+        .await
+        .map_err(pe)?;
+    apply_credential(s, id, None);
     admin_source(s, &c, actor).await
 }
 
@@ -559,17 +568,8 @@ pub async fn set_source_licence(
     require_admin(actor)?;
     let a = admin(s)?;
     let c = connector(s, id)?;
-    a.store
-        .put_licence(&LicenceRecord {
-            connector: id.to_string(),
-            agreement_on_file: b.agreement_on_file,
-            recorded_by: Some(actor.user_id),
-            recorded_at: s.app.clock.now(),
-        })
-        .await
-        .map_err(pe)?;
     let detail = json!({"agreement_on_file": b.agreement_on_file});
-    audit(
+    let row = entry(
         s,
         Some(actor),
         "licence.recorded",
@@ -577,6 +577,18 @@ pub async fn set_source_licence(
         detail,
     )
     .await;
+    a.store
+        .put_licence(
+            &LicenceRecord {
+                connector: id.to_string(),
+                agreement_on_file: b.agreement_on_file,
+                recorded_by: Some(actor.user_id),
+                recorded_at: s.app.clock.now(),
+            },
+            Some(&row),
+        )
+        .await
+        .map_err(pe)?;
     admin_source(s, &c, actor).await
 }
 
@@ -748,6 +760,7 @@ pub async fn set_my_credential(
             &fields,
             Some(actor.user_id),
             s.app.clock.now(),
+            None,
         )
         .await
         .map_err(pe)?;
@@ -764,8 +777,61 @@ pub async fn clear_my_credential(
     let a = admin(s)?;
     connector(s, id)?;
     a.store
-        .delete_credential(id, Some(actor.user_id))
+        .delete_credential(id, Some(actor.user_id), None)
         .await
         .map_err(pe)?;
     my_credentials(s, actor).await
+}
+
+/// Switch a source off or on (DEC-289): stored with its audit row, applied to the registry at
+/// once (searches skip a disabled source). Not gated: it changes no sign-in setting.
+///
+/// # Errors
+/// Not an admin, unknown source, storage errors.
+pub async fn set_source_enabled(
+    s: &ApiState,
+    actor: Actor,
+    id: &str,
+    enabled: bool,
+) -> ApiResult<AdminSourceDto> {
+    require_admin(actor)?;
+    let a = admin(s)?;
+    let c = connector(s, id)?;
+    let action = if enabled {
+        "source.enabled"
+    } else {
+        "source.disabled"
+    };
+    let row = entry(
+        s,
+        Some(actor),
+        action,
+        Some(("source", id.to_string())),
+        json!({}),
+    )
+    .await;
+    a.store
+        .set_source_enabled(
+            id,
+            enabled,
+            Some(actor.user_id),
+            s.app.clock.now(),
+            Some(&row),
+        )
+        .await
+        .map_err(pe)?;
+    s.registry.set_enabled(id, enabled);
+    admin_source(s, &c, actor).await
+}
+
+/// Apply the stored switches to the registry (start-up).
+///
+/// # Errors
+/// Storage errors.
+pub async fn load_source_switches(s: &ApiState) -> ApiResult<()> {
+    let a = admin(s)?;
+    for (id, enabled) in a.store.source_switches().await.map_err(pe)? {
+        s.registry.set_enabled(&id, enabled);
+    }
+    Ok(())
 }

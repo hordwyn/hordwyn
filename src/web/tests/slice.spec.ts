@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { addPerson } from "./helpers";
 
 // M07 acceptance: sign up -> search a movie (TMDB fixtures via the mock) -> add -> mark watched
 // with a companion -> appears in the library.
@@ -28,9 +29,7 @@ test("sign up, find a movie, watch it with a companion", async ({ page }) => {
 
   await page.goto("/people");
   await hydrated(page);
-  await page.getByLabel("Name", { exact: true }).fill("Ben");
-  await page.getByRole("button", { name: "Add person" }).click();
-  await expect(page.getByRole("listitem").filter({ hasText: "Ben" })).toBeVisible();
+  await addPerson(page, "Ben");
 
   await page.keyboard.press("Control+k");
   const dialog = page.getByRole("dialog");

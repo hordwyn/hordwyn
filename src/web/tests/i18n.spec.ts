@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { importDone } from "./helpers";
 
 // Per-user language (owner ruling DEC-171, DEC-201): the account menu switches the language,
 // the server renders the page in it and sets `<html lang>`; "Automatic" goes back.
@@ -52,9 +53,7 @@ test("the phase 1 pages render in German", async ({ page }) => {
     headers: { "content-type": "application/octet-stream" },
   });
   const { id } = await started.json();
-  await expect
-    .poll(async () => (await (await page.request.get(`/api/v1/imports/${id}`)).json()).state, { timeout: 30_000 })
-    .toBe("done");
+  await importDone(page, id);
   const lib = await (await page.request.get("/api/v1/library")).json();
   const item = lib.items[0].item.id as string;
   await hydrated(page);

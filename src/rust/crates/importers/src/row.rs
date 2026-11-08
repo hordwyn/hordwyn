@@ -28,6 +28,10 @@ pub struct HistoryEntry {
     #[serde(default)]
     #[schemars(with = "Option<serde_json::Value>")]
     pub progress: Option<serde_json::Value>,
+    /// Stable id of the event in the source (optional): re-importing a newer file of the
+    /// same source keys the event by it instead of its position in the row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<String>,
 }
 
 /// One library entry.
@@ -55,6 +59,10 @@ pub struct ImportRow {
     pub notes: Option<String>,
     #[serde(default)]
     pub history: Vec<HistoryEntry>,
+    /// Names of the user's lists the entry belongs to (optional, added in version 1
+    /// without a version bump: older files have none); missing lists are created.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lists: Vec<String>,
 }
 
 /// Why a row was not imported (per-row report).

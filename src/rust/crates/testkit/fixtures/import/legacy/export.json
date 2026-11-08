@@ -1,0 +1,1437 @@
+{
+  "metadata": [
+    {
+      "lot": "anime",
+      "source_id": "Tensei shitara Dainana Ouji Datta node, Kimama ni Majutsu wo Kiwamemasu",
+      "identifier": "53516",
+      "source": "myanimelist",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "7",
+          "collection_id": "col_dfUnoP3GEHtT",
+          "collection_name": "Completed",
+          "created_on": "2025-07-01T20:26:55.099126Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2025-07-01T20:26:55.299502Z"
+        },
+        {
+          "rank": "5",
+          "collection_id": "col_SG03dYPEQuH6",
+          "collection_name": "Monitoring",
+          "created_on": "2025-07-01T20:26:50.182700Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2025-07-01T20:26:50.440312Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-07-01T00:00:00Z",
+          "anime_episode_number": 12,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-07-01T00:00:00Z",
+          "anime_episode_number": 11,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-07-01T00:00:00Z",
+          "anime_episode_number": 10,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-07-01T00:00:00Z",
+          "anime_episode_number": 9,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-07-01T00:00:00Z",
+          "anime_episode_number": 8,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-07-01T00:00:00Z",
+          "anime_episode_number": 7,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-07-01T00:00:00Z",
+          "anime_episode_number": 6,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-07-01T00:00:00Z",
+          "anime_episode_number": 5,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-07-01T00:00:00Z",
+          "anime_episode_number": 4,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-07-01T00:00:00Z",
+          "anime_episode_number": 3,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-07-01T00:00:00Z",
+          "anime_episode_number": 2,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-07-01T00:00:00Z",
+          "anime_episode_number": 1,
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "anime",
+      "source_id": "Sword Art Online",
+      "identifier": "11757",
+      "source": "myanimelist",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "9",
+          "collection_id": "col_dfUnoP3GEHtT",
+          "collection_name": "Completed",
+          "created_on": "2025-06-21T09:42:08.913533Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2025-06-21T09:42:18.832629Z"
+        },
+        {
+          "rank": "7",
+          "collection_id": "col_SG03dYPEQuH6",
+          "collection_name": "Monitoring",
+          "created_on": "2025-06-21T09:41:26.381963Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2025-06-21T09:42:04.361281Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 25,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 24,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 23,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 22,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 21,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 20,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 19,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 18,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 17,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 16,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 15,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 14,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 13,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 12,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 11,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 10,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 9,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 8,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 7,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 6,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 5,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 4,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 3,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 2,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "anime_episode_number": 1,
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "anime",
+      "source_id": "Shinmai Ossan Bouken-sha, Saikyou Party ni Shinu Hodo Kitaerarete Muteki ni Naru.",
+      "identifier": "163292",
+      "source": "anilist",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "11",
+          "collection_id": "col_dfUnoP3GEHtT",
+          "collection_name": "Completed",
+          "created_on": "2025-06-19T22:23:48.268847Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2025-06-19T22:23:48.481553Z"
+        },
+        {
+          "rank": "8",
+          "collection_id": "col_SG03dYPEQuH6",
+          "collection_name": "Monitoring",
+          "created_on": "2025-06-19T22:23:27.838376Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2025-06-19T22:23:43.903991Z",
+          "information": {}
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-06-20T00:00:00Z",
+          "anime_episode_number": 12,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-06-20T00:00:00Z",
+          "anime_episode_number": 11,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-06-20T00:00:00Z",
+          "anime_episode_number": 10,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-06-20T00:00:00Z",
+          "anime_episode_number": 9,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-06-20T00:00:00Z",
+          "anime_episode_number": 8,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-06-20T00:00:00Z",
+          "anime_episode_number": 7,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-06-20T00:00:00Z",
+          "anime_episode_number": 6,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-06-20T00:00:00Z",
+          "anime_episode_number": 5,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-06-20T00:00:00Z",
+          "anime_episode_number": 4,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-06-20T00:00:00Z",
+          "anime_episode_number": 3,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-06-20T00:00:00Z",
+          "anime_episode_number": 2,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2025-06-20T00:00:00Z",
+          "anime_episode_number": 1,
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "book",
+      "source_id": "Guns, Germs, and Steel",
+      "identifier": "OL276558W",
+      "source": "openlibrary",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "4",
+          "collection_id": "col_SG03dYPEQuH6",
+          "collection_name": "Monitoring",
+          "created_on": "2025-08-02T15:52:37.082057Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2026-01-06T23:00:16.273252Z"
+        },
+        {
+          "rank": "4",
+          "collection_id": "col__bUd_AU8jFZr",
+          "collection_name": "In Progress",
+          "created_on": "2025-08-02T15:52:36.998542Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2025-08-02T15:53:37.692493Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "in_progress",
+          "progress": "11",
+          "started_on": "2025-08-02T00:00:00Z",
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "book",
+      "source_id": "The Atlas Paradox",
+      "identifier": "OL27969006W",
+      "source": "openlibrary",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "8",
+          "collection_id": "col_9BtgxeicnZjd",
+          "collection_name": "Owned",
+          "created_on": "2024-12-12T21:16:55.232350Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-10-13T18:49:39.511455Z",
+          "information": {}
+        },
+        {
+          "rank": "16",
+          "collection_id": "col__bUd_AU8jFZr",
+          "collection_name": "In Progress",
+          "created_on": "2024-12-12T21:16:55.232350Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-02-04T14:04:11.259681Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "in_progress",
+          "progress": "5",
+          "started_on": "2024-02-04T00:00:00Z",
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "book",
+      "source_id": "Harry Potter and the Goblet of Fire - Ravenclaw Edition",
+      "identifier": "rEbkyAEACAAJ",
+      "source": "google_books",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "6",
+          "collection_id": "col_9BtgxeicnZjd",
+          "collection_name": "Owned",
+          "created_on": "2024-12-12T21:16:55.232350Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-10-13T18:49:39.511455Z",
+          "information": {}
+        },
+        {
+          "rank": "57",
+          "collection_id": "col_dfUnoP3GEHtT",
+          "collection_name": "Completed",
+          "created_on": "2024-12-12T21:16:55.232350Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-10-13T18:49:39.511455Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2024-03-11T00:00:00Z",
+          "started_on": "2024-02-12T00:00:00Z",
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "book",
+      "source_id": "Harry Potter and the Chamber of Secrets - Ravenclaw Edition",
+      "identifier": "rWvQswEACAAJ",
+      "source": "google_books",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "2",
+          "collection_id": "col_9BtgxeicnZjd",
+          "collection_name": "Owned",
+          "created_on": "2024-12-12T21:16:55.232350Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-10-13T18:49:39.511455Z",
+          "information": {}
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "dropped",
+          "progress": "50",
+          "started_on": "2024-01-28T00:00:00Z",
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "video_game",
+      "source_id": "Star Wars: The Old Republic",
+      "identifier": "114",
+      "source": "igdb",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "12",
+          "collection_id": "col_SG03dYPEQuH6",
+          "collection_name": "Monitoring",
+          "created_on": "2024-12-17T23:37:09.242061Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-12-26T23:51:58.872004Z"
+        },
+        {
+          "rank": "11",
+          "collection_id": "col__bUd_AU8jFZr",
+          "collection_name": "In Progress",
+          "created_on": "2024-12-17T23:37:09.202982Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-12-26T23:51:58.835321Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "in_progress",
+          "progress": "48",
+          "started_on": "2024-01-23T00:00:00Z",
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "video_game",
+      "source_id": "DCS World",
+      "identifier": "3769",
+      "source": "igdb",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "13",
+          "collection_id": "col_SG03dYPEQuH6",
+          "collection_name": "Monitoring",
+          "created_on": "2024-12-17T19:15:37.542304Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-12-17T19:15:37.542304Z"
+        },
+        {
+          "rank": "13",
+          "collection_id": "col__bUd_AU8jFZr",
+          "collection_name": "In Progress",
+          "created_on": "2024-12-17T19:15:37.509556Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-12-17T19:15:37.509556Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "in_progress",
+          "progress": "0",
+          "started_on": "2024-12-17T00:00:00Z",
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "video_game",
+      "source_id": "Final Fantasy XIV Online",
+      "identifier": "386",
+      "source": "igdb",
+      "reviews": [],
+      "collections": [],
+      "seen_history": [
+        {
+          "state": "on_a_hold",
+          "progress": "12",
+          "started_on": "2024-01-23T00:00:00Z",
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "movie",
+      "source_id": "The Wrecking Crew",
+      "identifier": "1168190",
+      "source": "tmdb",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "1",
+          "collection_id": "col_dfUnoP3GEHtT",
+          "collection_name": "Completed",
+          "created_on": "2026-10-18T19:00:17.530840Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2026-10-18T19:00:17.530840Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-10-18T19:00:16Z",
+          "providers_consumed_on": [
+            "Amazon Prime"
+          ]
+        }
+      ]
+    },
+    {
+      "lot": "movie",
+      "source_id": "Hidden Figures",
+      "identifier": "381284",
+      "source": "tmdb",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "72",
+          "collection_id": "col_dfUnoP3GEHtT",
+          "collection_name": "Completed",
+          "created_on": "2024-12-12T21:16:55.232350Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-10-13T18:49:39.511455Z"
+        },
+        {
+          "rank": "2",
+          "collection_id": "col_HRpFjKHIhUMl",
+          "collection_name": "WatchWithPartner",
+          "created_on": "2024-12-12T21:16:55.232350Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-02-24T16:51:25.766565Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "completed",
+          "progress": "100",
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "movie",
+      "source_id": "The Chronicles of Narnia: The Lion, the Witch and the Wardrobe",
+      "identifier": "411",
+      "source": "tmdb",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "20",
+          "collection_id": "col__bUd_AU8jFZr",
+          "collection_name": "In Progress",
+          "created_on": "2024-12-12T21:16:55.232350Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-01-15T13:52:11.115767Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "in_progress",
+          "progress": "13",
+          "started_on": "2024-01-15T00:00:00Z",
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "movie",
+      "source_id": "Fast Five",
+      "identifier": "51497",
+      "source": "tmdb",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "51",
+          "collection_id": "col_dfUnoP3GEHtT",
+          "collection_name": "Completed",
+          "created_on": "2024-12-12T21:16:55.232350Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-10-13T18:49:39.511455Z"
+        },
+        {
+          "rank": "6",
+          "collection_id": "col_DtZSwUzheIdC",
+          "collection_name": "Fast and Furious",
+          "created_on": "2024-12-12T21:16:55.232350Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-01-16T13:22:53.244923Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "completed",
+          "progress": "100",
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "movie",
+      "source_id": "Harry Potter and the Philosopher's Stone",
+      "identifier": "671",
+      "source": "tmdb",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "11",
+          "collection_id": "col_SG03dYPEQuH6",
+          "collection_name": "Monitoring",
+          "created_on": "2025-01-19T01:59:17.415786Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2025-01-19T02:19:10.270865Z"
+        },
+        {
+          "rank": "6",
+          "collection_id": "col__bUd_AU8jFZr",
+          "collection_name": "In Progress",
+          "created_on": "2025-01-19T01:59:17.365386Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2025-01-19T02:19:10.237545Z"
+        },
+        {
+          "rank": "47",
+          "collection_id": "col_dfUnoP3GEHtT",
+          "collection_name": "Completed",
+          "created_on": "2024-12-12T21:16:55.232350Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-10-13T18:49:39.511455Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "in_progress",
+          "progress": "14.520903654253586765648975430",
+          "started_on": "2025-01-19T00:00:00Z",
+          "providers_consumed_on": [
+            "Jellyfin"
+          ]
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "movie",
+      "source_id": "Fast & Furious 6",
+      "identifier": "82992",
+      "source": "tmdb",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "54",
+          "collection_id": "col_dfUnoP3GEHtT",
+          "collection_name": "Completed",
+          "created_on": "2024-12-12T21:16:55.232350Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-10-13T18:49:39.511455Z"
+        },
+        {
+          "rank": "5",
+          "collection_id": "col_DtZSwUzheIdC",
+          "collection_name": "Fast and Furious",
+          "created_on": "2024-12-12T21:16:55.232350Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-01-16T13:23:11.625358Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "completed",
+          "progress": "100",
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "movie",
+      "source_id": "A Minecraft Movie",
+      "identifier": "950387",
+      "source": "tmdb",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "0",
+          "collection_id": "col_dfUnoP3GEHtT",
+          "collection_name": "Completed",
+          "created_on": "2026-11-06T12:50:31.967101Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2026-11-06T12:50:31.967101Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-11-06T12:50:30Z",
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "movie",
+      "source_id": "The Fast and the Furious: Tokyo Drift",
+      "identifier": "9615",
+      "source": "tmdb",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "89",
+          "collection_id": "col_dfUnoP3GEHtT",
+          "collection_name": "Completed",
+          "created_on": "2024-12-12T21:16:55.232350Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-10-13T18:49:39.511455Z"
+        },
+        {
+          "rank": "11",
+          "collection_id": "col_DtZSwUzheIdC",
+          "collection_name": "Fast and Furious",
+          "created_on": "2024-12-12T21:16:55.232350Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2024-01-16T13:19:26.000272Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2024-01-16T00:00:00Z",
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "show",
+      "source_id": "Star Wars: The Bad Batch",
+      "identifier": "105971",
+      "source": "tmdb",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "7",
+          "collection_id": "col__bUd_AU8jFZr",
+          "collection_name": "In Progress",
+          "created_on": "2025-01-18T13:44:28.623886Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2025-01-18T13:44:35.466195Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "in_progress",
+          "progress": "9.797418788645368904623938230",
+          "started_on": "2025-01-18T00:00:00Z",
+          "show_season_number": 1,
+          "show_episode_number": 1,
+          "providers_consumed_on": [
+            "Jellyfin"
+          ]
+        }
+      ]
+    },
+    {
+      "lot": "show",
+      "source_id": "Castle",
+      "identifier": "1419",
+      "source": "tmdb",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "2",
+          "collection_id": "col_SG03dYPEQuH6",
+          "collection_name": "Monitoring",
+          "created_on": "2026-01-20T22:07:06.668865Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2026-02-20T00:29:05.627246Z"
+        },
+        {
+          "rank": "2",
+          "collection_id": "col__bUd_AU8jFZr",
+          "collection_name": "In Progress",
+          "created_on": "2026-01-20T22:09:41.789695Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2026-02-20T00:29:05.593646Z"
+        },
+        {
+          "rank": "3",
+          "collection_id": "col_dfUnoP3GEHtT",
+          "collection_name": "Completed",
+          "created_on": "2026-01-20T22:07:19.280884Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2026-01-20T22:08:42.410602Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-02-20T00:29:05Z",
+          "show_season_number": 5,
+          "show_episode_number": 7,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-02-20T00:29:00Z",
+          "show_season_number": 5,
+          "show_episode_number": 6,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-02-20T00:28:53Z",
+          "show_season_number": 5,
+          "show_episode_number": 5,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-02-20T00:28:49Z",
+          "show_season_number": 5,
+          "show_episode_number": 4,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-02-20T00:28:44Z",
+          "show_season_number": 5,
+          "show_episode_number": 3,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-02-20T00:28:41Z",
+          "show_season_number": 5,
+          "show_episode_number": 2,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-02-20T00:28:38Z",
+          "show_season_number": 5,
+          "show_episode_number": 1,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-02-20T00:28:25Z",
+          "show_season_number": 4,
+          "show_episode_number": 23,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-02-20T00:28:21Z",
+          "show_season_number": 4,
+          "show_episode_number": 22,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-02-20T00:28:17Z",
+          "show_season_number": 4,
+          "show_episode_number": 21,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-02-20T00:28:10Z",
+          "show_season_number": 4,
+          "show_episode_number": 20,
+          "providers_consumed_on": []
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-02-20T00:28:06Z",
+          "show_season_number": 4,
+          "show_episode_number": 19,
+          "providers_consumed_on": []
+        }
+      ]
+    },
+    {
+      "lot": "show",
+      "source_id": "Supernatural",
+      "identifier": "1622",
+      "source": "tmdb",
+      "reviews": [],
+      "collections": [
+        {
+          "rank": "1",
+          "collection_id": "col_SG03dYPEQuH6",
+          "collection_name": "Monitoring",
+          "created_on": "2026-08-04T01:14:52.189871Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2026-10-03T22:01:08.087916Z"
+        },
+        {
+          "rank": "1",
+          "collection_id": "col__bUd_AU8jFZr",
+          "collection_name": "In Progress",
+          "created_on": "2026-08-04T01:15:00.265696Z",
+          "creator_user_id": "usr_owner_example",
+          "last_updated_on": "2026-08-04T23:50:23.536626Z"
+        }
+      ],
+      "seen_history": [
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-08-04T23:50:20Z",
+          "show_season_number": 2,
+          "show_episode_number": 3,
+          "providers_consumed_on": [
+            "Netflix"
+          ]
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-08-04T23:50:20Z",
+          "show_season_number": 2,
+          "show_episode_number": 2,
+          "providers_consumed_on": [
+            "Netflix"
+          ]
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-08-04T23:50:20Z",
+          "show_season_number": 2,
+          "show_episode_number": 1,
+          "providers_consumed_on": [
+            "Netflix"
+          ]
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-08-04T23:50:12Z",
+          "show_season_number": 1,
+          "show_episode_number": 22,
+          "providers_consumed_on": [
+            "Netflix"
+          ]
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-08-04T23:50:12Z",
+          "show_season_number": 1,
+          "show_episode_number": 21,
+          "providers_consumed_on": [
+            "Netflix"
+          ]
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-08-04T01:27:03Z",
+          "show_season_number": 1,
+          "show_episode_number": 20,
+          "providers_consumed_on": [
+            "Netflix"
+          ]
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-08-04T01:27:03Z",
+          "show_season_number": 1,
+          "show_episode_number": 19,
+          "providers_consumed_on": [
+            "Netflix"
+          ]
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-08-04T01:27:03Z",
+          "show_season_number": 1,
+          "show_episode_number": 18,
+          "providers_consumed_on": [
+            "Netflix"
+          ]
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-08-04T01:27:03Z",
+          "show_season_number": 1,
+          "show_episode_number": 17,
+          "providers_consumed_on": [
+            "Netflix"
+          ]
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-08-04T01:27:03Z",
+          "show_season_number": 1,
+          "show_episode_number": 16,
+          "providers_consumed_on": [
+            "Netflix"
+          ]
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-08-04T01:27:03Z",
+          "show_season_number": 1,
+          "show_episode_number": 15,
+          "providers_consumed_on": [
+            "Netflix"
+          ]
+        },
+        {
+          "state": "completed",
+          "progress": "100",
+          "ended_on": "2026-08-04T01:27:03Z",
+          "show_season_number": 1,
+          "show_episode_number": 14,
+          "providers_consumed_on": [
+            "Netflix"
+          ]
+        }
+      ]
+    }
+  ],
+  "collections": [
+    {
+      "id": "col_dfUnoP3GEHtT",
+      "count": 94,
+      "name": "Completed",
+      "is_default": true,
+      "description": "Media items that I have completed.",
+      "creator": {
+        "id": "usr_owner_example",
+        "name": "Owner Example"
+      },
+      "collaborators": [
+        {
+          "collaborator": {
+            "id": "usr_owner_example",
+            "name": "Owner Example"
+          }
+        }
+      ]
+    },
+    {
+      "id": "col_SG03dYPEQuH6",
+      "count": 13,
+      "name": "Monitoring",
+      "is_default": true,
+      "description": "Items that I am keeping an eye on.",
+      "creator": {
+        "id": "usr_owner_example",
+        "name": "Owner Example"
+      },
+      "collaborators": [
+        {
+          "collaborator": {
+            "id": "usr_owner_example",
+            "name": "Owner Example"
+          }
+        }
+      ]
+    },
+    {
+      "id": "col__bUd_AU8jFZr",
+      "count": 20,
+      "name": "In Progress",
+      "is_default": true,
+      "description": "Media items that I am currently watching.",
+      "creator": {
+        "id": "usr_owner_example",
+        "name": "Owner Example"
+      },
+      "collaborators": [
+        {
+          "collaborator": {
+            "id": "usr_owner_example",
+            "name": "Owner Example"
+          }
+        }
+      ]
+    },
+    {
+      "id": "col_y1Ya6LiIIL0U",
+      "count": 11,
+      "name": "WannaWatch",
+      "is_default": false,
+      "creator": {
+        "id": "usr_owner_example",
+        "name": "Owner Example"
+      },
+      "collaborators": [
+        {
+          "collaborator": {
+            "id": "usr_owner_example",
+            "name": "Owner Example"
+          }
+        }
+      ]
+    },
+    {
+      "id": "col_AVDnnqBlTP0g",
+      "count": 18,
+      "name": "Watchlist",
+      "is_default": true,
+      "description": "Things I want to watch in the future.",
+      "creator": {
+        "id": "usr_owner_example",
+        "name": "Owner Example"
+      },
+      "collaborators": [
+        {
+          "collaborator": {
+            "id": "usr_owner_example",
+            "name": "Owner Example"
+          }
+        }
+      ]
+    },
+    {
+      "id": "col_9BtgxeicnZjd",
+      "count": 9,
+      "name": "Owned",
+      "is_default": true,
+      "description": "Items that I have in my inventory.",
+      "creator": {
+        "id": "usr_owner_example",
+        "name": "Owner Example"
+      },
+      "collaborators": [
+        {
+          "collaborator": {
+            "id": "usr_owner_example",
+            "name": "Owner Example"
+          }
+        }
+      ],
+      "information_template": [
+        {
+          "name": "Owned on",
+          "description": "When did you get this media?",
+          "lot": "Date"
+        }
+      ]
+    },
+    {
+      "id": "col_wTKXftHw0Iy-",
+      "count": 0,
+      "name": "Reminders",
+      "is_default": true,
+      "description": "Items that I want to be reminded about.",
+      "creator": {
+        "id": "usr_owner_example",
+        "name": "Owner Example"
+      },
+      "collaborators": [
+        {
+          "collaborator": {
+            "id": "usr_owner_example",
+            "name": "Owner Example"
+          }
+        }
+      ],
+      "information_template": [
+        {
+          "name": "Reminder",
+          "description": "When do you want to be reminded?",
+          "required": true,
+          "lot": "Date"
+        },
+        {
+          "name": "Text",
+          "description": "What do you want to be reminded about?",
+          "required": true,
+          "lot": "String"
+        }
+      ]
+    },
+    {
+      "id": "col_HRpFjKHIhUMl",
+      "count": 8,
+      "name": "WatchWithPartner",
+      "is_default": false,
+      "creator": {
+        "id": "usr_owner_example",
+        "name": "Owner Example"
+      },
+      "collaborators": [
+        {
+          "collaborator": {
+            "id": "usr_owner_example",
+            "name": "Owner Example"
+          }
+        }
+      ]
+    },
+    {
+      "id": "col_LdqeQ741hRwN",
+      "count": 1,
+      "name": "Custom",
+      "is_default": true,
+      "description": "Items that I have created manually.",
+      "creator": {
+        "id": "usr_owner_example",
+        "name": "Owner Example"
+      },
+      "collaborators": [
+        {
+          "collaborator": {
+            "id": "usr_owner_example",
+            "name": "Owner Example"
+          }
+        }
+      ]
+    },
+    {
+      "id": "col_EZZdF5wCqata",
+      "count": 2,
+      "name": "Ghibli",
+      "is_default": false,
+      "creator": {
+        "id": "usr_owner_example",
+        "name": "Owner Example"
+      },
+      "collaborators": [
+        {
+          "collaborator": {
+            "id": "usr_owner_example",
+            "name": "Owner Example"
+          }
+        }
+      ]
+    },
+    {
+      "id": "col_DtZSwUzheIdC",
+      "count": 11,
+      "name": "Fast and Furious",
+      "is_default": false,
+      "creator": {
+        "id": "usr_owner_example",
+        "name": "Owner Example"
+      },
+      "collaborators": [
+        {
+          "collaborator": {
+            "id": "usr_owner_example",
+            "name": "Owner Example"
+          }
+        }
+      ]
+    },
+    {
+      "id": "col_BaFO5xjDTylX",
+      "count": 1,
+      "name": "Read to Kid",
+      "is_default": false,
+      "creator": {
+        "id": "usr_owner_example",
+        "name": "Owner Example"
+      },
+      "collaborators": [
+        {
+          "collaborator": {
+            "id": "usr_owner_example",
+            "name": "Owner Example"
+          }
+        }
+      ]
+    }
+  ],
+  "people": [],
+  "workouts": [],
+  "exercises": [],
+  "measurements": [],
+  "metadata_groups": [],
+  "workout_templates": []
+}

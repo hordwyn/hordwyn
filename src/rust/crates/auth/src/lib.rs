@@ -10,6 +10,7 @@ pub mod admin_pg;
 mod fresh;
 pub mod oidc;
 pub mod pg;
+mod recovery;
 pub mod secrets;
 mod store;
 
@@ -31,10 +32,14 @@ use domain::ids::UserId;
 use domain::user::{Actor, Role, User};
 use thiserror::Error;
 
-pub use fresh::{REAUTH_CAP_MINUTES, REAUTH_SLIDE_MINUTES, RECOVERY_CODES, ReauthStatus};
+pub use fresh::{
+    OIDC_AUTH_TIME_MAX_AGE_SECS, PENDING_ACTION_MAX_BYTES, PENDING_ACTION_MINUTES,
+    REAUTH_CAP_MINUTES, REAUTH_SLIDE_MINUTES, RECOVERY_CODES, ReauthStatus,
+};
+pub use recovery::PASSWORD_RESET_MINUTES;
 pub use store::{
-    AuthStore, Credentials, InviteStore, MemAuthStore, MemInviteStore, OidcIdentity, RecoveryCode,
-    Session, SignupInvite,
+    AuthStore, Credentials, InviteStore, MemAuthStore, MemInviteStore, OidcIdentity, PasswordReset,
+    RecoveryCode, Session, SessionSecret, SignupInvite,
 };
 
 /// Minimum password length (from the shared rules in `contracts::auth`).
@@ -642,6 +647,17 @@ impl Auth {
 
     /// A new session; signing in counts as a fresh proof made with `method` (DEC-191).
     async fn create_session(&self, user: UserId, method: &str) -> Result<SessionToken, AuthError> {
+        self.create_session_from(user, method, None, None).await
+    }
+
+    /// A new session, signed in through `provider` (OP session `sid`) when given.
+    pub(crate) async fn create_session_from(
+        &self,
+        user: UserId,
+        method: &str,
+        provider: Option<uuid::Uuid>,
+        sid: Option<String>,
+    ) -> Result<SessionToken, AuthError> {
         let token = URL_SAFE_NO_PAD.encode(random_bytes::<32>());
         let now = self.now();
         self.store
@@ -654,6 +670,8 @@ impl Auth {
                 reauth_at: Some(now),
                 reauth_method: Some(method.to_string()),
                 reauth_slide_at: None,
+                provider_id: provider,
+                oidc_sid: sid,
             })
             .await?;
         Ok(SessionToken(token))

@@ -438,6 +438,18 @@ impl NotifyStore for PgNotifyStore {
         Ok(())
     }
 
+    async fn mark_all_read(&self, user: UserId, at: DateTime<Utc>) -> StoreResult<u32> {
+        let r = sqlx::query!(
+            "UPDATE notify_inbox SET read_at = $2 WHERE user_id = $1 AND read_at IS NULL",
+            user.0,
+            at
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(pe)?;
+        Ok(u32::try_from(r.rows_affected()).unwrap_or(u32::MAX))
+    }
+
     async fn insert_delivery(&self, d: &Delivery) -> StoreResult<bool> {
         let r = sqlx::query!(
             "INSERT INTO notify_deliveries (id, user_id, channel_id, event, dedupe_key, title,
@@ -506,6 +518,23 @@ impl NotifyStore for PgNotifyStore {
              ORDER BY created_at DESC, id DESC LIMIT $2",
             user.0,
             limit(n)
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(pe)?
+        .into_iter()
+        .map(DeliveryRow::into_delivery)
+        .collect()
+    }
+
+    async fn latest_deliveries(&self, user: UserId) -> StoreResult<Vec<Delivery>> {
+        sqlx::query_as!(
+            DeliveryRow,
+            "SELECT DISTINCT ON (channel_id) id, user_id, channel_id, event, dedupe_key, title,
+                    body, link, state, attempts, last_error, due_at, created_at, sent_at
+             FROM notify_deliveries WHERE user_id = $1 AND state <> 'suppressed'
+             ORDER BY channel_id, created_at DESC, id DESC",
+            user.0
         )
         .fetch_all(&self.pool)
         .await

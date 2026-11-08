@@ -1,9 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
-import { expectNoA11yViolations, hydrated, signUp } from "./helpers";
+import { expectNoA11yViolations, hydrated, signUp, importDone } from "./helpers";
 
 // UX phase 1 item page (design.md 6.3, 5.4, 5.5, 3.4; addendum-1 1.3 Item row): the next step
 // with Undo, the "With..." sheet with a person and a rating, the play sheet with players and
-// the winner, the episode list's bulk marking with the ask-once question, the private note,
+// the winner, the episode list's bulk marking with the ask-once question, "Mark show" and the
+// backfill over a date range, the private note,
 // the tag editor, keyboard focus in a sheet, and axe in both themes at 1280 and 360 px with a
 // sheet open.
 
@@ -39,9 +40,7 @@ async function seed(page: Page): Promise<Record<string, string>> {
   });
   expect(started.status()).toBe(202);
   const { id } = await started.json();
-  await expect
-    .poll(async () => (await (await page.request.get(`/api/v1/imports/${id}`)).json()).state, { timeout: 30_000 })
-    .toBe("done");
+  await importDone(page, id);
   const lib = await (await page.request.get("/api/v1/library?limit=50")).json();
   const ids: Record<string, string> = Object.fromEntries(
     lib.items.map((i: { item: { title: string; id: string } }) => [i.item.title, i.item.id]),
@@ -52,7 +51,8 @@ async function seed(page: Page): Promise<Record<string, string>> {
         const p = await (await page.request.get(`/api/v1/items/${ids["Game of Thrones"]}/page`)).json();
         return (p.item.attributes.seasons ?? []).length;
       },
-      { timeout: 30_000 },
+      // the catalog refresh waits behind other specs' jobs on the same lane (UX3-22)
+      { timeout: 90_000 },
     )
     .toBeGreaterThan(0);
   return ids;
@@ -246,6 +246,46 @@ test("episodes: one mark asks once about the earlier ones, remembered; a season 
   const toast = page.getByRole("status").locator("> div").filter({ hasText: "Logged: 2 episodes" });
   await toast.getByRole("button", { name: "Undo" }).click();
   await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("8/10");
+});
+
+test("episodes: a season spreads over a date range, a bad range says why, Mark show marks the rest", async ({ page }) => {
+  test.setTimeout(240_000);
+  await signUp(page, `eprange${Date.now()}`, "Range Tester");
+  const ids = await seed(page);
+  const show = ids["Game of Thrones"];
+  await open(page, `/items/${show}`);
+  const tab = page.getByRole("tabpanel", { name: "Episodes" });
+  await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("1/10");
+
+  await tab.getByRole("radio", { name: "Spread over a date range" }).click();
+  await tab.getByLabel("From").fill("2025-01-01");
+  await tab.getByLabel("To").fill("2025-01-31");
+  await tab.getByRole("button", { name: "Mark season watched" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Logged: 9 episodes" })).toBeVisible();
+  await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("10/10");
+  const events: { occurred_at: string; progress: { type: string } }[] = await (
+    await page.request.get(`/api/v1/items/${show}/progress`)
+  ).json();
+  const spread = events
+    .map((e) => e.occurred_at)
+    .filter((d) => d.startsWith("2025-01"))
+    .sort();
+  expect(spread.length).toBe(9);
+  expect(spread[0]).toMatch(/^2025-01-01T12:00:00/);
+  expect(spread[8]).toMatch(/^2025-01-31T12:00:00/);
+
+  // a range that ends before it starts is refused, inline
+  await tab.getByLabel("To").fill("2024-12-01");
+  await tab.getByRole("button", { name: "Mark show watched" }).click();
+  await expect(tab.getByRole("alert")).toHaveText("The last day is before the first.");
+
+  // "Mark show": every season's open episodes at once (63 = 73 regular episodes - 10)
+  await tab.getByRole("radio", { name: "Now" }).click();
+  await expect(bar(page).getByRole("button", { name: "Watched S2 E1" })).toBeVisible();
+  await tab.getByRole("button", { name: "Mark show watched" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Logged: 63 episodes" })).toBeVisible({ timeout: 120_000 });
+  await expect(tab.getByRole("button", { name: /^Season 8/ })).toContainText("6/6");
+  await expect(tab.getByRole("button", { name: /^Season 2/ })).toContainText("10/10");
 });
 
 for (const size of [

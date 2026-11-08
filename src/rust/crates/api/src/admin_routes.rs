@@ -14,6 +14,9 @@ use contracts::admin::{
     SettingsPatchDto, SetupStateDto, SourceStatusPageDto, SourceTestDto, SourceTestInputDto,
     StorageJobsDto, UserCredentialDto,
 };
+use contracts::admin::{
+    MailPasswordDto, MailSettingsDto, MailTestDto, MailTestInputDto, SourceEnabledDto,
+};
 use contracts::{ErrorDto, SessionDto, SignUpDto};
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -48,6 +51,10 @@ pub(crate) fn routes() -> OpenApiRouter<ApiState> {
         .routes(routes!(set_credential, clear_credential))
         .routes(routes!(test_source))
         .routes(routes!(set_licence))
+        .routes(routes!(set_source_enabled))
+        .routes(routes!(mail))
+        .routes(routes!(set_mail_password))
+        .routes(routes!(send_test_mail))
         .routes(routes!(storage_jobs))
         .routes(routes!(run_eviction))
         .routes(routes!(retry_job))
@@ -503,4 +510,47 @@ async fn audit_csv(
         csv,
     )
         .into_response())
+}
+
+#[utoipa::path(put, path = "/admin/sources/{id}/enabled", tag = "admin",
+    request_body = SourceEnabledDto,
+    responses((status = 200, body = AdminSourceDto), (status = 403, body = ErrorDto)))]
+async fn set_source_enabled(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+    Json(b): Json<SourceEnabledDto>,
+) -> ApiResult<Json<AdminSourceDto>> {
+    Ok(Json(
+        admin::set_source_enabled(&s, a, &id, b.enabled).await?,
+    ))
+}
+
+#[utoipa::path(get, path = "/admin/mail", tag = "admin",
+    responses((status = 200, body = MailSettingsDto), (status = 403, body = ErrorDto)))]
+async fn mail(State(s): State<ApiState>, Authed(a): Authed) -> ApiResult<Json<MailSettingsDto>> {
+    Ok(Json(admin::mail(&s, a).await?))
+}
+
+/// Replace or remove the SMTP password (write-only, encrypted, gated).
+#[utoipa::path(put, path = "/admin/mail/password", tag = "admin", request_body = MailPasswordDto,
+    responses((status = 200, body = MailSettingsDto), (status = 403, body = ErrorDto),
+        (status = 409, body = ErrorDto)))]
+async fn set_mail_password(
+    State(s): State<ApiState>,
+    t: AuthedToken,
+    Json(b): Json<MailPasswordDto>,
+) -> ApiResult<Json<MailSettingsDto>> {
+    Ok(Json(admin::set_mail_password(&s, caller(&t), b).await?))
+}
+
+/// Send a test message with the settings in effect; the outcome is recorded.
+#[utoipa::path(post, path = "/admin/mail/test", tag = "admin", request_body = MailTestInputDto,
+    responses((status = 200, body = MailTestDto), (status = 422, body = ErrorDto)))]
+async fn send_test_mail(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Json(b): Json<MailTestInputDto>,
+) -> ApiResult<Json<MailTestDto>> {
+    Ok(Json(admin::send_test_mail(&s, a, b).await?))
 }

@@ -1,6 +1,8 @@
 //! The Episodes tab (design.md 6.3, 5.4, 3.4 R-07): season chips with watched/total, "Mark
-//! season watched", the episode rows with check circles, the next-up row highlighted, and a
-//! row menu ("Mark up to here", "Watched with..."). Marking one episode while earlier ones
+//! season watched", "Mark show watched", the episode rows with check circles, the next-up
+//! row highlighted, and a row menu ("Mark up to here", "Watched with..."). The bulk marks log
+//! now or spread over a date range (backfill, R-09; "On release dates" waits for per-episode
+//! air dates, DEC-363). Marking one episode while earlier ones
 //! are open asks once, inline, whether to mark those too; "Remember for this show" keeps the
 //! answer in this browser (DEC-231). The ranges come from [`crate::episode_plan`].
 
@@ -9,11 +11,12 @@ use leptos::html;
 use leptos::prelude::*;
 use ui::{
     Button, ButtonSize, ButtonVariant, Checkbox, Chip, DropdownMenu, Icon, IconName, Label,
-    MenuItem,
+    MenuItem, Segmented, SegmentedOption,
 };
 
 use crate::episode_plan::{
-    Ep, Plan, Previous, SeasonRow, plan_single, previous_key, unwatched_in_season, unwatched_up_to,
+    Ep, Plan, Previous, SeasonRow, parse_range, plan_single, previous_key, spread_over,
+    unwatched_in_season, unwatched_in_show, unwatched_up_to,
 };
 use crate::i18n::{t, use_i18n};
 use crate::log_sheet::{ItemInfo, SheetTarget};
@@ -27,6 +30,10 @@ pub struct EpisodeUi {
     pub ask: RwSignal<Option<Ep>>,
     pub busy: RwSignal<bool>,
     pub error: RwSignal<Option<String>>,
+    /// Dates of the bulk marks: `now` or `range` ("Spread over a date range", R-09).
+    pub when: RwSignal<String>,
+    pub from: RwSignal<String>,
+    pub to: RwSignal<String>,
 }
 
 impl Default for EpisodeUi {
@@ -36,6 +43,9 @@ impl Default for EpisodeUi {
             ask: RwSignal::new(None),
             busy: RwSignal::new(false),
             error: RwSignal::new(None),
+            when: RwSignal::new("now".into()),
+            from: RwSignal::new(String::new()),
+            to: RwSignal::new(String::new()),
         }
     }
 }
@@ -68,8 +78,15 @@ fn remember_answer(item_id: &str, answer: Previous) {
     let _ = (item_id, answer);
 }
 
-/// Log `eps` one after the other, then one toast with Undo for all of them.
-fn log_episodes(eps: Vec<Ep>, info: &ItemInfo, ctx: StepCtx, ui: EpisodeUi) {
+/// Log `eps` one after the other (at `dates`, one per episode, else now), then one toast
+/// with Undo for all of them.
+fn log_episodes(
+    eps: Vec<Ep>,
+    dates: Option<Vec<String>>,
+    info: &ItemInfo,
+    ctx: StepCtx,
+    ui: EpisodeUi,
+) {
     if eps.is_empty() {
         return;
     }
@@ -88,10 +105,11 @@ fn log_episodes(eps: Vec<Ep>, info: &ItemInfo, ctx: StepCtx, ui: EpisodeUi) {
     leptos::task::spawn_local(async move {
         let mut ids = Vec::new();
         let mut failed = None;
+        let mut dates = dates.unwrap_or_default().into_iter();
         for (season, episode) in eps {
             let p = contracts::NewProgressDto {
                 progress: serde_json::json!({"type": "episode", "season": season, "episode": episode}),
-                occurred_at: None,
+                occurred_at: dates.next(),
                 client_op_id: Some(uuid::Uuid::now_v7().to_string()),
                 with: Vec::new(),
             };
@@ -115,6 +133,61 @@ fn log_episodes(eps: Vec<Ep>, info: &ItemInfo, ctx: StepCtx, ui: EpisodeUi) {
         ui.busy.set(false);
         refresh.run(());
     });
+}
+
+/// A bulk mark ("Mark season", "Mark show", "Mark up to here"): now, or spread over the
+/// chosen date range (design.md 5.4, R-09).
+fn bulk(eps: Vec<Ep>, info: StoredValue<ItemInfo>, ctx: StepCtx, ui: EpisodeUi) {
+    let dates = if ui.when.get_untracked() == "range" {
+        let range = parse_range(
+            &ui.from.get_untracked(),
+            &ui.to.get_untracked(),
+            crate::history::today(),
+        );
+        match range {
+            Ok((from, to)) => Some(spread_over(eps.len(), from, to)),
+            Err(e) => {
+                ui.error.set(Some(ctx.i18n.t(e.key())));
+                return;
+            }
+        }
+    } else {
+        None
+    };
+    info.with_value(|i| log_episodes(eps, dates, i, ctx, ui));
+}
+
+/// When the bulk marks happened: now, or spread over a date range (backfill).
+#[component]
+fn BulkDates(ui: EpisodeUi) -> impl IntoView {
+    let i18n = use_i18n();
+    let options = vec![
+        SegmentedOption::new("now", i18n.t("episodes-when-now")),
+        SegmentedOption::new("range", i18n.t("episodes-when-range")),
+    ];
+    let max = crate::history::today().iso();
+    let field = "flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm \
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+    view! {
+        <div class="grid gap-2">
+            <Segmented id="ep-when" label=t("episodes-when") value=ui.when options=options class="flex-wrap"/>
+            <Show when=move || ui.when.get() == "range">
+                <div class="flex flex-wrap gap-3">
+                    <div class="grid gap-1">
+                        <Label r#for="ep-from">{t("episodes-from")}</Label>
+                        <input id="ep-from" type="date" max=max.clone() class=field aria-describedby="ep-range-hint"
+                            prop:value=move || ui.from.get() on:input=move |ev| ui.from.set(event_target_value(&ev))/>
+                    </div>
+                    <div class="grid gap-1">
+                        <Label r#for="ep-to">{t("episodes-to")}</Label>
+                        <input id="ep-to" type="date" max=max.clone() class=field aria-describedby="ep-range-hint"
+                            prop:value=move || ui.to.get() on:input=move |ev| ui.to.set(event_target_value(&ev))/>
+                    </div>
+                </div>
+                <p id="ep-range-hint" class="text-xs text-muted-foreground">{t("episodes-range-hint")}</p>
+            </Show>
+        </div>
+    }
 }
 
 /// The Episodes tab.
@@ -142,18 +215,18 @@ pub fn EpisodeList(
     let c2 = ctx.clone();
     let mark_season = move |_| {
         let eps = rows.with_value(|r| unwatched_in_season(r, shown.get_untracked()));
-        info.with_value(|i| log_episodes(eps, i, c2.clone(), ui));
+        bulk(eps, info, c2.clone(), ui);
     };
     let c3 = ctx.clone();
     let mark = Callback::new(move |(target, up_to): (Ep, bool)| {
-        let plan = if up_to {
-            Plan::Log(rows.with_value(|r| unwatched_up_to(r, target)))
-        } else {
-            let answer = info.with_value(|i| stored_answer(&i.item_id));
-            rows.with_value(|r| plan_single(r, target, answer))
-        };
-        match plan {
-            Plan::Log(eps) => info.with_value(|i| log_episodes(eps, i, c3.clone(), ui)),
+        if up_to {
+            let eps = rows.with_value(|r| unwatched_up_to(r, target));
+            bulk(eps, info, c3.clone(), ui);
+            return;
+        }
+        let answer = info.with_value(|i| stored_answer(&i.item_id));
+        match rows.with_value(|r| plan_single(r, target, answer)) {
+            Plan::Log(eps) => info.with_value(|i| log_episodes(eps, None, i, c3.clone(), ui)),
             Plan::Ask { .. } => ui.ask.set(Some(target)),
         }
     });
@@ -168,17 +241,28 @@ pub fn EpisodeList(
         }
         let eps = rows.with_value(|r| plan_single(r, target, choice));
         if let Plan::Log(eps) = eps {
-            info.with_value(|i| log_episodes(eps, i, ctx.clone(), ui));
+            info.with_value(|i| log_episodes(eps, None, i, ctx.clone(), ui));
         }
     });
+    let c4 = StepCtx::current();
+    let mark_show = move |_| {
+        let eps = rows.with_value(|r| unwatched_in_show(r));
+        bulk(eps, info, c4.clone(), ui);
+    };
     view! {
         <section class="grid gap-3 py-2">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <SeasonChips rows=rows.get_value() shown=shown ui=ui/>
-                <Button variant=ButtonVariant::Outline size=ButtonSize::Sm disabled=ui.busy on:click=mark_season>
-                    {t("episodes-mark-season")}
-                </Button>
+                <div class="flex flex-wrap gap-2">
+                    <Button variant=ButtonVariant::Outline size=ButtonSize::Sm disabled=ui.busy on:click=mark_season>
+                        {t("episodes-mark-season")}
+                    </Button>
+                    <Button variant=ButtonVariant::Outline size=ButtonSize::Sm disabled=ui.busy on:click=mark_show>
+                        {t("episodes-mark-show")}
+                    </Button>
+                </div>
             </div>
+            <BulkDates ui=ui/>
             <AskPrevious ui=ui rows=rows answer=answer/>
             {move || ui.error.get().map(|e| view! { <p role="alert" class="text-sm text-destructive-text">{e}</p> })}
             {move || rows.with_value(|r| r.iter().find(|s| s.number == shown.get()).cloned()).map(|season| view! {

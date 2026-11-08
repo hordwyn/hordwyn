@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oidc_providers SET client_secret = $3\n                         WHERE id = $1 AND client_secret = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6cbe24c32c529b09a01ed36450cba5055881745cd466fe7673219aeb7b2b210b"
+}

@@ -13,9 +13,14 @@ mod error;
 mod extract;
 pub mod hooks;
 pub mod notifications;
+mod oidc_routes;
 pub mod ops;
+pub mod people;
+mod people_routes;
+pub mod request_meta;
 mod routes;
 pub mod sharing;
+mod sso_routes;
 pub mod sync;
 
 use std::sync::Arc;
@@ -29,6 +34,9 @@ use catalog_core::search::SearchFanout;
 pub use error::ApiError;
 pub use extract::{Authed, AuthedToken, session_token};
 pub use routes::router;
+pub use sso_routes::{
+    AutoRedirect, SIGNED_OUT_PATH, auto_redirect, password_sign_in, sign_out_location, with_body,
+};
 
 /// User DTO (also used by the web backend).
 #[must_use]
@@ -43,6 +51,12 @@ pub struct Naming {
     pub session_cookie: String,
     /// Cookie holding the pending OIDC login.
     pub oidc_cookie: String,
+    /// Cookie holding an "Is this your account?" ticket (OIDC account linking).
+    pub oidc_link_cookie: String,
+    /// Signed hint for the next silent sign-in (provider, `login_hint`; addendum-1 4.2).
+    pub oidc_hint_cookie: String,
+    /// Loop guard: a silent attempt was made in the last 5 minutes (addendum-1 4.2 step 4).
+    pub oidc_silent_cookie: String,
     /// Title of the OpenAPI document.
     pub api_title: String,
 }
@@ -53,6 +67,9 @@ impl Naming {
         Self {
             session_cookie: format!("{prefix}_session"),
             oidc_cookie: format!("{prefix}_oidc"),
+            oidc_link_cookie: format!("{prefix}_oidc_link"),
+            oidc_hint_cookie: format!("{prefix}_oidc_hint"),
+            oidc_silent_cookie: format!("{prefix}_oidc_silent"),
             api_title: format!("{product} API"),
         }
     }

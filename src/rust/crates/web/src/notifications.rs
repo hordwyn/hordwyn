@@ -1,73 +1,37 @@
-//! Notifications (D-17): the inbox, channels, subscriptions and the delivery log.
+//! Settings > Notifications (design.md 6.8, 5.8; mockup `notifications.html`): four tabs.
+//! Inbox (grouped by the day in the reader's time zone, "Mark all read"), Channels (cards
+//! with health from the delivery log, "Add and send a test"), Rules (events x channels, see
+//! [`crate::notify_rules`]) and Log (deliveries with the error to unfold). Reads come from
+//! the page's server function; changes go to the REST routes (`web::rest`, DEC-327).
 
-use contracts::{ChannelDto, NewChannelDto, NotificationPageDto, SubscriptionDto};
+use std::collections::HashMap;
+
+use contracts::{InboxItemDto, NotificationPageDto, SubscriptionDto};
 use leptos::prelude::*;
 use ui::{
-    Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, FormField, Input, Select, SelectOption,
-    Skeleton,
+    Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, EmptyState, IconName, Table, TableBody,
+    TableCell, TableHead, TableHeader, TableRow, Tabs, TabsContent, TabsList, TabsTrigger,
 };
 
 use crate::api;
 use crate::events::use_events;
+use crate::history_state::{Day, DayGroup, DayLabel, day_heading};
 use crate::i18n::{t, use_i18n};
-use crate::pages::{PageTitle, go, needs_sign_in};
+use crate::pages::PageTitle;
+use crate::rest;
+use crate::settings::{Lead, loaded};
 
-fn notify_error(e: &ServerFnError) -> String {
-    let key = format!("notify-error-{}", api::error_code(e));
+pub(crate) use crate::notify_channels::Channels;
+pub(crate) use crate::notify_rules_view::Rules;
+
+/// The text for an error code of these pages: `notify-error-<code>`, else the generic one.
+pub(crate) fn notify_error(code: &str) -> String {
+    let key = format!("notify-error-{code}");
     let text = t(&key);
     if text == key {
         t("error-generic")
     } else {
         text
-    }
-}
-
-fn opt(value: &str, label: String) -> SelectOption {
-    SelectOption {
-        value: value.into(),
-        label,
-    }
-}
-
-/// Channel kinds the form offers (web push needs the browser and is set up there).
-const KINDS: [&str; 7] = [
-    "ntfy", "gotify", "discord", "matrix", "apprise", "webhook", "email",
-];
-
-/// The channel config from the three generic form fields.
-fn config(kind: &str, a: &str, b: &str, c: &str) -> serde_json::Value {
-    let o = |s: &str| (!s.trim().is_empty()).then(|| s.trim().to_string());
-    match kind {
-        "ntfy" => serde_json::json!({"kind": "ntfy", "server": a, "topic": b, "token": o(c)}),
-        "gotify" => serde_json::json!({"kind": "gotify", "server": a, "token": c}),
-        "discord" => serde_json::json!({"kind": "discord", "webhook_url": a}),
-        "matrix" => serde_json::json!({
-            "kind": "matrix", "homeserver": a, "room_id": b, "access_token": c,
-        }),
-        "apprise" => serde_json::json!({"kind": "apprise", "server": a, "urls": b}),
-        "webhook" => serde_json::json!({"kind": "webhook", "url": a, "secret": c}),
-        _ => serde_json::json!({"kind": "email", "to": a}),
-    }
-}
-
-/// Which of the three fields a kind uses (label keys; `None` hides the field).
-fn fields(kind: &str) -> [Option<&'static str>; 3] {
-    match kind {
-        "ntfy" => [
-            Some("notify-f-server"),
-            Some("notify-f-topic"),
-            Some("notify-f-token-optional"),
-        ],
-        "gotify" => [Some("notify-f-server"), None, Some("notify-f-app-token")],
-        "discord" => [Some("notify-f-webhook-url"), None, None],
-        "matrix" => [
-            Some("notify-f-homeserver"),
-            Some("notify-f-room"),
-            Some("notify-f-access-token"),
-        ],
-        "apprise" => [Some("notify-f-server"), Some("notify-f-apprise-urls"), None],
-        "webhook" => [Some("notify-f-url"), None, Some("notify-f-secret-optional")],
-        _ => [Some("notify-f-email"), None, None],
     }
 }
 
@@ -95,6 +59,37 @@ pub(crate) fn mode_label(s: &SubscriptionDto) -> String {
     }
 }
 
+/// `22:00:00` -> the locale's short time.
+fn clock(i18n: &crate::i18n::I18n, s: &str) -> Option<String> {
+    let mut parts = s.split(':');
+    let h = parts.next()?.parse().ok()?;
+    let m = parts.next()?.parse().ok()?;
+    Some(i18n.time(h, m))
+}
+
+/// The delivery of a rule in words: the mode, and the quiet hours if it has some.
+pub(crate) fn when_label(s: &SubscriptionDto) -> String {
+    let mode = mode_label(s);
+    let i18n = use_i18n();
+    let quiet = s.quiet_hours.as_ref().and_then(|q| {
+        Some((
+            clock(&i18n, q["start"].as_str()?)?,
+            clock(&i18n, q["end"].as_str()?)?,
+        ))
+    });
+    match quiet {
+        Some((from, to)) => i18n.t_args(
+            "notify-when-quiet",
+            &[
+                ("mode", mode.into()),
+                ("from", from.into()),
+                ("to", to.into()),
+            ],
+        ),
+        None => mode,
+    }
+}
+
 /// Name of an event or event pattern of a subscription (`*`, `release.*`, `release.episode`);
 /// events without a label show their id.
 pub(crate) fn event_label(id: &str) -> String {
@@ -109,387 +104,304 @@ pub(crate) fn event_label(id: &str) -> String {
     if text == key { id.to_string() } else { text }
 }
 
-fn targets_label(s: &SubscriptionDto, channels: &[ChannelDto]) -> String {
-    match s.targets["type"].as_str() {
-        Some("only") => s.targets["ids"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|id| channels.iter().find(|c| Some(c.id.as_str()) == id.as_str()))
-            .map(|c| c.name.clone())
-            .collect::<Vec<_>>()
-            .join(", "),
-        _ => t("notify-all-channels"),
+/// Which tab opens first: the inbox when something is unread, else the channels.
+fn first_tab(p: &NotificationPageDto) -> String {
+    if p.inbox.iter().any(|i| !i.read) {
+        "inbox".into()
+    } else {
+        "channels".into()
     }
 }
 
-// Pre-phase-1 page, rebuilt (tabs, cards, rules) in UX phase 3; split then (DEC-234).
-#[allow(clippy::too_many_lines)]
+/// Page-level state that outlives a refetch.
+#[derive(Clone, Copy)]
+pub(crate) struct NotifyState {
+    pub data: Resource<Result<NotificationPageDto, ServerFnError>>,
+    /// The last "Send test" result per channel id: `Err` carries the channel's answer.
+    pub tests: RwSignal<HashMap<String, Result<(), String>>>,
+    /// A generated webhook signing secret, shown once on its card: `(channel id, secret)`.
+    pub secret: RwSignal<Option<(String, String)>>,
+    pub tab: RwSignal<String>,
+}
+
 #[component]
 pub fn Notifications() -> impl IntoView {
     let data = Resource::new(|| (), |()| api::notifications());
     let events = use_events();
     Effect::new(move |_| {
         if let Some((topic, _)) = events.0.get()
-            && (topic == "notification.new" || topic == "entity.updated")
+            && topic == "notification.new"
         {
             data.refetch();
         }
     });
-    let message = RwSignal::new(None::<String>);
-    let report = move |r: Result<String, ServerFnError>| match r {
-        Ok(m) => message.set(Some(m)),
-        Err(e) => message.set(Some(notify_error(&e))),
+    let state = NotifyState {
+        data,
+        tests: RwSignal::new(HashMap::new()),
+        secret: RwSignal::new(None),
+        tab: RwSignal::new(String::new()),
     };
-
-    let read = Action::new(move |id: &String| {
-        let id = id.clone();
-        async move {
-            let _ = api::mark_read(id).await;
-            data.refetch();
-        }
-    });
-
-    // new channel
-    let kind = RwSignal::new("ntfy".to_string());
-    let name = RwSignal::new(String::new());
-    let (f1, f2, f3) = (
-        RwSignal::new(String::new()),
-        RwSignal::new(String::new()),
-        RwSignal::new(String::new()),
-    );
-    let add_channel = Action::new(move |(): &()| {
-        let k = kind.get_untracked();
-        let b = NewChannelDto {
-            name: name.get_untracked(),
-            config: config(
-                &k,
-                &f1.get_untracked(),
-                &f2.get_untracked(),
-                &f3.get_untracked(),
-            ),
-            enabled: true,
-        };
-        async move {
-            let r = api::create_channel(b).await.map(|c| {
-                for s in [name, f1, f2, f3] {
-                    s.set(String::new());
-                }
-                match c.secret {
-                    Some(secret) => use_i18n_args("notify-secret-created", "secret", secret),
-                    None => t("notify-channel-added"),
-                }
-            });
-            report(r);
-            data.refetch();
-        }
-    });
-    let test = Action::new(move |id: &String| {
-        let id = id.clone();
-        async move { report(api::test_channel(id).await.map(|()| t("notify-test-sent"))) }
-    });
-    let remove_channel = Action::new(move |id: &String| {
-        let id = id.clone();
-        async move {
-            report(api::delete_channel(id).await.map(|()| t("notify-deleted")));
-            data.refetch();
-        }
-    });
-
-    // new subscription
-    let event = RwSignal::new("*".to_string());
-    let target = RwSignal::new(String::new());
-    let mode = RwSignal::new("immediate".to_string());
-    let digest_hour = RwSignal::new("8".to_string());
-    let quiet_from = RwSignal::new(String::new());
-    let quiet_to = RwSignal::new(String::new());
-    let tz = RwSignal::new("UTC".to_string());
-    let add_sub = Action::new(move |(): &()| {
-        let quiet = match (quiet_from.get_untracked(), quiet_to.get_untracked()) {
-            (a, b) if !a.is_empty() && !b.is_empty() => Some(serde_json::json!({
-                "start": format!("{a}:00"), "end": format!("{b}:00"),
-            })),
-            _ => None,
-        };
-        let target = target.get_untracked();
-        let b = SubscriptionDto {
-            id: None,
-            event: event.get_untracked(),
-            filter: serde_json::Value::Null,
-            targets: if target.is_empty() {
-                serde_json::json!({"type": "all"})
-            } else {
-                serde_json::json!({"type": "only", "ids": [target]})
-            },
-            mode: if mode.get_untracked() == "digest" {
-                serde_json::json!({"mode": "digest", "cron": format!("0 {} * * *", digest_hour.get_untracked())})
-            } else {
-                serde_json::json!({"mode": "immediate"})
-            },
-            quiet_hours: quiet,
-            timezone: tz.get_untracked(),
-            rate_limit_per_hour: None,
-            enabled: true,
-            locked: false,
-            instance_default: false,
-        };
-        async move {
-            report(
-                api::put_subscription(b)
-                    .await
-                    .map(|_| t("notify-subscribed")),
-            );
-            data.refetch();
-        }
-    });
-    let remove_sub = Action::new(move |id: &String| {
-        let id = id.clone();
-        async move {
-            report(
-                api::delete_subscription(id)
-                    .await
-                    .map(|()| t("notify-deleted")),
-            );
-            data.refetch();
-        }
-    });
-
-    let page = Signal::derive(move || data.get().and_then(Result::ok));
-    let event_options = Signal::derive(move || {
-        let mut v = vec![opt("*", t("notify-all-events"))];
-        if let Some(p) = page.get() {
-            let mut groups: Vec<String> = p
-                .events
-                .iter()
-                .filter_map(|e| e.id.split_once('.').map(|(g, _)| g.to_string()))
-                .collect();
-            groups.dedup();
-            v.extend(
-                groups
-                    .iter()
-                    .map(|g| opt(&format!("{g}.*"), t(&format!("notify-group-{g}")))),
-            );
-            v.extend(p.events.iter().map(|e| opt(&e.id, event_label(&e.id))));
-        }
-        v
-    });
-    let target_options = Signal::derive(move || {
-        let mut v = vec![opt("", t("notify-all-channels"))];
-        if let Some(p) = page.get() {
-            v.extend(p.channels.iter().map(|c| opt(&c.id, c.name.clone())));
-        }
-        v
-    });
-    let kind_options = Signal::derive(|| {
-        KINDS
-            .iter()
-            .map(|k| opt(k, t(&format!("notify-kind-{k}"))))
-            .collect::<Vec<_>>()
-    });
-    let mode_options = Signal::derive(|| {
-        vec![
-            opt("immediate", t("notify-mode-immediate")),
-            opt("digest", t("notify-mode-digest")),
-        ]
-    });
-    let hour_options = Signal::derive(|| {
-        let i18n = use_i18n();
-        (0..24)
-            .map(|h| opt(&h.to_string(), i18n.time(h, 0)))
-            .collect::<Vec<_>>()
-    });
-
     view! {
         <PageTitle text=t("notify-title")/>
-        <p role="status" class="mb-4 text-sm">{move || message.get()}</p>
-        <Transition fallback=|| view! { <Skeleton class="h-48 w-full"/> }>
-            {move || data.get().map(|r| match r {
-                Err(e) if needs_sign_in(&e) => { go("/sign-in"); ().into_any() }
-                Err(e) => view! { <p role="alert">{notify_error(&e)}</p> }.into_any(),
-                Ok(p) => view! { <Inbox p=p.clone() read=read/> <Channels p=p.clone() test=test remove=remove_channel/> <Subscriptions p=p.clone() remove=remove_sub/> <Log p=p/> }.into_any(),
-            })}
-        </Transition>
+        <Lead text=t("notify-lead")/>
+        {loaded(data, move |p| view! { <Page p=p state=state/> })}
+    }
+}
 
-        <section class="mt-8 max-w-md" aria-labelledby="new-channel">
-            <h2 id="new-channel" class="mb-2 font-medium">{t("notify-new-channel")}</h2>
-            <form class="grid gap-2" on:submit=move |ev| { ev.prevent_default(); add_channel.dispatch(()); }>
-                <FormField id="channel-kind" label=t("notify-kind")>
-                    <Select id="channel-kind" value=kind options=kind_options/>
-                </FormField>
-                <FormField id="channel-name" label=t("notify-channel-name")>
-                    <Input id="channel-name" value=name/>
-                </FormField>
-                {move || {
-                    let [a, b, c] = fields(&kind.get());
-                    [(a, f1, "channel-f1"), (b, f2, "channel-f2"), (c, f3, "channel-f3")]
-                        .into_iter()
-                        .filter_map(|(label, sig, id)| label.map(|l| view! {
-                            <FormField id=id label=t(l)><Input id=id value=sig/></FormField>
-                        }))
-                        .collect_view()
-                }}
-                <Button r#type="submit" variant=ButtonVariant::Outline>{t("notify-add-channel")}</Button>
-            </form>
-        </section>
+#[component]
+fn Page(p: NotificationPageDto, state: NotifyState) -> impl IntoView {
+    // the tab is page state: a refetch (a new inbox row, a saved rule) keeps it
+    if state.tab.get_untracked().is_empty() {
+        state.tab.set(first_tab(&p));
+    }
+    let unread = p.inbox.iter().filter(|i| !i.read).count();
+    let i18n = use_i18n();
+    let unread_text = i18n.t_args("shell-unread", &[("count", unread.into())]);
+    let (p1, p2, p3, p4) = (p.clone(), p.clone(), p.clone(), p);
+    view! {
+        <Tabs id="nf" active=state.tab>
+            <TabsList label=t("notify-tabs") class="max-w-full justify-start overflow-x-auto">
+                <TabsTrigger value="inbox">
+                    {t("notify-inbox")}
+                    {(unread > 0).then(|| view! {
+                        <span class="ml-1.5 rounded-full bg-muted px-1.5 text-xs" aria-hidden="true">{unread}</span>
+                        <span class="sr-only">{format!(", {unread_text}")}</span>
+                    })}
+                </TabsTrigger>
+                <TabsTrigger value="channels">{t("notify-channels")}</TabsTrigger>
+                <TabsTrigger value="rules">{t("notify-rules")}</TabsTrigger>
+                <TabsTrigger value="log">{t("notify-log")}</TabsTrigger>
+            </TabsList>
+            <TabsContent value="inbox"><Inbox p=p1.clone() state=state/></TabsContent>
+            <TabsContent value="channels"><Channels p=p2.clone() state=state/></TabsContent>
+            <TabsContent value="rules"><Rules p=p3.clone() state=state/></TabsContent>
+            <TabsContent value="log"><Log p=p4.clone()/></TabsContent>
+        </Tabs>
+    }
+}
 
-        // the pickers read the page resource: inside a transition so hydration waits for it
-        <Transition fallback=|| ()>
-        <section class="mt-8 max-w-md" aria-labelledby="new-sub">
-            <h2 id="new-sub" class="mb-2 font-medium">{t("notify-new-subscription")}</h2>
-            <form class="grid gap-2" on:submit=move |ev| { ev.prevent_default(); add_sub.dispatch(()); }>
-                <FormField id="sub-event" label=t("notify-event")>
-                    <Select id="sub-event" value=event options=event_options/>
-                </FormField>
-                <FormField id="sub-target" label=t("notify-channel")>
-                    <Select id="sub-target" value=target options=target_options/>
-                </FormField>
-                <FormField id="sub-mode" label=t("notify-mode")>
-                    <Select id="sub-mode" value=mode options=mode_options/>
-                </FormField>
-                {move || (mode.get() == "digest").then(|| view! {
-                    <FormField id="sub-hour" label=t("notify-digest-at")>
-                        <Select id="sub-hour" value=digest_hour options=hour_options/>
-                    </FormField>
-                })}
-                <div class="grid grid-cols-2 gap-2">
-                    <FormField id="quiet-from" label=t("notify-quiet-from")>
-                        <Input id="quiet-from" r#type="time" value=quiet_from/>
-                    </FormField>
-                    <FormField id="quiet-to" label=t("notify-quiet-to")>
-                        <Input id="quiet-to" r#type="time" value=quiet_to/>
-                    </FormField>
+/// The inbox rows grouped by their local day (newest first), with the heading of each day.
+fn by_day(rows: Vec<InboxItemDto>, today: Day) -> Vec<(Day, DayLabel, Vec<InboxItemDto>)> {
+    let mut groups: Vec<(Day, DayLabel, Vec<InboxItemDto>)> = Vec::new();
+    for r in rows {
+        let Some(day) = Day::parse(&r.local_day).or_else(|| Day::parse(&r.created_at)) else {
+            continue;
+        };
+        match groups.last_mut() {
+            Some((d, _, rows)) if *d == day => rows.push(r),
+            _ => {
+                let label = match today.days() - day.days() {
+                    0 => DayLabel::Today,
+                    1 => DayLabel::Yesterday,
+                    _ => DayLabel::Date {
+                        same_year: day.year == today.year,
+                    },
+                };
+                groups.push((day, label, vec![r]));
+            }
+        }
+    }
+    groups
+}
+
+#[component]
+fn Inbox(p: NotificationPageDto, state: NotifyState) -> impl IntoView {
+    let unread = p.inbox.iter().any(|i| !i.read);
+    let failed = RwSignal::new(false);
+    let all_read = Action::new(move |(): &()| async move {
+        let r = rest::send("POST", "/notifications/inbox/read-all", None).await;
+        failed.set(r.is_err());
+        state.data.refetch();
+    });
+    let read = Action::new(move |id: &String| {
+        let path = format!("/notifications/inbox/{id}/read");
+        async move {
+            let _ = rest::send("POST", &path, None).await;
+            state.data.refetch();
+        }
+    });
+    if p.inbox.is_empty() {
+        return view! {
+            <EmptyState title=t("notify-inbox-empty") icon=IconName::Inbox level=2
+                body=t("notify-inbox-empty-body")
+                primary=move || view! {
+                    <Button variant=ButtonVariant::Outline on:click=move |_| state.tab.set("channels".into())>
+                        {t("notify-add-channel")}
+                    </Button>
+                }/>
+        }
+        .into_any();
+    }
+    let i18n = use_i18n();
+    let groups = by_day(p.inbox, crate::history::today());
+    view! {
+        <div class="mt-4 grid max-w-2xl gap-6 pb-[var(--tab-bar-height)]">
+            {unread.then(|| view! {
+                <div class="flex flex-wrap items-center justify-end gap-2">
+                    {move || failed.get().then(|| view! { <p role="alert" class="text-sm text-destructive-text">{t("error-generic")}</p> })}
+                    <Button variant=ButtonVariant::Outline size=ButtonSize::Sm loading=all_read.pending()
+                        on:click=move |_| { all_read.dispatch(()); }>{t("notify-mark-all-read")}</Button>
                 </div>
-                <FormField id="sub-tz" label=t("notify-timezone")>
-                    <Input id="sub-tz" value=tz/>
-                </FormField>
-                <Button r#type="submit" variant=ButtonVariant::Outline>{t("notify-subscribe")}</Button>
-            </form>
-        </section>
-        </Transition>
-    }
-}
-
-fn use_i18n_args(key: &str, name: &str, value: String) -> String {
-    crate::i18n::use_i18n().t_args(key, &[(name, value.into())])
-}
-
-#[component]
-fn Inbox(p: NotificationPageDto, read: Action<String, ()>) -> impl IntoView {
-    view! {
-        <section class="mb-8" aria-labelledby="inbox-title">
-            <h2 id="inbox-title" class="mb-2 font-medium">{t("notify-inbox")}</h2>
-            {if p.inbox.is_empty() {
-                view! { <p class="text-sm text-muted-foreground">{t("notify-inbox-empty")}</p> }.into_any()
-            } else {
+            })}
+            {groups.into_iter().map(|(day, label, rows)| {
+                let heading = day_heading(&i18n, &DayGroup { day, label, rows: Vec::new() });
+                let id = format!("nf-day-{}", day.iso());
                 view! {
-                    <ul class="flex flex-col gap-2" aria-labelledby="inbox-title">
-                        {p.inbox.into_iter().map(|i| {
-                            let id = i.id.clone();
-                            view! {
-                                <li class=if i.read { "rounded-md border border-border px-3 py-2 text-muted-foreground" } else { "rounded-md border border-primary px-3 py-2" }>
-                                    <p class="font-medium">
-                                        {match i.link.clone() {
-                                            Some(l) => view! { <a class="underline-offset-2 hover:underline" href=l>{i.title.clone()}</a> }.into_any(),
-                                            None => view! { <span>{i.title.clone()}</span> }.into_any(),
-                                        }}
-                                    </p>
-                                    <p class="text-sm">{i.body.clone()}</p>
-                                    <p class="text-xs text-muted-foreground">{use_i18n().datetime(&i.created_at)}</p>
-                                    {(!i.read).then(|| view! {
-                                        <Button size=ButtonSize::Sm variant=ButtonVariant::Ghost
-                                            attr:aria-label=use_i18n().t_args("notify-mark-read-named", &[("title", i.title.clone().into())])
-                                            on:click=move |_| { read.dispatch(id.clone()); }>{t("notify-mark-read")}</Button>
-                                    })}
-                                </li>
-                            }
-                        }).collect_view()}
-                    </ul>
-                }.into_any()
-            }}
-        </section>
+                    <section aria-labelledby=id.clone()>
+                        <h2 id=id.clone() class="mb-2 text-sm font-medium text-muted-foreground">{heading}</h2>
+                        <ul class="grid gap-1" aria-labelledby=id.clone()>
+                            {rows.into_iter().map(|i| view! { <InboxRow i=i read=read/> }).collect_view()}
+                        </ul>
+                    </section>
+                }
+            }).collect_view()}
+        </div>
     }
+    .into_any()
 }
 
 #[component]
-fn Channels(
-    p: NotificationPageDto,
-    test: Action<String, ()>,
-    remove: Action<String, ()>,
-) -> impl IntoView {
+fn InboxRow(i: InboxItemDto, read: Action<String, ()>) -> impl IntoView {
+    let i18n = use_i18n();
+    let time = clock(&i18n, &i.local_time).unwrap_or_default();
+    let id = i.id.clone();
+    let mark = i18n.t_args(
+        "notify-mark-read-named",
+        &[("title", i.title.clone().into())],
+    );
+    let title = match i.link.clone() {
+        Some(l) => {
+            view! { <a class="underline-offset-2 hover:underline" href=l>{i.title.clone()}</a> }
+                .into_any()
+        }
+        None => view! { <span>{i.title.clone()}</span> }.into_any(),
+    };
     view! {
-        <section class="mb-8" aria-labelledby="channels-title">
-            <h2 id="channels-title" class="mb-2 font-medium">{t("notify-channels")}</h2>
-            <p class="mb-2 text-sm text-muted-foreground">{t("notify-channels-lead")}</p>
-            <ul class="flex flex-col gap-2" aria-labelledby="channels-title">
-                {p.channels.into_iter().map(|c| {
-                    let (a, b) = (c.id.clone(), c.id.clone());
-                    view! {
-                        <li class="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
-                            <span class="flex-1">{c.name.clone()} <span class="ml-2 text-sm text-muted-foreground">{t(&format!("notify-kind-{}", c.kind))}</span></span>
-                            {(!c.enabled).then(|| view! { <Badge variant=BadgeVariant::Destructive>{t("notify-disabled")}</Badge> })}
-                            <Button size=ButtonSize::Sm variant=ButtonVariant::Outline attr:aria-label=use_i18n().t_args("notify-test-named", &[("name", c.name.clone().into())])
-                                on:click=move |_| { test.dispatch(a.clone()); }>{t("notify-test")}</Button>
-                            <Button size=ButtonSize::Sm variant=ButtonVariant::Ghost attr:aria-label=use_i18n().t_args("notify-delete-named", &[("name", c.name.clone().into())])
-                                on:click=move |_| { remove.dispatch(b.clone()); }>{t("notify-delete")}</Button>
-                        </li>
-                    }
-                }).collect_view()}
-            </ul>
-        </section>
-    }
-}
-
-#[component]
-fn Subscriptions(p: NotificationPageDto, remove: Action<String, ()>) -> impl IntoView {
-    let channels = p.channels.clone();
-    view! {
-        <section class="mb-8" aria-labelledby="subs-title">
-            <h2 id="subs-title" class="mb-2 font-medium">{t("notify-subscriptions")}</h2>
-            {p.subscriptions.is_empty().then(|| view! { <p class="text-sm text-muted-foreground">{t("notify-subscriptions-empty")}</p> })}
-            <ul class="flex flex-col gap-2" aria-labelledby="subs-title">
-                {p.subscriptions.into_iter().map(|s| {
-                    let id = s.id.clone().unwrap_or_default();
-                    let detail = format!("{} - {}", mode_label(&s), targets_label(&s, &channels));
-                    let removable = !s.instance_default;
-                    let event = event_label(&s.event);
-                    let label = use_i18n().t_args("notify-delete-named", &[("name", event.clone().into())]);
-                    view! {
-                        <li class="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
-                            <span class="flex-1">
-                                <span class="text-sm font-medium">{event}</span>
-                                <span class="ml-2 text-sm text-muted-foreground">{detail}</span>
-                            </span>
-                            {s.instance_default.then(|| view! { <Badge variant=BadgeVariant::Secondary>{t("notify-default")}</Badge> })}
-                            {(!s.enabled).then(|| view! { <Badge variant=BadgeVariant::Outline>{t("notify-muted")}</Badge> })}
-                            {removable.then(|| view! {
-                                <Button size=ButtonSize::Sm variant=ButtonVariant::Ghost attr:aria-label=label
-                                    on:click=move |_| { remove.dispatch(id.clone()); }>{t("notify-delete")}</Button>
-                            })}
-                        </li>
-                    }
-                }).collect_view()}
-            </ul>
-        </section>
+        <li class="flex items-start gap-3 rounded-md border border-border px-3 py-2" data-read=if i.read { "true" } else { "false" }>
+            <span aria-hidden="true" class=if i.read { "mt-2 size-2 shrink-0 rounded-full" } else { "mt-2 size-2 shrink-0 rounded-full bg-primary" }></span>
+            <div class="min-w-0 flex-1">
+                <p class=if i.read { "text-muted-foreground" } else { "font-semibold" }>
+                    {(!i.read).then(|| view! { <span class="sr-only">{t("notify-unread")}" "</span> })}
+                    {title}
+                </p>
+                <p class="text-sm">{i.body.clone()}</p>
+                <p class="text-xs text-muted-foreground">{time}</p>
+            </div>
+            {(!i.read).then(|| view! {
+                <Button size=ButtonSize::Sm variant=ButtonVariant::Ghost attr:aria-label=mark
+                    on:click=move |_| { read.dispatch(id.clone()); }>{t("notify-mark-read")}</Button>
+            })}
+        </li>
     }
 }
 
 #[component]
 fn Log(p: NotificationPageDto) -> impl IntoView {
+    if p.deliveries.is_empty() {
+        return view! { <p class="mt-4 text-sm text-muted-foreground">{t("notify-log-empty")}</p> }
+            .into_any();
+    }
+    let i18n = use_i18n();
+    let channels = p.channels;
     view! {
-        <section aria-labelledby="log-title">
-            <h2 id="log-title" class="mb-2 font-medium">{t("notify-log")}</h2>
-            {p.deliveries.is_empty().then(|| view! { <p class="text-sm text-muted-foreground">{t("notify-log-empty")}</p> })}
-            <ul class="flex flex-col gap-1 text-sm" aria-labelledby="log-title">
-                {p.deliveries.into_iter().map(|d| view! {
-                    <li class="flex flex-wrap gap-2">
-                        <span class="text-muted-foreground">{use_i18n().datetime(&d.created_at)}</span>
-                        <span class="flex-1">{d.title.clone()}</span>
-                        <Badge variant=if d.state == "failed" { BadgeVariant::Destructive } else { BadgeVariant::Secondary }>{t(&format!("notify-state-{}", d.state))}</Badge>
-                        // what the channel answered, as it said it (not translated)
-                        {d.last_error.clone().map(|e| view! { <span lang="en" class="basis-full text-xs text-destructive">{e}</span> })}
-                    </li>
-                }).collect_view()}
-            </ul>
-        </section>
+        <div class="mt-4 pb-[var(--tab-bar-height)]">
+            <Table attr:data-testid="nf-log">
+                <caption class="sr-only">{t("notify-log")}</caption>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead>{t("notify-log-when")}</TableHead>
+                        <TableHead>{t("notify-event")}</TableHead>
+                        <TableHead>{t("notify-channel")}</TableHead>
+                        <TableHead>{t("notify-log-state")}</TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {p.deliveries.into_iter().map(|d| {
+                        let when = match (Day::parse(&d.local_day), clock(&i18n, &d.local_time)) {
+                            (Some(day), Some(time)) => format!("{} {time}", i18n.date(&day.iso())),
+                            _ => i18n.datetime(&d.created_at),
+                        };
+                        let channel = channels.iter().find(|c| c.id == d.channel_id)
+                            .map_or_else(|| t("notify-channel-gone"), |c| c.name.clone());
+                        let variant = match d.state.as_str() {
+                            "failed" => BadgeVariant::Destructive,
+                            "sent" => BadgeVariant::Success,
+                            _ => BadgeVariant::Secondary,
+                        };
+                        view! {
+                            <TableRow>
+                                <TableCell class="whitespace-nowrap max-[40rem]:whitespace-normal">{when}</TableCell>
+                                <TableCell>
+                                    <span class="block">{event_label(&d.event)}</span>
+                                    <span class="block text-xs text-muted-foreground">{d.title.clone()}</span>
+                                </TableCell>
+                                <TableCell>{channel}</TableCell>
+                                <TableCell>
+                                    <Badge variant=variant>{t(&format!("notify-state-{}", d.state))}</Badge>
+                                    // what the channel answered, as it said it (not translated)
+                                    {d.last_error.clone().map(|e| view! {
+                                        <details class="mt-1 text-xs">
+                                            <summary class="cursor-pointer">{t("notify-log-show-error")}</summary>
+                                            <p lang="en" class="mt-1 max-w-sm break-words text-destructive-text">{e}</p>
+                                        </details>
+                                    })}
+                                </TableCell>
+                            </TableRow>
+                        }
+                    }).collect_view()}
+                </TableBody>
+            </Table>
+        </div>
+    }
+    .into_any()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(day: &str, at: &str) -> InboxItemDto {
+        InboxItemDto {
+            id: at.into(),
+            event: "admin.signup".into(),
+            title: String::new(),
+            body: String::new(),
+            link: None,
+            created_at: at.into(),
+            local_day: day.into(),
+            local_time: "23:30".into(),
+            read: false,
+        }
+    }
+
+    #[test]
+    fn the_inbox_groups_by_the_local_day() {
+        let today = Day::parse("2026-11-07").unwrap();
+        // UTC says the 8th, the reader's zone the 7th: grouped by the zone
+        let groups = by_day(
+            vec![
+                row("2026-11-07", "2026-11-08T01:00:00Z"),
+                row("2026-11-07", "2026-11-07T09:00:00Z"),
+                row("2026-11-06", "2026-11-06T09:00:00Z"),
+                row("", "2025-12-24T09:00:00Z"),
+            ],
+            today,
+        );
+        let shape: Vec<_> = groups.iter().map(|(_, l, r)| (*l, r.len())).collect();
+        assert_eq!(
+            shape,
+            vec![
+                (DayLabel::Today, 2),
+                (DayLabel::Yesterday, 1),
+                (DayLabel::Date { same_year: false }, 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn digest_hours_are_read_from_the_form_schedule_only() {
+        assert_eq!(digest_hour("0 8 * * *"), Some(8));
+        assert_eq!(digest_hour("30 8 * * *"), None);
+        assert_eq!(digest_hour("0 25 * * *"), None);
     }
 }

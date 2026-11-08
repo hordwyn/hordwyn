@@ -2,6 +2,7 @@
 //! M12 acceptance for the generic format: importing twice creates no duplicates, a crash in
 //! the middle resumes and finishes, dry runs write nothing, bad rows are reported.
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use app::ports::JobQueue;
@@ -157,4 +158,148 @@ async fn unknown_formats_are_refused() {
             .await
             .is_err()
     );
+}
+
+/// A store whose cancel request arrives while the import runs (after its first check).
+#[derive(Default)]
+struct CancelsMidway {
+    inner: MemImportStore,
+    checks: std::sync::atomic::AtomicU32,
+}
+
+#[async_trait::async_trait]
+impl importers::ImportStore for CancelsMidway {
+    async fn insert(&self, r: &importers::ImportRecord) -> Result<(), app::ports::PortError> {
+        self.inner.insert(r).await
+    }
+    async fn get(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<Option<importers::ImportRecord>, app::ports::PortError> {
+        self.inner.get(id).await
+    }
+    async fn save(&self, r: &importers::ImportRecord) -> Result<(), app::ports::PortError> {
+        self.inner.save(r).await
+    }
+    async fn list(
+        &self,
+        user: uuid::Uuid,
+        limit: u32,
+    ) -> Result<Vec<importers::ImportRecord>, app::ports::PortError> {
+        self.inner.list(user, limit).await
+    }
+    async fn request_cancel(&self, id: uuid::Uuid) -> Result<(), app::ports::PortError> {
+        self.inner.request_cancel(id).await
+    }
+    async fn cancel_requested(&self, _id: uuid::Uuid) -> Result<bool, app::ports::PortError> {
+        let n = self
+            .checks
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(n >= 1)
+    }
+    async fn item_for(
+        &self,
+        user: uuid::Uuid,
+        format: &str,
+        source_id: &str,
+    ) -> Result<Option<uuid::Uuid>, app::ports::PortError> {
+        self.inner.item_for(user, format, source_id).await
+    }
+    async fn set_item_for(
+        &self,
+        user: uuid::Uuid,
+        format: &str,
+        source_id: &str,
+        item: uuid::Uuid,
+    ) -> Result<(), app::ports::PortError> {
+        self.inner.set_item_for(user, format, source_id, item).await
+    }
+}
+
+#[tokio::test]
+async fn a_cancel_request_stops_at_the_next_checkpoint() {
+    let e = env().await;
+    let importer = Importer::new(
+        e.t.app.clone(),
+        Arc::new(CancelsMidway::default()),
+        Arc::new(MemBlobs::default()),
+        e.t.jobs.clone() as Arc<dyn JobQueue>,
+    );
+    let mut file = String::from("{\"format\":\"library-export\",\"version\":1}\n");
+    for i in 0..60 {
+        let _ = writeln!(
+            file,
+            "{{\"source_id\":\"r{i}\",\"kind\":\"movie\",\"title\":\"Film {i}\"}}"
+        );
+    }
+    let r = importer
+        .start(e.actor, "generic-jsonl", file.into_bytes(), false)
+        .await
+        .unwrap();
+    let r = importer.run(r.id).await.unwrap();
+    assert_eq!(r.state, ImportState::Cancelled);
+    assert_eq!(
+        (r.cursor, r.imported, r.total),
+        (importers::CHECKPOINT, 25, 60)
+    );
+    assert_eq!(e.t.app.library(e.actor).await.unwrap().len(), 25);
+    // a stopped import stays stopped
+    assert_eq!(
+        importer.run(r.id).await.unwrap().state,
+        ImportState::Cancelled
+    );
+}
+
+/// UX3-15: the uploaded file is deleted when a real run ends (done or cancelled); a dry run
+/// keeps it for "Run for real", whose end then deletes it; a rerun after that answers
+/// `import_file_gone`.
+#[tokio::test]
+async fn uploaded_files_are_deleted_when_the_real_run_ends() {
+    let kinds = Arc::new(kinds::Registry::with_builtins());
+    let t = TestEnv::with_kinds(kinds);
+    let user = t
+        .app
+        .register_user("anna", "Anna", None, Role::Member)
+        .await
+        .unwrap();
+    let actor = Actor {
+        user_id: user.id,
+        role: user.role,
+    };
+    let blobs = Arc::new(MemBlobs::default());
+    let importer = Importer::new(
+        t.app.clone(),
+        Arc::new(MemImportStore::default()),
+        blobs.clone(),
+        t.jobs.clone() as Arc<dyn JobQueue>,
+    );
+    let dry = importer
+        .start(actor, "generic-jsonl", FILE.as_bytes().to_vec(), true)
+        .await
+        .unwrap();
+    importer.run(dry.id).await.unwrap();
+    assert_eq!(blobs.total_bytes(), FILE.len(), "a dry run keeps its file");
+    let real = importer.rerun(actor, dry.id).await.unwrap();
+    importer.run(real.id).await.unwrap();
+    assert_eq!(blobs.total_bytes(), 0, "the real run deleted it");
+    let err = importer.rerun(actor, real.id).await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            importers::ImportError::Conflict {
+                code: "import_file_gone",
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+    // a cancelled real run deletes its file too
+    let r = importer
+        .start(actor, "generic-jsonl", FILE.as_bytes().to_vec(), false)
+        .await
+        .unwrap();
+    importer.cancel(actor, r.id).await.unwrap();
+    let r = importer.run(r.id).await.unwrap();
+    assert_eq!(r.state, ImportState::Cancelled);
+    assert_eq!(blobs.total_bytes(), 0);
 }

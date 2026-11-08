@@ -343,7 +343,7 @@ async fn disabled_accounts_cannot_sign_in_and_lose_their_sessions() {
     let (auth, _, _) = env(SignupMode::Open);
     let (admin, _) = auth.sign_up(su("anna")).await.unwrap();
     let (ben, ben_token) = auth.sign_up(su("ben")).await.unwrap();
-    auth.set_disabled(ben.id, Some(admin.id), true)
+    auth.set_disabled(ben.id, Some(admin.id), true, None)
         .await
         .unwrap();
     assert!(auth.session(&ben_token.0).await.unwrap().is_none());
@@ -351,7 +351,7 @@ async fn disabled_accounts_cannot_sign_in_and_lose_their_sessions() {
         auth.sign_in("ben", "correct horse battery", None).await,
         Err(AuthError::AccountDisabled)
     ));
-    auth.set_disabled(ben.id, Some(admin.id), false)
+    auth.set_disabled(ben.id, Some(admin.id), false, None)
         .await
         .unwrap();
     assert!(
@@ -382,7 +382,7 @@ async fn admin_signup_invites_work_once_and_can_be_revoked() {
     let (auth, clock, _) = env(SignupMode::Invite);
     let (admin, _) = auth.sign_up(su("anna")).await.unwrap();
     let (inv, token) = auth
-        .create_signup_invite(admin.id, Some("ben@example.org".into()), None)
+        .create_signup_invite(admin.id, Some("ben@example.org".into()), None, None)
         .await
         .unwrap();
     assert_eq!(auth.signup_invites().await.unwrap().len(), 1);
@@ -397,11 +397,11 @@ async fn admin_signup_invites_work_once_and_can_be_revoked() {
         Err(AuthError::InvalidInvite)
     ));
     let (inv2, token2) = auth
-        .create_signup_invite(admin.id, None, None)
+        .create_signup_invite(admin.id, None, None, None)
         .await
         .unwrap();
     assert_ne!(inv.id, inv2.id);
-    auth.revoke_signup_invite(inv2.id).await.unwrap();
+    auth.revoke_signup_invite(inv2.id, None).await.unwrap();
     let mut dora = su("dora");
     dora.invite = Some(token2.clone());
     assert!(matches!(
@@ -409,7 +409,7 @@ async fn admin_signup_invites_work_once_and_can_be_revoked() {
         Err(AuthError::InvalidInvite)
     ));
     let (_, token3) = auth
-        .create_signup_invite(admin.id, None, None)
+        .create_signup_invite(admin.id, None, None, None)
         .await
         .unwrap();
     clock.advance(Duration::days(15));
@@ -426,11 +426,12 @@ async fn the_oidc_reauth_hook_needs_a_recent_auth_time_of_the_same_identity() {
     let (auth, clock, _) = env(SignupMode::Open);
     let (user, token) = auth.sign_up(su("anna")).await.unwrap();
     auth.store()
-        .link_identity(&OidcIdentity {
-            issuer: "https://idp".into(),
-            subject: "s1".into(),
-            user_id: user.id,
-        })
+        .link_identity(&OidcIdentity::new(
+            "https://idp",
+            "s1",
+            user.id,
+            clock.now(),
+        ))
         .await
         .unwrap();
     clock.advance(Duration::hours(2));
@@ -458,7 +459,7 @@ async fn a_single_use_invite_admits_one_of_two_racing_sign_ups() {
     let (auth, _, _) = env(SignupMode::Invite);
     let (admin, _) = auth.sign_up(su("anna")).await.unwrap();
     let (inv, token) = auth
-        .create_signup_invite(admin.id, None, None)
+        .create_signup_invite(admin.id, None, None, None)
         .await
         .unwrap();
     let mut ben = su("ben");
@@ -490,7 +491,7 @@ async fn a_failed_sign_up_does_not_use_up_the_invite() {
     let (auth, _, _) = env(SignupMode::Invite);
     let (admin, _) = auth.sign_up(su("anna")).await.unwrap();
     let (_, token) = auth
-        .create_signup_invite(admin.id, None, None)
+        .create_signup_invite(admin.id, None, None, None)
         .await
         .unwrap();
     let mut anna_again = su("anna");

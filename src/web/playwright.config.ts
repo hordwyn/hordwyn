@@ -4,6 +4,7 @@ import { defineConfig, devices } from "@playwright/test";
 // be reachable at E2E_DATABASE_URL (`cargo xtask e2e` creates a fresh database).
 const port = Number(process.env.E2E_PORT ?? 3010);
 const tmdbPort = Number(process.env.TMDB_MOCK_PORT ?? 3011);
+const oidcPort = Number(process.env.OIDC_MOCK_PORT ?? 3012);
 const repo = `${require("node:path").resolve(__dirname, "../..")}/`;
 
 export default defineConfig({
@@ -18,7 +19,21 @@ export default defineConfig({
   projects: [
     // the instance admins exist before any spec runs (tests/global.setup.ts)
     { name: "setup", testMatch: /global\.setup\.ts/ },
-    { name: "chromium", use: { ...devices["Desktop Chrome"] }, dependencies: ["setup"] },
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["setup"],
+      testIgnore: /signin\.spec\.ts/,
+    },
+    // the sign-in specs add an identity provider and switch the instance to `auto` mode for a
+    // while, which changes every signed-out page: they run alone, after the other specs
+    {
+      name: "sso",
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["chromium"],
+      testMatch: /signin\.spec\.ts/,
+      fullyParallel: false,
+    },
   ],
   webServer: [
     {
@@ -26,6 +41,12 @@ export default defineConfig({
       url: `http://127.0.0.1:${tmdbPort}/health`,
       reuseExistingServer: !process.env.CI,
       env: { TMDB_MOCK_PORT: String(tmdbPort) },
+    },
+    {
+      command: "node tests/oidc-mock.mjs",
+      url: `http://127.0.0.1:${oidcPort}/health`,
+      reuseExistingServer: !process.env.CI,
+      env: { OIDC_MOCK_PORT: String(oidcPort) },
     },
     {
       command: process.env.E2E_SERVER_CMD ?? "../rust/target/debug/server",

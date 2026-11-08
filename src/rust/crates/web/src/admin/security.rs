@@ -1,7 +1,8 @@
-//! Admin > Security and sessions (OD-11, OD-12, addendum-1 2.2 and 3.3): the warnings
-//! first, the re-authentication window, session length and cookie security (a cookie
-//! change applies from the next sign-in; secure cookies need an https public address),
-//! and the secrets key ring with the rotation reminder (OD-09) and "Re-encrypt now".
+//! The security parts of Admin > Instance (OD-11, OD-12, addendum-1 2.2, 3.3 and 3.4; the
+//! Security page of phase 2 folded in): the warnings, the re-authentication window, session
+//! length and cookie security in "Advanced" (a cookie change applies from the next sign-in;
+//! secure cookies need an https public address), and "Secrets at rest" with the key ring,
+//! the rotation reminder (OD-09) and "Re-encrypt now".
 
 use std::collections::BTreeMap;
 
@@ -13,38 +14,37 @@ use ui::{
     Switch, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, field_described_by,
 };
 
-use super::{AdminFrame, SettingNote};
+use super::SettingNote;
 use crate::admin_api;
 use crate::admin_state::{Origin, days_value, find_setting, origin, setting_label_key};
 use crate::i18n::{t, use_i18n};
-use crate::reauth::{gated, use_reauth};
+use crate::reauth::{gated, gated_settings, use_reauth};
 use crate::settings::{Outcome, kept, loaded};
 
-type Data = Resource<Result<SecurityDto, ServerFnError>>;
+pub(super) type Data = Resource<Result<SecurityDto, ServerFnError>>;
 
+/// The warnings for the top of the page (the https one stays next to the cookie switch).
 #[component]
-pub fn Security() -> impl IntoView {
+pub(super) fn SecurityWarnings(data: Data) -> impl IntoView {
     view! {
-        <AdminFrame title=t("admin-nav-security") lead=t("admin-security-lead")>
-            <SecurityBody/>
-        </AdminFrame>
-    }
-}
-
-#[component]
-fn SecurityBody() -> impl IntoView {
-    let data: Data = Resource::new(|| (), |()| admin_api::admin_security());
-    view! {
-        <Window/>
-        {loaded(data, move |d| view! {
-            {top_warnings(&d).into_iter().map(|w| view! {
+        <Transition fallback=|| ()>
+            {move || data.get().and_then(Result::ok).map(|d| top_warnings(&d).into_iter().map(|w| view! {
                 <Alert variant=AlertVariant::Warning role=AlertRole::None class="mb-6 max-w-3xl">
                     {t(&format!("admin-warning-{w}"))}
                 </Alert>
-            }).collect_view()}
+            }).collect_view())}
+        </Transition>
+    }
+}
+
+/// "Advanced": the re-authentication window, session length and cookie security.
+#[component]
+pub(super) fn Advanced(data: Data) -> impl IntoView {
+    view! {
+        <Window/>
+        {loaded(data, move |d| view! {
             <Sessions settings=d.settings.clone() warnings=d.warnings.clone() data=data/>
-            <Secrets s=d.secrets.clone() data=data/>
-            <p class="mt-6 max-w-2xl text-sm text-muted-foreground">
+            <p class="max-w-2xl text-sm text-muted-foreground">
                 {use_i18n().t_args("admin-security-window-rule", &[
                     ("slide", d.reauth_slide_minutes.into()),
                     ("cap", d.reauth_cap_minutes.into()),
@@ -52,6 +52,15 @@ fn SecurityBody() -> impl IntoView {
             </p>
         })}
     }
+}
+
+/// "Secrets at rest": the key ring.
+#[component]
+pub(super) fn SecretsAtRest(data: Data) -> impl IntoView {
+    loaded(
+        data,
+        move |d| view! { <Secrets s=d.secrets.clone() data=data/> },
+    )
 }
 
 /// The warnings at the top; the https one is shown next to the cookie switch instead
@@ -85,7 +94,7 @@ fn Window() -> impl IntoView {
     );
     view! {
         <section aria-labelledby="adm-window-h" class="mb-6 max-w-3xl rounded-xl border bg-card p-4">
-            <h2 id="adm-window-h" class="mb-2 font-semibold">{t("admin-security-window")}</h2>
+            <h3 id="adm-window-h" class="mb-2 font-semibold">{t("admin-security-window")}</h3>
             {loaded(status, move |s| {
                 let i18n = use_i18n();
                 match s.minutes_left.filter(|_| s.fresh) {
@@ -143,11 +152,10 @@ fn Sessions(settings: Vec<SettingDto>, warnings: Vec<String>, data: Data) -> imp
             );
         }
         let saved = i18n.t("admin-saved");
-        let call = move || admin_api::update_admin_settings(values.clone());
-        gated(
+        gated_settings(
             reauth,
             busy,
-            call,
+            values,
             Callback::new(move |r: Result<_, String>| {
                 message.set(Some(r.map(|_| saved.clone())));
                 data.refetch();
@@ -156,7 +164,7 @@ fn Sessions(settings: Vec<SettingDto>, warnings: Vec<String>, data: Data) -> imp
     };
     view! {
         <form class="mb-8 grid max-w-2xl gap-5" on:submit=move |ev| { ev.prevent_default(); save(); }>
-            <h2 class="text-lg font-semibold">{t("admin-security-sessions")}</h2>
+            <h3 class="font-semibold">{t("admin-security-sessions")}</h3>
             {days.map(|s| view! {
                 <div class="grid max-w-sm gap-1">
                     <FormField id="adm-session-days" label=t(&setting_label_key(&s.key)) description=t("admin-security-days-hint")>
@@ -232,8 +240,7 @@ fn Secrets(s: SecretsStatusDto, data: Data) -> impl IntoView {
     let versions_summary =
         i18n.t_args("admin-secrets-versions-summary", &[("count", count.into())]);
     view! {
-        <section aria-labelledby="adm-secrets-h" class="grid max-w-3xl gap-3">
-            <h2 id="adm-secrets-h" class="text-lg font-semibold">{t("admin-secrets-title")}</h2>
+        <div class="grid max-w-3xl gap-3">
             {s.rotation_due.then(|| view! {
                 <Alert variant=AlertVariant::Info role=AlertRole::None>{rotation}</Alert>
             })}
@@ -280,6 +287,6 @@ fn Secrets(s: SecretsStatusDto, data: Data) -> impl IntoView {
                     </TableBody>
                 </Table>
             </Disclosure>
-        </section>
+        </div>
     }
 }

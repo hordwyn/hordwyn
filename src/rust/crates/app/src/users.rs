@@ -35,6 +35,8 @@ impl App {
             snapshot: None,
             is_self: true,
             merged_into: None,
+            merge: None,
+            removed_at: None,
             created_at: now,
         };
         let user = User {
@@ -46,6 +48,7 @@ impl App {
             self_companion: self_companion.id,
             share_sessions: true,
             locale: None,
+            time_zone: None,
             created_at: now,
         };
         self.repos

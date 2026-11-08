@@ -9,7 +9,7 @@ use contracts::admin::{AdminSourceDto, SourceTestDto};
 use leptos::prelude::*;
 use ui::{
     Alert, AlertRole, AlertVariant, Button, ButtonSize, ButtonVariant, Checkbox, Label,
-    SecretField, StatusDot, Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+    SecretField, StatusDot, Switch, Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 };
 
 use super::{AdminFrame, Attention, ConfirmDialog};
@@ -17,6 +17,7 @@ use crate::admin_api;
 use crate::admin_state::{key_guide, source_state};
 use crate::i18n::{kind_label, t, use_i18n};
 use crate::reauth::{gated, use_reauth};
+use crate::rest;
 use crate::settings::{Outcome, kept, loaded};
 
 pub(crate) type Sources = Resource<Result<Vec<AdminSourceDto>, ServerFnError>>;
@@ -188,6 +189,7 @@ fn SourceCard(s: AdminSourceDto, data: Sources) -> impl IntoView {
             <ul class="grid gap-0.5 text-sm text-muted-foreground">
                 {lines.into_iter().map(|l| view! { <li>{l}</li> }).collect_view()}
             </ul>
+            <EnabledSwitch s=s.clone() data=data/>
             <KeyHowTo s=s.clone()/>
             <Credential s=s.clone() data=data/>
             {licence.then(|| view! { <Licence s=s.clone() data=data/> })}
@@ -196,6 +198,47 @@ fn SourceCard(s: AdminSourceDto, data: Sources) -> impl IntoView {
                 <p lang="en" class="text-muted-foreground">{s.attribution.clone()}</p>
                 <a class="underline" href=s.terms_url.clone() rel="noopener">{t("admin-sources-terms")}</a>
             </div>
+        </div>
+    }
+}
+
+/// The source's own off switch (DEC-289, DEC-304): off, nobody can search it and its items
+/// are not refreshed; the change applies at once and is audited.
+#[component]
+fn EnabledSwitch(s: AdminSourceDto, data: Sources) -> impl IntoView {
+    let id = format!("adm-src-on-{}", s.status.id);
+    let hint = format!("{id}-hint");
+    let on = RwSignal::new(s.status.state != "disabled");
+    let message: Message = RwSignal::new(None);
+    let source = s.status.id.clone();
+    // the switch flips its signal first; the click then bubbles here
+    let changed = move |_| {
+        let (want, path) = (
+            on.get_untracked(),
+            format!("/admin/sources/{source}/enabled"),
+        );
+        let i18n = use_i18n();
+        leptos::task::spawn_local(async move {
+            match rest::send("PUT", &path, Some(serde_json::json!({"enabled": want}))).await {
+                Ok(()) => {
+                    message.set(None);
+                    data.refetch();
+                }
+                Err(e) => {
+                    on.set(!want);
+                    message.set(Some(Err(crate::settings::admin_error_with(&i18n, &e))));
+                }
+            }
+        });
+    };
+    view! {
+        <div class="grid gap-1">
+            <div class="flex items-center gap-3" on:click=changed>
+                <Switch id=id.clone() checked=on attr:aria-describedby=hint.clone()/>
+                <Label r#for=id>{t("admin-sources-enabled")}</Label>
+            </div>
+            <p id=hint class="text-sm text-muted-foreground">{t("admin-sources-enabled-hint")}</p>
+            <Outcome message=message/>
         </div>
     }
 }

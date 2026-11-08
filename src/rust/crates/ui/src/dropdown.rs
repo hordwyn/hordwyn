@@ -66,8 +66,12 @@ pub fn DropdownMenu(
     /// Trigger content (for example an icon); defaults to `label`.
     #[prop(optional)]
     trigger: Option<Children>,
+    /// Whether the menu is open, owned by the caller: a menu inside a view that a background
+    /// refresh rebuilds stays open when the caller keeps this signal outside that view.
+    #[prop(optional_no_strip, into)]
+    open: Option<RwSignal<bool>>,
 ) -> impl IntoView {
-    let open = RwSignal::new(false);
+    let open = open.unwrap_or_else(|| RwSignal::new(false));
     let active = RwSignal::new(0usize);
     let base = id.unwrap_or_else(|| slug(&label));
     let menu_id = format!("{base}-menu");

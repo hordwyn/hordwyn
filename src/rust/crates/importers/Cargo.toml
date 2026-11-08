@@ -22,13 +22,16 @@ serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt"] }
+tracing.workspace = true
 uuid.workspace = true
 
 [features]
-default = []
+default = ["trakt-import"]
 # our own documented format (JSON Lines and CSV), also used by the export
 generic = ["dep:csv"]
-all = ["generic"]
+# the user's own Trakt JSON files (docs/connectors/trakt.md, DEC-297): no network calls
+trakt-import = []
+all = ["generic", "trakt-import"]
 
 [dev-dependencies]
 store-pg.workspace = true

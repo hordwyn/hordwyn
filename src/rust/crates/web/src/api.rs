@@ -130,16 +130,6 @@ pub async fn username_available(
     .map_err(server::code)
 }
 
-#[server(prefix = "/_fn")]
-pub async fn sign_out() -> Result<(), ServerFnError> {
-    let b = server::backend()?;
-    if let Some(t) = server::token(b.as_ref()).await {
-        b.sign_out(&t).await;
-    }
-    server::set_session(b.as_ref(), "", 0);
-    Ok(())
-}
-
 /// The first `limit` entries of the library, most recently added first.
 #[server(prefix = "/_fn")]
 pub async fn library(limit: u32) -> Result<contracts::LibraryPageDto, ServerFnError> {
@@ -217,6 +207,46 @@ pub async fn create_companion(name: String) -> Result<CompanionDto, ServerFnErro
     let b = server::backend()?;
     let t = server::require_token(b.as_ref()).await?;
     b.create_companion(&t, &name).await.map_err(server::code)
+}
+
+/// The People page (WP3-6): requests, people with stats, merge suggestions.
+#[server(prefix = "/_fn")]
+pub async fn people_page() -> Result<contracts::PeoplePageDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.people_page(&t).await.map_err(server::code)
+}
+
+/// A person page (WP3-6).
+#[server(prefix = "/_fn")]
+pub async fn person_page(id: String) -> Result<contracts::PersonPageDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.person_page(&t, &id).await.map_err(server::code)
+}
+
+/// The imports page: the user's imports, newest first (WP3-7).
+#[server(prefix = "/_fn")]
+pub async fn imports() -> Result<Vec<contracts::imports::ImportDto>, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.imports(&t).await.map_err(server::code)
+}
+
+/// The Lists page's three tabs (WP3-6).
+#[server(prefix = "/_fn")]
+pub async fn lists_overview() -> Result<contracts::ListsOverviewDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.lists_overview(&t).await.map_err(server::code)
+}
+
+/// A list page (WP3-6).
+#[server(prefix = "/_fn")]
+pub async fn list_page(id: String) -> Result<contracts::ListPageDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.list_page(&t, &id).await.map_err(server::code)
 }
 
 #[server(prefix = "/_fn")]

@@ -142,6 +142,10 @@ impl App {
         let mut ctx = self
             .feed_context(actor, &own_sessions, &shared, me.self_companion)
             .await?;
+        let people = match q.person {
+            Some(p) => Some(self.person_ids(actor, p).await?),
+            None => None,
+        };
         let mut rows: Vec<ActivityRow> = Vec::new();
         let mut done = false;
         let fetch = u32::try_from(limit * 2 + 1).unwrap_or(u32::MAX);
@@ -178,7 +182,11 @@ impl App {
             let theirs: Vec<&Session> = shared.iter().filter(|s| in_window(s)).collect();
             self.load_items(&mut ctx, &events, &own, &theirs).await?;
             let batch = self.batch_rows(&ctx, &events, &own, &theirs);
-            rows.extend(batch.into_iter().filter(|r| keep(r, &q, &kinds)));
+            rows.extend(
+                batch
+                    .into_iter()
+                    .filter(|r| keep(r, &q, &kinds, people.as_ref())),
+            );
             before = low;
             if low.is_none() {
                 done = true;
@@ -193,6 +201,36 @@ impl App {
             None
         };
         Ok(ActivityPage { rows, next })
+    }
+
+    /// `person` and every companion of the actor whose merge chain ends in them (UX3-16):
+    /// plays logged with a duplicate before a merge still count for the person.
+    async fn person_ids(
+        &self,
+        actor: Actor,
+        person: CompanionId,
+    ) -> AppResult<HashSet<CompanionId>> {
+        let all = self.repos.companions.by_owner(actor.user_id).await?;
+        let into: HashMap<CompanionId, CompanionId> = all
+            .iter()
+            .filter_map(|c| c.merged_into.map(|m| (c.id, m)))
+            .collect();
+        let mut out = HashSet::from([person]);
+        for c in &all {
+            let mut at = c.id;
+            // a chain is at most as long as the list; a cycle never reaches `person`
+            for _ in 0..all.len() {
+                match into.get(&at) {
+                    Some(&next) if next == person => {
+                        out.insert(c.id);
+                        break;
+                    }
+                    Some(&next) => at = next,
+                    None => break,
+                }
+            }
+        }
+        Ok(out)
     }
 
     async fn feed_context(
@@ -372,10 +410,15 @@ impl App {
     }
 }
 
-fn keep(r: &ActivityRow, q: &ActivityQuery, kinds: &[KindId]) -> bool {
+/// `people`: the filtered person and everyone merged into them ([`App::person_ids`]).
+fn keep(
+    r: &ActivityRow,
+    q: &ActivityQuery,
+    kinds: &[KindId],
+    people: Option<&HashSet<CompanionId>>,
+) -> bool {
     (kinds.is_empty() || kinds.contains(&r.kind))
         && (q.types.is_empty() || q.types.contains(&r.row_type))
         && (!q.shared_only || r.shared)
-        && q.person
-            .is_none_or(|p| r.participants.iter().any(|x| x.companion_id == p))
+        && people.is_none_or(|p| r.participants.iter().any(|x| p.contains(&x.companion_id)))
 }

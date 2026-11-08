@@ -7,8 +7,9 @@
 // One scenario on purpose: the steps share one server and database.
 #![allow(clippy::too_many_lines)]
 
+mod support;
+
 use server::{Overrides, Server};
-use tower::ServiceExt;
 
 fn repo(p: &str) -> String {
     format!("{}/../../../../{p}", env!("CARGO_MANIFEST_DIR"))
@@ -53,11 +54,11 @@ async fn send(
     if let Some(c) = cookie {
         req = req.header("cookie", c);
     }
-    let resp = app
-        .clone()
-        .oneshot(req.body(axum::body::Body::from(body.to_string())).unwrap())
-        .await
-        .unwrap();
+    let resp = support::send(
+        app,
+        req.body(axum::body::Body::from(body.to_string())).unwrap(),
+    )
+    .await;
     let status = resp.status().as_u16();
     let header = |name| {
         resp.headers()
@@ -67,9 +68,7 @@ async fn send(
     let location = header(axum::http::header::LOCATION);
     let cookie =
         header(axum::http::header::SET_COOKIE).map(|c| c.split(';').next().unwrap().to_string());
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 23)
-        .await
-        .unwrap();
+    let bytes = resp.into_body();
     Resp {
         status,
         location,

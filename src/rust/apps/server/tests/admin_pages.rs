@@ -3,8 +3,9 @@
 //! "admins only" page for a member; the settings pages render under `/settings/*` with the
 //! side nav; the old paths are gone (no redirects, DEC-171).
 
+mod support;
+
 use server::{Overrides, Server};
-use tower::ServiceExt;
 
 fn repo(p: &str) -> String {
     format!("{}/../../../../{p}", env!("CARGO_MANIFEST_DIR"))
@@ -34,15 +35,9 @@ async fn page(app: &axum::Router, uri: &str, cookie: Option<&str>) -> (u16, Stri
     if let Some(c) = cookie {
         req = req.header("cookie", c);
     }
-    let resp = app
-        .clone()
-        .oneshot(req.body(axum::body::Body::empty()).unwrap())
-        .await
-        .unwrap();
+    let resp = support::send(app, req.body(axum::body::Body::empty()).unwrap()).await;
     let status = resp.status().as_u16();
-    let body = axum::body::to_bytes(resp.into_body(), 1 << 23)
-        .await
-        .unwrap();
+    let body = resp.into_body();
     (status, String::from_utf8(body.to_vec()).unwrap())
 }
 
@@ -50,18 +45,16 @@ async fn sign_up(app: &axum::Router, username: &str) -> String {
     let body = format!(
         r#"{{"username":"{username}","display_name":"{username}","password":"correct horse battery"}}"#
     );
-    let resp = app
-        .clone()
-        .oneshot(
-            axum::http::Request::builder()
-                .method("POST")
-                .uri("/api/v1/auth/sign-up")
-                .header("content-type", "application/json")
-                .body(axum::body::Body::from(body))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let resp = support::send(
+        app,
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/sign-up")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body))
+            .unwrap(),
+    )
+    .await;
     assert_eq!(resp.status(), 201, "sign-up");
     let cookie = resp.headers()["set-cookie"].to_str().unwrap();
     cookie.split(';').next().unwrap().to_string()
@@ -76,31 +69,28 @@ fn services() -> bool {
     true
 }
 
-/// The eight admin pages: path, H1 and one thing only the admin view renders.
+/// The eight admin pages of addendum-1 3.4 (DEC-255 reversed): path, H1 and one thing only
+/// the admin view renders.
 const ADMIN_PAGES: [(&str, &str, &str); 8] = [
-    ("/admin", ">Overview<", "data-testid=\"health-row\""),
+    ("/admin", ">Overview<", "data-testid=\"brand-swatch\""),
+    ("/admin/instance", ">Instance<", "How you host"),
     (
-        "/admin/users",
-        ">Users and sign-up<",
-        "Who can create an account",
+        "/admin/sso",
+        ">Sign-in and SSO<",
+        "/api/v1/auth/oidc/callback",
     ),
+    ("/admin/users", ">Users<", "data-testid=\"user-row\""),
     (
         "/admin/sources",
         ">Data sources<",
         "data-testid=\"src-table\"",
     ),
-    ("/admin/storage", ">Storage and jobs<", "Run eviction now"),
     (
         "/admin/notifications",
         ">Notification defaults<",
         "data-testid=\"defaults-table\"",
     ),
-    ("/admin/brand", ">Branding<", "data-testid=\"brand-swatch\""),
-    (
-        "/admin/security",
-        ">Security and sessions<",
-        "Session length (days)",
-    ),
+    ("/admin/storage", ">Storage and jobs<", "Run eviction now"),
     ("/admin/audit", ">Audit log<", "/api/v1/admin/audit.csv"),
 ];
 
@@ -147,17 +137,12 @@ async fn every_admin_page_renders_for_an_admin_and_refuses_a_member() {
     let (_, html) = page(&app, "/admin/users", Some(&admin)).await;
     assert!(html.contains(">mia<"), "users table lists the member");
     assert!(html.contains("(you)"), "the admin's own row");
-    let (_, html) = page(&app, "/admin/security", Some(&admin)).await;
-    // the test config sets the cookie flag in the file: read-only with its origin
-    assert!(html.contains("Set in the configuration file"), "provenance");
-    assert!(html.contains("Confirmed for"), "re-auth window state");
-    // UX2-W9: the http warning once, next to the cookie switch
-    assert_eq!(
-        html.matches("The public address does not use https.")
-            .count(),
-        1,
-        "https warning shown once"
+    // sign-up mode lives on Instance now, one place per setting (addendum-1 3.4)
+    assert!(
+        !html.contains("Who can create an account"),
+        "no sign-up mode on Users"
     );
+    instance_sso_and_sign_out(&app, &admin).await;
     // UX2-W1, W2: the TMDB card says how to get a key, with the developer page; home mode
     // has no licence record
     let (_, html) = page(&app, "/admin/sources", Some(&admin)).await;
@@ -206,6 +191,7 @@ async fn settings_pages_live_under_settings_and_the_old_paths_are_gone() {
         ("/settings/notifications", ">Notifications<"),
         ("/settings/integrations", ">Integrations<"),
         ("/settings/sources", ">Data sources<"),
+        ("/settings/imports", ">Imports and export<"),
         ("/settings/privacy", ">Privacy<"),
     ] {
         let (status, html) = page(&app, uri, Some(&member)).await;
@@ -221,6 +207,15 @@ async fn settings_pages_live_under_settings_and_the_old_paths_are_gone() {
     assert!(html.contains("Change password"), "password form");
     assert!(html.contains("Set up an authenticator"), "TOTP enrolment");
     assert!(html.contains("role=\"radiogroup\" aria-label=\"Language\""));
+    // phase 3: linked sign-ins and the time zone with its suggestions (DEC-306, DEC-312)
+    assert!(html.contains(">Linked sign-ins<"), "linked sign-ins");
+    assert!(html.contains("No provider linked."), "none linked yet");
+    assert!(html.contains(">Time zone<"), "time zone");
+    assert!(
+        html.contains("Times are shown in UTC"),
+        "no zone chosen yet"
+    );
+    assert!(html.contains("list=\"set-tz-zones\""), "suggestions list");
     let (_, html) = page(&app, "/settings/sources", Some(&member)).await;
     assert!(
         html.contains("data-testid=\"member-sources\""),
@@ -235,4 +230,70 @@ async fn settings_pages_live_under_settings_and_the_old_paths_are_gone() {
     let (_, html) = page(&app, "/you", Some(&member)).await;
     assert!(html.contains("href=\"/settings/notifications\""), "bell");
     assert!(html.contains("href=\"/settings/account\""), "settings link");
+}
+
+/// Phase 3 (WP3-4): Instance, Sign-in and SSO, the folded-in pages and the sign-out form.
+async fn instance_sso_and_sign_out(app: &axum::Router, admin: &str) {
+    let (_, html) = page(app, "/admin/instance", Some(admin)).await;
+    assert!(html.contains("Who can create an account"), "sign-up mode");
+    for mode in ["Home", "Hosted"] {
+        assert!(
+            html.contains(&format!("id=\"adm-hosting-{}\"", mode.to_lowercase())),
+            "hosting radio {mode}"
+        );
+    }
+    // the public address is read-only, from the configuration
+    assert!(
+        html.contains("data-testid=\"public-url\""),
+        "public address"
+    );
+    // the disclosures: Mail, Secrets at rest, Advanced (sessions and cookies)
+    for (id, title) in [
+        ("adm-mail", "Mail"),
+        ("adm-secrets", "Secrets at rest"),
+        ("adm-advanced", "Advanced"),
+    ] {
+        assert!(html.contains(&format!("id=\"{id}\"")), "{title} disclosure");
+    }
+    assert!(html.contains("Save and send a test"), "mail test");
+    assert!(
+        html.contains("Session length (days)"),
+        "sessions in Advanced"
+    );
+    // the test config sets the cookie flag in the file: read-only with its origin
+    assert!(html.contains("Set in the configuration file"), "provenance");
+    assert!(html.contains("Confirmed for"), "re-auth window state");
+    // UX2-W9: the http warning once, next to the cookie switch
+    assert_eq!(
+        html.matches("The public address does not use https.")
+            .count(),
+        1,
+        "https warning shown once"
+    );
+    // Sign-in and SSO: the URIs to register, the modes and the front-channel sentence
+    let (_, html) = page(app, "/admin/sso", Some(admin)).await;
+    for uri in [
+        "/api/v1/auth/oidc/callback",
+        "/signed-out",
+        "/api/v1/auth/oidc/backchannel-logout",
+    ] {
+        assert!(html.contains(uri), "register {uri}");
+    }
+    assert!(html.contains("Add a provider"), "add a provider");
+    assert!(html.contains("name=\"sign-in-mode\""), "mode radios");
+    assert!(
+        html.contains("Front-channel logout is not used"),
+        "front-channel sentence"
+    );
+    // Branding and Security are folded in: 404, no redirects (DEC-171)
+    for uri in ["/admin/brand", "/admin/security"] {
+        let (status, _) = page(app, uri, Some(admin)).await;
+        assert_eq!(status, 404, "{uri}");
+    }
+    // the account menu signs out with a form post, local first (DEC-326)
+    let (_, html) = page(app, "/you", Some(admin)).await;
+    assert!(
+        html.contains("action=\"/api/v1/auth/logout\""),
+        "sign-out form"
+    );
 }

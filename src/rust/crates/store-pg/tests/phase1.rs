@@ -492,4 +492,13 @@ async fn stats_on_postgres_match_the_in_memory_rules() {
             assert_eq!(pg, expected, "{group:?} {bucket:?}");
         }
     }
+    // UX3-20: a zone this Postgres does not know (tzdata older than chrono-tz) buckets in
+    // UTC instead of failing the Stats page
+    let progress = &env.app.repos.progress;
+    let unknown = progress
+        .month_amounts(pg_me.user_id, "Mars/Olympus")
+        .await
+        .unwrap();
+    let utc = progress.month_amounts(pg_me.user_id, "UTC").await.unwrap();
+    assert_eq!(unknown, utc);
 }

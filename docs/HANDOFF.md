@@ -1,4 +1,4 @@
-# Handoff: state, rules, owner rulings, open items (updated 2026-11-07)
+# Handoff: state, rules, owner rulings, open items (updated 2026-11-08)
 
 Read this first when resuming. It replaces the conversation context: the rules that govern
 all work, where the build stands, every owner ruling (2026-11-06 and 2026-11-07), what is
@@ -9,36 +9,43 @@ Sources of truth, in this order: the owner's words in this file (section 4), the
 rules (section 2, verbatim), `docs/DECISIONS.md`, `docs/design/DESIGN.md`, the UX design
 (`docs/design/ux/design.md` plus `addendum-1.md`), `docs/REPORT.adoc`.
 
-## 0. Resume here (2026-11-07, phase 2 done)
+## 0. Resume here (2026-11-08, phase 3 done)
 
-**Standing instruction from the owner (2026-11-07):** work through the open phases
-sequentially (phase 2, then 3, then 4, then the parallel workstreams) WITHOUT waiting for a
-go between phases, under the KICKOFF rules (section 2): test-driven, decisions logged, an
-independent review per phase whose findings are applied or rejected in DECISIONS, `cargo
-xtask ci` and `cargo xtask e2e` green, commit, push, tag `ux<N>`. Report a short status at
-each phase boundary; ask the owner only when a decision really needs them.
+**Standing instruction from the owner (2026-11-07, confirmed in chat 2026-11-07 with explicit
+permission to commit, tag and push):** work through the open phases sequentially (phase 4,
+then the parallel workstreams) WITHOUT waiting for a go between phases, under the KICKOFF
+rules (section 2): test-driven, decisions logged, an independent review per phase whose
+findings are applied or rejected in DECISIONS, `cargo xtask ci` and `cargo xtask e2e` green,
+commit, push, tag `ux<N>`. Report a short status at each phase boundary; ask the owner only
+when a decision really needs them.
 
 **Where the code is:**
 
-- `main` = tag `ux2` (UX phase 2 done, one squashed commit on top of `ux1`). The branch
-  `wip/ux2` is merged and may be deleted.
-- Untracked on purpose: `src/rust/crates/testkit/fixtures/import/legacy/` (anonymised extract
-  of the owner's Ryot export, owner-approved; commit it together with the legacy importer in
-  phase 3). The full export is in the git-ignored `owner-inbox/legacy/export.json`.
-- Agent brief files are in `docs/handoff/agent-briefs/` (rules.md, ui-api.md, p1-api.md,
-  p2-api.md). Point every workstream agent at `rules.md` first.
+- `main` = tag `ux3` (UX phase 3 done, one squashed commit on top of `ux2`). The branch
+  `wip/ux3` holds the per-package wip history and may be deleted.
+- The anonymised legacy fixture is committed with the legacy importer (WP3-7). The full owner
+  export stays in the git-ignored `owner-inbox/legacy/export.json`.
+- Plans and briefs: `docs/handoff/phase3-plan.md` (how phase 3 was cut into seven packages; use
+  the same approach for phase 4), `docs/handoff/agent-briefs/` (rules.md first).
 
 **Next steps, in order:**
 
 1. `nix develop`, then `cd src/rust && cargo xtask services up` (services do not survive a
    reboot). The VM has 16 GB RAM and 4 vCPU: builds use `CARGO_BUILD_JOBS=3`.
-2. Phase 3 (section 7), then phase 4, then the parallel workstreams. Items deferred to phase 3
-   by the ux2 review: DEC-282 (hosting mode change), DEC-283 (CLI escape hatches, SIGHUP key
-   reload), DEC-284 (audit client address / request id), DEC-281 (remaining untested
-   behaviours), DEC-289 (source Disabled switch), DEC-292 (wizard checklist done flags).
-3. e2e harness traps: `cargo test -p server` relinks `target/debug/server` without the
-   cargo-leptos settings, so run `cargo leptos build` (or `cargo xtask e2e`) before Playwright;
-   `--repeat-each` also repeats the setup project.
+2. Phase 4 (section 7). First have a planning agent cut it into packages like
+   `phase3-plan.md`, folding in everything phase 3 deferred: DEC-285 and 286 (probes, TheTVDB
+   cache key), 312 (emailed link, email sync), 316, 326, 335, 336 (Users row menu: reset
+   authenticator, unlink provider; localised health times), 344 (rule for one item, channel
+   edit in place), 353 (game groups tab, drag handles, log with a person, avatar upload),
+   355, 363 ("On release dates" needs per-episode air dates), 382, 383, 388 (linked-accounts
+   column, stacked admin tables), 390, 394, 396, and UX3-25 in DEC-384 (a rare "reactive value
+   disposed" panic in leptos transition.rs, not reproduced; a first fix attempt deadlocked).
+3. e2e and test harness notes: `cargo test -p server` relinks `target/debug/server` without
+   the cargo-leptos settings, so run `cargo leptos build` (or `cargo xtask e2e`) before
+   Playwright; `--repeat-each` also repeats the setup project; the Playwright `sso` project
+   runs last (DEC-334); server test requests time out after 90 s naming the page (DEC-384);
+   the route list is built once per process because leptos' route listing suppresses resource
+   loads process-wide (DEC-384).
 
 ## 1. How we continue: agent-based work
 
@@ -266,7 +273,7 @@ Everything you write in `docs/` is AsciiDoc for Antora.
 ## 3. State of the build
 
 - **Tags on `origin`:** `m00`-`m17` (see REPORT.adoc; M10/M11 board games and most of M12
-  importers not done), `ux0` (UX phase 0), `ux1` (UX phase 1), `ux2` (UX phase 2). Last green runs at `ux2`: `cargo xtask ci` 538 passed / 0 failed / 3 ignored, `cargo xtask e2e` 62 passed, load test p95 under 106 ms everywhere (search 95, Home 105). At `ux1`:
+  importers not done), `ux0` (UX phase 0), `ux1` (UX phase 1), `ux2` (UX phase 2), `ux3` (UX phase 3). Last green runs at `ux3`: `cargo xtask ci` 679 passed / 0 failed / 4 ignored, `cargo xtask e2e` 94 passed, load test p95 search 106, Home 164, stats 90, library 64-89, activity 13 ms (Home and stats grew with the per-user time zone; budget 300 ms). At `ux2`: `cargo xtask ci` 538 passed / 0 failed / 3 ignored, `cargo xtask e2e` 62 passed, load test p95 under 106 ms everywhere (search 95, Home 105). At `ux1`:
   `cargo xtask ci` 449 passed / 0 failed / 3 ignored, `cargo xtask e2e` 51 passed; GitLab
   pipeline for `ux0` green incl. the S3 test against RustFS in CI.
 - **UX phase 0 (done, `ux0`):** tokens per design 2.7, Atkinson Hyperlegible Next vendored
@@ -313,6 +320,102 @@ Everything you write in `docs/` is AsciiDoc for Antora.
     xtask tests green with services; Playwright `global.setup.ts` + `sources.spec.ts` 5/5.
     Not run by the package: the full `cargo xtask ci` / `cargo xtask e2e`, `sqlx prepare
     --check` (no SQL changed in this package).
+- **UX phase 3 (done, `ux3`):** review `docs/reviews/2026-11-08-ux3-review.md` (UX3-1..26) applied, deferred or rejected in DEC-367..398. Packages:
+  - WP3-1 instance-server done (DEC-298..307): audit rows in the change's transaction
+    (roles, deletion and operations still after, DEC-298); client address and request id
+    behind `server.trusted_proxies`; SMTP in the database with an encrypted password, swappable
+    mailer and "send a test"; CLI escape hatches (`admin promote|reset-password|reset-totp|
+    disable-sso-only`, `setup reopen`, `secrets status|rotate|prune`, actor `cli`,
+    `POST /auth/reset-password`); `auth.sign_in_mode` defined (`auto` refused until WP3-3);
+    SIGHUP key reload; source Disabled switch; wizard done flags; per-user time zone server half
+    (`PUT /auth/me/time-zone`, stats months, `local_day`/`local_time`, `ClientConfig.today`);
+    the DEC-281 server tests. Migration `0017_phase3_instance.sql`. Web pages for these: WP3-4.
+  - WP3-2 oidc-providers done (DEC-308..316): several OIDC providers in `oidc_providers` (client
+    secret encrypted, purpose `oidc_client_secret`, write-only), the environment's `auth.oidc` as a
+    read-only row; discovery per provider (24 h cache, refreshed by Test and on a signature miss),
+    PKCE S256, signed single-use pending cookie (HKDF `cookie_key`, modes
+    interactive|silent|link|reauth; silent/reauth refused until WP3-3), RFC 9207 `iss` or ID-token
+    `iss` mix-up check; account resolution steps 1-4 (no auto-link; "Is this your account?" via
+    `GET/POST /auth/oidc/link`; link mode; unlink guard), allowed/admin groups with
+    `role_source=provider` (never the last admin, `self_demotion`, role locked in Users); admin API
+    `/admin/oidc*` (re-auth gated, audit in the transaction, Test), runtime OIDC host allowlist,
+    Overview row from stored fields. Test issuer `testkit::oidc` (RS256). Migration `0018_oidc.sql`.
+    Tests: `apps/server/tests/oidc.rs` (6 scenarios), `auth/tests/oidc.rs`, cookie unit tests,
+    governed allowlist test. Web side: WP3-4 (redirect targets `/sign-in?error=<code>`,
+    `/sign-in/link`, `/settings/account?error=<code>`).
+  - WP3-3 sso-logout-modes done (DEC-317..326): local-first sign-out `POST /auth/logout` then
+    RP-initiated logout (`id_token_hint` kept encrypted per session in `session_secrets`,
+    purpose `session_secret`, dropped with the session); back-channel logout
+    `POST /auth/oidc/backchannel-logout` (signature, iss/aud/iat/exp, logout event, no nonce,
+    `jti` cache 10 min, by `sid` else `sub`, audit `oidc.backchannel_logout`); silent sign-in
+    (`prompt=none`, hint cookie, 5-minute loop guard, interaction errors -> interactive, outage
+    path with a 3-in-10-minutes retry cap, `retry=0`); `auth.sign_in_mode=auto` with its server
+    preconditions (409 `auto_needs_tested_provider` / `auto_needs_admin_authenticator`) and the
+    302 of signed-out page visits with a `role=status` body (`/signed-out` and the other
+    exemptions never redirect); break-glass `POST /auth/sign-in/local` (admins only in auto,
+    TOTP only if enrolled, throttle, audit `auth.local_sign_in`, notify `admin.local_sign_in`);
+    re-auth round trip `mode=reauth` (`max_age=0`, `confirm_oidc_reauth`, pending action
+    `PUT/GET /auth/reauth/pending`); Test probes `probe_silent` / `probe_max_age`. Migration
+    `0019_sso_sessions.sql`. Tests: 5 new scenarios in `apps/server/tests/oidc.rs` plus the
+    `#[ignore]` authentik `max_age=0` live check (`KK_OIDC_LIVE_*`, not run). The full route and
+    error-code contract for WP3-4 is DEC-326.
+  - WP3-4 signin-admin-web (DEC-327..336): `/sign-in` provider-first with the password form in a
+    `details`, the `?error=` states (outage alert with Try again / `retry=0`, refusals, "Your
+    session ended"), `/sign-in/local`, `/signed-out`, `/sign-in/link`, `/reset-password/:token`;
+    Sign out as a form post to `POST /api/v1/auth/logout`. Admin area as the eight pages of
+    addendum-1 3.4 (DEC-255 reversed): Overview with the brand card, Instance (hosting, sign-up,
+    public address, Mail with "Save and send a test", Secrets at rest, Advanced), Sign-in and SSO
+    (URIs, providers with write-only secret, Test and probes, Add a provider, mode radios), Users
+    with "via group", Data sources with "Use this source"; `/admin/brand` and `/admin/security`
+    are 404. Re-auth dialog "Confirm with <provider>" (pending action, settings replayed).
+    Settings > Account: linked sign-ins (Link/Unlink) and the time zone; Home/History show local
+    times. Browser REST calls in `web::rest` (DEC-327). E2E: `oidc-mock.mjs`, `signin.spec.ts` in
+    its own Playwright project `sso` after `chromium`, `settings.spec.ts` (DEC-281 items),
+    `admin.spec.ts` additions; SSR tests in `auth_pages.rs`/`admin_pages.rs`. Cuts in DEC-336.
+  - WP3-5 notifications-integrations (DEC-338..345): Settings > Notifications with tabs Inbox
+    (grouped by the local day, Mark all read via `POST /notifications/inbox/read-all`), Channels
+    (cards with health from the latest delivery, inline "Add and send a test" per type, secrets as
+    password fields), Rules (events x channels matrix, defaults labelled, locked rows, the
+    defaults offer on a new channel's first switch, rules for one list or person), Log (error in
+    a `details`); bell count capped at `9+`. Settings > Integrations: sender cards with health,
+    last recorded item and the refusal explained inline (field, redacted body <= 4 KiB, migration
+    `0020_integrations_payload.sql`), three-step connect panel on SSE `integration.call` with the
+    60 s "check the token" state, `POST /integrations/{id}/test` (records nothing, marked test),
+    revoke with confirm. Tests: `apps/server/tests/webhook.rs` (2 new), `notifications.rs` (new,
+    2), unit tests in integrations/notify/web, `notifications.spec.ts` (rewritten),
+    `integrations.spec.ts` (new, 2). Cuts in DEC-344 (item rules, channel editing -> phase 4).
+  - WP3-6 people-lists (DEC-346..353): `App::companion_stats` (together, plays, wins over decided
+    plays with ties as wins, last, most played; merged entries folded in, sessions a linked
+    person shared counted), merge suggestions by `name_key`, merge undo from the merge record and
+    "delete keeps history" (`removed_at`), migration `0021_people_lists.sql`;
+    `set_list_visibility` (link kept unless `new_link`, private/instance revoke), "Shared with me"
+    (instance lists of people linked either way) and "On this instance"; REST `/people`,
+    `/people/{id}`, `/companions/{id}` PATCH/DELETE, `/unmerge`, `/lists/overview`,
+    `/lists/{id}` GET/PATCH/DELETE, item remove and position, visibility, "Add all to my library"
+    (also by share token); server functions for the four page loads (`api::people`). Web:
+    `/people` (request cards, tabs, person cards, dialogs mounted outside the refetched data),
+    `/people/:id`, `/lists` (tabs and cards), `/lists/:id` (edit in place, keyboard Move up/down
+    with focus kept, Remove, Add through the scoped palette `PaletteTarget`), the share dialog
+    (`list_share.rs`), the public page polish. Tests: `app/tests/people.rs` (new, 6) and
+    `app/tests/lists.rs` (+3), `apps/server/tests/sharing.rs` (new, 3), `people.spec.ts` and
+    `lists.spec.ts` (new), `sharing.spec.ts` (rewritten); `shell`, `slice` and `notifications`
+    specs add people through the new sheet. Cuts in DEC-353 (Game groups, drag handles, "Log
+    with", avatar upload -> phase 4).
+  - WP3-7 imports-history (DEC-354..365): legacy importer from the owner's export only (fixture
+    committed: kinds, ids, episodes and dates, statuses from the built-in collections, other
+    collections as lists, undated views on the day the item entered Completed reported as
+    estimates, the rest reported as not kept); Trakt file importer (`trakt-import`, default on,
+    synthetic fixtures, credit on the Trakt card until an attribution page exists); runner with
+    a preview per import (`ImportRecord.preview`), an unmatched list with manual match and
+    replay, cancel per checkpoint (migration `0022_imports_page.sql`), `GET /imports`,
+    `POST /imports/{id}/run|cancel|match`, CSV export; optional `lists` and `event_id` in the
+    generic row (version 1 kept). Web: `/settings/imports` (format cards with drop zone,
+    preview, "x of y" with Cancel, result with the unmatched list matched through the
+    palette, Try again, export downloads), History H1 link to Export, episode list "Mark
+    show" and "Spread over a date range". Tests: `importers/tests/{legacy,trakt}.rs`,
+    `apps/server/tests/imports.rs`, `imports.spec.ts`, `item.spec.ts` (+1). Cuts in DEC-365
+    ("On release dates" needs per-episode air dates, DEC-363; Goodreads, BG Stats, BGG wait
+    for samples).
 - **Research done** (in `docs/research/`): icons, notification channels, RustFS, OD-12
   re-auth window, board game sources, anime/manga sources. Connector doc for BGG rewritten
   from the owner-supplied terms (`docs/connectors/bgg.md`, DEC-190).
@@ -473,7 +576,7 @@ test by hand, commit, push, tag.
   card with Ask admin / Set up, Home admin nudge (DEC-237), hosted-mode banner, TheTVDB member
   PIN in requests (DEC-246), keep the Playwright setup project creating the first admin
   through the wizard). Then the phase review and the tag `ux2`.
-- **Phase 3, sign-in and the stale pages.** OIDC multi-provider and true SSO (addendum 4,
+- **Phase 3 (done, `ux3`), sign-in and the stale pages.** OIDC multi-provider and true SSO (addendum 4,
   OD-15..21 with OD-17 as changed; re-auth OIDC round trip for DEC-191 via
   `Auth::confirm_oidc_reauth`; encrypt OIDC client secrets and the SMTP password; the
   Sign-in-and-SSO and Instance admin pages DEC-255 left out), Notifications, Integrations,
@@ -503,7 +606,13 @@ test by hand, commit, push, tag.
   already uses `debug = "line-tables-only"`.
 - **Disk:** `src/rust/target/debug/deps` grows by GBs per phase. When free disk is below
   ~5 GB and no cargo runs: `rtk proxy find src/rust/target/debug/deps -maxdepth 1 -type f
-  -executable -delete`; if still short, `rm -rf src/rust/target/debug` (rebuild ~1 h). Drop
+  -executable -delete`. Old rlib/rmeta builds pile up too (58 copies of `libserver` were
+  found once; deleting them freed 10 GB): in `src/rust/target/debug/deps` run
+  `rtk proxy ls -t | grep -E '^lib.+-[0-9a-f]{16}\.(rlib|rmeta|so)$|^.+-[0-9a-f]{16}\.d$' |
+  perl -ne 'chomp; /^(.+)-[0-9a-f]{16}\.(\w+)$/ and do { $k="$1.$2"; unlink $_ if $seen{$k}++ }'`
+  (keeps the newest per crate; cargo rebuilds anything still needed; plain `ls` is rewritten
+  by rtk and then matches nothing). If still short, `rm -rf src/rust/target/debug` (rebuild
+  ~1 h). Drop
   leftover `e2e_*` / `test_*` databases. The owner allowed deleting build output of
   `<projects dir>/{testingapi,pegaprox-rs,organizer}` (done once); never touch `<projects dir>/osd`.
 - **Local services:** `cargo xtask services up` (Postgres 55432, RustFS S3 55433,

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO instance_settings (id, mail_last_test_at, mail_last_test_result)\n             VALUES (true, $1, $2)\n             ON CONFLICT (id) DO UPDATE SET mail_last_test_at = $1, mail_last_test_result = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "09ab84a771181835f459c03e513374096c820b7585e35c8e55edb29bb7d29b46"
+}

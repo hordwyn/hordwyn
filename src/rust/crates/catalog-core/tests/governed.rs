@@ -326,3 +326,36 @@ async fn network_errors_do_not_carry_the_url() {
     assert!(!shown.contains("s3cr3t-value"), "{shown}");
     assert!(!shown.contains("/token"), "{shown}");
 }
+
+/// The allowlist of a connector can change at run time (OIDC providers added in the admin
+/// area, phase 3 WP3-2): the handle replaces the hosts for every later request.
+#[tokio::test]
+async fn host_allowlist_changes_at_run_time() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/.well-known/openid-configuration"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+        .mount(&server)
+        .await;
+    let mut p = policy(&server);
+    p.hosts.clear();
+    let http = client(&server, p);
+    let hosts = http.host_list("fake").expect("a handle for the connector");
+    assert!(http.host_list("other").is_none());
+    let r = http
+        .fetch(get(&server, "/.well-known/openid-configuration"))
+        .await;
+    assert!(matches!(r, Err(HttpError::Blocked(_))), "{r:?}");
+    hosts.set(vec![server.address().to_string()]);
+    let r = http
+        .fetch(get(&server, "/.well-known/openid-configuration"))
+        .await
+        .unwrap();
+    assert_eq!(r.status, 200);
+    assert_eq!(hosts.get(), vec![server.address().to_string()]);
+    hosts.set(Vec::new());
+    let r = http
+        .fetch(get(&server, "/.well-known/openid-configuration"))
+        .await;
+    assert!(matches!(r, Err(HttpError::Blocked(_))), "{r:?}");
+}

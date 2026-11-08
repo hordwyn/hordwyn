@@ -13,6 +13,8 @@ pub struct ApiError {
     pub message: String,
     /// Seconds until a throttled caller may try again (`too_many_attempts`).
     pub retry_after_secs: Option<u64>,
+    /// The request field the error is about, if known.
+    pub field: Option<String>,
 }
 
 impl ApiError {
@@ -23,7 +25,15 @@ impl ApiError {
             code,
             message: message.into(),
             retry_after_secs: None,
+            field: None,
         }
+    }
+
+    /// The same error, about `field`.
+    #[must_use]
+    pub fn with_field(mut self, field: impl Into<String>) -> Self {
+        self.field = Some(field.into());
+        self
     }
 
     #[must_use]
@@ -43,6 +53,7 @@ impl ApiError {
             code: self.code.into(),
             message: self.message,
             retry_after_secs: self.retry_after_secs,
+            field: self.field,
         }
     }
 }

@@ -2,8 +2,9 @@
 //! sections, the charts with their text equivalents and the day-grouped history with its URL
 //! filters for a seeded user.
 
+mod support;
+
 use server::{Overrides, Server};
-use tower::ServiceExt;
 
 fn repo(p: &str) -> String {
     format!("{}/../../../../{p}", env!("CARGO_MANIFEST_DIR"))
@@ -50,11 +51,9 @@ async fn call(
         }
         None => axum::body::Body::empty(),
     };
-    let resp = app.clone().oneshot(req.body(body).unwrap()).await.unwrap();
+    let resp = support::send(app, req.body(body).unwrap()).await;
     let status = resp.status().as_u16();
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 23)
-        .await
-        .unwrap();
+    let bytes = resp.into_body();
     (status, String::from_utf8(bytes.to_vec()).unwrap())
 }
 
@@ -64,18 +63,16 @@ async fn sign_up(app: &axum::Router, username: &str) -> String {
         "display_name": username,
         "password": "correct horse battery",
     });
-    let resp = app
-        .clone()
-        .oneshot(
-            axum::http::Request::builder()
-                .method("POST")
-                .uri("/api/v1/auth/sign-up")
-                .header("content-type", "application/json")
-                .body(axum::body::Body::from(body.to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let resp = support::send(
+        app,
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/sign-up")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap(),
+    )
+    .await;
     assert_eq!(resp.status(), 201, "sign-up");
     let cookie = resp.headers()["set-cookie"].to_str().unwrap();
     cookie.split(';').next().unwrap().to_string()

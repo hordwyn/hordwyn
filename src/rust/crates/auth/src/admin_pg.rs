@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use app::ports::{
-    PortError, RepoError, RepoResult, RewrapBatch, SecretCipher, SecretRows, SecretSlot,
+    PortError, RepoError, RepoResult, RewrapBatch, SecretCipher, SecretLocked, SecretRows,
+    SecretSlot,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -15,7 +16,7 @@ use zeroize::Zeroizing;
 
 use crate::admin::{
     ActorKind, AdminStore, AuditEntry, AuditFilter, CREDENTIAL_FIELD, CREDENTIAL_PURPOSE,
-    LicenceRecord, StoredCredential, StoredSettings,
+    LicenceRecord, MAIL_PURPOSE, StoredCredential, StoredMail, StoredSettings,
 };
 
 // Takes the error by value so it can be passed to `map_err` directly.
@@ -76,6 +77,53 @@ impl PgAdminStore {
 
 type StoredFields = Result<BTreeMap<String, String>, app::ports::SecretLocked>;
 
+/// Insert one audit row on `conn`, usually the transaction of the change it records
+/// (addendum-1 3.4: "each row is written in the same transaction as the change").
+///
+/// # Errors
+/// Database errors (the caller's transaction is then rolled back).
+pub async fn insert_audit(conn: &mut sqlx::PgConnection, e: &AuditEntry) -> Result<(), PortError> {
+    sqlx::query!(
+        "INSERT INTO admin_audit (id, at, actor_id, actor_kind, actor_name, action, target_type,
+                                  target_id, detail, client_addr, request_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        e.id,
+        e.at,
+        e.actor_id.map(|u| u.0),
+        e.actor_kind.as_str(),
+        e.actor_name,
+        e.action,
+        e.target_type,
+        e.target_id,
+        e.detail,
+        e.client_addr,
+        e.request_id
+    )
+    .execute(conn)
+    .await
+    .map_err(pe)?;
+    Ok(())
+}
+
+async fn audit_opt(
+    tx: &mut sqlx::PgConnection,
+    audit: Option<&AuditEntry>,
+) -> Result<(), PortError> {
+    match audit {
+        Some(e) => insert_audit(tx, e).await,
+        None => Ok(()),
+    }
+}
+
+/// The slot of the SMTP password (one row: the instance).
+fn mail_slot() -> SecretSlot<'static> {
+    SecretSlot {
+        purpose: MAIL_PURPOSE,
+        row: "instance",
+        field: "password",
+    }
+}
+
 /// Does any encrypted column hold a value (start-up: refuse to generate a new key then)?
 ///
 /// # Errors
@@ -84,7 +132,10 @@ pub async fn has_encrypted_rows(pool: &PgPool) -> Result<bool, PortError> {
     sqlx::query_scalar!(
         r#"SELECT (EXISTS (SELECT 1 FROM credentials WHERE totp_secret_enc IS NOT NULL)
                 OR EXISTS (SELECT 1 FROM notify_channels WHERE secret IS NOT NULL)
-                OR EXISTS (SELECT 1 FROM connector_credentials)) AS "e!""#
+                OR EXISTS (SELECT 1 FROM connector_credentials)
+                OR EXISTS (SELECT 1 FROM instance_settings WHERE mail_password IS NOT NULL)
+                OR EXISTS (SELECT 1 FROM oidc_providers WHERE client_secret IS NOT NULL))
+               AS "e!""#
     )
     .fetch_one(pool)
     .await
@@ -138,10 +189,12 @@ impl From<AuditRow> for AuditEntry {
 impl AdminStore for PgAdminStore {
     async fn settings(&self) -> Result<StoredSettings, PortError> {
         let r = sqlx::query!(
-            "SELECT hosting, signup, session_days, secure_cookies, storage_max_total_bytes,
+            r#"SELECT hosting, signup, session_days, secure_cookies, storage_max_total_bytes,
                     storage_high_watermark, storage_low_watermark, setup_completed_at, setup_step,
-                    updated_at, updated_by
-             FROM instance_settings WHERE id"
+                    sign_in_mode, mail_host, mail_port, mail_security, mail_username, mail_from,
+                    mail_password IS NOT NULL AS "mail_password_set!", mail_last_test_at,
+                    mail_last_test_result, updated_at, updated_by
+             FROM instance_settings WHERE id"#
         )
         .fetch_optional(&self.pool)
         .await
@@ -158,22 +211,41 @@ impl AdminStore for PgAdminStore {
             storage_low_watermark: r.storage_low_watermark,
             setup_completed_at: r.setup_completed_at,
             setup_step: r.setup_step,
+            sign_in_mode: r.sign_in_mode,
+            mail: StoredMail {
+                host: r.mail_host,
+                port: r.mail_port.and_then(|p| u16::try_from(p).ok()),
+                security: r.mail_security,
+                username: r.mail_username,
+                from: r.mail_from,
+                password_set: r.mail_password_set,
+                last_test_at: r.mail_last_test_at,
+                last_test_result: r.mail_last_test_result,
+            },
             updated_at: r.updated_at,
             updated_by: r.updated_by.map(UserId),
         })
         .unwrap_or_default())
     }
 
-    async fn put_settings(&self, s: &StoredSettings) -> Result<(), PortError> {
+    async fn put_settings(
+        &self,
+        s: &StoredSettings,
+        audit: &[AuditEntry],
+    ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(pe)?;
         sqlx::query!(
             "INSERT INTO instance_settings (id, hosting, signup, session_days, secure_cookies,
                  storage_max_total_bytes, storage_high_watermark, storage_low_watermark,
-                 setup_completed_at, setup_step, updated_at, updated_by)
-             VALUES (true, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                 setup_completed_at, setup_step, updated_at, updated_by, sign_in_mode, mail_host,
+                 mail_port, mail_security, mail_username, mail_from)
+             VALUES (true, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                     $17)
              ON CONFLICT (id) DO UPDATE SET hosting = $1, signup = $2, session_days = $3,
                  secure_cookies = $4, storage_max_total_bytes = $5, storage_high_watermark = $6,
                  storage_low_watermark = $7, setup_completed_at = $8, setup_step = $9,
-                 updated_at = $10, updated_by = $11",
+                 updated_at = $10, updated_by = $11, sign_in_mode = $12, mail_host = $13,
+                 mail_port = $14, mail_security = $15, mail_username = $16, mail_from = $17",
             s.hosting,
             s.signup,
             s.session_days.and_then(|d| i32::try_from(d).ok()),
@@ -185,35 +257,26 @@ impl AdminStore for PgAdminStore {
             s.setup_completed_at,
             s.setup_step,
             s.updated_at,
-            s.updated_by.map(|u| u.0)
+            s.updated_by.map(|u| u.0),
+            s.sign_in_mode,
+            s.mail.host,
+            s.mail.port.map(i32::from),
+            s.mail.security,
+            s.mail.username,
+            s.mail.from
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(pe)?;
-        Ok(())
+        for e in audit {
+            insert_audit(&mut tx, e).await?;
+        }
+        tx.commit().await.map_err(pe)
     }
 
     async fn audit(&self, e: &AuditEntry) -> Result<(), PortError> {
-        sqlx::query!(
-            "INSERT INTO admin_audit (id, at, actor_id, actor_kind, actor_name, action, target_type,
-                                      target_id, detail, client_addr, request_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
-            e.id,
-            e.at,
-            e.actor_id.map(|u| u.0),
-            e.actor_kind.as_str(),
-            e.actor_name,
-            e.action,
-            e.target_type,
-            e.target_id,
-            e.detail,
-            e.client_addr,
-            e.request_id
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(pe)?;
-        Ok(())
+        let mut conn = self.pool.acquire().await.map_err(pe)?;
+        insert_audit(&mut conn, e).await
     }
 
     async fn audit_query(&self, f: &AuditFilter) -> Result<Vec<AuditEntry>, PortError> {
@@ -318,6 +381,7 @@ impl AdminStore for PgAdminStore {
         fields: &BTreeMap<String, String>,
         by: Option<UserId>,
         at: DateTime<Utc>,
+        audit: Option<&AuditEntry>,
     ) -> Result<StoredCredential, PortError> {
         let id = self
             .credential(connector, user)
@@ -328,6 +392,7 @@ impl AdminStore for PgAdminStore {
         let row = id.to_string();
         let blob = self.cipher.seal(slot(&row), &plain);
         let scope = if user.is_some() { "user" } else { "instance" };
+        let mut tx = self.pool.begin().await.map_err(pe)?;
         sqlx::query!(
             "INSERT INTO connector_credentials (id, connector_id, scope, user_id, secret,
                                                 created_by, created_at)
@@ -342,9 +407,11 @@ impl AdminStore for PgAdminStore {
             by.map(|u| u.0),
             at
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(pe)?;
+        audit_opt(&mut tx, audit).await?;
+        tx.commit().await.map_err(pe)?;
         Ok(StoredCredential {
             id,
             connector: connector.to_string(),
@@ -361,18 +428,22 @@ impl AdminStore for PgAdminStore {
         &self,
         connector: &str,
         user: Option<UserId>,
+        audit: Option<&AuditEntry>,
     ) -> Result<bool, PortError> {
-        Ok(sqlx::query!(
+        let mut tx = self.pool.begin().await.map_err(pe)?;
+        let n = sqlx::query!(
             "DELETE FROM connector_credentials
              WHERE connector_id = $1 AND user_id IS NOT DISTINCT FROM $2",
             connector,
             user.map(|u| u.0)
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(pe)?
-        .rows_affected()
-            > 0)
+        .rows_affected();
+        audit_opt(&mut tx, audit).await?;
+        tx.commit().await.map_err(pe)?;
+        Ok(n > 0)
     }
 
     async fn record_test(
@@ -411,7 +482,12 @@ impl AdminStore for PgAdminStore {
         .collect())
     }
 
-    async fn put_licence(&self, l: &LicenceRecord) -> Result<(), PortError> {
+    async fn put_licence(
+        &self,
+        l: &LicenceRecord,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(pe)?;
         sqlx::query!(
             "INSERT INTO source_licences (connector_id, agreement_on_file, recorded_by, recorded_at)
              VALUES ($1, $2, $3, $4)
@@ -421,6 +497,94 @@ impl AdminStore for PgAdminStore {
             l.agreement_on_file,
             l.recorded_by.map(|u| u.0),
             l.recorded_at
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(pe)?;
+        audit_opt(&mut tx, audit).await?;
+        tx.commit().await.map_err(pe)
+    }
+
+    async fn source_switches(&self) -> Result<Vec<(String, bool)>, PortError> {
+        Ok(
+            sqlx::query!("SELECT connector_id, enabled FROM source_switches ORDER BY connector_id")
+                .fetch_all(&self.pool)
+                .await
+                .map_err(pe)?
+                .into_iter()
+                .map(|r| (r.connector_id, r.enabled))
+                .collect(),
+        )
+    }
+
+    async fn set_source_enabled(
+        &self,
+        connector: &str,
+        enabled: bool,
+        by: Option<UserId>,
+        at: DateTime<Utc>,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(pe)?;
+        sqlx::query!(
+            "INSERT INTO source_switches (connector_id, enabled, changed_by, changed_at)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (connector_id) DO UPDATE SET enabled = $2, changed_by = $3,
+                 changed_at = $4",
+            connector,
+            enabled,
+            by.map(|u| u.0),
+            at
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(pe)?;
+        audit_opt(&mut tx, audit).await?;
+        tx.commit().await.map_err(pe)
+    }
+
+    async fn mail_password(&self) -> Result<Option<Result<String, SecretLocked>>, PortError> {
+        let blob = sqlx::query_scalar!("SELECT mail_password FROM instance_settings WHERE id")
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(pe)?
+            .flatten();
+        Ok(blob.map(|b| {
+            self.cipher.open(mail_slot(), &b).and_then(|plain| {
+                let plain = Zeroizing::new(plain);
+                String::from_utf8(plain.to_vec()).map_err(|_| SecretLocked {
+                    version: crate::secrets::blob_version(&b),
+                })
+            })
+        }))
+    }
+
+    async fn put_mail_password(
+        &self,
+        password: Option<&str>,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), PortError> {
+        let blob = password.map(|p| self.cipher.seal(mail_slot(), p.as_bytes()));
+        let mut tx = self.pool.begin().await.map_err(pe)?;
+        sqlx::query!(
+            "INSERT INTO instance_settings (id, mail_password) VALUES (true, $1)
+             ON CONFLICT (id) DO UPDATE SET mail_password = $1",
+            blob
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(pe)?;
+        audit_opt(&mut tx, audit).await?;
+        tx.commit().await.map_err(pe)
+    }
+
+    async fn record_mail_test(&self, at: DateTime<Utc>, result: &str) -> Result<(), PortError> {
+        sqlx::query!(
+            "INSERT INTO instance_settings (id, mail_last_test_at, mail_last_test_result)
+             VALUES (true, $1, $2)
+             ON CONFLICT (id) DO UPDATE SET mail_last_test_at = $1, mail_last_test_result = $2",
+            at,
+            result
         )
         .execute(&self.pool)
         .await
@@ -529,6 +693,79 @@ impl SecretRows for PgAdminStore {
             rewrapped: done,
             locked,
             last,
+        })
+    }
+}
+
+/// The encrypted SMTP password (purpose `smtp_password`, one row) for the rotation job and
+/// the security page.
+pub struct PgMailSecret {
+    pool: PgPool,
+}
+
+impl PgMailSecret {
+    #[must_use]
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl SecretRows for PgMailSecret {
+    fn purpose(&self) -> &'static str {
+        MAIL_PURPOSE
+    }
+
+    async fn seal_plaintext(&self, _cipher: &dyn SecretCipher) -> RepoResult<u64> {
+        Ok(0)
+    }
+
+    async fn version_counts(&self) -> RepoResult<Vec<(u16, u64)>> {
+        crate::pg::version_counts(&self.pool, "instance_settings", "mail_password").await
+    }
+
+    async fn rewrap_batch(
+        &self,
+        cipher: &dyn SecretCipher,
+        _active: u16,
+        after: Option<Uuid>,
+        _limit: u32,
+    ) -> RepoResult<RewrapBatch> {
+        // one row: the first call handles it, the paging call after it ends the loop
+        if after.is_some() {
+            return Ok(RewrapBatch::default());
+        }
+        let Some(blob) =
+            sqlx::query_scalar!("SELECT mail_password FROM instance_settings WHERE id")
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(re)?
+                .flatten()
+        else {
+            return Ok(RewrapBatch::default());
+        };
+        let (mut rewrapped, mut locked) = (0, 0);
+        match cipher.rewrap(mail_slot(), &blob) {
+            Ok(Some(new)) => {
+                rewrapped = sqlx::query!(
+                    "UPDATE instance_settings SET mail_password = $2
+                     WHERE id AND mail_password = $1",
+                    blob,
+                    new
+                )
+                .execute(&self.pool)
+                .await
+                .map_err(re)?
+                .rows_affected();
+            }
+            Ok(None) => {}
+            Err(_) => locked = 1,
+        }
+        Ok(RewrapBatch {
+            rewrapped,
+            locked,
+            // a sentinel id so the caller asks once more and stops
+            last: Some(Uuid::nil()),
         })
     }
 }

@@ -1,7 +1,7 @@
 use app::ports::AppEvent;
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::header::{LOCATION, SET_COOKIE};
+use axum::http::header::SET_COOKIE;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use contracts::{
@@ -18,7 +18,6 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::error::ApiResult;
-use crate::extract::cookie;
 use crate::{ApiError, ApiState, Authed, dto, hooks, notifications, ops, sharing};
 
 #[derive(OpenApi)]
@@ -29,6 +28,34 @@ struct ApiDoc;
 pub const JSON_BODY_LIMIT: usize = 2 << 20;
 /// Largest import upload.
 pub const IMPORT_BODY_LIMIT: usize = 64 << 20;
+
+/// Notifications, integrations, sync and imports (kept apart so [`router`] stays short).
+fn notify_sync_import_routes() -> OpenApiRouter<ApiState> {
+    OpenApiRouter::new()
+        .routes(routes!(notification_events))
+        .routes(routes!(inbox))
+        .routes(routes!(mark_read))
+        .routes(routes!(mark_all_read))
+        .routes(routes!(channels, create_channel))
+        .routes(routes!(update_channel, delete_channel))
+        .routes(routes!(test_channel))
+        .routes(routes!(subscriptions, put_subscription))
+        .routes(routes!(delete_subscription))
+        .routes(routes!(deliveries))
+        .routes(routes!(templates, set_template))
+        .routes(routes!(web_push_key))
+        .routes(routes!(integrations, create_integration))
+        .routes(routes!(delete_integration))
+        .routes(routes!(test_integration))
+        .routes(routes!(watched_hook))
+        .routes(routes!(sync_changes))
+        .routes(routes!(sync_commands))
+        .routes(routes!(import_status))
+        .routes(routes!(rerun_import))
+        .routes(routes!(cancel_import))
+        .routes(routes!(match_import_row))
+        .routes(routes!(export))
+}
 
 /// `/api/v1` routes plus `/api/v1/openapi.json`.
 pub fn router(state: ApiState) -> axum::Router {
@@ -41,8 +68,6 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(me))
         .routes(routes!(totp_begin))
         .routes(routes!(totp_confirm))
-        .routes(routes!(oidc_start))
-        .routes(routes!(oidc_callback))
         .routes(routes!(get_item))
         .routes(routes!(search))
         .routes(routes!(sources))
@@ -66,26 +91,11 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(claim_session))
         .routes(routes!(set_privacy))
         .routes(routes!(set_locale))
+        .routes(routes!(set_time_zone))
+        .routes(routes!(reset_password))
         .routes(routes!(share_list))
         .routes(routes!(shared_list))
-        .routes(routes!(notification_events))
-        .routes(routes!(inbox))
-        .routes(routes!(mark_read))
-        .routes(routes!(channels, create_channel))
-        .routes(routes!(update_channel, delete_channel))
-        .routes(routes!(test_channel))
-        .routes(routes!(subscriptions, put_subscription))
-        .routes(routes!(delete_subscription))
-        .routes(routes!(deliveries))
-        .routes(routes!(templates, set_template))
-        .routes(routes!(web_push_key))
-        .routes(routes!(integrations, create_integration))
-        .routes(routes!(delete_integration))
-        .routes(routes!(watched_hook))
-        .routes(routes!(sync_changes))
-        .routes(routes!(sync_commands))
-        .routes(routes!(import_status))
-        .routes(routes!(export))
+        .merge(notify_sync_import_routes())
         .routes(routes!(events))
         .routes(routes!(kinds))
         .routes(routes!(library_counts))
@@ -102,12 +112,15 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(home))
         .routes(routes!(item_page))
         .merge(crate::admin_routes::routes())
+        .merge(crate::people_routes::routes())
+        .merge(crate::oidc_routes::routes())
+        .merge(crate::sso_routes::routes())
         // JSON bodies are small (G2-10); only file imports may be large (the upload quota
         // limits what is kept)
         .layer(axum::extract::DefaultBodyLimit::max(JSON_BODY_LIMIT))
         .merge(
             OpenApiRouter::new()
-                .routes(routes!(start_import))
+                .routes(routes!(start_import, list_imports))
                 .layer(axum::extract::DefaultBodyLimit::max(IMPORT_BODY_LIMIT)),
         )
         .with_state(state)
@@ -126,7 +139,7 @@ pub fn router(state: ApiState) -> axum::Router {
     )
 }
 
-fn session_cookie(state: &ApiState, token: &str, max_age_secs: i64) -> HeaderValue {
+pub(crate) fn session_cookie(state: &ApiState, token: &str, max_age_secs: i64) -> HeaderValue {
     let secure = if state.cookie_secure() {
         "; Secure"
     } else {
@@ -176,10 +189,8 @@ async fn sign_up(State(s): State<ApiState>, Json(b): Json<SignUpDto>) -> ApiResu
 #[utoipa::path(post, path = "/auth/sign-in", tag = "auth", request_body = SignInDto,
     responses((status = 200, body = SessionDto), (status = 401, body = contracts::ErrorDto)))]
 async fn sign_in(State(s): State<ApiState>, Json(b): Json<SignInDto>) -> ApiResult<Response> {
-    let token = s
-        .auth
-        .sign_in(&b.username, &b.password, b.totp.as_deref())
-        .await?;
+    // `auto` mode: 403 `sso_only` (the break-glass path is `/auth/sign-in/local`)
+    let token = crate::password_sign_in(&s, &b, false).await?;
     let actor = s
         .auth
         .session(&token.0)
@@ -252,63 +263,6 @@ async fn totp_confirm(
     Json(b): Json<TotpCodeDto>,
 ) -> ApiResult<Json<contracts::admin::RecoveryCodesDto>> {
     Ok(Json(crate::admin::totp_confirm(&s, a, &b.code).await?))
-}
-
-fn oidc(s: &ApiState) -> ApiResult<&std::sync::Arc<auth::oidc::Oidc>> {
-    s.oidc
-        .as_ref()
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "OIDC is not configured"))
-}
-
-#[utoipa::path(get, path = "/auth/oidc/start", tag = "auth", responses((status = 302)))]
-async fn oidc_start(State(s): State<ApiState>) -> ApiResult<Response> {
-    let (url, pending) = oidc(&s)?.start().await?;
-    let secure = if s.cookie_secure() { "; Secure" } else { "" };
-    let value = serde_json::to_string(&pending).unwrap_or_default();
-    let cookie_value = format!(
-        "{}={}; Path=/api/v1/auth/oidc; HttpOnly; SameSite=Lax; Max-Age=600{secure}",
-        s.naming.oidc_cookie,
-        base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, value)
-    );
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        LOCATION,
-        HeaderValue::from_str(&url).map_err(|e| ApiError::bad_request(e.to_string()))?,
-    );
-    headers.insert(
-        SET_COOKIE,
-        HeaderValue::from_str(&cookie_value).map_err(|e| ApiError::bad_request(e.to_string()))?,
-    );
-    Ok((StatusCode::FOUND, headers).into_response())
-}
-
-#[derive(Deserialize, IntoParams)]
-struct OidcCallback {
-    code: String,
-    state: String,
-}
-
-#[utoipa::path(get, path = "/auth/oidc/callback", tag = "auth", params(OidcCallback),
-    responses((status = 302)))]
-async fn oidc_callback(
-    State(s): State<ApiState>,
-    Query(q): Query<OidcCallback>,
-    req: axum::extract::Request,
-) -> ApiResult<Response> {
-    let (parts, _) = req.into_parts();
-    let raw = cookie(&parts, &s.naming.oidc_cookie)
-        .ok_or_else(|| ApiError::bad_request("no pending sign-in"))?;
-    let json = base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, raw)
-        .map_err(|_| ApiError::bad_request("bad sign-in state"))?;
-    let pending: auth::oidc::PendingLogin =
-        serde_json::from_slice(&json).map_err(|_| ApiError::bad_request("bad sign-in state"))?;
-    let token = oidc(&s)?
-        .finish(&s.auth, &pending, &q.state, &q.code)
-        .await?;
-    let mut r = with_session(&s, &token.0, StatusCode::FOUND);
-    r.headers_mut()
-        .insert(LOCATION, HeaderValue::from_static("/"));
-    Ok(r)
 }
 
 // ---------------------------------------------------------------- catalog
@@ -480,16 +434,24 @@ struct NameDto {
     name: String,
 }
 
-#[utoipa::path(post, path = "/companions", tag = "companions", request_body = NameDto,
+#[derive(Deserialize, ToSchema)]
+struct NewPersonBody {
+    name: String,
+    /// An optional note ("Add a person", design.md 6.7).
+    #[serde(default)]
+    notes: Option<String>,
+}
+
+#[utoipa::path(post, path = "/companions", tag = "companions", request_body = NewPersonBody,
     responses((status = 201, body = CompanionDto)))]
 async fn create_companion(
     State(s): State<ApiState>,
     Authed(a): Authed,
-    Json(b): Json<NameDto>,
+    Json(b): Json<NewPersonBody>,
 ) -> ApiResult<(StatusCode, Json<CompanionDto>)> {
     Ok((
         StatusCode::CREATED,
-        Json(ops::create_companion(&s, a, &b.name).await?),
+        Json(crate::people::add_person(&s, a, &b.name, b.notes).await?),
     ))
 }
 
@@ -726,6 +688,14 @@ async fn mark_read(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// "Mark all read": every unread inbox row of the caller.
+#[utoipa::path(post, path = "/notifications/inbox/read-all", tag = "notifications",
+    responses((status = 204)))]
+async fn mark_all_read(State(s): State<ApiState>, Authed(a): Authed) -> ApiResult<StatusCode> {
+    notifications::mark_all_read(&s, a).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[utoipa::path(get, path = "/notifications/channels", tag = "notifications",
     responses((status = 200, body = Vec<ChannelDto>)))]
 async fn channels(
@@ -889,9 +859,28 @@ async fn delete_integration(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// "Send a test call from here" (design.md 5.9): the body is a sample `WatchedEvent`; it is
+/// validated and matched like a real call, nothing is recorded, and the user's pages get an
+/// `integration.call` marked `test`. A refused sample is a 422 with `field`.
+#[utoipa::path(post, path = "/integrations/{id}/test", tag = "integrations",
+    params(("id" = String, Path)),
+    request_body(content = Object, description = "WatchedEvent (JSON Schema in the docs)"),
+    responses((status = 200, body = contracts::IntegrationTestDto),
+        (status = 404, body = contracts::ErrorDto), (status = 422, body = contracts::ErrorDto)))]
+async fn test_integration(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+    body: axum::body::Bytes,
+) -> ApiResult<Json<contracts::IntegrationTestDto>> {
+    Ok(Json(hooks::test(&s, a, &id, &body).await?))
+}
+
 /// The watched webhook: one finished movie or episode in our JSON format (see the docs,
 /// "Integrations"). Authenticated with an integration token, not a session:
-/// `Authorization: Bearer itk_...`. Posting the same play twice records it once.
+/// `Authorization: Bearer itk_...`. Posting the same play twice records it once. The token
+/// is checked before the body, so a refused body (422, with the offending `field`) shows on
+/// the sender's card in Settings > Integrations.
 #[utoipa::path(post, path = "/hooks/watched", tag = "integrations",
     request_body(content = Object, description = "WatchedEvent (JSON Schema in the docs)"),
     responses((status = 200, body = contracts::WatchedRecordedDto),
@@ -899,7 +888,7 @@ async fn delete_integration(
 async fn watched_hook(
     State(s): State<ApiState>,
     headers: HeaderMap,
-    Json(b): Json<integrations::WatchedEvent>,
+    body: axum::body::Bytes,
 ) -> ApiResult<Json<contracts::WatchedRecordedDto>> {
     let token = headers
         .get(axum::http::header::AUTHORIZATION)
@@ -907,7 +896,7 @@ async fn watched_hook(
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(str::trim)
         .ok_or_else(ApiError::unauthorized)?;
-    Ok(Json(hooks::watched(&s, token, &b).await?))
+    Ok(Json(hooks::watched(&s, token, &body).await?))
 }
 
 // ---------------------------------------------------------------- sync
@@ -984,12 +973,108 @@ async fn import_status(
     Ok(Json(ops::import_status(&s, a, &id).await?))
 }
 
-/// The library as JSON Lines in the generic format (re-importable).
-#[utoipa::path(get, path = "/export", tag = "import",
+/// The user's imports, newest first: state, counts, preview, errors and unmatched rows.
+#[utoipa::path(get, path = "/imports", tag = "import",
+    responses((status = 200, body = Vec<serde_json::Value>)))]
+async fn list_imports(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+) -> ApiResult<Json<Vec<serde_json::Value>>> {
+    Ok(Json(ops::imports(&s, a).await?))
+}
+
+/// Run the file of an import again for real: after a dry run's preview, or as a retry.
+#[utoipa::path(post, path = "/imports/{id}/run", tag = "import", params(("id" = String, Path)),
+    responses((status = 202, body = serde_json::Value)))]
+async fn rerun_import(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(ops::rerun_import(&s, a, &id).await?),
+    ))
+}
+
+/// Stop a queued or running import at its next checkpoint (409 `import_finished` after it).
+#[utoipa::path(post, path = "/imports/{id}/cancel", tag = "import", params(("id" = String, Path)),
+    responses((status = 202, body = serde_json::Value)))]
+async fn cancel_import(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(ops::cancel_import(&s, a, &id).await?),
+    ))
+}
+
+#[derive(Deserialize, ToSchema)]
+struct MatchRowBody {
+    /// The unmatched row's `source_id`.
+    source_id: String,
+    /// The catalog item it is.
+    item_id: String,
+}
+
+/// Match an unmatched row of an import with a catalog item; the row is imported then.
+#[utoipa::path(post, path = "/imports/{id}/match", tag = "import", params(("id" = String, Path)),
+    request_body = MatchRowBody, responses((status = 200, body = serde_json::Value)))]
+async fn match_import_row(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+    Json(b): Json<MatchRowBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    Ok(Json(
+        ops::match_import_row(&s, a, &id, &b.source_id, &b.item_id).await?,
+    ))
+}
+
+#[derive(Deserialize, IntoParams)]
+struct ExportParams {
+    /// `jsonl` (default) or `csv`.
+    #[serde(default)]
+    format: Option<String>,
+}
+
+/// The library in the generic format (re-importable): JSON Lines, or CSV with `format=csv`
+/// (finished dates only). Sent as a download.
+#[utoipa::path(get, path = "/export", tag = "import", params(ExportParams),
     responses((status = 200, content_type = "application/x-ndjson", body = String)))]
-async fn export(State(s): State<ApiState>, Authed(a): Authed) -> ApiResult<Response> {
-    let body = ops::export(&s, a).await?;
-    Ok(([("content-type", "application/x-ndjson")], body).into_response())
+async fn export(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Query(p): Query<ExportParams>,
+) -> ApiResult<Response> {
+    let (body, kind, name) = match p.format.as_deref() {
+        None | Some("jsonl") => (
+            ops::export(&s, a).await?,
+            "application/x-ndjson",
+            "library-export.jsonl",
+        ),
+        Some("csv") => (
+            ops::export_csv(&s, a).await?,
+            "text/csv; charset=utf-8",
+            "library-export.csv",
+        ),
+        Some(other) => {
+            return Err(ApiError::bad_request(format!(
+                "unknown export format `{other}`"
+            )));
+        }
+    };
+    let disposition = format!("attachment; filename=\"{name}\"");
+    Ok((
+        [
+            ("content-type", kind),
+            ("content-disposition", disposition.as_str()),
+        ],
+        body,
+    )
+        .into_response())
 }
 
 // ---------------------------------------------------------------- events
@@ -1215,4 +1300,27 @@ async fn item_page(
     Path(id): Path<String>,
 ) -> ApiResult<Json<contracts::ItemPageDto>> {
     Ok(Json(ops::item_page(&s, a, &id).await?))
+}
+
+#[utoipa::path(put, path = "/auth/me/time-zone", tag = "auth", request_body = contracts::TimeZoneDto,
+    responses((status = 200, body = UserDto), (status = 422, body = contracts::ErrorDto)))]
+async fn set_time_zone(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Json(b): Json<contracts::TimeZoneDto>,
+) -> ApiResult<Json<UserDto>> {
+    Ok(Json(sharing::set_time_zone(&s, a, b).await?))
+}
+
+/// Use a one-time password reset link (printed by `cli admin reset-password`).
+#[utoipa::path(post, path = "/auth/reset-password", tag = "auth",
+    request_body = contracts::ResetPasswordDto,
+    responses((status = 204), (status = 404, body = contracts::ErrorDto),
+        (status = 422, body = contracts::ErrorDto)))]
+async fn reset_password(
+    State(s): State<ApiState>,
+    Json(b): Json<contracts::ResetPasswordDto>,
+) -> ApiResult<StatusCode> {
+    sharing::reset_password(&s, b).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

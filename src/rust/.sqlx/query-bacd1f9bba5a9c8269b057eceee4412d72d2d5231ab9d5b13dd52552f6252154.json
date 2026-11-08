@@ -1,0 +1,124 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, issuer, subject, user_id, provider_id, sid, linked_at, last_claims_hash,\n                    last_groups\n             FROM oidc_identities WHERE user_id = $1 ORDER BY linked_at, issuer",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oidc_identities",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "issuer",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_identities",
+            "name": "issuer"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "subject",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_identities",
+            "name": "subject"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oidc_identities",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "provider_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oidc_identities",
+            "name": "provider_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "sid",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_identities",
+            "name": "sid"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "linked_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "oidc_identities",
+            "name": "linked_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "last_claims_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oidc_identities",
+            "name": "last_claims_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "last_groups",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "oidc_identities",
+            "name": "last_groups"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "bacd1f9bba5a9c8269b057eceee4412d72d2d5231ab9d5b13dd52552f6252154"
+}

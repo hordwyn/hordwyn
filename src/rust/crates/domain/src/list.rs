@@ -18,6 +18,52 @@ pub enum Visibility {
     },
 }
 
+/// What the share dialog offers (design.md 5.10): the visibility without the link token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VisibilityChoice {
+    Private,
+    Instance,
+    Link,
+}
+
+impl VisibilityChoice {
+    /// `private`, `instance` or `link`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Private => "private",
+            Self::Instance => "instance",
+            Self::Link => "link",
+        }
+    }
+
+    /// # Errors
+    /// Anything but `private`, `instance` or `link`.
+    pub fn parse(s: &str) -> Result<Self, DomainError> {
+        match s {
+            "private" => Ok(Self::Private),
+            "instance" => Ok(Self::Instance),
+            "link" => Ok(Self::Link),
+            _ => Err(DomainError::invalid(
+                "visibility",
+                "visibility must be private, instance or link",
+            )),
+        }
+    }
+}
+
+impl Visibility {
+    #[must_use]
+    pub const fn choice(&self) -> VisibilityChoice {
+        match self {
+            Self::Private => VisibilityChoice::Private,
+            Self::Instance => VisibilityChoice::Instance,
+            Self::Link { .. } => VisibilityChoice::Link,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListItem {
     pub item_id: ItemId,

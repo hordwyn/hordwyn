@@ -1,5 +1,5 @@
 use domain::companion::{
-    Companion, Invite, LinkRequest, RequestState, UserSnapshot, invite_expiry, merge,
+    Companion, Invite, LinkRequest, RequestState, UserSnapshot, invite_expiry, merge, unmerge,
     validate_companion_name,
 };
 use domain::ids::{CompanionId, InviteId, LinkRequestId, UserId};
@@ -13,17 +13,34 @@ impl App {
     /// # Errors
     /// Invalid name.
     pub async fn create_companion(&self, actor: Actor, name: &str) -> AppResult<Companion> {
+        self.add_person(actor, name, None).await
+    }
+
+    /// The "Add a person" sheet (design.md 6.7): a name and an optional note.
+    ///
+    /// # Errors
+    /// Invalid name.
+    pub async fn add_person(
+        &self,
+        actor: Actor,
+        name: &str,
+        notes: Option<String>,
+    ) -> AppResult<Companion> {
         validate_companion_name(name)?;
         let c = Companion {
             id: CompanionId(self.uuid()),
             owner: actor.user_id,
             name: name.trim().to_string(),
             avatar_asset: None,
-            notes: None,
+            notes: notes
+                .map(|n| n.trim().to_string())
+                .filter(|n| !n.is_empty()),
             linked_user: None,
             snapshot: None,
             is_self: false,
             merged_into: None,
+            merge: None,
+            removed_at: None,
             created_at: self.now(),
         };
         self.repos.companions.insert(&c).await?;
@@ -94,16 +111,23 @@ impl App {
         Ok(c)
     }
 
-    /// Delete an unused companion. Companions referenced by sessions can only be merged.
+    /// Delete a companion. One that sessions name (directly or through a merge) is removed
+    /// instead: hidden from People and the pickers, its link ended, its name kept for the
+    /// history ("delete keeps history", design.md 6.7).
     ///
     /// # Errors
-    /// Self-companion, referenced, or not owned.
+    /// Self-companion, already merged or removed, or not owned.
     pub async fn delete_companion(&self, actor: Actor, id: CompanionId) -> AppResult<()> {
-        let c = self.companion(actor, id).await?;
+        let mut c = self.companion(actor, id).await?;
+        c.ensure_active()?;
         if c.is_self {
             return Err(AppError::Conflict(
                 "the self-companion cannot be deleted".into(),
             ));
+        }
+        // a link ends for both sides (UX3-17)
+        if let Some(linked) = c.linked_user {
+            self.end_counterpart(actor.user_id, linked).await?;
         }
         let mut referenced = vec![id];
         referenced.extend(
@@ -115,16 +139,26 @@ impl App {
                 .filter(|o| o.merged_into == Some(id))
                 .map(|o| o.id),
         );
-        if !self
-            .repos
-            .sessions
-            .with_participants(&referenced)
-            .await?
-            .is_empty()
+        // a companion others were merged into stays as well: deleting it would let them return
+        if referenced.len() > 1
+            || !self
+                .repos
+                .sessions
+                .with_participants(&referenced)
+                .await?
+                .is_empty()
         {
-            return Err(AppError::Conflict(
-                "companion is part of logged sessions; merge it instead".into(),
-            ));
+            if let Some(linked) = c.linked_user {
+                let user = self.user(linked).await?;
+                c.demote(UserSnapshot {
+                    display_name: user.display_name,
+                    avatar_asset: None,
+                });
+            }
+            c.removed_at = Some(self.now());
+            self.repos.companions.update(&c).await?;
+            self.publish_companion(&c).await;
+            return Ok(());
         }
         self.repos.companions.delete(id).await?;
         self.publish_companion(&c).await;
@@ -264,7 +298,8 @@ impl App {
     }
 
     /// End a link (demotion). Allowed for the owner and for the linked user. The companion
-    /// keeps a snapshot of the user's name; history is untouched.
+    /// keeps a snapshot of the user's name; history is untouched. The other side's companion
+    /// for the owner, if any, is unlinked too (UX3-17).
     ///
     /// # Errors
     /// Neither owner nor linked user, or the self-companion.
@@ -279,6 +314,7 @@ impl App {
         if c.is_self {
             return Err(AppError::Conflict("the self-companion stays linked".into()));
         }
+        self.end_counterpart(c.owner, linked).await?;
         let user = self.user(linked).await?;
         c.demote(UserSnapshot {
             display_name: user.display_name,
@@ -287,6 +323,28 @@ impl App {
         self.repos.companions.update(&c).await?;
         self.publish_companion(&c).await;
         Ok(c)
+    }
+
+    /// The companions of `other` that stand for `user` lose their link too (UX3-17): a link
+    /// ends for both sides, whoever ends it, so neither keeps seeing the other's shared
+    /// sessions or link-only lists. Each keeps a snapshot of the name.
+    async fn end_counterpart(&self, user: UserId, other: UserId) -> AppResult<()> {
+        if user == other {
+            return Ok(());
+        }
+        let name = self.user(user).await?.display_name;
+        for mut o in self.repos.companions.by_owner(other).await? {
+            if o.is_self || o.linked_user != Some(user) {
+                continue;
+            }
+            o.demote(UserSnapshot {
+                display_name: name.clone(),
+                avatar_asset: None,
+            });
+            self.repos.companions.update(&o).await?;
+            self.publish_companion(&o).await;
+        }
+        Ok(())
     }
 
     /// Merge the duplicate `remove` into `keep`.
@@ -301,7 +359,7 @@ impl App {
     ) -> AppResult<Companion> {
         let mut k = self.companion(actor, keep).await?;
         let mut r = self.companion(actor, remove).await?;
-        merge(&mut k, &mut r)?;
+        merge(&mut k, &mut r, self.now())?;
         self.repos
             .companions
             .update_many(&[k.clone(), r.clone()])
@@ -309,6 +367,60 @@ impl App {
         self.publish_companion(&k).await;
         self.publish_companion(&r).await;
         Ok(k)
+    }
+
+    /// Undo a merge from its record (DEC-017): `remove` is active again and gets back what
+    /// moved to the companion it was merged into.
+    ///
+    /// # Errors
+    /// Not owned, not merged, or the kept companion is gone or no longer active.
+    pub async fn unmerge_companion(
+        &self,
+        actor: Actor,
+        remove: CompanionId,
+    ) -> AppResult<Companion> {
+        let mut r = self.companion(actor, remove).await?;
+        let Some(keep) = r.merged_into else {
+            return Err(AppError::Conflict("companion is not merged".into()));
+        };
+        let mut k = self.companion(actor, keep).await?;
+        // the kept one merged on (a chain) or removed: a state conflict like "not merged"
+        // (409, as the route promises), not invalid input (UX3-21)
+        k.ensure_active()
+            .map_err(|e| AppError::Conflict(e.to_string()))?;
+        unmerge(&mut k, &mut r)?;
+        self.repos
+            .companions
+            .update_many(&[k.clone(), r.clone()])
+            .await?;
+        self.publish_companion(&k).await;
+        self.publish_companion(&r).await;
+        Ok(r)
+    }
+
+    /// The companions merged straight into `keep` (each can be unmerged).
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn merged_into(&self, actor: Actor, keep: CompanionId) -> AppResult<Vec<Companion>> {
+        let mut out: Vec<Companion> = self
+            .repos
+            .companions
+            .by_owner(actor.user_id)
+            .await?
+            .into_iter()
+            .filter(|c| c.merged_into == Some(keep))
+            .collect();
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(out)
+    }
+
+    /// Pending link requests the actor sent ("Link request sent" on the card).
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn sent_link_requests(&self, actor: Actor) -> AppResult<Vec<LinkRequest>> {
+        Ok(self.repos.link_requests.pending_from(actor.user_id).await?)
     }
 
     /// Promote a companion to a user: create a single-use invite. Returns the invite and the
