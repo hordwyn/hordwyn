@@ -1,4 +1,4 @@
-# Handoff: state, rules, owner rulings, open items (updated 2026-11-09)
+# Handoff: state, rules, owner rulings, open items (updated 2026-11-10)
 
 Read this first when resuming. It replaces the conversation context: the rules that govern
 all work, where the build stands, every owner ruling (2026-11-06 and 2026-11-07), what is
@@ -9,7 +9,44 @@ Sources of truth, in this order: the owner's words in this file (section 4), the
 rules (section 2, verbatim), `docs/DECISIONS.md`, `docs/design/DESIGN.md`, the UX design
 (`docs/design/ux/design.md` plus `addendum-1.md`), `docs/REPORT.adoc`.
 
-## 0. Resume here (2026-11-09, phase 4 done)
+## 0. Resume here (2026-11-10, phase 4 done; handover before a restart)
+
+**Open threads at the handover (2026-11-10), do these first:**
+
+- **Eight read-only Fable reviews, owner has not reviewed them yet:** on branch
+  `wip/fable-reviews` (pushed), folder `docs/fable/`: `security-audit.md` (SEC-1..12, 5
+  medium), `hub-design.md` (BGG replacement as a hub role; 15 owner questions with
+  defaults), `architecture-review.md` (10 work packages incl. the `web` crate split),
+  `open-data-sources.md` (open source per kind: TVmaze, Wikidata, MusicBrainz, Open
+  Library/DNB, VNDB; 10 connector packages), `decisions-current-state.md` (93 supersessions,
+  12 contradictions, 58-item backlog, log restructuring proposal), `perf-proposals.md`
+  (9-step plan; `/people` has an unmeasured N+1), `ops-readiness.md` (OPS-1..12: no `cli`
+  in the image, PUBLIC_URL/TRUSTED_PROXIES/SECURE_COOKIES missing from `.env.example`,
+  improved Dockerfile proposal, backup runbook), `test-audit.md` (shared e2e instance state,
+  CI retries hide flakes, never-red tests). Next: walk through them with the owner (hub
+  questions and SEC findings first), then merge the folder into `main`.
+- **Owner's podman build** (native rootless, Ubuntu 26.04, 16 GB): still failed after commit
+  f1eeefa (frontend and server built one after the other, `CARGO_BUILD_JOBS` build arg,
+  default 2), but got further (about 900 s). Waiting for the log tail; next try
+  `CARGO_BUILD_JOBS=1`; see `ops-readiness.md` section 0/1 for the memory peaks and a
+  cargo-chef style Dockerfile. Tell the owner to set `APP__SERVER__PUBLIC_URL` (and
+  `APP__AUTH__SECURE_COOKIES=false` on plain http) for a non-localhost test.
+- **Owner's TMDB key problem:** the owner's read access token works from this VM (`curl`
+  and `cargo test -p connectors --features all --test tmdb -- --ignored`), so the code is
+  fine; the owner's instance showed "retrying" (circuit open) and no results, which points
+  at the container's network/DNS/TLS. Waiting for `podman logs` and a `curl` from inside
+  the container. The token was posted in the chat; the owner will rotate it.
+- **Plan after that (owner agreed in principle, to be finalised after testing):** W0 release
+  build check of the image's feature set in CI, W1 attribution page, W2 performance
+  follow-ups, W3 board games on Wikidata (now possibly the hub, see hub-design.md),
+  W4 anime/manga, W5 more connectors (see open-data-sources.md), W6 web push, W7 "date
+  unknown" on events; blocked on the owner: Goodreads/BG Stats/BGG samples, saved views
+  (after the funnel review on 2026-12-06). Definition of Done per workstream: planned
+  packages, test-first, DECs, independent review applied, `cargo xtask ci` + `cargo xtask
+  e2e` (0 panics) green, release load run for performance-relevant work, no test
+  workarounds for app races, squash onto `main`, tag (`ws1`, ...), push, HANDOFF + memory.
+- Code work is paused until the owner has tested and finalised the plan.
+- Last change on `main`: 99d1e0f (Ctrl+K puts the cursor in the search field).
 
 **Standing instruction from the owner (2026-11-07, confirmed in chat 2026-11-07 with explicit
 permission to commit, tag and push):** work through the open phases sequentially WITHOUT
