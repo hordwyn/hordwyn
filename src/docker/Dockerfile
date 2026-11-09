@@ -16,9 +16,15 @@ COPY src/web/public src/web/public
 COPY config config
 WORKDIR /repo/src/rust
 ENV SQLX_OFFLINE=true
+# Memory: one release rustc of the web crate needs 3-4 GB, the wasm build (fat LTO, one codegen
+# unit) more. The frontend and the server are built one after the other, with few parallel jobs,
+# so the build fits in about 8 GB. Lower it on small hosts: --build-arg CARGO_BUILD_JOBS=1
+ARG CARGO_BUILD_JOBS=2
+ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
 RUN rustup show active-toolchain || rustup toolchain install
 RUN rustup target add wasm32-unknown-unknown \
-    && cargo leptos build --release \
+    && cargo leptos build --release --frontend-only \
+    && cargo leptos build --release --server-only \
     && mkdir -p /out/site && cp -r target/site/. /out/site/ \
     && cp target/release/server /out/server
 

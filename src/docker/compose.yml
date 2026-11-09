@@ -6,6 +6,9 @@ services:
     build:
       context: ../..
       dockerfile: src/docker/Dockerfile
+      args:
+        # parallel compile jobs in the image build; 1 on hosts with less than 8 GB free
+        CARGO_BUILD_JOBS: "${CARGO_BUILD_JOBS:-2}"
     restart: unless-stopped
     environment:
       APP__DATABASE__URL: "postgres://app:${POSTGRES_PASSWORD:-app}@postgres:5432/app"
