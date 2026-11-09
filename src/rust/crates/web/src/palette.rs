@@ -634,7 +634,7 @@ pub fn SearchPalette() -> impl IntoView {
         .collect();
     let hints = hints(&i18n, scope);
     view! {
-        <Dialog open=open title=i18n.t("search-title") close_label=i18n.t("dialog-close") class=FULL_SCREEN_ON_PHONES>
+        <Dialog open=open title=i18n.t("search-title") close_label=i18n.t("dialog-close") class=FULL_SCREEN_ON_PHONES initial_focus="search">
             {move || scope.get().map(|target| {
                 let (id, text) = target_line(&use_i18n(), &target);
                 view! { <p class="mb-2 text-sm" data-testid=id>{text}</p> }

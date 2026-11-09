@@ -277,6 +277,11 @@ test("palette: Ctrl+Enter adds a provider hit as Planned and stays open, Undo re
 
   await page.keyboard.press("Control+k");
   const palette = page.getByRole("dialog", { name: "Search" });
+  // the cursor lands in the search field, so typing goes straight into it
+  await expect(palette.getByRole("combobox")).toBeFocused();
+  await page.keyboard.type("x");
+  await expect(palette.getByRole("combobox")).toHaveValue("x");
+  await page.keyboard.press("Backspace");
   // fewer than two characters: suggested commands (no recent items yet)
   await expect(palette.getByRole("option", { name: "Go to Lists" })).toBeVisible();
   await expect(palette.getByRole("option", { name: "Import a file" })).toBeVisible();
