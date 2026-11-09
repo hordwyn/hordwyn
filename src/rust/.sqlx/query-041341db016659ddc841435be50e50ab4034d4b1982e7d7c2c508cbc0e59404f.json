@@ -1,0 +1,140 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.id, s.owner_id, s.item_id, s.started_at, s.duration_minutes, s.location,\n                    s.notes, s.coop_outcome, s.incomplete, s.game_group_id\n             FROM sessions s JOIN catalog_items c ON c.id = s.item_id\n             WHERE EXISTS (SELECT 1 FROM session_participants p\n                           WHERE p.session_id = s.id AND p.companion_id = ANY($1))\n               AND EXISTS (SELECT 1 FROM unnest($2::timestamptz[], $3::timestamptz[]) AS sp(lo, hi)\n                           WHERE s.started_at >= sp.lo AND s.started_at < sp.hi)\n               AND (cardinality($4::text[]) = 0 OR c.kind = ANY($4))\n             ORDER BY s.started_at DESC, s.id DESC\n             LIMIT $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "item_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "item_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "started_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "started_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "duration_minutes",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "duration_minutes"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "location",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "location"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "notes",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "notes"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "coop_outcome",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "coop_outcome"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "incomplete",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "incomplete"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "game_group_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "game_group_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "TimestamptzArray",
+        "TimestamptzArray",
+        "TextArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "041341db016659ddc841435be50e50ab4034d4b1982e7d7c2c508cbc0e59404f"
+}

@@ -71,15 +71,15 @@ pub fn percent(fraction: f32) -> u32 {
     p
 }
 
-/// Log `progress` for `item_id` and show "Logged: <label>" with Undo; `on_done` runs after
-/// the log and after an undo (to refetch). Errors land in `error` (shown inline next to
-/// the control: errors never go through toasts, design.md 7.1).
 /// Contexts a step needs, taken while the component is built (event handlers run outside
 /// the reactive owner).
 #[derive(Clone)]
 pub struct StepCtx {
     pub i18n: std::sync::Arc<I18n>,
     pub toasts: Toasts,
+    /// The offline queue (signed-in shell only, WP4-5).
+    pub offline: Option<crate::offline::Offline>,
+    pub funnel: crate::funnel::Funnel,
 }
 
 impl StepCtx {
@@ -88,7 +88,43 @@ impl StepCtx {
         Self {
             i18n: use_i18n(),
             toasts: use_toasts(),
+            offline: use_context::<crate::offline::Offline>(),
+            funnel: crate::funnel::Funnel::current(),
         }
+    }
+
+    /// Queue `commands` after a network failure ("Saved offline, will sync" with Undo);
+    /// `false` without a queue (the caller shows its error) or when the queue is full.
+    pub fn save_offline(
+        &self,
+        title: String,
+        commands: Vec<crate::offline::Queued>,
+        on_undo: Option<Callback<()>>,
+    ) -> bool {
+        let Some(offline) = self.offline else {
+            return false;
+        };
+        let ctx = crate::offline::OfflineCtx {
+            offline,
+            i18n: self.i18n.clone(),
+            toasts: self.toasts,
+        };
+        crate::offline::save_offline(&ctx, title, commands, on_undo)
+    }
+
+    /// Queue a status or rating change, stamped now by the client clock (`make` gets the
+    /// stamp); `false` without a queue.
+    pub fn queue_field(
+        &self,
+        title: String,
+        make: impl FnOnce(&str) -> contracts::SyncCommandDto,
+    ) -> bool {
+        let Some(offline) = self.offline else {
+            return false;
+        };
+        let cmd = make(&offline.stamp());
+        let q = crate::offline::Queued::new(cmd, &title, crate::offline::now_ms());
+        self.save_offline(title, vec![q], None)
     }
 }
 
@@ -101,6 +137,10 @@ pub struct LoggedStep {
     pub progress: serde_json::Value,
 }
 
+/// Log `progress` for `item_id` and show "Logged: <label>" with Undo; `on_done` runs after
+/// the log and after an undo (to refetch). Errors land in `error` (shown inline next to
+/// the control: errors never go through toasts, design.md 7.1). Offline (a network failure)
+/// the log goes into the queue with the same op id (WP4-5). One funnel flow `next_step`.
 pub fn run_step(
     ctx: StepCtx,
     step: LoggedStep,
@@ -108,34 +148,50 @@ pub fn run_step(
     error: RwSignal<Option<String>>,
     on_done: Option<Callback<()>>,
 ) {
-    let StepCtx { i18n, toasts } = ctx;
     let LoggedStep {
         item_id,
         title,
         label,
         progress,
     } = step;
+    ctx.funnel.intent(crate::funnel::Flow::NextStep);
     busy.set(true);
     error.set(None);
     leptos::task::spawn_local(async move {
+        let op = uuid::Uuid::now_v7().to_string();
         let p = NewProgressDto {
-            progress,
+            progress: progress.clone(),
             occurred_at: None,
-            client_op_id: Some(uuid::Uuid::now_v7().to_string()),
+            client_op_id: Some(op.clone()),
             with: Vec::new(),
         };
-        match api::log_progress(item_id, p).await {
+        match api::log_progress(item_id.clone(), p).await {
             Ok(event) => {
-                let ctx = StepCtx { i18n, toasts };
+                ctx.funnel.logged();
                 toast_logged(&ctx, &label, title, vec![event.id], on_done);
                 if let Some(cb) = on_done {
                     cb.run(());
                 }
             }
+            Err(e) if crate::offline::network_error(&e) && ctx.offline.is_some() => {
+                let hlc = ctx.offline.map(crate::offline::Offline::stamp);
+                let cmd = crate::offline::log_command(
+                    &item_id,
+                    progress,
+                    crate::offline::now_rfc3339(),
+                    hlc.as_deref(),
+                );
+                let q =
+                    crate::offline::Queued::with_op_id(op, cmd, &title, crate::offline::now_ms());
+                ctx.save_offline(title, vec![q], None);
+                ctx.funnel.logged();
+            }
             Err(e) => {
+                ctx.funnel.abandoned_if(crate::funnel::Flow::NextStep);
                 let text = crate::pages::error_text(&e);
                 error.set(Some(
-                    i18n.t_args("library-step-failed", &[("error", text.into())]),
+                    ctx.i18n
+                        .t_args("library-step-failed", &[("error", text.into())]),
                 ));
             }
         }
@@ -206,8 +262,13 @@ pub fn toast_logged(
 /// Shared look of the compact (pill on a poster) variant.
 const PILL: &str = "inline-flex min-h-7 max-w-full items-center gap-1 rounded-full border border-border \
     bg-background/95 px-2.5 text-xs font-semibold text-foreground shadow-sm";
-const PILL_ACTION: &str = "cursor-pointer hover:bg-accent focus-visible:outline-none \
-    focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60";
+const PILL_ACTION: &str = "cursor-pointer focus-visible:outline-none focus-visible:ring-2 \
+    focus-visible:ring-ring disabled:opacity-60";
+/// The hover of each look: the pill's own text stays on `accent`; the primary button only
+/// darkens (`accent` under `primary-foreground` text was 1.05:1, found by axe with the pointer
+/// still on the button after a click).
+const PILL_HOVER: &str = "hover:bg-accent";
+const BUTTON_HOVER: &str = "hover:bg-primary/90";
 
 /// The primary action of an entry (design.md 7.3): label and action from its next step.
 /// Finish and episode steps log in one click (toast with Undo); page, position and session
@@ -222,6 +283,9 @@ pub fn NextStepButton(
     step: NextStepDto,
     #[prop(optional)] compact: bool,
     #[prop(optional_no_strip, into)] on_done: Option<Callback<()>>,
+    /// The tab stop of the control (a roving grid sets `-1` on all but one card).
+    #[prop(into, optional)]
+    tabindex: MaybeProp<String>,
     #[prop(into, optional)] class: MaybeProp<String>,
 ) -> impl IntoView {
     let i18n = use_i18n();
@@ -235,10 +299,13 @@ pub fn NextStepButton(
     );
     let busy = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
-    let look = if compact {
-        PILL
+    let (look, hover) = if compact {
+        (PILL, PILL_HOVER)
     } else {
-        "inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground"
+        (
+            "inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground",
+            BUTTON_HOVER,
+        )
     };
     let extra = move || class.get().unwrap_or_default();
     let control = match step_progress(&step) {
@@ -254,9 +321,11 @@ pub fn NextStepButton(
                 <button
                     type="button"
                     aria-label=named
+                    data-next-step=""
+                    tabindex=move || tabindex.get()
                     aria-busy=move || busy.get().then_some("true")
                     disabled=move || busy.get()
-                    class=move || cn(&[look, PILL_ACTION, &extra()])
+                    class=move || cn(&[look, PILL_ACTION, hover, &extra()])
                     on:click=move |_| run_step(ctx.clone(), logged.clone(), busy, error, on_done)
                 >
                     <Icon name=IconName::Check/>
@@ -273,7 +342,7 @@ pub fn NextStepButton(
         }
         .into_any(),
         None => view! {
-            <a href=format!("/items/{item_id}") aria-label=named class=move || cn(&[look, PILL_ACTION, &extra()])>
+            <a href=format!("/items/{item_id}") aria-label=named data-next-step="" tabindex=move || tabindex.get() class=move || cn(&[look, PILL_ACTION, hover, &extra()])>
                 <Icon name=IconName::Pencil/>
                 <span class="truncate">{label.clone()}</span>
             </a>

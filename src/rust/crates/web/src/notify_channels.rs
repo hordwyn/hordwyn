@@ -9,7 +9,7 @@ use leptos::prelude::*;
 use serde_json::{Value, json};
 use ui::{
     Alert, AlertRole, AlertVariant, Badge, BadgeVariant, Button, ButtonSize, ButtonVariant,
-    CopyField, FormField, Input, Segmented, SegmentedOption, StatusDot, StatusState,
+    CopyField, FormField, Input, Segmented, SegmentedOption, StatusDot, StatusState, Switch,
     field_described_by,
 };
 
@@ -243,6 +243,8 @@ fn ChannelCard(
     let id = StoredValue::new(c.id.clone());
     let name = c.name.clone();
     let confirm = RwSignal::new(false);
+    let editing = RwSignal::new(false);
+    let edit_c = c.clone();
     let testing = Signal::derive(move || {
         test.pending().get() && test.input().get().as_deref() == Some(id.get_value().as_str())
     });
@@ -296,15 +298,135 @@ fn ChannelCard(
                 <Button size=ButtonSize::Sm variant=ButtonVariant::Outline loading=testing
                     attr:aria-label=i18n.t_args("notify-test-named", &[("name", name.clone().into())])
                     on:click=move |_| { test.dispatch(id.get_value()); }>{t("notify-test")}</Button>
+                <Button size=ButtonSize::Sm variant=ButtonVariant::Outline
+                    attr:aria-label=i18n.t_args("notify-edit-named", &[("name", name.clone().into())])
+                    attr:aria-expanded=move || if editing.get() { "true" } else { "false" }
+                    on:click=move |_| editing.update(|e| *e = !*e)>{t("notify-edit")}</Button>
                 <Button size=ButtonSize::Sm variant=ButtonVariant::Ghost
                     attr:aria-label=i18n.t_args("notify-delete-named", &[("name", name.clone().into())])
                     on:click=move |_| confirm.set(true)>{t("notify-delete")}</Button>
             </div>
+            <Show when=move || editing.get()>
+                <EditChannel c=edit_c.clone() state=state editing=editing/>
+            </Show>
             <crate::admin::ConfirmDialog open=confirm
                 title=i18n.t_args("notify-delete-title", &[("name", name.clone().into())])
                 body=t("notify-delete-body") confirm=t("notify-delete")
                 on_confirm=Callback::new(move |()| { remove.dispatch(id.get_value()); })/>
         </li>
+    }
+}
+
+/// The config of an edited channel (design.md 5.8, DEC-344): the kind, the fields as typed,
+/// and for a secret left blank the stored value's placeholder, which the server keeps
+/// (secrets are write-only: the form never shows them).
+#[must_use]
+pub fn edited_config(c: &ChannelDto, values: &[String]) -> Value {
+    let mut m = serde_json::Map::new();
+    m.insert("kind".into(), c.kind.clone().into());
+    for (spec, v) in fields(&c.kind).iter().zip(values) {
+        let v = v.trim();
+        let value = if spec.secret && v.is_empty() {
+            c.config[spec.key].clone()
+        } else if v.is_empty() && spec.optional && spec.key == "token" {
+            Value::Null
+        } else {
+            v.into()
+        };
+        m.insert(spec.key.into(), value);
+    }
+    Value::Object(m)
+}
+
+/// The problem with an edited value: a blank secret keeps the stored one.
+fn check_edit(spec: &FieldSpec, value: &str) -> Option<&'static str> {
+    if spec.secret && value.trim().is_empty() {
+        None
+    } else {
+        check(spec, value)
+    }
+}
+
+/// Edit a channel in place: its name, its non-secret fields (filled in), its secrets (blank
+/// keeps them) and whether it is on; `PUT /notifications/channels/{id}`.
+#[component]
+fn EditChannel(c: ChannelDto, state: NotifyState, editing: RwSignal<bool>) -> impl IntoView {
+    let specs = fields(&c.kind);
+    let name = RwSignal::new(c.name.clone());
+    let enabled = RwSignal::new(c.enabled);
+    let values: Vec<RwSignal<String>> = specs
+        .iter()
+        .map(|s| {
+            let shown = if s.secret {
+                ""
+            } else {
+                c.config[s.key].as_str().unwrap_or_default()
+            };
+            RwSignal::new(shown.to_string())
+        })
+        .collect();
+    let errors: Vec<RwSignal<Option<&'static str>>> =
+        (0..=specs.len()).map(|_| RwSignal::new(None)).collect();
+    let failed = RwSignal::new(None::<String>);
+    let (vals, errs, sp) = (values.clone(), errors.clone(), specs.clone());
+    let check_all = move || {
+        errs[0].set(
+            name.get_untracked()
+                .trim()
+                .is_empty()
+                .then_some("notify-check-required"),
+        );
+        for (i, spec) in sp.iter().enumerate() {
+            errs[i + 1].set(check_edit(spec, &vals[i].get_untracked()));
+        }
+        errs.iter().all(|e| e.get_untracked().is_none())
+    };
+    let (channel, vals) = (c.clone(), values.clone());
+    let save = Action::new(move |(): &()| {
+        let typed: Vec<String> = vals.iter().map(|v| v.get_untracked()).collect();
+        let body = json!({
+            "name": name.get_untracked(),
+            "config": edited_config(&channel, &typed),
+            "enabled": enabled.get_untracked(),
+        });
+        let path = format!("/notifications/channels/{}", channel.id);
+        async move {
+            match rest::call_dto::<ChannelDto>("PUT", &path, Some(body)).await {
+                Ok(_) => {
+                    editing.set(false);
+                    state.data.refetch();
+                }
+                Err(e) => failed.set(Some(notify_error(&e.code))),
+            }
+        }
+    });
+    let prefix = format!("nf-e-{}", c.id);
+    let name_id = format!("{prefix}-name");
+    let on_id = format!("{prefix}-on");
+    let name_error = errors[0];
+    view! {
+        <form class="grid max-w-md gap-4" novalidate=true on:submit=move |ev| {
+            ev.prevent_default();
+            if check_all() { save.dispatch(()); }
+        }>
+            <FormField id=name_id.clone() label=t("notify-channel-name")
+                error=Signal::derive(move || name_error.get().map(t))>
+                <Input id=name_id.clone() value=name described_by=field_described_by(&name_id)
+                    invalid=Signal::derive(move || name_error.get().is_some())/>
+            </FormField>
+            {specs.into_iter().enumerate().map(|(i, spec)| view! {
+                <ChannelField spec=spec value=values[i] error=errors[i + 1] id_prefix=prefix.clone() keep=true/>
+            }).collect_view()}
+            <div class="flex items-center gap-3">
+                <Switch id=on_id.clone() checked=enabled/>
+                <label for=on_id class="text-sm font-medium">{t("notify-channel-enabled")}</label>
+            </div>
+            {move || failed.get().map(|m| view! { <Alert variant=AlertVariant::Destructive role=AlertRole::Alert>{m}</Alert> })}
+            <div class="flex flex-wrap gap-2">
+                <Button r#type="submit" loading=save.pending()>{t("notify-channel-save")}</Button>
+                <Button variant=ButtonVariant::Ghost on:click=move |_| editing.set(false)>{t("notify-channel-cancel")}</Button>
+            </div>
+        </form>
     }
 }
 
@@ -415,17 +537,32 @@ fn ChannelField(
     spec: FieldSpec,
     value: RwSignal<String>,
     error: RwSignal<Option<&'static str>>,
+    /// Element id prefix (default `nf-f`; each edit form has its own).
+    #[prop(into, optional)]
+    id_prefix: Option<String>,
+    /// Editing a stored channel: a blank secret keeps the stored one.
+    #[prop(optional)]
+    keep: bool,
 ) -> impl IntoView {
-    let id = format!("nf-f-{}", spec.key);
+    let id = format!(
+        "{}-{}",
+        id_prefix.unwrap_or_else(|| "nf-f".into()),
+        spec.key
+    );
+    let secret_hint = if keep {
+        "notify-hint-secret-keep"
+    } else {
+        "notify-hint-secret"
+    };
     let hint = match (spec.hint, spec.secret) {
-        (Some(h), true) => Some(format!("{} {}", t(h), t("notify-hint-secret"))),
+        (Some(h), true) => Some(format!("{} {}", t(h), t(secret_hint))),
         (Some(h), false) => Some(t(h)),
-        (None, true) => Some(t("notify-hint-secret")),
+        (None, true) => Some(t(secret_hint)),
         (None, false) => None,
     };
     let (secret, shape, label) = (spec.secret, spec.shape, spec.label);
     view! {
-        <div on:focusout=move |_| error.set(check(&spec, &value.get_untracked()))>
+        <div on:focusout=move |_| error.set(if keep { check_edit(&spec, &value.get_untracked()) } else { check(&spec, &value.get_untracked()) })>
             <FormField id=id.clone() label=t(label) description=hint
                 error=Signal::derive(move || error.get().map(t))>
                 <Input id=id.clone() value=value described_by=field_described_by(&id)
@@ -471,5 +608,48 @@ mod tests {
         );
         let w = config("webhook", &["https://h.example.org".into(), String::new()]);
         assert_eq!(w["secret"], "", "an empty secret asks the server for one");
+    }
+    #[test]
+    fn an_edit_keeps_blank_secrets_and_sends_typed_ones() {
+        let ch = |config: Value| ChannelDto {
+            id: "c".into(),
+            name: "Phone".into(),
+            kind: "ntfy".into(),
+            enabled: true,
+            config,
+            secret: None,
+            health: contracts::ChannelHealthDto::default(),
+        };
+        let c = ch(
+            json!({"kind": "ntfy", "server": "https://ntfy.sh", "topic": "a", "token": "********"}),
+        );
+        assert_eq!(
+            edited_config(&c, &["https://ntfy.sh".into(), "b".into(), String::new()]),
+            json!({"kind": "ntfy", "server": "https://ntfy.sh", "topic": "b", "token": "********"})
+        );
+        assert_eq!(
+            edited_config(&c, &["https://ntfy.sh".into(), "b".into(), " new ".into()])["token"],
+            "new"
+        );
+        // no stored token: a blank one stays absent
+        let none =
+            ch(json!({"kind": "ntfy", "server": "https://ntfy.sh", "topic": "a", "token": null}));
+        assert_eq!(
+            edited_config(
+                &none,
+                &["https://ntfy.sh".into(), "a".into(), String::new()]
+            )["token"],
+            Value::Null
+        );
+        let spec = fields("webhook")[1];
+        assert_eq!(
+            check_edit(&spec, ""),
+            None,
+            "a blank secret keeps the stored one"
+        );
+        assert_eq!(
+            check_edit(&fields("webhook")[0], ""),
+            Some("notify-check-required")
+        );
     }
 }

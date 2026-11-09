@@ -76,6 +76,16 @@ pub enum LinkError {
     /// The identity was linked to another account meanwhile.
     #[error("this sign-in is linked to another account")]
     InUse,
+    /// No emailed link for this account: it has a password, no stored address, or mail is
+    /// not set up.
+    #[error("no link can be emailed for this account")]
+    NoEmail,
+    /// The emailed code is unknown, used, expired, or was asked for in another browser.
+    #[error("this link does not work (any more)")]
+    Code,
+    /// Too many links asked for; try again in this many seconds.
+    #[error("too many links asked for")]
+    TooMany { retry_after_secs: i64 },
     #[error(transparent)]
     Auth(#[from] AuthError),
 }

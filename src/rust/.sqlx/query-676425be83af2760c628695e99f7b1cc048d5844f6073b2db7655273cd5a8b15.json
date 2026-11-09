@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO source_stats_hours (connector, hour, calls, rate_limited)\n                     VALUES ($1, $2, $3, $4)\n                     ON CONFLICT (connector, hour) DO UPDATE\n                     SET calls = source_stats_hours.calls + EXCLUDED.calls,\n                         rate_limited = source_stats_hours.rate_limited + EXCLUDED.rate_limited",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "676425be83af2760c628695e99f7b1cc048d5844f6073b2db7655273cd5a8b15"
+}

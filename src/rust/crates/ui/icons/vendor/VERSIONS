@@ -8,3 +8,5 @@ tabler   npm @tabler/icons 3.50.0    MIT
 
 Additions 2026-11-06 (UX phase 0, DEC-183): further lucide files from the same 1.69.0
 tarball, see ../icons.toml.
+Addition 2026-11-08 (UX phase 4, WP4-3): lucide grip-vertical.svg from the same 1.69.0
+tarball (the list page drag handle).

@@ -118,16 +118,39 @@ impl SearchIndex for PgSearch {
                 .collect(),
         );
         let limit = i64::try_from(q.limit.clamp(1, 100)).unwrap_or(20);
+        // Words first, typos second (Meilisearch's order of ranking rules: words, typo):
+        // documents holding the words or the text rank by `ts_rank` + `similarity`; only when
+        // they do not fill the page are the closest misspellings added (`word_similarity`, so
+        // a typo in a long title still matches). The typo scan is skipped (one-time filter)
+        // when the page is full; it was the costly part under load (DEC-493).
         let rows = sqlx::query!(
-            r#"SELECT id, fields AS "fields!"
-               FROM search_docs,
-                    websearch_to_tsquery('simple', $3) AS query
-               WHERE index_name = $1
-                 AND ($2::uuid IS NULL OR owner_id = $2)
-                 AND (SELECT bool_and(fields ->> f.key = f.value)
-                      FROM jsonb_each_text($4::jsonb) AS f) IS NOT FALSE
-                 AND ($3 = '' OR tsv @@ query OR body % $3 OR body ILIKE '%' || $3 || '%')
-               ORDER BY ts_rank(tsv, query) + similarity(body, $3) DESC, id
+            r#"WITH exact AS (
+                   SELECT id, fields, ts_rank(tsv, query) + similarity(body, $3) AS score
+                   FROM search_docs, websearch_to_tsquery('simple', $3) AS query
+                   WHERE index_name = $1
+                     AND ($2::uuid IS NULL OR owner_id = $2)
+                     AND (SELECT bool_and(fields ->> f.key = f.value)
+                          FROM jsonb_each_text($4::jsonb) AS f) IS NOT FALSE
+                     AND ($3 = '' OR tsv @@ query OR body ILIKE '%' || $3 || '%')
+                   ORDER BY score DESC, id
+                   LIMIT $5),
+               typos AS (
+                   SELECT id, fields, word_similarity($3, body) AS score
+                   FROM search_docs
+                   WHERE (SELECT count(*) FROM exact) < $5
+                     AND $3 <> ''
+                     AND index_name = $1
+                     AND ($2::uuid IS NULL OR owner_id = $2)
+                     AND (SELECT bool_and(fields ->> f.key = f.value)
+                          FROM jsonb_each_text($4::jsonb) AS f) IS NOT FALSE
+                     AND $3 <% body
+                     AND id NOT IN (SELECT id FROM exact)
+                   ORDER BY score DESC, id
+                   LIMIT $5)
+               SELECT id AS "id!", fields AS "fields!"
+               FROM (SELECT id, fields, 0 AS phase, score FROM exact
+                     UNION ALL SELECT id, fields, 1, score FROM typos) AS hits
+               ORDER BY phase, score DESC, id
                LIMIT $5"#,
             q.index,
             owner,

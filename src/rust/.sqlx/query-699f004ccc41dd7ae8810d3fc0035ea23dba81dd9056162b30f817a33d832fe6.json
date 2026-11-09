@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM usage_funnel_daily WHERE day < $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Date"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "699f004ccc41dd7ae8810d3fc0035ea23dba81dd9056162b30f817a33d832fe6"
+}

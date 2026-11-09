@@ -100,6 +100,9 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(kinds))
         .routes(routes!(library_counts))
         .routes(routes!(library_query))
+        .routes(routes!(crate::bulk::library_bulk))
+        .routes(routes!(crate::bulk::library_bulk_undo))
+        .routes(routes!(crate::bulk::remove_from_library))
         .routes(routes!(tags))
         .routes(routes!(rename_tag))
         .routes(routes!(add_tag))
@@ -113,8 +116,10 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(item_page))
         .merge(crate::admin_routes::routes())
         .merge(crate::people_routes::routes())
+        .merge(crate::goals_routes::routes())
         .merge(crate::oidc_routes::routes())
         .merge(crate::sso_routes::routes())
+        .merge(crate::usage_routes::routes())
         // JSON bodies are small (G2-10); only file imports may be large (the upload quota
         // limits what is kept)
         .layer(axum::extract::DefaultBodyLimit::max(JSON_BODY_LIMIT))
@@ -274,10 +279,10 @@ async fn totp_confirm(
     responses((status = 200, body = CatalogItemDto), (status = 404, body = contracts::ErrorDto)))]
 async fn get_item(
     State(s): State<ApiState>,
-    Authed(_): Authed,
+    Authed(a): Authed,
     Path(id): Path<String>,
 ) -> ApiResult<Json<CatalogItemDto>> {
-    Ok(Json(ops::item(&s, &id).await?))
+    Ok(Json(ops::item(&s, a, &id).await?))
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -311,8 +316,8 @@ async fn sources(State(s): State<ApiState>) -> Json<Vec<AttributionDto>> {
 
 #[derive(Deserialize, IntoParams)]
 struct PageParams {
-    #[serde(default)]
-    offset: u64,
+    /// The previous page's `next` (keyset paging, DEC-416).
+    after: Option<String>,
     /// 1 to 500, default 100.
     #[serde(default = "default_page")]
     limit: u32,
@@ -330,7 +335,9 @@ async fn library(
     Authed(a): Authed,
     Query(p): Query<PageParams>,
 ) -> ApiResult<Json<contracts::LibraryPageDto>> {
-    Ok(Json(ops::library(&s, a, p.offset, p.limit).await?))
+    Ok(Json(
+        ops::library(&s, a, p.after.as_deref(), p.limit).await?,
+    ))
 }
 
 #[derive(Deserialize, ToSchema)]

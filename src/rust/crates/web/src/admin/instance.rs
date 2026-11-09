@@ -52,7 +52,6 @@ fn InstanceBody() -> impl IntoView {
     let settings = Resource::new(|| (), |()| admin_api::admin_settings());
     let security: SecurityData = Resource::new(|| (), |()| admin_api::admin_security());
     let mail: MailData = Resource::new(|| (), |()| admin_api::admin_mail());
-    let open = |section: &str| disclosure_storage_key("instance", section);
     view! {
         <SecurityWarnings data=security/>
         {loaded(settings, |s| view! {
@@ -64,15 +63,15 @@ fn InstanceBody() -> impl IntoView {
         })}
         <div class="grid max-w-3xl gap-4">
             <Disclosure id="adm-mail" title=t("admin-mail-title") summary=t("admin-mail-summary")
-                mode=DisclosureMode::Button level=2 storage_key=open("mail")>
+                mode=DisclosureMode::Button level=2 storage_key=disclosure_storage_key("instance", "mail")>
                 {loaded(mail, move |m| view! { <Mail m=m data=mail/> })}
             </Disclosure>
             <Disclosure id="adm-secrets" title=t("admin-secrets-title") summary=t("admin-secrets-summary")
-                mode=DisclosureMode::Button level=2 storage_key=open("secrets")>
+                mode=DisclosureMode::Button level=2 storage_key=disclosure_storage_key("instance", "secrets")>
                 <SecretsAtRest data=security/>
             </Disclosure>
             <Disclosure id="adm-advanced" title=t("admin-advanced-title") summary=t("admin-advanced-summary")
-                mode=DisclosureMode::Button level=2 storage_key=open("advanced")>
+                mode=DisclosureMode::Button level=2 storage_key=disclosure_storage_key("instance", "advanced")>
                 <Advanced data=security/>
             </Disclosure>
         </div>

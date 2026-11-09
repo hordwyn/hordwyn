@@ -125,3 +125,100 @@ fn a_disabled_source_serves_nothing_until_enabled_again() {
     assert!(r.is_enabled("tmdb"));
     assert_eq!(r.for_kind("movie", Capability::Search).len(), 1);
 }
+
+/// A details source that counts its calls.
+struct DetailsSpy {
+    inner: Fake,
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl catalog_core::Details for DetailsSpy {
+    async fn details(
+        &self,
+        _ctx: &catalog_core::Ctx,
+        req: &catalog_core::DetailsRequest,
+    ) -> Result<catalog_core::Snapshot, catalog_core::ConnectorError> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(catalog_core::Snapshot {
+            connector: "tmdb".into(),
+            kind: req.kind.clone(),
+            external_ids: vec![domain::catalog::ExternalId::new("tmdb", &req.id)],
+            title: "Heat (refreshed)".into(),
+            original_title: None,
+            year: Some(1995),
+            description: Some("From the source.".into()),
+            attributes: serde_json::json!({}),
+            images: vec![],
+            complete: true,
+        })
+    }
+}
+
+impl Connector for DetailsSpy {
+    fn info(&self) -> &ConnectorInfo {
+        &self.inner.info
+    }
+
+    fn key_slot(&self) -> Option<KeySlot> {
+        self.inner.key_slot()
+    }
+
+    fn credentials(&self) -> CredentialSpec {
+        self.inner.credentials()
+    }
+
+    fn as_details(&self) -> Option<&dyn catalog_core::Details> {
+        Some(self)
+    }
+}
+
+/// DEC-383 (deferred to WP4-8): the Disabled switch also stops detail refreshes: a switched
+/// off source is not asked, the item keeps its data; switched on again, it refreshes.
+#[tokio::test]
+async fn a_disabled_source_is_not_asked_for_details() {
+    let mut fake = Fake::new("tmdb", Some("k"));
+    fake.info.capabilities = vec![Capability::Details];
+    let spy = Arc::new(DetailsSpy {
+        inner: fake,
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let mut r = Registry::default();
+    r.register(spy.clone());
+    let env = testkit::TestEnv::new();
+    let item = env
+        .app
+        .upsert_catalog_item(app::NewCatalogItem {
+            kind: domain::kind::KindId::new("movie").unwrap(),
+            title: "Heat".into(),
+            original_title: None,
+            year: Some(1995),
+            description: None,
+            external_ids: vec![domain::catalog::ExternalId::new("tmdb", "949")],
+            attributes: serde_json::json!({}),
+            cover_url: None,
+        })
+        .await
+        .unwrap();
+    let http = Arc::new(testkit::ReplayHttp::default());
+    let refresh = || {
+        catalog_core::refresh::refresh_item(
+            &env.app,
+            &r,
+            http.clone(),
+            app::ports::Lane::BackgroundRefresh,
+            item.id,
+        )
+    };
+    r.set_enabled("tmdb", false);
+    refresh().await.unwrap();
+    assert_eq!(spy.calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(env.app.catalog_item(item.id).await.unwrap().title, "Heat");
+    r.set_enabled("tmdb", true);
+    refresh().await.unwrap();
+    assert_eq!(spy.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(
+        env.app.catalog_item(item.id).await.unwrap().title,
+        "Heat (refreshed)"
+    );
+}

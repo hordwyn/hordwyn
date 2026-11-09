@@ -5,7 +5,15 @@ import { defineConfig, devices } from "@playwright/test";
 const port = Number(process.env.E2E_PORT ?? 3010);
 const tmdbPort = Number(process.env.TMDB_MOCK_PORT ?? 3011);
 const oidcPort = Number(process.env.OIDC_MOCK_PORT ?? 3012);
+// the mail sink (tests/mail-sink.mjs): SMTP for the server, HTTP for the specs
+const mailSmtpPort = Number(process.env.MAIL_SINK_SMTP_PORT ?? 3013);
+const mailHttpPort = Number(process.env.MAIL_SINK_HTTP_PORT ?? 3014);
 const repo = `${require("node:path").resolve(__dirname, "../..")}/`;
+const serverCmd = process.env.E2E_SERVER_CMD ?? "../rust/target/debug/server";
+// UX3-25 panic guard (DEC-384): with E2E_SERVER_LOG set (`cargo xtask e2e` sets it to a file
+// outside the repo) the server's stdout and stderr go to that file, and xtask fails the run on
+// any `panicked at` line in it
+const serverLog = process.env.E2E_SERVER_LOG;
 
 export default defineConfig({
   testDir: "./tests",
@@ -49,7 +57,13 @@ export default defineConfig({
       env: { OIDC_MOCK_PORT: String(oidcPort) },
     },
     {
-      command: process.env.E2E_SERVER_CMD ?? "../rust/target/debug/server",
+      command: "node tests/mail-sink.mjs",
+      url: `http://127.0.0.1:${mailHttpPort}/health`,
+      reuseExistingServer: !process.env.CI,
+      env: { MAIL_SINK_SMTP_PORT: String(mailSmtpPort), MAIL_SINK_HTTP_PORT: String(mailHttpPort) },
+    },
+    {
+      command: serverLog ? `sh -c 'exec ${serverCmd} >>"$E2E_SERVER_LOG" 2>&1'` : serverCmd,
       cwd: "../rust",
       url: `http://127.0.0.1:${port}/healthz`,
       reuseExistingServer: !process.env.CI,
@@ -71,6 +85,7 @@ export default defineConfig({
         APP__BRAND__DIR: process.env.E2E_BRAND_DIR ?? `${repo}config/brand/default`,
         APP__CONNECTORS__TMDB__BASE_URL: `http://127.0.0.1:${tmdbPort}`,
         APP__CONNECTORS__TMDB__API_KEY: "e2e-not-a-real-key",
+        ...(serverLog ? { E2E_SERVER_LOG: serverLog } : {}),
       },
     },
   ],

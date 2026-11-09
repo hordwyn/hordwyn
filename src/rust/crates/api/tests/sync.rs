@@ -135,6 +135,7 @@ async fn offline_clients_converge_and_replays_are_no_ops() {
                     item_id: id.clone(),
                     progress: serde_json::json!({"type": "finished"}),
                     occurred_at: None,
+                    hlc: None,
                 },
             ),
         ],

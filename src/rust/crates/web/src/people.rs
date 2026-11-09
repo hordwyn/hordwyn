@@ -1,9 +1,9 @@
 //! People (design.md 3.6, 6.7, 5.11; mockup `companions.html`): requests for you as cards on
-//! top, tabs All / Linked accounts, person cards with initials, link state and the numbers
-//! people log plays for, duplicate suggestions, and the person page (`/people/:id`) with the
-//! history filtered to the person and the lists they share. The dialogs (invite, link,
-//! unlink, merge, delete, "Add a person") live in `people_dialogs`. Reads come from server
-//! functions, changes go to the REST routes (`web::rest`, DEC-327).
+//! top, tabs All / Linked accounts / Game groups (`game_groups`), person cards with initials,
+//! link state and the numbers people log plays for, duplicate suggestions, and the person page
+//! (`/people/:id`) with the history filtered to the person and the lists they share. The
+//! dialogs (invite, link, unlink, merge, delete, "Add a person") live in `people_dialogs`.
+//! Reads come from server functions, changes go to the REST routes (`web::rest`, DEC-327).
 
 use contracts::{LinkRequestDto, MergeSuggestionDto, PeoplePageDto, PersonDto, PersonRefDto};
 use leptos::prelude::*;
@@ -55,6 +55,8 @@ pub fn People() -> impl IntoView {
     refetch_on_update(move || data.refetch());
     let ui = Ui::new(Callback::new(move |()| data.refetch()));
     provide_context(ui);
+    let groups = crate::game_groups::GroupUi::new(Callback::new(move |r| ui.report(r)));
+    provide_context(groups);
     view! {
         <PageTitle text=t("companions-title")/>
         <Lead text=t("companions-lead")/>
@@ -68,6 +70,7 @@ pub fn People() -> impl IntoView {
             })}
         </div>
         <PersonDialogs ui=ui/>
+        <crate::game_groups::GroupDialogs ui=groups/>
     }
 }
 
@@ -83,6 +86,11 @@ fn PeopleBody(page: PeoplePageDto) -> impl IntoView {
         .collect();
     let all_label = i18n.t_args("companions-tab-all", &[("count", page.people.len().into())]);
     let linked_label = i18n.t_args("companions-tab-linked", &[("count", linked.len().into())]);
+    let groups_label = i18n.t_args(
+        "companions-tab-groups",
+        &[("count", page.groups.len().into())],
+    );
+    let groups = StoredValue::new(page.groups);
     let all = StoredValue::new(page.people);
     let linked = StoredValue::new(linked);
     view! {
@@ -92,12 +100,16 @@ fn PeopleBody(page: PeoplePageDto) -> impl IntoView {
             <TabsList label=t("companions-tabs") class="w-fit">
                 <TabsTrigger value="all">{all_label}</TabsTrigger>
                 <TabsTrigger value="linked">{linked_label}</TabsTrigger>
+                <TabsTrigger value="groups">{groups_label}</TabsTrigger>
             </TabsList>
             <TabsContent value="all">
                 {move || view! { <Cards people=all.get_value() empty=t("companions-empty")/> }}
             </TabsContent>
             <TabsContent value="linked">
                 {move || view! { <Cards people=linked.get_value() empty=t("companions-empty-linked")/> }}
+            </TabsContent>
+            <TabsContent value="groups">
+                {move || view! { <crate::game_groups::GroupsTab groups=groups.get_value()/> }}
             </TabsContent>
         </Tabs>
     }
@@ -247,7 +259,7 @@ pub(crate) fn last_and_most(i18n: &I18n, p: &PersonDto) -> (Option<String>, Opti
         i18n.t_args(
             "companions-last",
             &[
-                ("title", l.title.clone().into()),
+                ("title", crate::i18n::title_text(&l.title).into()),
                 ("when", day_words(i18n, &l.local_day).into()),
             ],
         )
@@ -255,7 +267,10 @@ pub(crate) fn last_and_most(i18n: &I18n, p: &PersonDto) -> (Option<String>, Opti
     let most = p.most_played.as_ref().map(|m| {
         i18n.t_args(
             "companions-most-played",
-            &[("title", m.title.clone().into()), ("plays", m.plays.into())],
+            &[
+                ("title", crate::i18n::title_text(&m.title).into()),
+                ("plays", m.plays.into()),
+            ],
         )
     });
     (last, most)
@@ -303,6 +318,31 @@ pub(crate) fn menu_items(ui: Ui, p: &PersonDto) -> Vec<MenuItem> {
     out
 }
 
+/// "Log with <person>" (DEC-353): the search palette picks the item, then its log sheet opens
+/// with the person (the scoped pick, WP4-4).
+fn log_with_button(p: &PersonDto) -> impl IntoView + use<> {
+    let i18n = use_i18n();
+    let scope = expect_context::<crate::palette::PaletteScope>().0;
+    let open = expect_context::<crate::palette::PaletteOpen>().0;
+    let label = i18n.t_args(
+        "companions-log-with-named",
+        &[("name", p.name.clone().into())],
+    );
+    let (id, name) = (p.id.clone(), p.name.clone());
+    view! {
+        <Button size=ButtonSize::Sm variant=ButtonVariant::Outline attr:aria-label=label
+            on:click=move |_| {
+                scope.set(Some(crate::palette::PaletteTarget::LogWith {
+                    companion_id: id.clone(),
+                    name: name.clone(),
+                }));
+                open.set(true);
+            }>
+            {t("companions-log-with")}
+        </Button>
+    }
+}
+
 #[component]
 fn PersonCard(p: PersonDto) -> impl IntoView {
     let i18n = use_i18n();
@@ -326,6 +366,7 @@ fn PersonCard(p: PersonDto) -> impl IntoView {
             </Button>
         }
     });
+    let log_with = log_with_button(&p);
     let items = menu_items(ui, &p);
     view! {
         <li class="grid gap-3 rounded-xl border border-border bg-card p-4 shadow-elevation-1" data-testid="pp-card">
@@ -348,6 +389,7 @@ fn PersonCard(p: PersonDto) -> impl IntoView {
                     {t("companions-history")}
                 </a>
                 {invite}
+                {log_with}
             </div>
         </li>
     }

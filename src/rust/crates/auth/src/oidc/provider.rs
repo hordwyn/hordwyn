@@ -241,6 +241,17 @@ pub trait ProviderStore: Send + Sync {
         expires_at: DateTime<Utc>,
         now: DateTime<Utc>,
     ) -> Result<bool, PortError>;
+    /// Back-Channel Logout 2.6 step 7: accept a logout token's `key` (provider and `jti`)
+    /// once until `expires_at`, across processes; `false` when it was seen. Expired entries
+    /// are dropped on the way.
+    async fn claim_jti(
+        &self,
+        key: &str,
+        expires_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<bool, PortError>;
+    /// Forget `key` again (ending the sessions failed, so the provider may retry).
+    async fn release_jti(&self, key: &str) -> Result<(), PortError>;
 }
 
 /// In-memory [`ProviderStore`] (tests).
@@ -351,5 +362,22 @@ impl ProviderStore for MemProviderStore {
         _now: DateTime<Utc>,
     ) -> Result<bool, PortError> {
         Ok(self.used.lock().expect("used").insert(key.to_string()))
+    }
+
+    async fn claim_jti(
+        &self,
+        key: &str,
+        _expires_at: DateTime<Utc>,
+        _now: DateTime<Utc>,
+    ) -> Result<bool, PortError> {
+        Ok(self.used.lock().expect("used").insert(format!("jti|{key}")))
+    }
+
+    async fn release_jti(&self, key: &str) -> Result<(), PortError> {
+        self.used
+            .lock()
+            .expect("used")
+            .remove(&format!("jti|{key}"));
+        Ok(())
     }
 }

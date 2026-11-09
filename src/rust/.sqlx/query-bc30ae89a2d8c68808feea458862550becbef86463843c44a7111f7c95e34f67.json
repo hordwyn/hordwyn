@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO goals (id, user_id, year, kind_group, metric, target, created_at)\n             VALUES ($1, $2, $3, $4, $5, $6, $7)\n             ON CONFLICT (id) DO UPDATE SET year = EXCLUDED.year,\n                 kind_group = EXCLUDED.kind_group, metric = EXCLUDED.metric,\n                 target = EXCLUDED.target",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Int4",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bc30ae89a2d8c68808feea458862550becbef86463843c44a7111f7c95e34f67"
+}

@@ -50,6 +50,11 @@ import-finished-body = { $imported ->
 }
 import-failed-title = Import fehlgeschlagen
 import-failed-body = Der Import wurde abgebrochen: { $error }
+account-authenticator_reset-title = Deine Authenticator-App wurde entfernt
+account-authenticator_reset-body = { $by } hat die Authenticator-App von deinem Konto entfernt. Richte unter Einstellungen > Konto eine neue ein.
+account-sign_in_unlinked-title = { $provider } meldet dich nicht mehr an
+account-sign_in_unlinked-body = { $by } hat { $provider } von deinem Konto getrennt. Frag deinen Admin, falls du das nicht erwartet hast.
+
 
 admin-storage_high-title = Speicher fast voll
 admin-storage_high-body = { $used } von { $cap } belegt.
@@ -71,3 +76,12 @@ admin-local_sign_in-body = { $username } hat sich von { $address } aus lokal ang
 
 test-title = Test von { $product }
 test-body = Der Kanal "{ $name }" funktioniert.
+sign_in_link-title = Dein Anmeldelink für { $product }
+sign_in_link-body = Bei einer Anmeldung mit { $provider } wurde darum gebeten, sie mit dem Konto { $username } bei { $product } zu verbinden. Falls du das warst, öffne diesen Link innerhalb von { $minutes } Minuten im selben Browser:
+
+    { $url }
+
+    Falls du das nicht warst, ignoriere diese Nachricht; es ändert sich nichts.
+
+
+item_unavailable-title = Titel nicht verfügbar - Quelldaten abgelaufen

@@ -54,7 +54,38 @@ pub struct CatalogItem {
     pub fresh_until: Option<Timestamp>,
 }
 
+/// When one episode of a show was released (WP4-7): number, air date and runtime only, no
+/// titles or overviews.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogEpisode {
+    pub season: u32,
+    pub number: u32,
+    pub air_date: Option<chrono::NaiveDate>,
+    pub runtime_minutes: Option<u32>,
+}
+
+/// What was fetched for one season, keyed by the season data it was fetched for (the
+/// refresh skips a season whose `episode_count` and `air_date` are unchanged).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EpisodeSeason {
+    pub season: u32,
+    /// The connector the episodes came from.
+    pub connector: String,
+    pub episode_count: u32,
+    pub air_date: Option<chrono::NaiveDate>,
+    pub fetched_at: Timestamp,
+    /// In episode order.
+    pub episodes: Vec<CatalogEpisode>,
+}
+
 impl CatalogItem {
+    /// The title is gone with the rest of the source's data (catalog retention, UX4-9): show a
+    /// neutral placeholder instead; the item is fetched again once its source can answer.
+    #[must_use]
+    pub fn title_unavailable(&self) -> bool {
+        self.title.is_empty()
+    }
+
     /// True if the item should be refreshed in the background at `now`.
     #[must_use]
     pub fn needs_refresh(&self, now: Timestamp) -> bool {

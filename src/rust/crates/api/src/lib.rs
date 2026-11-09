@@ -8,9 +8,12 @@
 pub mod admin;
 mod admin_routes;
 pub mod browse;
+pub mod bulk;
 mod dto;
 mod error;
 mod extract;
+pub mod goals;
+mod goals_routes;
 pub mod hooks;
 pub mod notifications;
 mod oidc_routes;
@@ -22,6 +25,8 @@ mod routes;
 pub mod sharing;
 mod sso_routes;
 pub mod sync;
+pub mod usage;
+mod usage_routes;
 
 use std::sync::Arc;
 

@@ -38,6 +38,7 @@ fn StorageBody() -> impl IntoView {
     let data: Data = Resource::new(|| (), |()| admin_api::storage_jobs());
     loaded(data, move |d| {
         let failed = d.failed.len();
+        let settings = d.settings.clone();
         let i18n = use_i18n();
         view! {
             {d.at_hard_cap.then(|| view! {
@@ -51,6 +52,7 @@ fn StorageBody() -> impl IntoView {
             })}
             <Budget d=d.clone() data=data/>
             <Jobs d=d data=data/>
+            <super::usage::UsageMeasurement settings=settings/>
         }
     })
 }

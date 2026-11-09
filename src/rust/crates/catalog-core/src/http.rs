@@ -168,6 +168,9 @@ pub struct GovernedHttp {
     flights: SingleFlight<Result<HttpResponse, HttpError>>,
     upstream_calls: AtomicU64,
     stats: Option<Arc<SourceStats>>,
+    /// `instance.hosting`, read per request: `hosted` shares the interactive lane fairly per
+    /// user (design.md 4.1).
+    hosting: Option<Arc<std::sync::RwLock<String>>>,
 }
 
 enum Step {
@@ -218,6 +221,7 @@ impl GovernedHttp {
             flights: SingleFlight::default(),
             upstream_calls: AtomicU64::new(0),
             stats: None,
+            hosting: None,
         }
     }
 
@@ -238,6 +242,24 @@ impl GovernedHttp {
     pub fn with_stats(mut self, stats: Arc<SourceStats>) -> Self {
         self.stats = Some(stats);
         self
+    }
+
+    /// Read the hosting mode (`home` or `hosted`) live from `hosting` (the admin API's copy
+    /// of `instance.hosting`).
+    #[must_use]
+    pub fn with_hosting(mut self, hosting: Arc<std::sync::RwLock<String>>) -> Self {
+        self.hosting = Some(hosting);
+        self
+    }
+
+    /// Hosted mode: interactive waiters are served round-robin per user.
+    fn fair_share(&self) -> bool {
+        self.hosting.as_ref().is_some_and(|h| {
+            h.read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_str()
+                == "hosted"
+        })
     }
 
     fn failed(&self, g: &Governed) {
@@ -303,7 +325,10 @@ impl GovernedHttp {
         if !g.breaker.allow() {
             return Step::Done(Err(HttpError::CircuitOpen));
         }
-        let permit = g.gate.acquire(req.lane).await;
+        let permit = g
+            .gate
+            .acquire_for(req.lane, req.user, self.fair_share())
+            .await;
         if let Err(e) = g.wait_pause().await {
             return Step::Done(Err(e));
         }
@@ -367,6 +392,8 @@ impl GovernedHttp {
     }
 
     /// Decide what a received response means: done, retry after a pause, cache update.
+    // the parts of one response attempt, passed on by `send` unchanged; a struct would only
+    // repackage them for this one call (UX4-19)
     #[allow(clippy::too_many_arguments)]
     async fn classify(
         &self,

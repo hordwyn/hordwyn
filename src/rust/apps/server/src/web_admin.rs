@@ -182,6 +182,18 @@ impl AdminBackend for WebAdmin {
         admin::delete_user(&self.0, c, id).await.map_err(err)
     }
 
+    async fn reset_user_totp(&self, token: &str, id: &str) -> BResult<AdminUserDto> {
+        let c = self.caller(token).await?;
+        admin::reset_user_totp(&self.0, c, id).await.map_err(err)
+    }
+
+    async fn unlink_user_identity(&self, token: &str, id: &str, identity: &str) -> BResult<()> {
+        let c = self.caller(token).await?;
+        admin::unlink_user_identity(&self.0, c, id, identity)
+            .await
+            .map_err(err)
+    }
+
     async fn invites(&self, token: &str) -> BResult<Vec<AdminInviteDto>> {
         let a = self.actor(token).await?;
         admin::invites(&self.0, a).await.map_err(err)

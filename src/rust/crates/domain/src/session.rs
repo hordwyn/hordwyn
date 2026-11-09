@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::DomainError;
 use crate::Timestamp;
-use crate::ids::{CompanionId, ItemId, SessionId, UserId};
+use crate::ids::{CompanionId, GameGroupId, ItemId, SessionId, UserId};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Participant {
@@ -55,6 +55,10 @@ pub struct Session {
     pub participants: Vec<Participant>,
     pub coop_outcome: Option<CoopOutcome>,
     pub incomplete: bool,
+    /// The game group this play was logged as (design.md 6.7); the group may be removed
+    /// since, the session keeps it.
+    #[serde(default)]
+    pub game_group_id: Option<GameGroupId>,
 }
 
 impl Session {

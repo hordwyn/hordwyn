@@ -188,6 +188,28 @@
       scroll-padding-bottom: calc(var(--tab-bar-height) + 6rem);
     }
   }
+
+  /* the Library's bulk bar sticks above the tab bar (UX4-15): focused rows scroll clear of it
+     (one row of buttons on wide screens, up to three on a phone) */
+  html:has([data-sticky-bar]) {
+    scroll-padding-bottom: calc(var(--tab-bar-height) + 5rem);
+  }
+  @media (width < 48rem) {
+    html:has([data-sticky-bar]) {
+      scroll-padding-bottom: calc(var(--tab-bar-height) + 11rem);
+    }
+  }
+}
+
+/* toasts and the chord hint float above the bulk bar instead of on it (UX4-22); outside the
+   layers so the elements' own bottom utilities give way */
+html:has([data-sticky-bar]) [data-float] {
+  bottom: calc(var(--tab-bar-height) + 5.5rem);
+}
+@media (width < 48rem) {
+  html:has([data-sticky-bar]) [data-float] {
+    bottom: calc(var(--tab-bar-height) + 11.5rem);
+  }
 }
 
 /* WCAG 2.3.3 technique (design.md 2.9, 8): no movement, the pulse stops. Outside the

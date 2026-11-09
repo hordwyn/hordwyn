@@ -4,6 +4,14 @@
       "additionalProperties": false,
       "description": "One season of an episodic item.",
       "properties": {
+        "air_date": {
+          "description": "First air date of the season (WP4-7; TMDB `seasons[].air_date`).",
+          "format": "date",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "episode_count": {
           "format": "uint32",
           "minimum": 0,

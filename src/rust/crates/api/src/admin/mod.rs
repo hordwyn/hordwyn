@@ -6,8 +6,10 @@
 
 mod mail;
 mod oidc;
+mod probes;
 mod setup;
 mod sources;
+mod user_menu;
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -32,10 +34,12 @@ pub use mail::{
     MAIL_KEYS, MailSettings, MailTransport, SharedTransport, mail, rebuild as rebuild_mail,
     send_test_mail, set_mail_password,
 };
+pub(crate) use mail::{mail_ready, send_mail};
 pub use oidc::{
     ENV_VAR as OIDC_ENV_VAR, create_provider, delete_provider, linked_identities, oidc_admin,
     oidc_buttons, set_provider_secret, test_provider, unlink_identity, update_provider,
 };
+pub use probes::{PROBE_IDS, STALE_SECS, run_probes};
 pub use setup::{
     change_password, reauth, reauth_status, setup_account, setup_complete, setup_gate,
     setup_hosting, setup_sources, setup_state, totp_begin, totp_confirm,
@@ -45,6 +49,7 @@ pub use sources::{
     load_source_switches, my_credentials, search_reasons, set_my_credential, set_source_credential,
     set_source_enabled, set_source_licence, source_status, sources, test_source, user_keys,
 };
+pub use user_menu::{reset_user_totp, unlink_user_identity};
 
 use crate::error::ApiResult;
 use crate::{ApiError, ApiState};
@@ -74,7 +79,7 @@ pub struct SettingDef {
     pub next_session: bool,
 }
 
-pub const SETTINGS: [SettingDef; 13] = [
+pub const SETTINGS: [SettingDef; 14] = [
     SettingDef {
         key: "instance.hosting",
         env: "APP__INSTANCE__HOSTING",
@@ -152,6 +157,13 @@ pub const SETTINGS: [SettingDef; 13] = [
         key: "mail.from",
         env: "APP__NOTIFY__SMTP__FROM",
         gated: true,
+        next_session: false,
+    },
+    // WP4-5: the logging funnel (Admin > Storage and jobs)
+    SettingDef {
+        key: "usage.funnel",
+        env: "APP__USAGE__FUNNEL",
+        gated: false,
         next_session: false,
     },
 ];
@@ -233,6 +245,8 @@ pub struct AdminApi {
     /// The email transport (swapped when the mail settings change); `None` without the
     /// email channel.
     pub mail: Option<SharedTransport>,
+    /// Usage beacons per person and minute (WP4-5).
+    pub usage_limiter: Arc<crate::usage::Limiter>,
 }
 
 impl AdminApi {
@@ -421,6 +435,7 @@ fn stored_value(st: &StoredSettings, key: &str) -> Option<Value> {
         "mail.security" => st.mail.security.clone().map(Value::String),
         "mail.username" => st.mail.username.clone().map(Value::String),
         "mail.from" => st.mail.from.clone().map(Value::String),
+        "usage.funnel" => st.usage_funnel.map(Value::Bool),
         _ => None,
     }
 }
@@ -487,6 +502,14 @@ fn set_stored(st: &mut StoredSettings, key: &str, v: Option<&Value>) -> ApiResul
         "auth.sign_in_mode" => {
             st.sign_in_mode = v.map(|v| one_of(v, &["page", "auto"])).transpose()?;
         }
+        "usage.funnel" => {
+            st.usage_funnel = v
+                .map(|v| {
+                    v.as_bool()
+                        .ok_or_else(|| invalid("invalid_setting", "true or false"))
+                })
+                .transpose()?;
+        }
         k if k.starts_with("mail.") => set_mail(st, k, v)?,
         _ => {
             return Err(invalid(
@@ -551,6 +574,11 @@ fn set_mail(st: &mut StoredSettings, key: &str, v: Option<&Value>) -> ApiResult<
         }
     }
     Ok(())
+}
+
+/// The effective value of one managed setting (`Null` for an unknown key).
+pub(crate) fn effective_value(a: &AdminApi, st: &StoredSettings, key: &str) -> Value {
+    effective(a, st).remove(key).unwrap_or(Value::Null)
 }
 
 /// Effective values: file/env > database > default.
@@ -778,8 +806,14 @@ pub async fn update_settings(
     }
     a.store.put_settings(&next, &rows).await.map_err(pe)?;
     apply(s, &next);
+    if patch.values.contains_key(crate::usage::SETTING) {
+        a.usage_limiter.forget_setting();
+    }
     let mail_ok =
         !patch.values.keys().any(|k| k.starts_with("mail.")) || mail::rebuild(s).await.is_ok();
+    if patch.values.keys().any(|k| k.starts_with("mail.")) {
+        probes::refresh_probe(s, "mail").await;
+    }
     let mut out = settings(s, c.actor).await?;
     if !mail_ok {
         // stored, but mail is off until the settings are fixed (UX3-18)
@@ -845,6 +879,7 @@ async fn admin_user(s: &ApiState, u: &domain::user::User, me: UserId) -> ApiResu
         created_at: ts(u.created_at),
         is_self: u.id == me,
         role_via_provider: oidc::role_via_provider(s, u.id).await?,
+        identities: oidc::linked_identities(s, u.id).await?,
     })
 }
 
@@ -1149,7 +1184,7 @@ pub async fn audit_log(s: &ApiState, actor: Actor, q: AuditQueryDto) -> ApiResul
 /// One CSV cell. A value a spreadsheet would run as a formula gets a leading `'` (the
 /// helper the library export shares, UX2-9, UX3-5; usernames and invite notes are free
 /// text); commas, quotes and line breaks are quoted.
-fn csv_field(v: &str) -> String {
+pub(crate) fn csv_field(v: &str) -> String {
     let v = importers::cell::guard(v).into_owned();
     if v.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", v.replace('"', "\"\""))
@@ -1437,6 +1472,7 @@ pub async fn storage_jobs(s: &ApiState, actor: Actor) -> ApiResult<StorageJobsDt
                 "storage.max_total_bytes",
                 "storage.high_watermark",
                 "storage.low_watermark",
+                crate::usage::SETTING,
             ],
         ),
         lanes: lanes
@@ -1552,6 +1588,9 @@ fn row(id: &str, status: &str, detail: &str, args: &[(&str, String)]) -> HealthR
             .iter()
             .map(|(k, v)| ((*k).to_string(), v.clone()))
             .collect(),
+        checked_at: None,
+        checked_local: None,
+        stale: false,
     }
 }
 
@@ -1670,37 +1709,16 @@ async fn secrets_row(s: &ApiState) -> ApiResult<HealthRowDto> {
     Ok(secrets)
 }
 
-/// Admin > Overview: eight health rows, the attention block, the last three admin actions
-/// and the brand card.
+/// Admin > Overview: eight health rows as the probe job stored them (never probed in the
+/// request, DEC-285), the attention block, the last three admin actions and the brand card.
 ///
 /// # Errors
 /// Not an admin, storage errors.
 pub async fn overview(s: &ApiState, actor: Actor) -> ApiResult<AdminOverviewDto> {
     require_admin(actor)?;
     let a = admin(s)?;
-    let db = if a.store.ping().await.is_ok() {
-        row("database", "ok", "reachable", &[])
-    } else {
-        row("database", "error", "unreachable", &[])
-    };
-    let search = match a.health.search_backend.as_str() {
-        "postgres_fallback" => row("search", "warning", "fallback", &[]),
-        b => row("search", "ok", "backend", &[("backend", b.to_string())]),
-    };
-    let mail = mail::health_row(a, &a.store.settings().await.map_err(pe)?);
-    let idp = oidc::health_row(s).await;
-    let sources = sources_row(s, actor).await?;
-    let secrets = secrets_row(s).await?;
-    let health = vec![
-        db,
-        search,
-        storage_row(a).await,
-        jobs_row(a).await,
-        mail,
-        sources,
-        idp,
-        secrets,
-    ];
+    let zone = s.app.user_zone(actor.user_id).await?;
+    let health = probes::stored_rows(s, zone).await?;
     let attention = health
         .iter()
         .filter(|h| h.status == "warning" || h.status == "error")

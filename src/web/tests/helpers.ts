@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, request, type APIRequestContext, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execFileSync } from "node:child_process";
 import { createHmac } from "node:crypto";
@@ -110,7 +110,7 @@ export async function requestLink(page: Page, name: string, username: string) {
  * generous, and a failed import fails at once with its state instead of polling to the end
  * (UX3-22).
  */
-export async function importDone(page: Page, id: string) {
+export async function importDone(page: { request: APIRequestContext }, id: string) {
   let state = "";
   await expect
     .poll(
@@ -122,4 +122,66 @@ export async function importDone(page: Page, id: string) {
     )
     .toBe(true);
   expect(state, `import ${id}`).toBe("done");
+}
+
+/**
+ * Another account imports a new catalog item. Catalog changes reach only the users the item
+ * matters to (DEC-490), so an open page of someone else hears nothing of it.
+ */
+export async function changeElsewhere(baseURL: string) {
+  const r = await request.newContext({ baseURL });
+  const user = `elsewhere${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  const made = await r.post("/api/v1/auth/sign-up", { data: { username: user, password: PASSWORD, display_name: "" } });
+  expect(made.ok(), `sign-up ${made.status()}`).toBeTruthy();
+  const row = { source_id: user, kind: "movie", title: `Elsewhere ${user}`, year: 2001, status: "planned" };
+  const file = [JSON.stringify({ format: "library-export", version: 1 }), JSON.stringify(row)].join("\n");
+  const started = await r.post("/api/v1/imports?format=generic-jsonl", {
+    data: file,
+    headers: { "content-type": "application/octet-stream" },
+  });
+  expect(started.status()).toBe(202);
+  await importDone({ request: r }, (await started.json()).id);
+  const lib = await (await r.get("/api/v1/library?limit=5")).json();
+  await r.dispose();
+  return lib.items[0].item.id as string;
+}
+
+/**
+ * The signed-in user makes a new list through the API: an `entity.updated` for this user that
+ * changes nothing Home or History shows, i.e. a background refresh with the page's data
+ * unchanged (what an unchanged refresh of one of the user's items looks like to an open page).
+ */
+export async function changeMine(page: Page) {
+  const name = `Event ${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  const r = await page.request.post("/api/v1/lists", { data: { name } });
+  expect(r.ok(), `list ${r.status()}`).toBeTruthy();
+}
+
+/** Count the `entity.updated` events the page's event stream delivers and keep the ids they name (call before `goto`). */
+export async function countEntityEvents(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __entityEvents: number; __entityIds: string[] };
+    w.__entityEvents = 0;
+    w.__entityIds = [];
+    const Source = window.EventSource;
+    window.EventSource = class extends Source {
+      constructor(url: string | URL, init?: EventSourceInit) {
+        super(url, init);
+        this.addEventListener("entity.updated", (e) => {
+          w.__entityEvents += 1;
+          w.__entityIds.push(JSON.parse((e as MessageEvent).data)?.entity?.id ?? "");
+        });
+      }
+    } as typeof EventSource;
+  });
+}
+
+/** `entity.updated` events delivered to the current page so far (see `countEntityEvents`). */
+export function entityEvents(page: Page): Promise<number> {
+  return page.evaluate(() => (window as unknown as { __entityEvents?: number }).__entityEvents ?? 0);
+}
+
+/** The entity ids named by the `entity.updated` events delivered so far (see `countEntityEvents`). */
+export function entityIds(page: Page): Promise<string[]> {
+  return page.evaluate(() => (window as unknown as { __entityIds?: string[] }).__entityIds ?? []);
 }

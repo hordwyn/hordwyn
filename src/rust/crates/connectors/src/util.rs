@@ -24,6 +24,7 @@ pub async fn get_json<T: DeserializeOwned>(
             body: None,
             lane: ctx.lane,
             skip_auth_record: ctx.skip_auth_record(),
+            user: ctx.user,
         })
         .await?;
     match resp.status {
@@ -71,6 +72,7 @@ pub async fn post_json<T: DeserializeOwned>(
             body: Some(body),
             lane: ctx.lane,
             skip_auth_record: ctx.skip_auth_record(),
+            user: ctx.user,
         })
         .await?;
     match resp.status {

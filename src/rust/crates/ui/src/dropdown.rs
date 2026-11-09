@@ -50,6 +50,38 @@ fn menu_keys(
     }
 }
 
+/// The menu's items: each runs its action, then the menu closes (focus back on the trigger).
+fn menu_items(
+    items: StoredValue<Vec<MenuItem>>,
+    close: impl Fn() + Copy + 'static,
+) -> impl IntoView {
+    items.with_value(|items| {
+        items
+            .iter()
+            .map(|it| {
+                let on_select = it.on_select;
+                view! {
+                    <button
+                        type="button"
+                        role="menuitem"
+                        tabindex="-1"
+                        on:click=move |_| {
+                            on_select.run(());
+                            close();
+                        }
+                        class=cn(&[
+                            "flex w-full cursor-pointer items-center rounded-sm px-2 py-1.5 text-left text-sm outline-none focus:bg-accent focus:text-accent-foreground",
+                            if it.destructive { "text-destructive-text" } else { "" },
+                        ])
+                    >
+                        {it.label.clone()}
+                    </button>
+                }
+            })
+            .collect_view()
+    })
+}
+
 #[component]
 pub fn DropdownMenu(
     /// Accessible name of the trigger and id prefix.
@@ -66,6 +98,9 @@ pub fn DropdownMenu(
     /// Trigger content (for example an icon); defaults to `label`.
     #[prop(optional)]
     trigger: Option<Children>,
+    /// The trigger's tab stop (a roving grid sets `-1` on all but one card).
+    #[prop(into, optional)]
+    trigger_tabindex: MaybeProp<String>,
     /// Whether the menu is open, owned by the caller: a menu inside a view that a background
     /// refresh rebuilds stays open when the caller keeps this signal outside that view.
     #[prop(optional_no_strip, into)]
@@ -104,6 +139,7 @@ pub fn DropdownMenu(
                 aria-expanded=move || if open.get() { "true" } else { "false" }
                 aria-controls=menu_id.clone()
                 aria-label=trigger_label.clone()
+                tabindex=move || trigger_tabindex.get()
                 on:click=move |_| {
                     active.set(0);
                     open.update(|o| *o = !*o);
@@ -134,26 +170,7 @@ pub fn DropdownMenu(
                     on:keydown=on_menu_key
                     class="absolute right-0 z-50 mt-1 min-w-40 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
                 >
-                    {items.with_value(|items| items.iter().map(|it| {
-                        let on_select = it.on_select;
-                        view! {
-                            <button
-                                type="button"
-                                role="menuitem"
-                                tabindex="-1"
-                                on:click=move |_| {
-                                    on_select.run(());
-                                    close();
-                                }
-                                class=cn(&[
-                                    "flex w-full cursor-pointer items-center rounded-sm px-2 py-1.5 text-left text-sm outline-none focus:bg-accent focus:text-accent-foreground",
-                                    if it.destructive { "text-destructive" } else { "" },
-                                ])
-                            >
-                                {it.label.clone()}
-                            </button>
-                        }
-                    }).collect_view())}
+                    {menu_items(items, close)}
                 </div>
             </Show>
         </div>

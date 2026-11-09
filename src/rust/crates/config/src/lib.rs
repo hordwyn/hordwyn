@@ -324,6 +324,10 @@ pub struct JobsConfig {
     pub concurrency: u32,
     /// Seconds a stopping worker waits for running jobs.
     pub shutdown_grace_secs: u64,
+    /// Days after which catalog data from a source whose terms limit caching (TMDB: six
+    /// months) is refreshed by the daily retention job, or purged when no refresh is possible
+    /// (no key, source switched off). 1 to 170; such data is purged at 175 days in any case.
+    pub catalog_max_age_days: u32,
 }
 
 impl Default for JobsConfig {
@@ -331,6 +335,7 @@ impl Default for JobsConfig {
         Self {
             concurrency: 4,
             shutdown_grace_secs: 20,
+            catalog_max_age_days: 150,
         }
     }
 }
@@ -489,6 +494,23 @@ pub struct FeaturesConfig {
     pub kinds: Vec<String>,
 }
 
+/// First-party usage measurement (WP4-5, design.md 9, research R-54).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct UsageConfig {
+    /// Count the logging funnel: how many taps and how long logging takes, and which
+    /// settings sections people open, as daily totals without any user or item, kept 180
+    /// days. When set here or in the environment (`APP__USAGE__FUNNEL`) the admin area shows
+    /// it read-only; otherwise Admin > Storage and jobs can turn it off.
+    pub funnel: bool,
+}
+
+impl Default for UsageConfig {
+    fn default() -> Self {
+        Self { funnel: true }
+    }
+}
+
 /// The whole configuration.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
@@ -507,6 +529,7 @@ pub struct AppConfig {
     pub connectors: BTreeMap<String, ConnectorConfig>,
     pub instance: InstanceConfig,
     pub secrets: SecretsConfig,
+    pub usage: UsageConfig,
     /// Dotted keys set by the file or the environment (not part of the file format).
     #[serde(skip)]
     #[schemars(skip)]
@@ -677,6 +700,10 @@ impl AppConfig {
         if self.jobs.concurrency == 0 {
             return bad("jobs.concurrency must be positive".into());
         }
+        // below the retention job's 175-day hard limit (catalog_core::retention, DEC-453)
+        if !(1..=170).contains(&self.jobs.catalog_max_age_days) {
+            return bad("jobs.catalog_max_age_days must be between 1 and 170".into());
+        }
         self.storage.validate().map_err(ConfigError::Invalid)
     }
 }
@@ -714,6 +741,38 @@ mod tests {
     #[test]
     fn defaults_are_valid() {
         AppConfig::from_sources("", env(&[])).unwrap();
+    }
+
+    /// DEC-453: the catalog retention age defaults to 150 days and stays below the job's
+    /// 175-day hard limit.
+    #[test]
+    fn catalog_max_age_is_150_days_and_bounded() {
+        let c = AppConfig::from_sources("", env(&[])).unwrap();
+        assert_eq!(c.jobs.catalog_max_age_days, 150);
+        let c =
+            AppConfig::from_sources("", env(&[("APP__JOBS__CATALOG_MAX_AGE_DAYS", "30")])).unwrap();
+        assert_eq!(c.jobs.catalog_max_age_days, 30);
+        for bad in ["0", "171", "200"] {
+            assert!(
+                AppConfig::from_sources("", env(&[("APP__JOBS__CATALOG_MAX_AGE_DAYS", bad)]))
+                    .is_err(),
+                "{bad} days accepted"
+            );
+        }
+    }
+
+    /// WP4-5: the funnel is counted by default; the environment fixes the switch.
+    #[test]
+    fn the_usage_funnel_is_on_by_default_and_env_fixes_it() {
+        let c = AppConfig::from_sources("", env(&[])).unwrap();
+        assert!(c.usage.funnel);
+        assert_eq!(c.origin("usage.funnel"), None);
+        let c = AppConfig::from_sources("", env(&[("APP__USAGE__FUNNEL", "false")])).unwrap();
+        assert!(!c.usage.funnel);
+        assert_eq!(
+            c.origin("usage.funnel"),
+            Some(&Origin::Env("APP__USAGE__FUNNEL".into()))
+        );
     }
 
     /// DEC-284 and addendum-1 4.3: trusted proxies (empty by default, CIDR checked) and the

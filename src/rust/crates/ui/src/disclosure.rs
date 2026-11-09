@@ -115,7 +115,11 @@ pub fn Disclosure(
         }
     });
     if let Some(key) = storage_key.get_untracked() {
-        remember(open, key, force_open);
+        // after `remember`, so its restore is in place before the first report
+        remember(open, key.clone(), force_open);
+        if let Some(watch) = use_context::<DisclosureWatch>() {
+            watched(watch, key, open);
+        }
     }
     if let Some(group) = use_context::<GroupCtx>() {
         group.opens.update(|v| v.push(open));
@@ -208,5 +212,118 @@ pub fn DisclosureGroup(
             })}
             {sections}
         </div>
+    }
+}
+
+/// What a remembered disclosure reports (addendum-1 D16): it was shown on a page view, the
+/// person opened it, and opened it within [`OPENED_EARLY_MS`] of it showing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisclosureEvent {
+    Shown,
+    Opened,
+    OpenedEarly,
+}
+
+/// "Opened early": within this long after the disclosure showed (D16: 2 s of page load).
+pub const OPENED_EARLY_MS: f64 = 2_000.0;
+
+/// The app's watcher in context (WP4-5): every disclosure with a `storage_key` reports its
+/// [`DisclosureEvent`]s with the key, and the watcher knows which of them are open (the open
+/// sections at the moment of a save). Without a watcher nothing is reported.
+#[derive(Clone, Copy)]
+pub struct DisclosureWatch {
+    report: Callback<(String, DisclosureEvent)>,
+    mounted: StoredValue<Vec<(u64, String, RwSignal<bool>)>>,
+    next: StoredValue<u64>,
+}
+
+impl DisclosureWatch {
+    #[must_use]
+    pub fn new(report: Callback<(String, DisclosureEvent)>) -> Self {
+        Self {
+            report,
+            mounted: StoredValue::new(Vec::new()),
+            next: StoredValue::new(0),
+        }
+    }
+
+    /// Storage keys of the disclosures open now, once each.
+    #[must_use]
+    pub fn open_keys(&self) -> Vec<String> {
+        let keys: Vec<String> = self
+            .mounted
+            .try_with_value(|m| {
+                m.iter()
+                    .filter(|(_, _, open)| open.try_get_untracked().unwrap_or(false))
+                    .map(|(_, k, _)| k.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        // once each, in mount order, also when two of them are not adjacent
+        let mut seen = std::collections::HashSet::new();
+        keys.into_iter()
+            .filter(|k| seen.insert(k.clone()))
+            .collect()
+    }
+
+    fn register(&self, key: String, open: RwSignal<bool>) -> u64 {
+        let id = self.next.try_update_value(|n| {
+            *n += 1;
+            *n
+        });
+        let id = id.unwrap_or_default();
+        self.mounted.try_update_value(|m| m.push((id, key, open)));
+        id
+    }
+
+    fn unregister(&self, id: u64) {
+        self.mounted
+            .try_update_value(|m| m.retain(|(i, _, _)| *i != id));
+    }
+}
+
+fn now_ms() -> f64 {
+    window().performance().map_or(0.0, |p| p.now())
+}
+
+/// Report shown/opened for one remembered disclosure (browser only: effects do not run on
+/// the server). A state restored from `localStorage` before the first run is not "opened".
+fn watched(watch: DisclosureWatch, key: String, open: RwSignal<bool>) {
+    let id = watch.register(key.clone(), open);
+    on_cleanup(move || watch.unregister(id));
+    Effect::new(move |prev: Option<(bool, f64)>| {
+        let is_open = open.get();
+        let Some((was_open, shown_at)) = prev else {
+            watch.report.run((key.clone(), DisclosureEvent::Shown));
+            return (is_open, now_ms());
+        };
+        if is_open && !was_open {
+            watch.report.run((key.clone(), DisclosureEvent::Opened));
+            if now_ms() - shown_at <= OPENED_EARLY_MS {
+                watch
+                    .report
+                    .run((key.clone(), DisclosureEvent::OpenedEarly));
+            }
+        }
+        (is_open, shown_at)
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_keys_name_each_key_once_even_when_not_adjacent() {
+        // UX4-22: `dedup` on an unsorted list counted a shared key twice
+        let owner = Owner::new();
+        owner.with(|| {
+            let watch = DisclosureWatch::new(Callback::new(|_| ()));
+            for key in ["a", "b", "a"] {
+                watch.register(key.into(), RwSignal::new(true));
+            }
+            watch.register("c".into(), RwSignal::new(false));
+            assert_eq!(watch.open_keys(), ["a", "b"]);
+        });
     }
 }

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO source_stats (connector, last_ok_at, last_error_at, last_error,\n                     last_auth_status, last_auth_failure_at, last_rate_limited_at,\n                     circuit_opened_at, circuit_open_until, key_changed_at)\n                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n                 ON CONFLICT (connector) DO UPDATE SET\n                     last_ok_at = GREATEST(source_stats.last_ok_at, EXCLUDED.last_ok_at),\n                     last_error = CASE WHEN EXCLUDED.last_error_at > source_stats.last_error_at\n                         OR source_stats.last_error_at IS NULL\n                         THEN COALESCE(EXCLUDED.last_error, source_stats.last_error)\n                         ELSE source_stats.last_error END,\n                     last_error_at = GREATEST(source_stats.last_error_at, EXCLUDED.last_error_at),\n                     last_auth_status = CASE\n                         WHEN EXCLUDED.last_auth_failure_at > source_stats.last_auth_failure_at\n                           OR source_stats.last_auth_failure_at IS NULL\n                         THEN COALESCE(EXCLUDED.last_auth_status, source_stats.last_auth_status)\n                         ELSE source_stats.last_auth_status END,\n                     last_auth_failure_at = GREATEST(source_stats.last_auth_failure_at,\n                         EXCLUDED.last_auth_failure_at),\n                     last_rate_limited_at = GREATEST(source_stats.last_rate_limited_at,\n                         EXCLUDED.last_rate_limited_at),\n                     circuit_open_until = CASE\n                         WHEN EXCLUDED.circuit_opened_at > source_stats.circuit_opened_at\n                           OR source_stats.circuit_opened_at IS NULL\n                         THEN COALESCE(EXCLUDED.circuit_open_until, source_stats.circuit_open_until)\n                         ELSE source_stats.circuit_open_until END,\n                     circuit_opened_at = GREATEST(source_stats.circuit_opened_at,\n                         EXCLUDED.circuit_opened_at),\n                     key_changed_at = GREATEST(source_stats.key_changed_at, EXCLUDED.key_changed_at)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Text",
+        "Int2",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "132eb7eea980d0c3d855bb8e5ae20ee8a74d6b388c97f959d2caf5a3e3c448ee"
+}

@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT season, number, air_date, runtime_minutes\n             FROM catalog_episodes WHERE item_id = $1 ORDER BY season, number",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "season",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "catalog_episodes",
+            "name": "season"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "number",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "catalog_episodes",
+            "name": "number"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "air_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "catalog_episodes",
+            "name": "air_date"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "runtime_minutes",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "catalog_episodes",
+            "name": "runtime_minutes"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "f6597355f09293dcc3b06e3802c37c0b4cf34186f8ec0a4dad5422d1b361d0b4"
+}

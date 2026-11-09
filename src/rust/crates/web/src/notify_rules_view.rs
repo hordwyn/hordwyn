@@ -202,6 +202,10 @@ fn Matrix(
             }
         })
         .collect_view();
+    // not `stacked` (DEC-388, WP4-2): the matrix is two-dimensional (events x channels, one
+    // switch per cell, section header rows); as cards every switch would need its channel
+    // name repeated and the comparison across a row is the point, so it keeps the focusable
+    // scroll wrapper (DEC-337; data tables are exempt from WCAG 1.4.10)
     view! {
         <Table attr:data-testid="nf-rules">
             <caption class="sr-only">{t("notify-rules")}</caption>
@@ -436,6 +440,28 @@ fn subject_options(
     subjects
 }
 
+/// "Choose an item...": the search palette picks the item (the scoped pick, DEC-344); it
+/// joins the subjects as "Item: <title>" and is chosen.
+fn item_pick(subject: RwSignal<String>, subjects: RwSignal<Vec<SelectOption>>) -> Callback<()> {
+    let scope = expect_context::<crate::palette::PaletteScope>().0;
+    let open = expect_context::<crate::palette::PaletteOpen>().0;
+    let i18n = use_i18n();
+    let done = Callback::new(move |(id, label): (String, String)| {
+        let value = format!("item:{id}");
+        let text = i18n.t_args("notify-filter-item", &[("name", label.into())]);
+        subjects.update(|s| {
+            if !s.iter().any(|o| o.value == value) {
+                s.push(opt(&value, text));
+            }
+        });
+        subject.set(value);
+    });
+    Callback::new(move |()| {
+        scope.set(Some(crate::palette::PaletteTarget::RuleSubject { done }));
+        open.set(true);
+    })
+}
+
 #[component]
 fn AddFiltered(
     events: Vec<contracts::EventTypeDto>,
@@ -455,7 +481,8 @@ fn AddFiltered(
         .map(|e| opt(&e.id, event_label(&e.id)))
         .collect();
     let i18n = use_i18n();
-    let subjects = subject_options(&i18n, &lists, &people);
+    let subjects = RwSignal::new(subject_options(&i18n, &lists, &people));
+    let pick_item = item_pick(subject, subjects);
     let mut targets = vec![opt("", t("notify-all-channels"))];
     targets.extend(channels.iter().map(|c| opt(&c.id, c.name.clone())));
     let modes = vec![
@@ -469,6 +496,7 @@ fn AddFiltered(
         let filter = match subject.get_untracked().split_once(':') {
             Some(("list", id)) => json!({"lists": [id]}),
             Some(("person", id)) => json!({"companions": [id]}),
+            Some(("item", id)) => json!({"items": [id]}),
             _ => serde_json::Value::Null,
         };
         let target = target.get_untracked();
@@ -505,8 +533,11 @@ fn AddFiltered(
                     <Select id="nf-r-event" value=event options=Signal::derive(move || event_options.clone())/>
                 </FormField>
                 <FormField id="nf-r-for" label=t("notify-filter-for") description=t("notify-filter-items-later")>
-                    <Select id="nf-r-for" value=subject options=Signal::derive(move || subjects.clone())/>
+                    <Select id="nf-r-for" value=subject options=subjects/>
                 </FormField>
+                <Button variant=ButtonVariant::Outline size=ButtonSize::Sm class="w-fit" on:click=move |_| pick_item.run(())>
+                    <Icon name=IconName::Search/> {t("notify-filter-pick-item")}
+                </Button>
                 <FormField id="nf-r-target" label=t("notify-channel")>
                     <Select id="nf-r-target" value=target options=Signal::derive(move || targets.clone())/>
                 </FormField>

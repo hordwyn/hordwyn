@@ -96,7 +96,8 @@ impl Bus {
 }
 
 /// May `viewer` see `event`? Admin topics go to admins only; an empty audience means every
-/// signed-in user (catalog updates); otherwise only the listed users.
+/// signed-in user (a catalog item on a list the instance can see; other catalog changes go to
+/// the users the item matters to, DEC-490); otherwise only the listed users.
 #[must_use]
 pub fn visible_to(event: &AppEvent, viewer: &Actor) -> bool {
     if event.topic.starts_with("admin.") {

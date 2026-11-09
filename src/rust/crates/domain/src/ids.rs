@@ -53,4 +53,8 @@ id_type!(
     LinkRequestId,
     /// An invitation that promotes a companion to a user.
     InviteId,
+    /// A private yearly goal (design.md 9, R-04).
+    GoalId,
+    /// A game group: people who play together (design.md 6.7).
+    GameGroupId,
 );

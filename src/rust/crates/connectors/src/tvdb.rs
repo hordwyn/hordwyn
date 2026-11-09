@@ -1,7 +1,8 @@
 //! `TheTVDB` (shows), API v4. Terms and attribution: `docs/connectors/tvdb.md`.
 //!
 //! Auth: `POST /v4/login` with the API key (and optional subscriber PIN) returns a bearer
-//! token valid for one month; it is cached per PIN and renewed after 25 days. The PIN is the
+//! token valid for one month; it is cached per PIN (keyed by its blake3 digest) and renewed
+//! after 25 days. The PIN is the
 //! requesting member's own (`Ctx::user_key`, the user-supported model of design.md 4.1)
 //! when they stored one, else the one in the instance key (`<apikey>:<pin>`), if any.
 
@@ -15,7 +16,7 @@ use catalog_core::{
     Details, DetailsRequest, ImageKind, ImageRef, KeySlot, RateLimit, Search, SearchRequest,
     Snapshot,
 };
-use domain::catalog::ExternalId;
+use domain::catalog::{CatalogEpisode, ExternalId};
 use kinds::builtin::{SeasonInfo, ShowAttributes};
 use serde::Deserialize;
 
@@ -37,7 +38,9 @@ pub struct Tvdb {
     info: ConnectorInfo,
     api_base: String,
     key: KeySlot,
-    /// Bearer tokens per PIN (`""`: none): token, renew after, key version.
+    /// Bearer tokens per PIN, keyed by the blake3 hex digest of the PIN (of `""`: none), so
+    /// no PIN is kept as a map key for the life of the process (DEC-286): token, renew
+    /// after, key version.
     tokens: Mutex<HashMap<String, (String, Instant, u64)>>,
 }
 
@@ -65,7 +68,12 @@ impl Tvdb {
                 id: ID.into(),
                 name: "TheTVDB".into(),
                 kinds: vec![KIND.into()],
-                capabilities: vec![Capability::Search, Capability::Details, Capability::Images],
+                capabilities: vec![
+                    Capability::Search,
+                    Capability::Details,
+                    Capability::Images,
+                    Capability::Episodes,
+                ],
                 rate_limit: RateLimit {
                     per_second: 5,
                     burst: 5,
@@ -104,7 +112,13 @@ impl Tvdb {
             .filter(|p| !p.is_empty())
             .or(instance_pin)
             .filter(|p| !p.is_empty());
-        let slot = pin.clone().unwrap_or_default();
+        // a keyed derivation, so the map key is no bare hash of a short PIN (UX4-22)
+        let slot = blake3::Hash::from(blake3::derive_key(
+            "catalog connectors 2026-11-09 tvdb token slot",
+            pin.as_deref().unwrap_or_default().as_bytes(),
+        ))
+        .to_hex()
+        .to_string();
         let version = self.key.version();
         let cached = self
             .tokens
@@ -142,6 +156,21 @@ impl Tvdb {
             ("Authorization".into(), format!("Bearer {token}")),
             ("Accept".into(), "application/json".into()),
         ])
+    }
+
+    /// The keys of the token cache (tests check that no PIN appears in them).
+    ///
+    /// # Panics
+    /// If the token lock is poisoned.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn token_slots(&self) -> Vec<String> {
+        self.tokens
+            .lock()
+            .expect("token lock")
+            .keys()
+            .cloned()
+            .collect()
     }
 
     /// # Errors
@@ -236,6 +265,23 @@ struct Series {
     seasons: Vec<Season>,
     #[serde(default)]
     remote_ids: Vec<RemoteId>,
+}
+
+/// `data` of `GET /series/{id}/episodes/{season-type}` (getSeriesEpisodes, v4 spec 4.7.10).
+#[derive(Deserialize)]
+struct SeriesEpisodes {
+    #[serde(default)]
+    episodes: Vec<EpisodeRecord>,
+}
+
+/// The fields of `EpisodeBaseRecord` we keep (WP4-7: no names or overviews).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EpisodeRecord {
+    number: Option<u32>,
+    season_number: Option<u32>,
+    aired: Option<String>,
+    runtime: Option<u32>,
 }
 
 fn snake(s: &str) -> String {
@@ -333,6 +379,7 @@ impl Details for Tvdb {
             .map(|number| SeasonInfo {
                 number,
                 episode_count: 0,
+                air_date: None,
             })
             .collect();
         seasons.sort_by_key(|x| x.number);
@@ -372,6 +419,44 @@ impl catalog_core::Images for Tvdb {
     }
 }
 
+#[async_trait]
+impl catalog_core::Episodes for Tvdb {
+    async fn season_episodes(
+        &self,
+        ctx: &Ctx,
+        req: &catalog_core::EpisodesRequest,
+    ) -> Result<Vec<CatalogEpisode>, ConnectorError> {
+        check_kind(&req.kind)?;
+        let id: u64 = req
+            .id
+            .parse()
+            .map_err(|_| ConnectorError::Parse(format!("tvdb id `{}`", req.id)))?;
+        // aired order ("official", as the season list of `details`), one season per call so a
+        // season fits the first page (the spec documents no paging for this endpoint)
+        let season = req.season.to_string();
+        let url = self.url(
+            &format!("/series/{id}/episodes/official"),
+            &[("page", "0"), ("season", &season)],
+        )?;
+        let headers = self.headers(ctx).await?;
+        let r: Envelope<SeriesEpisodes> = get_json(ctx, ID, "season", &url, headers).await?;
+        Ok(r.data
+            .episodes
+            .into_iter()
+            .filter(|e| e.season_number == Some(req.season))
+            .filter_map(|e| {
+                Some(CatalogEpisode {
+                    season: req.season,
+                    number: e.number.filter(|n| *n > 0)?,
+                    // the spec states no format; the first ten characters as YYYY-MM-DD
+                    air_date: date_of(e.aired.as_deref().and_then(|d| d.get(..10))),
+                    runtime_minutes: e.runtime.filter(|r| *r > 0),
+                })
+            })
+            .collect())
+    }
+}
+
 impl Connector for Tvdb {
     fn info(&self) -> &ConnectorInfo {
         &self.info
@@ -401,6 +486,10 @@ impl Connector for Tvdb {
     }
 
     fn as_images(&self) -> Option<&dyn catalog_core::Images> {
+        Some(self)
+    }
+
+    fn as_episodes(&self) -> Option<&dyn catalog_core::Episodes> {
         Some(self)
     }
 }

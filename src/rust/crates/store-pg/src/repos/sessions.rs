@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use app::ports::{RepoError, SessionRepo};
+use app::ports::{HistorySpans, HistoryWindow, RepoError, SessionRepo};
 use async_trait::async_trait;
-use domain::ids::{CompanionId, ItemId, SessionId, UserId};
+use domain::ids::{CompanionId, GameGroupId, ItemId, SessionId, UserId};
 use domain::session::{Participant, Session};
 use sqlx::{Postgres, Transaction};
 
@@ -20,6 +20,7 @@ struct SessionRow {
     notes: Option<String>,
     coop_outcome: Option<String>,
     incomplete: bool,
+    game_group_id: Option<uuid::Uuid>,
 }
 
 impl PgStore {
@@ -59,6 +60,7 @@ impl PgStore {
                     participants: parts.remove(&r.id).unwrap_or_default(),
                     coop_outcome: r.coop_outcome.as_deref().map(coop).transpose()?,
                     incomplete: r.incomplete,
+                    game_group_id: r.game_group_id.map(GameGroupId),
                 })
             })
             .collect::<Result<_, RepoError>>()
@@ -80,12 +82,12 @@ impl PgStore {
 async fn write_session(tx: &mut Transaction<'static, Postgres>, s: &Session) -> Res<()> {
     sqlx::query!(
         "INSERT INTO sessions (id, owner_id, item_id, started_at, duration_minutes, location, notes,
-                               coop_outcome, incomplete)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                               coop_outcome, incomplete, game_group_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (id) DO UPDATE SET item_id = EXCLUDED.item_id, started_at = EXCLUDED.started_at,
              duration_minutes = EXCLUDED.duration_minutes, location = EXCLUDED.location,
              notes = EXCLUDED.notes, coop_outcome = EXCLUDED.coop_outcome,
-             incomplete = EXCLUDED.incomplete",
+             incomplete = EXCLUDED.incomplete, game_group_id = EXCLUDED.game_group_id",
         s.id.0,
         s.owner.0,
         s.item_id.0,
@@ -94,7 +96,8 @@ async fn write_session(tx: &mut Transaction<'static, Postgres>, s: &Session) -> 
         s.location,
         s.notes,
         s.coop_outcome.map(coop_str),
-        s.incomplete
+        s.incomplete,
+        s.game_group_id.map(|g| g.0)
     )
     .execute(&mut **tx)
     .await
@@ -184,4 +187,161 @@ impl SessionRepo for PgStore {
         .map_err(be)?;
         self.sessions_where_ids(&ids).await
     }
+
+    async fn group_plays(&self, owner: UserId) -> Res<Vec<app::ports::GroupPlays>> {
+        let rows = sqlx::query!(
+            r#"SELECT DISTINCT ON (s.game_group_id)
+                      s.game_group_id AS "group!", s.started_at, s.item_id,
+                      COUNT(*) OVER (PARTITION BY s.game_group_id) AS "plays!"
+               FROM sessions s
+               WHERE s.owner_id = $1 AND s.game_group_id IS NOT NULL
+               ORDER BY s.game_group_id, s.started_at DESC, s.id DESC"#,
+            owner.0
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| app::ports::GroupPlays {
+                group: GameGroupId(r.group),
+                plays: u32::try_from(r.plays).unwrap_or(u32::MAX),
+                last_at: r.started_at,
+                last_item: ItemId(r.item_id),
+            })
+            .collect())
+    }
+
+    async fn by_owner_window(&self, owner: UserId, w: &HistoryWindow) -> Res<Vec<Session>> {
+        let kinds: Vec<String> = w.kinds.iter().map(|k| k.as_str().to_string()).collect();
+        let rows = sqlx::query_as!(
+            SessionRow,
+            "SELECT s.id, s.owner_id, s.item_id, s.started_at, s.duration_minutes, s.location,
+                    s.notes, s.coop_outcome, s.incomplete, s.game_group_id
+             FROM sessions s JOIN catalog_items c ON c.id = s.item_id
+             WHERE s.owner_id = $1
+               AND ($2::timestamptz IS NULL OR (s.started_at, s.id) < ($2, $3::uuid))
+               AND ($4::timestamptz IS NULL OR s.started_at >= $4)
+               AND (cardinality($5::text[]) = 0 OR c.kind = ANY($5))
+             ORDER BY s.started_at DESC, s.id DESC
+             LIMIT $6",
+            owner.0,
+            w.before.map(|b| b.0),
+            w.before.map_or(uuid::Uuid::nil(), |b| b.1),
+            w.since,
+            &kinds,
+            i64::from(w.limit)
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?;
+        self.load_sessions(rows).await
+    }
+
+    async fn with_participants_window(
+        &self,
+        companions: &[CompanionId],
+        w: &HistoryWindow,
+    ) -> Res<Vec<Session>> {
+        let cids: Vec<uuid::Uuid> = companions.iter().map(|c| c.0).collect();
+        let kinds: Vec<String> = w.kinds.iter().map(|k| k.as_str().to_string()).collect();
+        let rows = sqlx::query_as!(
+            SessionRow,
+            "SELECT s.id, s.owner_id, s.item_id, s.started_at, s.duration_minutes, s.location,
+                    s.notes, s.coop_outcome, s.incomplete, s.game_group_id
+             FROM sessions s JOIN catalog_items c ON c.id = s.item_id
+             WHERE EXISTS (SELECT 1 FROM session_participants p
+                           WHERE p.session_id = s.id AND p.companion_id = ANY($1))
+               AND ($2::timestamptz IS NULL OR (s.started_at, s.id) < ($2, $3::uuid))
+               AND ($4::timestamptz IS NULL OR s.started_at >= $4)
+               AND (cardinality($5::text[]) = 0 OR c.kind = ANY($5))
+             ORDER BY s.started_at DESC, s.id DESC
+             LIMIT $6",
+            &cids,
+            w.before.map(|b| b.0),
+            w.before.map_or(uuid::Uuid::nil(), |b| b.1),
+            w.since,
+            &kinds,
+            i64::from(w.limit)
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?;
+        self.load_sessions(rows).await
+    }
+
+    async fn by_owner_spans(&self, owner: UserId, w: &HistorySpans) -> Res<Vec<Session>> {
+        let (from, to) = span_arrays(w);
+        let kinds: Vec<String> = w.kinds.iter().map(|k| k.as_str().to_string()).collect();
+        // DEC-494: the span rows first (one range scan of `sessions_owner_recent` per span),
+        // as in `recent_spans`
+        let rows = sqlx::query_as!(
+            SessionRow,
+            r#"WITH s AS MATERIALIZED (
+                 SELECT s.id, s.owner_id, s.item_id, s.started_at, s.duration_minutes, s.location,
+                        s.notes, s.coop_outcome, s.incomplete, s.game_group_id
+                 FROM unnest($2::timestamptz[], $3::timestamptz[]) AS sp(lo, hi)
+                 JOIN sessions s ON s.owner_id = $1
+                      AND s.started_at >= sp.lo AND s.started_at < sp.hi)
+             SELECT s.id AS "id!", s.owner_id AS "owner_id!", s.item_id AS "item_id!",
+                    s.started_at AS "started_at!", s.duration_minutes, s.location, s.notes,
+                    s.coop_outcome, s.incomplete AS "incomplete!", s.game_group_id
+             FROM s
+             WHERE cardinality($4::text[]) = 0
+                OR (SELECT c.kind FROM catalog_items c WHERE c.id = s.item_id) = ANY($4)
+             ORDER BY s.started_at DESC, s.id DESC
+             LIMIT $5"#,
+            owner.0,
+            &from,
+            &to,
+            &kinds,
+            i64::from(w.limit)
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?;
+        self.load_sessions(rows).await
+    }
+
+    async fn with_participants_spans(
+        &self,
+        companions: &[CompanionId],
+        w: &HistorySpans,
+    ) -> Res<Vec<Session>> {
+        let cids: Vec<uuid::Uuid> = companions.iter().map(|c| c.0).collect();
+        let (from, to) = span_arrays(w);
+        let kinds: Vec<String> = w.kinds.iter().map(|k| k.as_str().to_string()).collect();
+        let rows = sqlx::query_as!(
+            SessionRow,
+            "SELECT s.id, s.owner_id, s.item_id, s.started_at, s.duration_minutes, s.location,
+                    s.notes, s.coop_outcome, s.incomplete, s.game_group_id
+             FROM sessions s JOIN catalog_items c ON c.id = s.item_id
+             WHERE EXISTS (SELECT 1 FROM session_participants p
+                           WHERE p.session_id = s.id AND p.companion_id = ANY($1))
+               AND EXISTS (SELECT 1 FROM unnest($2::timestamptz[], $3::timestamptz[]) AS sp(lo, hi)
+                           WHERE s.started_at >= sp.lo AND s.started_at < sp.hi)
+               AND (cardinality($4::text[]) = 0 OR c.kind = ANY($4))
+             ORDER BY s.started_at DESC, s.id DESC
+             LIMIT $5",
+            &cids,
+            &from,
+            &to,
+            &kinds,
+            i64::from(w.limit)
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?;
+        self.load_sessions(rows).await
+    }
+}
+
+/// The span starts and ends as two arrays (for `unnest`).
+pub(crate) fn span_arrays(
+    w: &HistorySpans,
+) -> (
+    Vec<chrono::DateTime<chrono::Utc>>,
+    Vec<chrono::DateTime<chrono::Utc>>,
+) {
+    w.spans.iter().copied().unzip()
 }

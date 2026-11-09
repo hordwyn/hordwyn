@@ -1468,7 +1468,7 @@ notify-section-integration = Senders
 notify-section-import = Imports
 notify-section-admin = Instance (admin)
 notify-section-patterns = Several events at once
-notify-filtered = Rules for one list or person
+notify-filtered = Rules for one list, item or person
 notify-filtered-empty = None yet.
 notify-add-filtered = Add a rule for one list, item or person
 notify-filter-for = For
@@ -1479,8 +1479,8 @@ notify-filter-items = { $count ->
     [one] one item
    *[other] { $count } items
 }
-notify-filter-items-later = Rules for one item come with the search palette later; the API already takes them.
-notify-filter-required = Choose a list or a person.
+notify-filter-items-later = For one item, choose it with the search below.
+notify-filter-required = Choose a list, a person or an item.
 notify-add-rule = Add rule
 integrations-senders = Senders
 integrations-connect = Connect a sender
@@ -1848,4 +1848,264 @@ episodes-range-hint = Mark season, Mark show and Mark up to here spread the epis
 episodes-range-missing = Pick both days of the range.
 episodes-range-reversed = The last day is before the first.
 episodes-range-future = The range cannot end after today.
+episodes-when-release = On release dates
+episodes-release-hint = Mark season, Mark show and Mark up to here log each episode on the day it was released.
+episodes-release-missing = { $count ->
+    [one] "On release dates" is not offered: one open episode of this season has no release date up to today.
+   *[other] "On release dates" is not offered: { $count } open episodes of this season have no release date up to today.
+}
+episodes-release-refused = { $count ->
+    [one] One of these episodes has no release date up to today, so nothing was marked.
+   *[other] { $count } of these episodes have no release date up to today, so nothing was marked.
+}
 imports-match-target = Choosing a result matches it with the imported row "{ $title }" and imports the row.
+
+# WP4-2 admin-ops: probe rows, the Users row menu, linked accounts, the emailed link
+admin-status-unknown = Not checked yet
+admin-health-not-checked = The background check has not run yet.
+admin-health-stale = Not checked recently (last check { $time })
+admin-users-more = More actions for { $name }
+admin-users-more-short = More
+admin-users-reset-totp = Reset authenticator
+admin-users-reset-totp-title = Reset the authenticator of { $name }?
+admin-users-reset-totp-body = { $name } then signs in with the password alone until they set up a new authenticator app. Their recovery codes stop working, and they get a notification.
+admin-users-unlink = Unlink { $provider }
+admin-users-unlink-title = Unlink { $provider } from { $name }?
+admin-users-unlink-body = { $name } can no longer sign in with { $provider } and gets a notification. The account and its library stay.
+admin-users-unlink-confirm = Unlink
+admin-error-no_authenticator = This person has no authenticator.
+admin-sso-linked = Linked accounts
+admin-audit-user_totp_reset = Authenticator reset
+admin-audit-user_identity_unlinked = Sign-in unlinked
+admin-audit-auth_link_emailed = Sign-in link emailed
+admin-audit-auth_link_confirmed = Sign-in linked through an emailed link
+notify-event-account-authenticator_reset = Your authenticator was removed
+notify-event-account-sign_in_unlinked = A sign-in was unlinked from your account
+signin-link-email-lead = That account has no password. We can email a one-time link to its address; open it in this browser to link the sign-in.
+signin-link-email = Email me a link
+signin-link-emailed = We sent a link to { $address }. Open it in this browser within { $minutes } minutes.
+signin-link-emailed-short = We sent a link. Open it in this browser.
+signin-link-email-failed = The link could not be sent. Ask your admin to link it.
+signin-link-code-invalid = This link no longer works: it was used, it expired, or it was opened in another browser. Sign in again to start over.
+signin-link-linking = Linking your account...
+
+## Bulk edits and removing from the library (WP4-3)
+library-select = Select { $title }
+library-select-all = Select all on this page
+library-add-to-list = Add to list...
+library-remove = Remove from library
+library-removed = Removed { $title } from your library
+library-bulk-label = Bulk actions
+library-bulk-count = { $count } selected
+library-bulk-status-menu = Set status
+library-bulk-tag = Add tag
+library-bulk-tag-title = Add a tag to the selected entries
+library-bulk-list = Add to list
+library-bulk-remove = Remove
+library-bulk-clear = Clear selection
+library-bulk-remove-title = { $count ->
+    [one] Remove one entry from your library?
+   *[other] Remove { $count } entries from your library?
+}
+library-bulk-remove-body = Their status, rating, note and tags go. Plays, progress, reviews and lists keep them, and Undo brings everything back.
+library-bulk-remove-confirm = Remove
+library-bulk-status = { $count ->
+    [one] One entry marked as { $status }
+   *[other] { $count } entries marked as { $status }
+}
+library-bulk-tagged = { $count ->
+    [one] Tagged one entry with { $tag }
+   *[other] Tagged { $count } entries with { $tag }
+}
+library-bulk-listed = { $count ->
+    [one] Added one entry to { $list }
+   *[other] Added { $count } entries to { $list }
+}
+library-bulk-removed = { $count ->
+    [one] Removed one entry from your library
+   *[other] Removed { $count } entries from your library
+}
+library-bulk-failed = { $count ->
+    [one] One entry could not be changed.
+   *[other] { $count } entries could not be changed.
+}
+library-list-pick-title = { $count ->
+    [one] Add to which list?
+   *[other] Add { $count } entries to which list?
+}
+library-list-none = You have no lists yet.
+library-list-create = Create a list
+item-remove = Remove from library
+# keyboard map and palette (WP4-4)
+shortcuts-chord-waiting = G pressed: then H, L, Y, T or P to go to a section.
+shortcuts-then = then
+shortcuts-or = or
+shortcuts-everywhere = Everywhere
+shortcuts-home = Home
+shortcuts-library = Library
+shortcuts-item = Item page
+shortcuts-search = Search
+shortcuts-go-home = Go to Home
+shortcuts-go-library = Go to Library
+shortcuts-go-history = Go to History
+shortcuts-go-lists = Go to Lists
+shortcuts-go-people = Go to People
+shortcuts-home-move = Move between Continue cards
+shortcuts-home-run = Run the next step of the focused card
+shortcuts-library-move = Move between cards
+shortcuts-library-row = First or last card of the row
+shortcuts-library-first = First card of all (Ctrl+End: the last)
+shortcuts-library-open = Open the focused card
+shortcuts-library-step = Next step of the focused card
+shortcuts-library-tags = Tags of the focused card
+shortcuts-library-list = Add the focused card to a list
+shortcuts-library-filter = Filter the library
+shortcuts-item-step = Log the next step
+shortcuts-item-rating = Focus your rating
+shortcuts-item-tags = Edit the tags
+shortcuts-item-list = Add to a list
+shortcuts-search-open = Open the result, or choose it for the page that opened the search
+shortcuts-search-quick = Add as Planned, or run the next step
+shortcuts-key-enter = Enter
+shortcuts-key-home = Home
+shortcuts-key-end = End
+shortcuts-key-arrows = Arrow keys
+shortcuts-off-note = Single-key shortcuts are turned off (Settings > Account). Ctrl+K and the keys inside grids, menus and the search still work.
+search-target-rule = Choosing a result makes it the subject of the rule.
+search-target-log-with = Choosing a result logs it with { $name }.
+search-recent = Recent
+search-suggested = Suggestions
+search-cmd-lists = Go to Lists
+search-cmd-new-list = New list
+search-cmd-log-play = Log a play of { $title }
+search-cmd-import = Import a file
+search-added-planned = Added to Planned
+search-hint-open = Open
+search-hint-choose = Choose
+search-hint-quick = Add as Planned or next step
+companions-log-with = Log with...
+companions-log-with-named = Log with { $name }
+notify-filter-pick-item = Choose an item...
+notify-filter-item = Item: { $name }
+notify-hint-secret-keep = Leave it blank to keep the stored value.
+notify-edit = Edit
+notify-edit-named = Edit { $name }
+notify-channel-enabled = Send to this channel
+notify-channel-save = Save
+notify-channel-cancel = Cancel
+settings-shortcuts = Keyboard shortcuts
+settings-shortcuts-hint = Single keys such as G, N, W or ? work as shortcuts outside text fields. Turn them off if they get in the way of speech input or a screen reader. Remembered in this browser.
+# WP4-5 offline queue and logging funnel
+offline-saved = Saved offline, will sync
+offline-waiting = { $count ->
+    [one] 1 change waiting
+   *[other] { $count } changes waiting
+}
+offline-dropped = Not saved: { $what } - the server refused this change made offline
+offline-sheet = You are offline. Save when you are back.
+offline-bulk = You are offline. Bulk edits wait until you are back.
+privacy-usage-on = This instance counts, per day and without your name or any titles, how many taps and seconds logging takes (from opening search, a sheet or a next step to the saved entry), and how often these collapsible sections are shown, opened, opened within 2 seconds and open when you save: the Library filters; "More" in the log and play sheets of an item; "Set a goal" on Stats; "Sign-in" in Settings > Account; and, for admins, the invites on Users, "Mail", "Secrets at rest" and "Advanced" on Instance, and "Usage measurement" on Storage and jobs. Totals are kept 180 days; the admin can turn this off.
+privacy-usage-off = This instance does not count how logging is used.
+admin-setting-usage_funnel = Count the logging funnel
+admin-usage-title = Usage measurement
+admin-usage-summary = Daily totals without users, kept 180 days
+admin-usage-what = Counted per day: how a log went from its start (search opened, next step clicked, sheet opened, episode marked, rows selected) to saved or abandoned, in buckets of taps (1 to 5 and more) and seconds (under 2, 5, 10, 30, 60 and over); and how often each of the ten measured collapsible sections (Library filters, the two "More" of the item sheets, "Set a goal", "Sign-in" in Settings, the invites, Mail, Secrets at rest, Advanced and this one) is shown, opened, opened within 2 seconds and open at a save. No user, no item, no title is stored.
+admin-usage-on = On
+admin-usage-off = Off
+admin-usage-csv = Download the daily totals (CSV)
+admin-usage-caption = Totals of the last { $days } days (kept { $retention } days)
+admin-usage-none = Nothing counted in the last 28 days.
+admin-usage-flow = Flow
+admin-usage-section = Section
+admin-usage-outcome = Outcome
+admin-usage-count = Count
+# WP4-6 goals, year comparison, people seen most, game groups
+stats-compare-title = { $year } so far
+stats-compare-lead = From 1 January to { $through }, next to the same days last year (to { $last }).
+stats-compare-none = Nothing logged in either period yet.
+stats-compare-value = { $this } in { $year }, { $last } in { $last_year }
+stats-often-with = Most often with
+stats-often-none = Log something with a person and they show up here.
+stats-often-together = { $count ->
+    [one] once together
+   *[other] { $count } times together
+}
+goals-heading = Goals
+goals-lead = Optional and only for you. A goal counts what you log in its year, nothing more.
+goals-set = Set a goal
+goals-set-summary = A yearly number for a group and a measure
+goals-title = { $group }: { $measure }
+goals-progress = { $done } of { $target } in { $year }
+goals-bar = { $title } in { $year }
+goals-edit = Edit
+goals-edit-named = Edit goal { $title }
+goals-delete = Delete
+goals-delete-named = Delete goal { $title }
+goals-delete-title = Delete the goal { $title }?
+goals-delete-body = Only the goal goes; everything you logged stays.
+goals-year = Year
+goals-group = Group
+goals-metric = Measure
+goals-target = Target
+goals-target-hint = A whole number, 1 or more.
+goals-target-invalid = Enter a whole number of 1 or more as the target.
+goals-error-conflict = There is a goal for this year, group and measure already. Edit that one instead.
+goals-save = Save goal
+companions-tab-groups = Game groups { $count }
+groups-list = Game groups
+groups-new = New group
+groups-new-title = New game group
+groups-edit-title = Edit { $name }
+groups-empty = No game groups yet
+groups-empty-body = A group is the people you play with often. Choosing it fills in the players of a play in one step.
+groups-members = With { $names }
+groups-no-members = Nobody in this group any more.
+groups-plays = Plays as this group
+groups-last = Last: { $title }, { $when }
+groups-never = Not played as a group yet.
+groups-log = Log a play with...
+groups-log-named = Log a play with { $name }
+groups-menu-named = Actions for { $name }
+groups-edit = Edit
+groups-delete = Delete
+groups-delete-title = Delete { $name }?
+groups-delete-body = { $count ->
+    [0] The group goes from People and the play sheet.
+    [one] The group goes from People and the play sheet. Its play stays in your history.
+   *[other] The group goes from People and the play sheet. Its { $count } plays stay in your history.
+}
+groups-deleted = { $name } deleted.
+groups-name = Name
+groups-members-legend = Members
+groups-need-members = Choose at least one person.
+groups-save = Save group
+groups-created = { $name } created.
+groups-saved = { $name } saved.
+log-groups = Groups
+search-target-log-group = Choosing a game logs a play with { $name }.
+
+# UX phase 4 review (web)
+catalog-title-unavailable = Title unavailable - source data expired
+offline-what-status = status { $status }
+offline-what-rating = rating
+offline-what-notes = notes
+offline-what-add = added to the library
+offline-full = Not saved: { $count } changes are already waiting, the most this browser keeps. Go back online to send them first.
+offline-undo-sending = Not undone: this change is being sent right now. Change it back once it is synced.
+offline-undo-sent = Not undone: this change was already synced. Change it back on the item page or in History.
+signout-waiting-title = { $count ->
+    [one] One change is not synced yet
+   *[other] { $count } changes are not synced yet
+}
+signout-waiting-body = They were made while the server could not be reached and are kept in this browser until it can be. Signing out now discards them.
+signout-stay = Stay signed in
+signout-discard = Sign out and discard
+library-undo-failed = Undo did not work: { $error }
+library-undo-expired = This change can no longer be undone here (the undo expired after an hour).
+library-bulk-too-large = Too many entries to change at once with Undo. Select fewer and try again.
+admin-error-self_change = You cannot do this to your own account here. Use Settings > Account instead.
+admin-health-mail-result-not_configured = mail is not set up
+admin-health-mail-result-connection = the mail server could not be reached
+admin-health-mail-result-auth = the mail server refused the sign-in
+admin-health-mail-result-rejected = the mail server refused the message
+admin-health-mail-result-send_failed = sending failed

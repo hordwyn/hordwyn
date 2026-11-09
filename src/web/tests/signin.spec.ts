@@ -393,3 +393,74 @@ test("auto mode: a person with a provider session gets in without any form; /sig
     }
   }
 });
+
+test("an account without a password links the provider through an emailed one-time link", async ({ page, browser }) => {
+  const sinkSmtp = Number(process.env.MAIL_SINK_SMTP_PORT ?? 3013);
+  const sinkHttp = `http://127.0.0.1:${process.env.MAIL_SINK_HTTP_PORT ?? 3014}`;
+  await ensureProvider(page);
+  // mail through the sink (tests/mail-sink.mjs); the admin signed in just now, so it is fresh
+  const on = await page.request.put("/api/v1/admin/settings", {
+    data: {
+      values: {
+        "mail.host": "127.0.0.1",
+        "mail.port": sinkSmtp,
+        "mail.security": "none",
+        "mail.from": "Shelf <noreply@example.test>",
+      },
+    },
+  });
+  expect(on.ok(), `mail on ${on.status()} ${await on.text()}`).toBeTruthy();
+  const user = `pia${Date.now()}`;
+  const address = `${user}@example.test`;
+  const { context, page: p } = await person(browser);
+  try {
+    // an account that signs in without a password (as one made through a provider would)
+    const made = await p.request.post("/api/v1/auth/sign-up", {
+      data: { username: user, display_name: "Pia", password: PASSWORD, email: address },
+    });
+    expect(made.ok()).toBeTruthy();
+    sql(`UPDATE credentials SET password_hash = NULL WHERE user_id = (SELECT id FROM users WHERE username = '${user}')`);
+    await context.clearCookies();
+    await visit(p, "/sign-in");
+    await p.getByRole("link", { name: `Continue with ${NAME}` }).click();
+    await atProvider(p, user);
+    await expect(p).toHaveURL(/\/sign-in\/link$/);
+    await hydrated(p);
+    await expect(p.getByRole("button", { name: "Email me a link" })).toBeVisible();
+    await checkPage(p, "/sign-in/link email offer");
+    await p.getByRole("button", { name: "Email me a link" }).click();
+    await expect(p.getByTestId("link-emailed")).toContainText(`We sent a link to p***@example.test`);
+    // the message at the sink names the link (quoted-printable may fold it)
+    let link = "";
+    await expect(async () => {
+      const list = await (await p.request.get(`${sinkHttp}/messages?to=${address}`)).json();
+      expect(list.length).toBeGreaterThan(0);
+      const body = String(list[list.length - 1].data).replace(/=\n/g, "").replace(/=3D/g, "=");
+      link = /https?:\/\/\S+\/sign-in\/link\?code=[A-Za-z0-9_-]+/.exec(body)?.[0] ?? "";
+      expect(link).not.toBe("");
+    }).toPass();
+    // another browser cannot use it
+    const { context: other, page: q } = await person(browser);
+    await visit(q, link);
+    await expect(q.getByRole("alert")).toContainText("This link request has expired");
+    // the single-use code does not stay in the address or the history (UX4-22)
+    await expect(q).toHaveURL(/\/sign-in\/link$/);
+    await other.close();
+    // this browser: linked and signed in
+    await p.goto(link);
+    await expect(p).toHaveURL(/127\.0\.0\.1:\d+\/$/);
+    await visit(p, "/settings/account");
+    await p.getByRole("button", { name: /^Sign-in/ }).click();
+    await expect(p.getByTestId("linked-row").filter({ hasText: NAME })).toBeVisible();
+    // once only
+    await visit(p, link);
+    await expect(p.getByRole("alert")).toBeVisible();
+    await expect(p).toHaveURL(/\/sign-in\/link$/);
+  } finally {
+    await context.close();
+    const off = await page.request.put("/api/v1/admin/settings", {
+      data: { values: { "mail.host": null, "mail.port": null, "mail.security": null, "mail.from": null } },
+    });
+    expect(off.ok(), `mail off ${off.status()}`).toBeTruthy();
+  }
+});

@@ -120,6 +120,7 @@ dependencies = [
  "chrono",
  "contracts",
  "domain",
+ "getrandom 0.4.3",
  "http-body-util",
  "importers",
  "integrations",
@@ -146,6 +147,7 @@ name = "app"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "chrono-tz",
  "domain",
@@ -912,6 +914,7 @@ version = "0.1.0"
 dependencies = [
  "app",
  "async-trait",
+ "blake3",
  "catalog-core",
  "chrono",
  "domain",

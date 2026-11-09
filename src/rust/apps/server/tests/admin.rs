@@ -2,7 +2,9 @@
 //! provenance, re-authentication (DEC-191), lock-out guards, data-source credentials and
 //! status, "Ask admin", the audit log and the search reason lines.
 
-// End-to-end scenarios on purpose: the steps share one server and database; the short
+// End-to-end scenarios on purpose: the steps share one server and database, so a scenario
+// stays one test (the longest: `overview_reads_the_probe_rows_and_never_probes`, 120 lines;
+// UX4-19); the short
 // names (t: server, a/m: admin/member cookie, r: answer) keep the many calls readable.
 #![allow(clippy::too_many_lines, clippy::many_single_char_names)]
 
@@ -856,6 +858,15 @@ async fn credentials_status_ask_admin_and_search_reasons() {
         .clone();
     assert_eq!(tm["status"]["state"], "key_rejected", "{tm}");
     assert_eq!(tm["credential"]["last_result"], "key_rejected");
+    // DEC-383 (deferred to WP4-8): the Test's time is answered over HTTP too
+    let tested = tm["credential"]["last_tested_at"]
+        .as_str()
+        .unwrap_or_default();
+    let tested = chrono::DateTime::parse_from_rfc3339(tested).expect("an RFC 3339 time");
+    assert!(
+        (chrono::Utc::now() - tested.to_utc()).num_minutes() < 5,
+        "{tm}"
+    );
     assert_eq!(tm["status"]["last_auth_status"], 401);
     // UX2-6: the wizard calls a rejected key typed in the UI rejected, not "set by env"
     let r = call(&t, "GET", "/setup", a, None).await;
@@ -901,4 +912,153 @@ async fn credentials_status_ask_admin_and_search_reasons() {
         vec!["secret.cleared", "licence.recorded", "secret.replaced"]
     );
     assert!(!audit.to_string().contains("tmdb-key-from-ui"));
+}
+
+/// Counts every outgoing request (a provider call during the Overview request would show).
+#[derive(Default)]
+struct Counting(std::sync::atomic::AtomicUsize);
+
+#[async_trait::async_trait]
+impl app::ports::HttpFetch for Counting {
+    async fn fetch(
+        &self,
+        _req: app::ports::HttpRequest,
+    ) -> Result<app::ports::HttpResponse, app::ports::HttpError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(app::ports::HttpError::Blocked("test".into()))
+    }
+}
+
+fn health_row<'a>(o: &'a Value, id: &str) -> &'a Value {
+    o["health"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["id"] == id)
+        .unwrap_or_else(|| panic!("no row {id} in {o}"))
+}
+
+/// WP4-2 (DEC-285, addendum-1 3.4): the `admin.probes` job writes the eight health rows; the
+/// Overview reads them from the table and makes no call of its own; a row older than three
+/// minutes says so; times come with the admin's local time.
+#[tokio::test]
+async fn overview_reads_the_probe_rows_and_never_probes() {
+    if skip() {
+        return;
+    }
+    let Some(db) = store_pg::testing::fresh_db_url().await else {
+        return;
+    };
+    let toml = format!(
+        "[database]\nurl = \"{db}\"\n[secrets]\nephemeral = true\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
+         [brand]\ndir = \"{}\"\n[auth]\nsecure_cookies = false\n",
+        repo("config/brand/default")
+    );
+    let cfg = config::AppConfig::from_sources(&toml, vec![]).unwrap();
+    let http = std::sync::Arc::new(Counting::default());
+    let srv = Server::build(
+        cfg,
+        config::ServerRole::All,
+        Overrides {
+            http: Some(http.clone()),
+            ..Overrides::default()
+        },
+    )
+    .await
+    .unwrap();
+    let t = T {
+        app: srv.base_router(),
+        srv,
+    };
+    let r = call(&t, "POST", "/setup/account", None, Some(account("root"))).await;
+    let admin = r.cookie.unwrap();
+    let a = Some(admin.as_str());
+
+    // the job writes one row per health row
+    let n = api::admin::run_probes(&t.srv.api).await.unwrap();
+    assert_eq!(n, 8);
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM health_probes")
+        .fetch_one(&t.srv.pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 8);
+
+    // the Overview shows what the table says, not what it would find now
+    sqlx::query(
+        "UPDATE health_probes SET status = 'error', detail = 'unreachable' WHERE id = 'database'",
+    )
+    .execute(&t.srv.pool)
+    .await
+    .unwrap();
+    let before = http.0.load(std::sync::atomic::Ordering::SeqCst);
+    let o = call(&t, "GET", "/admin/overview", a, None).await.body;
+    assert_eq!(
+        http.0.load(std::sync::atomic::Ordering::SeqCst),
+        before,
+        "no call"
+    );
+    assert_eq!(o["health"].as_array().unwrap().len(), 8, "{o}");
+    assert_eq!(health_row(&o, "database")["status"], "error", "{o}");
+    assert!(o["attention"].to_string().contains("database"), "{o}");
+    assert_eq!(health_row(&o, "search")["stale"], false, "{o}");
+    assert!(health_row(&o, "search")["checked_at"].is_string(), "{o}");
+
+    // a row the job has not refreshed for over three minutes is reported as not checked
+    // recently; a row it never wrote is reported as not checked yet
+    sqlx::query(
+        "UPDATE health_probes SET checked_at = now() - interval '5 minutes' WHERE id = 'search'",
+    )
+    .execute(&t.srv.pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM health_probes WHERE id = 'jobs'")
+        .execute(&t.srv.pool)
+        .await
+        .unwrap();
+    let o = call(&t, "GET", "/admin/overview", a, None).await.body;
+    assert_eq!(health_row(&o, "search")["stale"], true, "{o}");
+    let jobs = health_row(&o, "jobs");
+    assert_eq!(
+        (jobs["status"].as_str(), jobs["detail"].as_str()),
+        (Some("unknown"), Some("not_checked")),
+        "{o}"
+    );
+
+    // times in the arguments come with the admin's local time (DEC-336)
+    let r = call(
+        &t,
+        "PUT",
+        "/auth/me/time-zone",
+        a,
+        Some(json!({"time_zone": "Europe/Berlin"})),
+    )
+    .await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    sqlx::query(
+        "UPDATE health_probes SET status = 'ok', detail = 'tested',
+                args = '{\"at\": \"2026-01-15T12:00:00+00:00\"}', checked_at = now()
+         WHERE id = 'mail'",
+    )
+    .execute(&t.srv.pool)
+    .await
+    .unwrap();
+    let o = call(&t, "GET", "/admin/overview", a, None).await.body;
+    let mail = health_row(&o, "mail");
+    assert_eq!(mail["args"]["at"], "2026-01-15T12:00:00+00:00", "{o}");
+    assert_eq!(mail["args"]["at_local"], "2026-01-15T13:00", "{o}");
+    assert!(mail["checked_local"].is_string(), "{o}");
+
+    // the job is on the background lane every minute
+    t.srv.schedule_admin_jobs().await;
+    let cron: String =
+        sqlx::query_scalar("SELECT schedule FROM cron_schedules WHERE name = 'admin.probes'")
+            .fetch_one(&t.srv.pool)
+            .await
+            .unwrap();
+    assert_eq!(cron, "* * * * *");
+    assert_eq!(
+        http.0.load(std::sync::atomic::Ordering::SeqCst),
+        before,
+        "the probes make no provider call either: no source is set up"
+    );
 }

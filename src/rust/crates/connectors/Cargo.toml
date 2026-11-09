@@ -21,13 +21,14 @@ chrono = { workspace = true, features = ["clock"] }
 url.workspace = true
 tracing.workspace = true
 sha1 = { version = "0.10.7", optional = true }
+blake3 = { workspace = true, optional = true }
 
 [features]
 default = []
 tmdb = []
 igdb = []
 podcastindex = ["dep:sha1"]
-tvdb = []
+tvdb = ["dep:blake3"]
 # every connector (CI, server builds)
 all = ["tmdb", "igdb", "podcastindex", "tvdb"]
 

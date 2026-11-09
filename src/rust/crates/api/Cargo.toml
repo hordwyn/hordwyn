@@ -35,6 +35,7 @@ utoipa-axum.workspace = true
 url.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
+getrandom.workspace = true
 
 [dev-dependencies]
 http-body-util = "0.1.5"

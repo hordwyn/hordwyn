@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO health_probes (id, status, detail, args, checked_at)\n                 VALUES ($1, $2, $3, $4, $5)\n                 ON CONFLICT (id) DO UPDATE SET status = $2, detail = $3, args = $4,\n                     checked_at = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a88c9b1820243b5a9f2a79cfd5aeb9f9e94ee9037c0b7f66647c89004dec8b26"
+}

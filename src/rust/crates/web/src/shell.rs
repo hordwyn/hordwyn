@@ -15,7 +15,9 @@ use ui::{
 
 use crate::app::ClientConfig;
 use crate::i18n::{LOCALES, t, use_i18n};
+use crate::keyboard::{CHORD_MS, GO_KEYS, Sep, ShortcutsOn, go_target};
 use crate::palette::PaletteOpen;
+use crate::sign_out::SIGN_OUT_FORM;
 
 /// `localStorage` key of the theme choice (unchanged; read before paint by `THEME_BOOT`).
 pub const THEME_KEY: &str = "app-theme";
@@ -228,27 +230,90 @@ fn provide_theme() -> ThemeChoice {
     theme
 }
 
-/// Where the account menu and the You hub sign out: a form post, so the server ends the
-/// session first and then sends the browser to the provider's end-session page or straight
-/// to `/signed-out` (addendum-1 4.2 "Logout", DEC-318). Works before hydration too.
-const SIGN_OUT_ACTION: &str = "/api/v1/auth/logout";
+/// The chord's state: the machine, the hint shown while it waits, and the timer that ends it.
+#[derive(Clone, Copy)]
+struct ChordUi {
+    chord: StoredValue<ui::Chord>,
+    hint: RwSignal<String>,
+    timer: StoredValue<Option<TimeoutHandle>>,
+}
 
-/// The id of the account menu's sign-out form (the menu item is its submit button).
-const SIGN_OUT_FORM: &str = "sign-out-form";
+impl ChordUi {
+    fn new() -> Self {
+        Self {
+            chord: StoredValue::new(ui::Chord::new('g', GO_KEYS, CHORD_MS)),
+            hint: RwSignal::new(String::new()),
+            timer: StoredValue::new(None),
+        }
+    }
 
-/// Global single-key shortcuts (design.md 3.2): `?` help, `N` add; never while typing.
-fn shortcut_keys(signed_in: bool, palette: RwSignal<bool>, help: RwSignal<bool>) {
+    fn stop(self) {
+        self.chord.update_value(ui::Chord::cancel);
+        self.hint.set(String::new());
+        if let Some(h) = self.timer.get_value() {
+            h.clear();
+        }
+        self.timer.set_value(None);
+    }
+
+    /// Show the hint and end the chord when its window runs out.
+    fn wait(self, text: String) {
+        self.hint.set(text);
+        if let Some(h) = self.timer.get_value() {
+            h.clear();
+        }
+        let h = set_timeout_with_handle(
+            move || self.stop(),
+            std::time::Duration::from_secs_f64(CHORD_MS / 1000.0),
+        );
+        self.timer.set_value(h.ok());
+    }
+}
+
+/// Global single-key shortcuts (design.md 3.2): `?` help, `N` add, `G then H/L/Y/T/P` go to a
+/// section (signed in), with the hint in a polite live region and focus on the new page's
+/// heading. Never while typing, in a dialog or menu, with a modifier, or with the shortcuts
+/// switched off (Settings > Account, WCAG 2.1.4).
+fn shortcut_keys(signed_in: bool, palette: RwSignal<bool>, help: RwSignal<bool>) -> ChordUi {
+    let on = expect_context::<ShortcutsOn>().0;
+    let ui = ChordUi::new();
+    let nav = StoredValue::new(leptos_router::hooks::use_navigate());
+    let location = use_location();
+    let waiting = use_i18n().t("shortcuts-chord-waiting");
     let _ = window_event_listener(leptos::ev::keydown, move |ev| {
-        if ev.ctrl_key()
-            || ev.meta_key()
-            || ev.alt_key()
-            || palette.get_untracked()
-            || help.get_untracked()
-            || typing(&ev)
-        {
+        if !crate::keyboard::plain_key(&ev, on) {
+            ui.stop();
             return;
         }
-        match ev.key().as_str() {
+        let key = ev.key();
+        let step = if signed_in {
+            let mut step = ui::ChordStep::Ignored;
+            ui.chord
+                .update_value(|c| step = c.key(&key, crate::keyboard::now_ms()));
+            step
+        } else {
+            ui::ChordStep::Ignored
+        };
+        match step {
+            ui::ChordStep::Started => {
+                ev.prevent_default();
+                ui.wait(waiting.clone());
+                return;
+            }
+            ui::ChordStep::Done(c) => {
+                ev.prevent_default();
+                ui.stop();
+                if let Some((path, _)) = go_target(c) {
+                    let same = location.pathname.get_untracked() == path;
+                    nav.with_value(|n| n(path, leptos_router::NavigateOptions::default()));
+                    crate::keyboard::focus_heading(same);
+                }
+                return;
+            }
+            ui::ChordStep::Cancelled => ui.stop(),
+            ui::ChordStep::Ignored => {}
+        }
+        match key.as_str() {
             "?" => {
                 ev.prevent_default();
                 help.set(true);
@@ -260,6 +325,7 @@ fn shortcut_keys(signed_in: bool, palette: RwSignal<bool>, help: RwSignal<bool>)
             _ => {}
         }
     });
+    ui
 }
 
 /// Everything around the routes. Must sit inside the `Router`.
@@ -274,7 +340,13 @@ pub fn AppShell(children: Children) -> impl IntoView {
     provide_context(crate::reauth::Reauth::new());
     provide_theme();
     let online = provide_online();
-    shortcut_keys(cfg.signed_in, palette, help);
+    // the offline queue and the funnel (WP4-5) belong to a signed-in person
+    let waiting = cfg
+        .signed_in
+        .then(|| crate::offline::provide_offline(cfg.username.clone(), online).waiting);
+    crate::funnel::provide_funnel(cfg.signed_in && cfg.usage_funnel);
+    crate::keyboard::provide_shortcuts();
+    let chord = shortcut_keys(cfg.signed_in, palette, help);
     let location = use_location();
     let current = Signal::derive(move || section_of(&location.pathname.get()).to_string());
     view! {
@@ -282,13 +354,14 @@ pub fn AppShell(children: Children) -> impl IntoView {
             {t("skip-to-content")}
         </a>
         <TopBar current=current/>
-        <OfflineBanner online=online/>
+        <OfflineBanner online=online waiting=waiting/>
         <main id="main" tabindex="-1" class="mx-auto w-full max-w-6xl px-4 pt-6 pb-[calc(1.5rem+var(--tab-bar-height))] focus:outline-none">
             {children()}
         </main>
-        {cfg.signed_in.then(|| view! { <MobileTabs current=current/> <crate::reauth::ReauthDialog/> })}
+        {cfg.signed_in.then(|| view! { <MobileTabs current=current/> <crate::reauth::ReauthDialog/> <crate::sign_out::SignOutForm/> })}
         <crate::palette::SearchPalette/>
         <ShortcutHelp open=help/>
+        <ChordHint hint=chord.hint/>
         <Toaster dismiss_label=i18n.t("shell-dismiss")/>
     }
 }
@@ -528,7 +601,6 @@ fn AccountMenuItems(open: RwSignal<bool>, close: Callback<()>) -> impl IntoView 
         <div role="separator" class=SEPARATOR></div>
         <LanguageItems close=close/>
         <div role="separator" class=SEPARATOR></div>
-        <form id=SIGN_OUT_FORM method="post" action=SIGN_OUT_ACTION hidden></form>
         <button type="submit" form=SIGN_OUT_FORM role="menuitem" tabindex="-1" class=MENU_ITEM>
             <Icon name=IconName::LogOut/>
             {t("nav-sign-out")}
@@ -740,42 +812,86 @@ fn provide_online() -> RwSignal<bool> {
 /// Offline banner (design.md 6.15), a polite live region that is always in the page so the
 /// change is announced.
 #[component]
-fn OfflineBanner(online: RwSignal<bool>) -> impl IntoView {
+fn OfflineBanner(online: RwSignal<bool>, waiting: Option<RwSignal<usize>>) -> impl IntoView {
+    let count = move || waiting.map_or(0, |w| w.get());
+    let has_waiting = move || count() > 0;
+    let line = move || {
+        (count() > 0).then(|| {
+            let text = use_i18n().t_args("offline-waiting", &[("count", count().into())]);
+            view! { <span class="block font-medium" data-testid="queue-count">{text}</span> }
+        })
+    };
     view! {
         <div role="status" class="mx-auto w-full max-w-6xl px-4 empty:hidden">
-            <Show when=move || !online.get()>
+            <Show when=move || !online.get() || has_waiting()>
                 <Alert variant=AlertVariant::Warning role=AlertRole::None class="mt-4">
-                    {t("shell-offline")}
+                    {move || (!online.get()).then(|| view! { <span class="block">{t("shell-offline")}</span> })}
+                    {line}
                 </Alert>
             </Show>
         </div>
     }
 }
 
-/// `?`: the keyboard shortcuts that exist.
+/// `?`: every keyboard shortcut, grouped by where it works (design.md 8), with a note when
+/// the single-key ones are switched off.
 #[component]
 fn ShortcutHelp(open: RwSignal<bool>) -> impl IntoView {
     let i18n = use_i18n();
-    let rows = move || {
-        vec![
-            (
-                vec![t("shell-ctrl"), "K".to_string()],
-                t("shell-key-search"),
-            ),
-            (vec!["N".to_string()], t("shell-key-add")),
-            (vec!["?".to_string()], t("shell-key-help")),
-            (vec![t("shell-key-esc")], t("shell-key-close")),
-        ]
+    let signed_in = expect_context::<ClientConfig>().signed_in;
+    let on = expect_context::<ShortcutsOn>().0;
+    let key_name = |k: &str| crate::keyboard::key_message(k).map_or_else(|| k.to_string(), t);
+    let sections = move || {
+        crate::keyboard::help_sections(signed_in)
+            .into_iter()
+            .map(|(section, rows)| {
+                let heading = format!("kb-{}", section.rsplit('-').next().unwrap_or_default());
+                let rows = rows
+                    .into_iter()
+                    .map(|r| {
+                        let keys: Vec<String> = r.keys.iter().map(|k| key_name(k)).collect();
+                        let sep = match r.sep {
+                            Sep::Plus => "+".to_string(),
+                            Sep::Then => format!(" {} ", t("shortcuts-then")),
+                            Sep::Or => format!(" {} ", t("shortcuts-or")),
+                        };
+                        view! {
+                            <dt><KeyHint keys=keys separator=sep/></dt>
+                            <dd>{t(r.what)}</dd>
+                        }
+                    })
+                    .collect_view();
+                view! {
+                    <section aria-labelledby=heading.clone() class="grid gap-2">
+                        <h3 id=heading.clone() class="text-sm font-semibold">{t(section)}</h3>
+                        <dl class="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-sm">{rows}</dl>
+                    </section>
+                }
+            })
+            .collect_view()
     };
     view! {
-        <Dialog open=open title=i18n.t("shell-shortcuts") close_label=i18n.t("dialog-close") return_to=ACCOUNT_TRIGGER>
-            <dl class="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-sm">
-                {rows().into_iter().map(|(keys, what)| view! {
-                    <dt><KeyHint keys=keys/></dt>
-                    <dd>{what}</dd>
-                }).collect_view()}
-            </dl>
+        <Dialog open=open title=i18n.t("shell-shortcuts") close_label=i18n.t("dialog-close") return_to=ACCOUNT_TRIGGER
+            class="max-h-[90dvh] overflow-y-auto">
+            <div class="grid gap-5">
+                {move || (!on.get()).then(|| view! { <p class="text-sm text-muted-foreground">{t("shortcuts-off-note")}</p> })}
+                {sections}
+            </div>
         </Dialog>
+    }
+}
+
+/// "G pressed: then ..." while a chord waits (design.md 3.2): a polite live region that is
+/// always in the page, so the change is announced; the words show above the tab bar.
+#[component]
+fn ChordHint(hint: RwSignal<String>) -> impl IntoView {
+    view! {
+        <div data-float="" class="pointer-events-none fixed inset-x-0 bottom-[calc(var(--tab-bar-height)+1rem)] z-50 flex justify-center px-4">
+            <p role="status" data-testid="chord-hint"
+                class="rounded-md border border-border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-elevation-2 empty:hidden">
+                {move || hint.get()}
+            </p>
+        </div>
     }
 }
 
@@ -832,12 +948,10 @@ pub fn You() -> impl IntoView {
                     </a>
                 })}
             </div>
-            <form method="post" action=SIGN_OUT_ACTION>
-                <button type="submit" class="inline-flex min-h-11 w-fit items-center gap-2 rounded-md border border-input px-4 text-sm font-medium cursor-pointer">
+            <button type="submit" form=SIGN_OUT_FORM class="inline-flex min-h-11 w-fit items-center gap-2 rounded-md border border-input px-4 text-sm font-medium cursor-pointer">
                     <Icon name=IconName::LogOut/>
                     {t("nav-sign-out")}
-                </button>
-            </form>
+            </button>
         </div>
     }
     .into_any()

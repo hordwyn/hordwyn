@@ -51,6 +51,11 @@ import-finished-body = { $imported ->
 }
 import-failed-title = Import failed
 import-failed-body = The import stopped: { $error }
+account-authenticator_reset-title = Your authenticator was removed
+account-authenticator_reset-body = { $by } removed the authenticator app from your account. Set up a new one under Settings > Account.
+account-sign_in_unlinked-title = { $provider } no longer signs you in
+account-sign_in_unlinked-body = { $by } unlinked { $provider } from your account. Ask your admin if this was not expected.
+
 
 admin-storage_high-title = Storage almost full
 admin-storage_high-body = { $used } of { $cap } used.
@@ -72,3 +77,14 @@ admin-local_sign_in-body = Local sign-in used by { $username } from { $address }
 
 test-title = Test from { $product }
 test-body = The channel "{ $name }" works.
+sign_in_link-title = Your sign-in link for { $product }
+sign_in_link-body = Someone signing in with { $provider } asked to link it to the account { $username } on { $product }. If that was you, open this link in the same browser within { $minutes } minutes:
+
+    { $url }
+
+    If it was not you, ignore this message; nothing changes.
+
+
+# The name of an item whose source data expired and was removed (catalog retention); it is
+# fetched again once the source answers.
+item_unavailable-title = Title unavailable - source data expired

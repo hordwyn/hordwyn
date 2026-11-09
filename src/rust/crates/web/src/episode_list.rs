@@ -1,8 +1,8 @@
 //! The Episodes tab (design.md 6.3, 5.4, 3.4 R-07): season chips with watched/total, "Mark
 //! season watched", "Mark show watched", the episode rows with check circles, the next-up
 //! row highlighted, and a row menu ("Mark up to here", "Watched with..."). The bulk marks log
-//! now or spread over a date range (backfill, R-09; "On release dates" waits for per-episode
-//! air dates, DEC-363). Marking one episode while earlier ones
+//! now, spread over a date range (backfill, R-09) or on the release dates (WP4-7, when every
+//! episode of the season shown has one up to today). Marking one episode while earlier ones
 //! are open asks once, inline, whether to mark those too; "Remember for this show" keeps the
 //! answer in this browser (DEC-231). The ranges come from [`crate::episode_plan`].
 
@@ -15,8 +15,9 @@ use ui::{
 };
 
 use crate::episode_plan::{
-    Ep, Plan, Previous, SeasonRow, parse_range, plan_single, previous_key, spread_over,
-    unwatched_in_season, unwatched_in_show, unwatched_up_to,
+    AirDates, Ep, Plan, Previous, SeasonRow, air_dates, missing_release, parse_range, plan_single,
+    previous_key, release_dates, spread_over, unwatched_in_season, unwatched_in_show,
+    unwatched_up_to,
 };
 use crate::i18n::{t, use_i18n};
 use crate::log_sheet::{ItemInfo, SheetTarget};
@@ -30,7 +31,8 @@ pub struct EpisodeUi {
     pub ask: RwSignal<Option<Ep>>,
     pub busy: RwSignal<bool>,
     pub error: RwSignal<Option<String>>,
-    /// Dates of the bulk marks: `now` or `range` ("Spread over a date range", R-09).
+    /// Dates of the bulk marks: `now`, `range` ("Spread over a date range", R-09) or `release`
+    /// ("On release dates", WP4-7).
     pub when: RwSignal<String>,
     pub from: RwSignal<String>,
     pub to: RwSignal<String>,
@@ -100,21 +102,49 @@ fn log_episodes(
             .t_args("episodes-logged", &[("count", eps.len().into())]),
     };
     let (item_id, title, refresh) = (info.item_id.clone(), info.title.clone(), info.refresh);
+    ctx.funnel.intent(crate::funnel::Flow::EpisodeMark);
     ui.busy.set(true);
     ui.error.set(None);
     leptos::task::spawn_local(async move {
         let mut ids = Vec::new();
         let mut failed = None;
+        let mut queued = Vec::new();
         let mut dates = dates.unwrap_or_default().into_iter();
         for (season, episode) in eps {
+            let progress =
+                serde_json::json!({"type": "episode", "season": season, "episode": episode});
+            let occurred_at = dates.next();
+            let op = uuid::Uuid::now_v7().to_string();
+            // after one network failure the rest goes straight into the queue (WP4-5)
+            if !queued.is_empty() {
+                queued.push(offline_log(
+                    &item_id,
+                    &title,
+                    op,
+                    progress,
+                    occurred_at,
+                    ctx.offline,
+                ));
+                continue;
+            }
             let p = contracts::NewProgressDto {
-                progress: serde_json::json!({"type": "episode", "season": season, "episode": episode}),
-                occurred_at: dates.next(),
-                client_op_id: Some(uuid::Uuid::now_v7().to_string()),
+                progress: progress.clone(),
+                occurred_at: occurred_at.clone(),
+                client_op_id: Some(op.clone()),
                 with: Vec::new(),
             };
             match crate::api::log_progress(item_id.clone(), p).await {
                 Ok(ev) => ids.push(ev.id),
+                Err(e) if crate::offline::network_error(&e) && ctx.offline.is_some() => {
+                    queued.push(offline_log(
+                        &item_id,
+                        &title,
+                        op,
+                        progress,
+                        occurred_at,
+                        ctx.offline,
+                    ));
+                }
                 Err(e) => {
                     failed = Some(crate::pages::error_text(&e));
                     break;
@@ -122,23 +152,67 @@ fn log_episodes(
             }
         }
         if !ids.is_empty() {
-            toast_logged(&ctx, &label, title, ids, Some(refresh));
+            toast_logged(&ctx, &label, title.clone(), ids, Some(refresh));
+        }
+        if !queued.is_empty() {
+            ctx.save_offline(title, queued, None);
         }
         if let Some(text) = failed {
+            ctx.funnel.abandoned_if(crate::funnel::Flow::EpisodeMark);
             ui.error.set(Some(
                 ctx.i18n
                     .t_args("library-step-failed", &[("error", text.into())]),
             ));
+        } else {
+            ctx.funnel.logged();
         }
         ui.busy.set(false);
         refresh.run(());
     });
 }
 
-/// A bulk mark ("Mark season", "Mark show", "Mark up to here"): now, or spread over the
-/// chosen date range (design.md 5.4, R-09).
-fn bulk(eps: Vec<Ep>, info: StoredValue<ItemInfo>, ctx: StepCtx, ui: EpisodeUi) {
-    let dates = if ui.when.get_untracked() == "range" {
+/// An episode log for the offline queue, with its op id, time (now when not backfilled) and
+/// the queue's stamp for the status it implies (DEC-455).
+fn offline_log(
+    item_id: &str,
+    title: &str,
+    op: String,
+    progress: serde_json::Value,
+    occurred_at: Option<String>,
+    offline: Option<crate::offline::Offline>,
+) -> crate::offline::Queued {
+    let at = occurred_at.or_else(crate::offline::now_rfc3339);
+    let hlc = offline.map(crate::offline::Offline::stamp);
+    crate::offline::Queued::with_op_id(
+        op,
+        crate::offline::log_command(item_id, progress, at, hlc.as_deref()),
+        title,
+        crate::offline::now_ms(),
+    )
+}
+
+/// A bulk mark ("Mark season", "Mark show", "Mark up to here"): now, spread over the chosen
+/// date range (design.md 5.4, R-09), or each on its release day (refused, with nothing
+/// logged, when one of them has none up to today).
+fn bulk(
+    eps: Vec<Ep>,
+    info: StoredValue<ItemInfo>,
+    ctx: StepCtx,
+    ui: EpisodeUi,
+    released: StoredValue<AirDates>,
+) {
+    let dates = if ui.when.get_untracked() == "release" {
+        match released.with_value(|d| release_dates(&eps, d, crate::history::today())) {
+            Ok(days) => Some(days),
+            Err(n) => {
+                ui.error.set(Some(
+                    ctx.i18n
+                        .t_args("episodes-release-refused", &[("count", n.into())]),
+                ));
+                return;
+            }
+        }
+    } else if ui.when.get_untracked() == "range" {
         let range = parse_range(
             &ui.from.get_untracked(),
             &ui.to.get_untracked(),
@@ -157,20 +231,52 @@ fn bulk(eps: Vec<Ep>, info: StoredValue<ItemInfo>, ctx: StepCtx, ui: EpisodeUi) 
     info.with_value(|i| log_episodes(eps, dates, i, ctx, ui));
 }
 
-/// When the bulk marks happened: now, or spread over a date range (backfill).
+/// When the bulk marks happened: now, spread over a date range (backfill), or on the release
+/// dates, offered only when every open episode of the season shown has one up to today
+/// (`offered`); else, for an item with any dates, a hint says how many are missing.
 #[component]
-fn BulkDates(ui: EpisodeUi) -> impl IntoView {
-    let i18n = use_i18n();
-    let options = vec![
-        SegmentedOption::new("now", i18n.t("episodes-when-now")),
-        SegmentedOption::new("range", i18n.t("episodes-when-range")),
-    ];
+fn BulkDates(
+    ui: EpisodeUi,
+    offered: Memo<bool>,
+    missing: Memo<usize>,
+    has_dates: bool,
+) -> impl IntoView {
+    // a season without the dates takes "On release dates" away: fall back to now
+    Effect::new(move |_| {
+        if !offered.get() && ui.when.get_untracked() == "release" {
+            ui.when.set("now".into());
+        }
+    });
+    let segmented = move || {
+        let i18n = use_i18n();
+        let mut options = vec![
+            SegmentedOption::new("now", i18n.t("episodes-when-now")),
+            SegmentedOption::new("range", i18n.t("episodes-when-range")),
+        ];
+        if offered.get() {
+            options.push(SegmentedOption::new(
+                "release",
+                i18n.t("episodes-when-release"),
+            ));
+        }
+        view! { <Segmented id="ep-when" label=t("episodes-when") value=ui.when options=options class="flex-wrap"/> }
+    };
+    let missing_hint = move || has_dates && !offered.get();
+    let release_hint = move || ui.when.get() == "release";
     let max = crate::history::today().iso();
     let field = "flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm \
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
     view! {
         <div class="grid gap-2">
-            <Segmented id="ep-when" label=t("episodes-when") value=ui.when options=options class="flex-wrap"/>
+            {segmented}
+            <Show when=missing_hint>
+                <p data-testid="ep-release-missing" class="text-xs text-muted-foreground">
+                    {move || use_i18n().t_args("episodes-release-missing", &[("count", missing.get().into())])}
+                </p>
+            </Show>
+            <Show when=release_hint>
+                <p class="text-xs text-muted-foreground">{t("episodes-release-hint")}</p>
+            </Show>
             <Show when=move || ui.when.get() == "range">
                 <div class="flex flex-wrap gap-3">
                     <div class="grid gap-1">
@@ -196,6 +302,8 @@ pub fn EpisodeList(
     info: ItemInfo,
     attributes: serde_json::Value,
     progress: Vec<ProgressEventDto>,
+    /// Release dates of the episodes (WP4-7; empty when the item has none).
+    dates: Vec<contracts::EpisodeDateDto>,
     /// The next unwatched episode (highlighted, its season shown first).
     next: Option<Ep>,
     ui: EpisodeUi,
@@ -211,17 +319,25 @@ pub fn EpisodeList(
     let shown = Memo::new(move |_| ui.season.get().unwrap_or(default));
     let rows = StoredValue::new(rows);
     let info = StoredValue::new(info);
+    let released = StoredValue::new(air_dates(&dates));
+    let has_dates = !dates.is_empty();
+    let today = crate::history::today();
+    let missing = Memo::new(move |_| {
+        let open = rows.with_value(|r| unwatched_in_season(r, shown.get()));
+        released.with_value(|d| missing_release(&open, d, today))
+    });
+    let offered = Memo::new(move |_| has_dates && missing.get() == 0);
     let ctx = StepCtx::current();
     let c2 = ctx.clone();
     let mark_season = move |_| {
         let eps = rows.with_value(|r| unwatched_in_season(r, shown.get_untracked()));
-        bulk(eps, info, c2.clone(), ui);
+        bulk(eps, info, c2.clone(), ui, released);
     };
     let c3 = ctx.clone();
     let mark = Callback::new(move |(target, up_to): (Ep, bool)| {
         if up_to {
             let eps = rows.with_value(|r| unwatched_up_to(r, target));
-            bulk(eps, info, c3.clone(), ui);
+            bulk(eps, info, c3.clone(), ui, released);
             return;
         }
         let answer = info.with_value(|i| stored_answer(&i.item_id));
@@ -247,7 +363,7 @@ pub fn EpisodeList(
     let c4 = StepCtx::current();
     let mark_show = move |_| {
         let eps = rows.with_value(|r| unwatched_in_show(r));
-        bulk(eps, info, c4.clone(), ui);
+        bulk(eps, info, c4.clone(), ui, released);
     };
     view! {
         <section class="grid gap-3 py-2">
@@ -262,7 +378,7 @@ pub fn EpisodeList(
                     </Button>
                 </div>
             </div>
-            <BulkDates ui=ui/>
+            <BulkDates ui=ui offered=offered missing=missing has_dates=has_dates/>
             <AskPrevious ui=ui rows=rows answer=answer/>
             {move || ui.error.get().map(|e| view! { <p role="alert" class="text-sm text-destructive-text">{e}</p> })}
             {move || rows.with_value(|r| r.iter().find(|s| s.number == shown.get()).cloned()).map(|season| view! {

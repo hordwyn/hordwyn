@@ -16,7 +16,9 @@ use ui::{
 
 use crate::api;
 use crate::events::use_events;
-use crate::history_state::{Day, DayGroup, HistoryState, day_heading, group_by_day, side_counts};
+use crate::history_state::{
+    Day, DayGroup, HISTORY_PAGE, HistoryState, day_heading, group_by_day, side_counts,
+};
 use crate::i18n::{I18n, kind_label, t, use_i18n};
 use crate::next_step::{StepCtx, undo_event};
 use crate::pages::{PageTitle, bad_query, error_text, go, needs_sign_in};
@@ -115,7 +117,10 @@ pub fn ActivityRow(
         .clone()
         .filter(|_| row.undoable && !row.shared)
         .map(|id| {
-            let label = i18n.t_args("history-undo-named", &[("title", row.title.clone().into())]);
+            let label = i18n.t_args(
+                "history-undo-named",
+                &[("title", crate::i18n::title_text(&row.title).into())],
+            );
             let ctx = ctx.clone();
             view! {
                 <Button variant=ButtonVariant::Ghost size=ButtonSize::Sm attr:aria-label=label
@@ -125,7 +130,10 @@ pub fn ActivityRow(
             }
         });
     let copy = row.session_id.clone().filter(|_| row.shared).map(|id| {
-        let label = i18n.t_args("history-copy-named", &[("title", row.title.clone().into())]);
+        let label = i18n.t_args(
+            "history-copy-named",
+            &[("title", crate::i18n::title_text(&row.title).into())],
+        );
         let ctx = ctx.clone();
         view! {
             <Button variant=ButtonVariant::Outline size=ButtonSize::Sm attr:aria-label=label
@@ -146,7 +154,7 @@ pub fn ActivityRow(
             </span>
             <span class="min-w-0 flex-1">
                 <span class="block">
-                    <a href=format!("/items/{}", row.item_id) class="font-medium underline-offset-2 hover:underline">{row.title.clone()}</a>
+                    <a href=format!("/items/{}", row.item_id) class="font-medium underline-offset-2 hover:underline">{crate::i18n::title_text(&row.title)}</a>
                     " - " {what(&i18n, &row)}
                     {with.map(|w| view! { " " <span>{w}</span> })}
                 </span>
@@ -177,12 +185,56 @@ fn copy_to_log(ctx: &StepCtx, session_id: String, on_change: Option<Callback<()>
     });
 }
 
-/// Pages after the first, loaded by "Load more" for one state (`href`).
+/// Pages after the first answer, loaded by "Show more" for one state (`href`). They continue
+/// the first answer whose `next` is `after`; a refetched first answer (it brings the loaded
+/// range itself, DEC-490) has another `next` and so leaves them out.
 #[derive(Clone, Default, PartialEq)]
 struct More {
     href: String,
+    after: Option<String>,
     rows: Vec<ActivityRowDto>,
     next: Option<String>,
+}
+
+/// Rows on screen and the cursor for the next page: the first answer of address `href` and the
+/// "Show more" pages that continue it.
+fn shown_rows(
+    more: &More,
+    href: &str,
+    first: &ActivityPageDto,
+) -> (Vec<ActivityRowDto>, Option<String>) {
+    let mut rows = first.rows.clone();
+    if more.href == href && first.next.is_some() && more.after == first.next {
+        rows.extend(more.rows.iter().cloned());
+        (rows, more.next.clone())
+    } else {
+        (rows, first.next.clone())
+    }
+}
+
+/// The first answer for `state` with at least `rows` rows (pages of up to the feed's maximum,
+/// following `next`): a refresh fetches again what is on screen in one answer (DEC-490).
+async fn feed_range(state: HistoryState, rows: usize) -> Result<ActivityPageDto, ServerFnError> {
+    // the feed answers at most this many rows per page (`app::MAX_ACTIVITY_PAGE`)
+    const MAX_PAGE: usize = 100;
+    let ask = |before: Option<String>, left: usize| {
+        let mut q = state.query_dto(before);
+        q.limit = Some(u32::try_from(left.clamp(1, MAX_PAGE)).unwrap_or(HISTORY_PAGE));
+        q
+    };
+    let mut page = api::activity_feed(ask(None, rows)).await?;
+    while page.rows.len() < rows
+        && let Some(next) = page.next.clone()
+    {
+        let more = api::activity_feed(ask(Some(next), rows - page.rows.len())).await?;
+        if more.rows.is_empty() {
+            page.next = None;
+            break;
+        }
+        page.rows.extend(more.rows);
+        page.next = more.next;
+    }
+    Ok(page)
 }
 
 #[derive(Clone, Copy)]
@@ -200,17 +252,11 @@ struct Hist {
 impl Hist {
     /// Rows on screen and the cursor for the next page, for the answer of address `href`.
     fn shown(&self, href: &str, first: &ActivityPageDto) -> (Vec<ActivityRowDto>, Option<String>) {
-        let mut rows = first.rows.clone();
-        let more = self.more.get();
-        if more.href == href {
-            rows.extend(more.rows);
-            (rows, more.next)
-        } else {
-            (rows, first.next.clone())
-        }
+        self.more.with(|m| shown_rows(m, href, first))
     }
 
-    fn load_more(&self, next: String) {
+    /// Load the page at `next` after the first answer whose `next` is `after`.
+    fn load_more(&self, next: String, after: Option<String>) {
         let (state, more, loading, error) = (
             self.state.get_untracked(),
             self.more,
@@ -226,9 +272,10 @@ impl Hist {
             match result {
                 Err(e) => error.set(Some(error_text(&e))),
                 Ok(page) => more.update(|m| {
-                    if m.href != href {
+                    if m.href != href || m.after != after {
                         *m = More {
                             href: href.clone(),
+                            after: after.clone(),
                             ..More::default()
                         };
                     }
@@ -260,24 +307,38 @@ pub fn History() -> impl IntoView {
     });
     // the answer carries the address it belongs to (UX3-3): the stream never shows the
     // previous address's result under the new one
+    // a refresh asks for as many rows as are on screen for that address (taken by the next
+    // fetch); any other fetch asks for one page
+    let want = StoredValue::new((String::new(), 0usize));
     let first = Resource::new(
         move || state.get(),
-        |s: HistoryState| async move {
+        move |s: HistoryState| {
             let href = s.href();
-            (href, api::activity_feed(s.query_dto(None)).await)
+            let rows = want
+                .try_update_value(std::mem::take)
+                .filter(|(h, _)| *h == href)
+                .map_or(0, |(_, n)| n)
+                .max(HISTORY_PAGE as usize);
+            async move { (href, feed_range(s, rows).await) }
         },
     );
     let more = RwSignal::new(More::default());
+    // an event or an undo fetches again the rows on screen, "Show more" pages included, in one
+    // answer: the pages stay and the stream keeps its rendering (DEC-490; it reset the pages)
     let refresh = Callback::new(move |()| {
-        more.set(More::default());
+        if let Some((href, Ok(page))) = first.get_untracked() {
+            let n = more.with_untracked(|m| shown_rows(m, &href, &page).0.len());
+            want.set_value((href, n));
+        }
         first.refetch();
     });
     let events = use_events();
+    let on_event = crate::offline::refresh_when_online(refresh);
     Effect::new(move |_| {
         if let Some((topic, _)) = events.0.get()
             && topic == "entity.updated"
         {
-            refresh.run(());
+            on_event.run(());
         }
     });
     let h = Hist {
@@ -588,10 +649,36 @@ fn Stream(h: Hist) -> impl IntoView {
 }
 
 /// The key of one rendering of the stream (UX3-3): the address the answer belongs to,
-/// whether the address on screen has moved on (a new one is loading), and the answer itself.
+/// whether the address on screen has moved on (a new one is loading), and the answer itself;
+/// for rows only that there are rows, as the day groups follow the latest answer themselves
+/// (a refresh keeps "Show more" and its focus, DEC-490).
 fn stream_key(href: &str, stale: bool, r: &Result<ActivityPageDto, ServerFnError>) -> String {
-    let data = serde_json::to_string(r).unwrap_or_default();
+    let data = match r {
+        Ok(page) if !page.rows.is_empty() => "rows".to_string(),
+        other => serde_json::to_string(other).unwrap_or_default(),
+    };
     format!("{stale}|{href}|{data}")
+}
+
+/// The latest answer with rows for `href`, starting from `first` (browser only: on the server
+/// the first answer, as a second resource read under the Transition can cut the SSR stream,
+/// DEC-398).
+fn latest_page(
+    rows: Resource<Loaded>,
+    href: String,
+    first: ActivityPageDto,
+) -> Memo<ActivityPageDto> {
+    #[cfg(feature = "hydrate")]
+    let page = Memo::new(move |prev: Option<&ActivityPageDto>| match rows.get() {
+        Some((h, Ok(p))) if h == href && !p.rows.is_empty() => p,
+        _ => prev.cloned().unwrap_or_else(|| first.clone()),
+    });
+    #[cfg(not(feature = "hydrate"))]
+    let page = {
+        let _ = (rows, href);
+        Memo::new(move |_| first.clone())
+    };
+    page
 }
 
 /// The stream for one answer: skeletons while the next address loads, else the rows, the
@@ -641,17 +728,21 @@ fn NoRows(h: Hist, filtered: bool) -> impl IntoView {
     }
 }
 
-/// The day groups and "Show more". Pages loaded by "Show more" are appended: only a day
-/// group that gains rows is rendered again, and the button stays (it keeps the focus, UX3-3).
+/// The day groups and "Show more". Pages loaded by "Show more" are appended and a refresh
+/// brings the rows on screen again: only a day group whose rows change is rendered again (its
+/// handlers carry the new data, UX1-2), and the button stays (it keeps the focus, UX3-3,
+/// DEC-490).
 #[component]
 fn Days(h: Hist, href: String, page: ActivityPageDto) -> impl IntoView {
     let today = today();
-    let shown = Memo::new(move |_| h.shown(&href, &page));
+    let page = latest_page(h.first, href.clone(), page);
+    let shown = Memo::new(move |_| page.with(|p| h.shown(&href, p)));
     let groups = Memo::new(move |_| shown.with(|(rows, _)| group_by_day(rows.clone(), today)));
     let next = Memo::new(move |_| shown.with(|(_, next)| next.clone()));
+    let after = move || page.with_untracked(|p| p.next.clone());
     view! {
         <div class="flex flex-col gap-6">
-            <For each=move || groups.get() key=|g: &DayGroup| (g.day.iso(), g.rows.len()) let:g>
+            <For each=move || groups.get() key=day_key let:g>
                 <DaySection h=h g=g/>
             </For>
             <Show when=move || next.with(Option::is_some)>
@@ -666,7 +757,7 @@ fn Days(h: Hist, href: String, page: ActivityPageDto) -> impl IntoView {
                                 return;
                             }
                             if let Some(n) = next.get_untracked() {
-                                h.load_more(n);
+                                h.load_more(n, after());
                             }
                         }>{t("library-more")}</Button>
                     {move || h.more_error.get().map(|e| view! { <p role="alert" class="text-sm text-destructive-text">{e}</p> })}
@@ -674,6 +765,15 @@ fn Days(h: Hist, href: String, page: ActivityPageDto) -> impl IntoView {
             </Show>
         </div>
     }
+}
+
+/// A day group is rendered again when its rows change (not only their number).
+fn day_key(g: &DayGroup) -> String {
+    format!(
+        "{}|{}",
+        g.day.iso(),
+        serde_json::to_string(&g.rows).unwrap_or_default()
+    )
 }
 
 #[component]
@@ -737,6 +837,7 @@ fn Side(h: Hist) -> impl IntoView {
                     }
                 })}
             </Suspense>
+            <crate::stats_extras::SideCompare/>
             <a href="/stats" class="text-sm font-medium underline underline-offset-2">{i18n.t("home-all-stats")}</a>
         </aside>
     }
@@ -771,11 +872,56 @@ mod tests {
         };
         let a = stream_key("/history", false, &page(1));
         assert_eq!(a, stream_key("/history", false, &page(1)));
-        assert_ne!(a, stream_key("/history", false, &page(2)));
+        // rows that change keep the rendering: the day groups follow them (DEC-490)
+        assert_eq!(a, stream_key("/history", false, &page(2)));
+        assert_ne!(a, stream_key("/history", false, &page(0)));
         assert_ne!(a, stream_key("/history", true, &page(1)));
         assert_ne!(a, stream_key("/history?group=watch", false, &page(1)));
         let failed: Result<ActivityPageDto, ServerFnError> = Err(ServerFnError::new("internal"));
         assert_ne!(a, stream_key("/history", false, &failed));
+    }
+
+    /// DEC-490: the pages of "Show more" hang on the first answer they continue; a refetch
+    /// that brings the loaded range in its own answer leaves them out, and the next refresh
+    /// fetches as many rows as are on screen.
+    #[test]
+    fn show_more_pages_belong_to_the_answer_they_continue() {
+        let rows = |n: usize| -> Vec<ActivityRowDto> {
+            (0..n)
+                .map(|_| row("2026-11-06T10:00:00Z", "2026-11-06", "10:00"))
+                .collect()
+        };
+        let first = ActivityPageDto {
+            rows: rows(30),
+            next: Some("c30".into()),
+        };
+        let more = More {
+            href: "/history".into(),
+            after: Some("c30".into()),
+            rows: rows(30),
+            next: Some("c60".into()),
+        };
+        let (shown, next) = shown_rows(&more, "/history", &first);
+        assert_eq!((shown.len(), next.as_deref()), (60, Some("c60")));
+        // another address, or the refetched range (its own `next`): the first answer alone
+        let (shown, next) = shown_rows(&more, "/history?group=watch", &first);
+        assert_eq!((shown.len(), next.as_deref()), (30, Some("c30")));
+        let refetched = ActivityPageDto {
+            rows: rows(60),
+            next: Some("c60b".into()),
+        };
+        let (shown, next) = shown_rows(&more, "/history", &refetched);
+        assert_eq!((shown.len(), next.as_deref()), (60, Some("c60b")));
+        // a first page without a next page has nothing to continue
+        let last = ActivityPageDto {
+            rows: rows(5),
+            next: None,
+        };
+        let none = More {
+            after: None,
+            ..more
+        };
+        assert_eq!(shown_rows(&none, "/history", &last).0.len(), 5);
     }
 
     /// DEC-306: with the viewer's zone known the times carry no "UTC" marker any more.

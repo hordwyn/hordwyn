@@ -81,14 +81,19 @@ impl Auth {
     /// # Errors
     /// Storage errors.
     pub async fn reset_totp(&self, user: UserId) -> Result<bool, AuthError> {
-        let mut creds = self.credentials_or_default(user).await?;
-        let had = creds.totp_enabled || creds.totp_secret.is_some() || creds.totp_locked;
-        creds.totp_secret = None;
-        creds.totp_enabled = false;
-        creds.totp_last_step = None;
-        creds.totp_locked = false;
-        self.store.put_credentials(&creds).await?;
-        self.store.put_recovery_codes(user, &[], self.now()).await?;
-        Ok(had)
+        self.reset_totp_audited(user, None).await
+    }
+
+    /// [`Auth::reset_totp`] with the audit row in the same transaction (an admin in Users,
+    /// DEC-336).
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn reset_totp_audited(
+        &self,
+        user: UserId,
+        audit: Option<&crate::admin::AuditEntry>,
+    ) -> Result<bool, AuthError> {
+        Ok(self.store.reset_totp(user, audit).await?)
     }
 }

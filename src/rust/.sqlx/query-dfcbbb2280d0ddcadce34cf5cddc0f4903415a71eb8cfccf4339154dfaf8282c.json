@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE stats_users SET zone = $2, bucket_zone = $3 WHERE user_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dfcbbb2280d0ddcadce34cf5cddc0f4903415a71eb8cfccf4339154dfaf8282c"
+}

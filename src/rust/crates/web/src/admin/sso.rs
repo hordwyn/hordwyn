@@ -150,12 +150,13 @@ fn Providers(list: Vec<OidcProviderDto>, data: Data) -> impl IntoView {
         .map(|p| view! { <ProviderPanel p=p data=data/> })
         .collect_view();
     view! {
-        <Table attr:data-testid="sso-table" class="mb-6 max-w-4xl">
+        <Table stacked=true attr:data-testid="sso-table" class="mb-6 max-w-4xl">
             <caption class="sr-only">{t("admin-sso-providers")}</caption>
             <TableHeader>
                 <TableRow>
                     <TableHead>{t("admin-sso-provider")}</TableHead>
                     <TableHead>{t("admin-sso-issuer")}</TableHead>
+                    <TableHead>{t("admin-sso-linked")}</TableHead>
                     <TableHead>{t("admin-sso-status")}</TableHead>
                     <TableHead><span class="sr-only">{t("admin-sso-actions")}</span></TableHead>
                 </TableRow>
@@ -179,17 +180,21 @@ fn ProviderRow(p: OidcProviderDto) -> impl IntoView {
     );
     let controls = format!("adm-sso-{}", p.slug);
     let (name, issuer) = (p.display_name.clone(), p.issuer.clone());
+    let linked = use_i18n().number(f64::from(
+        u32::try_from(p.linked_accounts).unwrap_or(u32::MAX),
+    ));
     let (default, env) = (p.is_default, p.provenance == "env");
     view! {
         <TableRow attr:data-testid="sso-row">
-            <TableCell>
+            <TableCell label=t("admin-sso-provider")>
                 <span class="font-medium">{name}</span>
                 {default.then(|| view! { " " <Badge variant=BadgeVariant::Secondary>{t("admin-sso-default")}</Badge> })}
                 {env.then(|| view! { " " <Badge variant=BadgeVariant::Outline>{t("admin-setting-read-only")}</Badge> })}
             </TableCell>
-            <TableCell class="break-all font-mono text-xs">{issuer}</TableCell>
-            <TableCell><StatusDot state=dot label=word/></TableCell>
-            <TableCell>
+            <TableCell label=t("admin-sso-issuer") class="break-all font-mono text-xs">{issuer}</TableCell>
+            <TableCell label=t("admin-sso-linked") attr:data-testid="sso-linked">{linked}</TableCell>
+            <TableCell label=t("admin-sso-status")><StatusDot state=dot label=word/></TableCell>
+            <TableCell label=t("admin-sso-actions")>
                 <Button variant=ButtonVariant::Outline size=ButtonSize::Sm attr:aria-expanded=move || open.get().to_string()
                     attr:aria-controls=controls on:click=move |_| open.update(|o| *o = !*o)>
                     {label}

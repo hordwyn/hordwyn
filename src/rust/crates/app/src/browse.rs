@@ -15,7 +15,7 @@ use domain::user::Actor;
 
 use crate::error::OptionExt;
 use crate::next_step::{NextStep, step_for};
-use crate::ports::{LibraryFilter, LibraryHit, LibrarySort};
+use crate::ports::{LibraryCursor, LibraryFilter, LibraryHit, LibrarySort};
 use crate::{App, AppResult};
 
 /// A library query as the Library page sends it (its URL state).
@@ -34,7 +34,8 @@ pub struct LibraryQuery {
     pub sort: LibrarySort,
     /// `None`: the sort's natural direction.
     pub descending: Option<bool>,
-    pub offset: u64,
+    /// Continue after this row (the previous page's `next`; keyset paging, DEC-416).
+    pub after: Option<LibraryCursor>,
     /// 1 to [`App::MAX_PAGE`]; 0 means the default of 48.
     pub limit: u32,
 }
@@ -56,6 +57,8 @@ pub struct LibraryPage {
     pub rows: Vec<LibraryRow>,
     /// Entries matching the query (all pages).
     pub total: u64,
+    /// Where the next page starts, when more rows follow.
+    pub next: Option<LibraryCursor>,
 }
 
 /// One `(kind, status)` cell of the counts.
@@ -188,14 +191,24 @@ impl App {
     /// One page of the library for the Library page (filters, sort, paging).
     ///
     /// # Errors
-    /// A facet that is not a facet of the selected kinds; storage errors.
+    /// A facet that is not a facet of the selected kinds; a cursor of another sort or
+    /// direction; storage errors.
     pub async fn library_query(&self, actor: Actor, q: LibraryQuery) -> AppResult<LibraryPage> {
         let Some(kinds) = self.selected_kinds(q.group, &q.kinds) else {
             return Ok(LibraryPage {
                 rows: vec![],
                 total: 0,
+                next: None,
             });
         };
+        let descending = q.descending.unwrap_or(q.sort.descending_by_default());
+        if let Some(c) = &q.after
+            && (c.sort != q.sort || c.descending != descending || !c.key.fits(q.sort))
+        {
+            return Err(
+                DomainError::invalid("after", "the cursor belongs to another order").into(),
+            );
+        }
         self.check_facets(&kinds, &q.facets)?;
         let mut tags = Vec::new();
         for t in &q.tags {
@@ -209,14 +222,15 @@ impl App {
             facets: q.facets,
             items: q.items,
             sort: q.sort,
-            descending: q.descending.unwrap_or(q.sort.descending_by_default()),
-            offset: q.offset,
+            descending,
+            after: q.after,
             limit: limit.clamp(1, Self::MAX_PAGE),
         };
-        let (hits, total) = self.repos.library.query(actor.user_id, &filter).await?;
+        let page = self.repos.library.query(actor.user_id, &filter).await?;
         Ok(LibraryPage {
-            rows: self.rows(actor, hits).await?,
-            total,
+            rows: self.rows(actor, page.hits).await?,
+            total: page.total,
+            next: page.next,
         })
     }
 

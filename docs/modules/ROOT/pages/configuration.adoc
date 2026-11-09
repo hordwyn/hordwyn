@@ -92,6 +92,7 @@ they are never written back or logged.
 |===
 |Key |Environment |Type |Default |Description
 
+|`catalog_max_age_days` |`APP__JOBS__CATALOG_MAX_AGE_DAYS` |integer |`150` |Days after which catalog data from a source whose terms limit caching (TMDB: six months) is refreshed by the daily retention job, or purged when no refresh is possible (no key, source switched off). 1 to 170; such data is purged at 175 days in any case.
 |`concurrency` |`APP__JOBS__CONCURRENCY` |integer |`4` |Concurrent jobs per worker process.
 |`shutdown_grace_secs` |`APP__JOBS__SHUTDOWN_GRACE_SECS` |integer |`20` |Seconds a stopping worker waits for running jobs.
 |===
@@ -208,4 +209,15 @@ S3 settings and daily operation limits.
 
 |`filter` |`APP__TELEMETRY__FILTER` |string |`"info,sqlx=warn"` |`tracing` filter directives, e.g. `info,sqlx=warn`. `RUST_LOG` overrides it.
 |`log_format` |`APP__TELEMETRY__LOG_FORMAT` |`text` \| `json` |`"text"` |
+|===
+
+== `[usage]`
+
+First-party usage measurement (WP4-5, design.md 9, research R-54).
+
+[cols="2,3,2,2,4"]
+|===
+|Key |Environment |Type |Default |Description
+
+|`funnel` |`APP__USAGE__FUNNEL` |boolean |`true` |Count the logging funnel: how many taps and how long logging takes, and which settings sections people open, as daily totals without any user or item, kept 180 days. When set here or in the environment (`APP__USAGE__FUNNEL`) the admin area shows it read-only; otherwise Admin > Storage and jobs can turn it off.
 |===

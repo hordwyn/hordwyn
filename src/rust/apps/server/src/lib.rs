@@ -29,6 +29,9 @@ use tokio_util::sync::CancellationToken;
 
 pub use handlers::REFRESH_LANE;
 
+/// How often each process flushes its data-source counters (WP4-2 default).
+pub const STATS_SYNC_SECS: u64 = 60;
+
 /// Everything a running process needs (cheap to clone: handles only).
 #[derive(Clone)]
 pub struct Server {
@@ -287,10 +290,23 @@ impl Server {
             None => default_registry(&config),
         };
         let registry = registry.with_stats(stats.clone());
+        // `instance.hosting`, shared by the admin API (which changes it) and the governed
+        // client (fair share of the interactive lane in hosted mode, design.md 4.1)
+        let hosting = Arc::new(std::sync::RwLock::new(
+            config.instance.hosting.as_str().to_string(),
+        ));
         let (http, oidc_hosts): (Arc<dyn HttpFetch>, _) = if let Some(h) = o.http {
             (h, None)
         } else {
-            governed_http(&config, &brand, &registry, &pool, budget.clone(), stats)
+            governed_http(
+                &config,
+                &brand,
+                &registry,
+                &pool,
+                budget.clone(),
+                stats,
+                hosting.clone(),
+            )
         };
         let assets = Arc::new(assets::AssetService::new(
             budget.clone(),
@@ -368,9 +384,23 @@ impl Server {
                 search_backend,
                 disabled_sources,
                 mailer,
+                hosting,
             },
         )
         .await?;
+        // the counters other processes flushed, and the Overview rows as of now (WP4-2)
+        if let Some(st) = registry.stats()
+            && let Err(e) = st
+                .sync(&catalog_core::pg::PgSourceStats::new(pool.clone()))
+                .await
+        {
+            tracing::warn!(error = %e, "reading the shared source counters failed");
+        }
+        if api.admin.is_some()
+            && let Err(e) = api::admin::run_probes(&api).await
+        {
+            tracing::warn!(error = %e.message, "the first health probe failed");
+        }
         let trusted_proxies = Arc::new(
             api::request_meta::TrustedProxies::parse(&config.server.trusted_proxies)
                 .map_err(anyhow::Error::msg)?,
@@ -465,6 +495,27 @@ impl Server {
         self.worker().run(stop).await;
         let _ = ticker.await;
         let _ = indexer.await;
+    }
+
+    /// Flush this process's data-source counters every [`STATS_SYNC_SECS`] and read back
+    /// what every process recorded (DEC-247/326), until `stop`; a last flush on the way out.
+    pub async fn run_stats_sync(&self, stop: CancellationToken) {
+        let Some(stats) = self.registry.stats().cloned() else {
+            return;
+        };
+        let store = catalog_core::pg::PgSourceStats::new(self.pool.clone());
+        loop {
+            let stopping = tokio::select! {
+                () = stop.cancelled() => true,
+                () = tokio::time::sleep(Duration::from_secs(STATS_SYNC_SECS)) => false,
+            };
+            if let Err(e) = stats.sync(&store).await {
+                tracing::warn!(error = %e, "flushing the source counters failed");
+            }
+            if stopping {
+                break;
+            }
+        }
     }
 
     #[must_use]
@@ -563,6 +614,7 @@ fn governed_http(
     pool: &sqlx::PgPool,
     budget: Arc<assets::StorageBudget>,
     stats: Arc<catalog_core::SourceStats>,
+    hosting: Arc<std::sync::RwLock<String>>,
 ) -> (Arc<dyn HttpFetch>, Option<Arc<catalog_core::HostList>>) {
     let cache = HttpCache {
         index: Arc::new(catalog_core::pg::PgCacheIndex::new(pool.clone())),
@@ -590,7 +642,7 @@ fn governed_http(
         .collect();
     g.add_connector(auth::oidc::CONNECTOR, policy);
     let hosts = g.host_list(auth::oidc::CONNECTOR);
-    (Arc::new(g.with_stats(stats)), hosts)
+    (Arc::new(g.with_stats(stats).with_hosting(hosting)), hosts)
 }
 
 fn auth_settings(config: &AppConfig, brand: &brand::Brand) -> auth::AuthSettings {

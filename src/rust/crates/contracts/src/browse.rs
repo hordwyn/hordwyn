@@ -103,7 +103,9 @@ pub struct LibraryQueryDto {
     pub sort: Option<String>,
     /// Default: titles A to Z, everything else newest or highest first.
     pub descending: Option<bool>,
-    pub offset: u64,
+    /// Continue after the previous page: its `next` (opaque; keyset paging, DEC-416). A
+    /// cursor made for another sort or direction is refused.
+    pub after: Option<String>,
     /// 1 to 500; 0 or absent: 48.
     pub limit: u32,
 }
@@ -190,7 +192,8 @@ pub struct LibraryRowsDto {
     pub rows: Vec<LibraryRowDto>,
     /// Entries matching the query (all pages).
     pub total: u64,
-    pub offset: u64,
+    /// Pass as `after` for the next page; absent on the last page.
+    pub next: Option<String>,
     pub limit: u32,
 }
 
@@ -401,4 +404,53 @@ pub struct NewPlayDto {
     pub coop: Option<String>,
     /// Idempotency key (UUID) of the play's progress event.
     pub client_op_id: Option<String>,
+    /// Logged as this game group of the caller.
+    pub game_group_id: Option<String>,
+}
+
+/// Body of `POST /library/bulk` (design.md 3.5 bulk bar, WP4-3): one operation on up to 500
+/// items of the caller's library.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+#[serde(default)]
+pub struct BulkRequestDto {
+    /// Catalog item ids; at most 500 (more: 400). The same id twice counts once.
+    pub item_ids: Vec<String>,
+    /// `set_status` (needs `status`), `add_tag` / `remove_tag` (need `tag`), `add_to_list`
+    /// (needs `list_id`, a list of the caller), or `remove` (from the library; history stays).
+    pub op: String,
+    pub status: Option<String>,
+    pub tag: Option<String>,
+    pub list_id: Option<String>,
+}
+
+/// The outcome for one id of a bulk request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct BulkResultDto {
+    pub item_id: String,
+    /// Changed, or already as asked.
+    pub ok: bool,
+    /// When not ok: `not_in_library`, `status_not_allowed` or `too_many_tags`.
+    pub error: Option<String>,
+}
+
+/// Answer of `POST /library/bulk` and `DELETE /library/{item_id}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct BulkResponseDto {
+    /// One per distinct id, in request order.
+    pub results: Vec<BulkResultDto>,
+    /// Ids that are ok.
+    pub done: u32,
+    /// Opaque and signed, for the caller only, valid one hour; `POST /library/bulk/undo` with
+    /// it puts back what this change did (a change made since stays).
+    pub undo: String,
+}
+
+/// Body of `POST /library/bulk/undo`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct BulkUndoDto {
+    pub undo: String,
 }

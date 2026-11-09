@@ -1,10 +1,11 @@
 //! Library entries, progress events, reviews.
 
 use app::ports::{
-    HistoryWindow, LibraryFilter, LibraryHit, LibraryRepo, LibrarySort, ProgressRepo, RepoError,
-    ReviewRepo,
+    EntryPage, HistorySpans, HistoryWindow, HitPage, LibraryFilter, LibraryRepo, ProgressRepo,
+    RepoError, ReviewRepo,
 };
 use async_trait::async_trait;
+use domain::Timestamp;
 use domain::hlc::Lww;
 use domain::ids::{EntryId, EventId, ItemId, ReviewId, UserId};
 use domain::kind::{KindId, Status};
@@ -13,22 +14,23 @@ use domain::progress::{Progress, ProgressEvent};
 use domain::review::Review;
 use domain::tag::tag_key;
 
+use super::library_page::{write_entry, write_tags};
 use crate::conv::{corrupt, hlc, json, to_json};
 use crate::tx::{Op, record};
 use crate::{PgStore, Res, be};
 
-struct EntryRow {
-    id: uuid::Uuid,
-    user_id: uuid::Uuid,
-    item_id: uuid::Uuid,
-    kind: String,
-    status: String,
-    status_hlc: String,
-    rating: Option<i16>,
-    rating_hlc: String,
-    notes: Option<String>,
-    notes_hlc: String,
-    added_at: chrono::DateTime<chrono::Utc>,
+pub(super) struct EntryRow {
+    pub(super) id: uuid::Uuid,
+    pub(super) user_id: uuid::Uuid,
+    pub(super) item_id: uuid::Uuid,
+    pub(super) kind: String,
+    pub(super) status: String,
+    pub(super) status_hlc: String,
+    pub(super) rating: Option<i16>,
+    pub(super) rating_hlc: String,
+    pub(super) notes: Option<String>,
+    pub(super) notes_hlc: String,
+    pub(super) added_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl TryFrom<EntryRow> for LibraryEntry {
@@ -87,32 +89,40 @@ impl LibraryRepo for PgStore {
         .transpose()
     }
 
+    async fn existing_entry_ids(&self, ids: &[EntryId]) -> Res<Vec<EntryId>> {
+        let ids: Vec<uuid::Uuid> = ids.iter().map(|i| i.0).collect();
+        Ok(
+            sqlx::query_scalar!("SELECT id FROM library_entries WHERE id = ANY($1)", &ids)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(be)?
+                .into_iter()
+                .map(EntryId)
+                .collect(),
+        )
+    }
+
+    async fn entries_for(&self, user: UserId, items: &[ItemId]) -> Res<Vec<LibraryEntry>> {
+        let items: Vec<uuid::Uuid> = items.iter().map(|i| i.0).collect();
+        sqlx::query_as!(
+            EntryRow,
+            "SELECT id, user_id, item_id, kind, status, status_hlc, rating, rating_hlc, notes,
+                    notes_hlc, added_at FROM library_entries
+             WHERE user_id = $1 AND item_id = ANY($2)",
+            user.0,
+            &items
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?
+        .into_iter()
+        .map(LibraryEntry::try_from)
+        .collect()
+    }
+
     async fn upsert(&self, e: &LibraryEntry) -> Res<()> {
         let mut tx = self.begin().await?;
-        let id = sqlx::query_scalar!(
-            "INSERT INTO library_entries (id, user_id, item_id, kind, status, status_hlc, rating,
-                                          rating_hlc, notes, notes_hlc, added_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-             ON CONFLICT (user_id, item_id) DO UPDATE SET status = EXCLUDED.status,
-                 status_hlc = EXCLUDED.status_hlc, rating = EXCLUDED.rating,
-                 rating_hlc = EXCLUDED.rating_hlc, notes = EXCLUDED.notes,
-                 notes_hlc = EXCLUDED.notes_hlc
-             RETURNING id",
-            e.id.0,
-            e.user_id.0,
-            e.item_id.0,
-            e.kind.as_str(),
-            e.status.value.as_str(),
-            e.status.stamp.to_string(),
-            e.rating.value.map(|r| i16::from(r.value())),
-            e.rating.stamp.to_string(),
-            e.notes.value,
-            e.notes.stamp.to_string(),
-            e.added_at
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(be)?;
+        let id = write_entry(&mut tx, e).await?;
         record(&mut tx, "library_entry", id, Op::Upsert, &[e.user_id]).await?;
         tx.commit().await.map_err(be)
     }
@@ -143,42 +153,49 @@ impl LibraryRepo for PgStore {
         .collect()
     }
 
-    async fn page(&self, user: UserId, offset: u64, limit: u32) -> Res<(Vec<LibraryEntry>, u64)> {
-        let rows = sqlx::query_as!(
-            EntryRow,
-            "SELECT id, user_id, item_id, kind, status, status_hlc, rating, rating_hlc, notes,
-                    notes_hlc, added_at FROM library_entries WHERE user_id = $1
-             ORDER BY added_at DESC, id DESC OFFSET $2 LIMIT $3",
-            user.0,
-            i64::try_from(offset).unwrap_or(i64::MAX),
-            i64::from(limit)
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(be)?;
-        let total = sqlx::query_scalar!(
-            r#"SELECT COUNT(*) AS "n!" FROM library_entries WHERE user_id = $1"#,
-            user.0
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(be)?;
-        Ok((
-            rows.into_iter()
-                .map(LibraryEntry::try_from)
-                .collect::<Res<_>>()?,
-            u64::try_from(total).unwrap_or(0),
-        ))
+    async fn write_many(&self, writes: &[(LibraryEntry, Option<Vec<String>>)]) -> Res<()> {
+        let mut tx = self.begin().await?;
+        for (e, tags) in writes {
+            let id = write_entry(&mut tx, e).await?;
+            if let Some(tags) = tags {
+                write_tags(&mut tx, id, e.user_id, tags).await?;
+            }
+            record(&mut tx, "library_entry", id, Op::Upsert, &[e.user_id]).await?;
+        }
+        tx.commit().await.map_err(be)
     }
 
-    async fn query(&self, user: UserId, f: &LibraryFilter) -> Res<(Vec<LibraryHit>, u64)> {
-        let (rows, total) = self.query_page(user, f, f.offset, f.limit).await?;
-        let total = match (rows.is_empty(), f.offset) {
-            // past the end: count without paging
-            (true, o) if o > 0 => self.query_page(user, f, 0, 1).await?.1,
-            _ => total,
-        };
-        Ok((rows, total))
+    async fn remove_many(&self, user: UserId, ids: &[EntryId]) -> Res<u64> {
+        let ids: Vec<uuid::Uuid> = ids.iter().map(|e| e.0).collect();
+        let mut tx = self.begin().await?;
+        // tags go with the entry (ON DELETE CASCADE); events, sessions, reviews and list
+        // items do not reference the entry and stay
+        let gone = sqlx::query_scalar!(
+            "DELETE FROM library_entries WHERE user_id = $1 AND id = ANY($2) RETURNING id",
+            user.0,
+            &ids
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(be)?;
+        for id in &gone {
+            record(&mut tx, "library_entry", *id, Op::Delete, &[user]).await?;
+        }
+        tx.commit().await.map_err(be)?;
+        Ok(gone.len() as u64)
+    }
+
+    async fn page(
+        &self,
+        user: UserId,
+        after: Option<(Timestamp, EntryId)>,
+        limit: u32,
+    ) -> Res<EntryPage> {
+        self.entries_after(user, after, limit).await
+    }
+
+    async fn query(&self, user: UserId, f: &LibraryFilter) -> Res<HitPage> {
+        self.hits_after(user, f).await
     }
 
     async fn next_in_series(&self, user: UserId, kinds: &[KindId], limit: u32) -> Res<Vec<ItemId>> {
@@ -253,23 +270,7 @@ impl LibraryRepo for PgStore {
 
     async fn set_tags(&self, e: &LibraryEntry, tags: &[String]) -> Res<()> {
         let mut tx = self.begin().await?;
-        sqlx::query!("DELETE FROM entry_tags WHERE entry_id = $1", e.id.0)
-            .execute(&mut *tx)
-            .await
-            .map_err(be)?;
-        let keys: Vec<String> = tags.iter().map(|t| tag_key(t)).collect();
-        sqlx::query!(
-            "INSERT INTO entry_tags (entry_id, user_id, tag, tag_key)
-             SELECT $1, $2, t, k FROM unnest($3::text[], $4::text[]) AS x (t, k)
-             ON CONFLICT DO NOTHING",
-            e.id.0,
-            e.user_id.0,
-            tags,
-            &keys
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(be)?;
+        write_tags(&mut tx, e.id.0, e.user_id, tags).await?;
         record(&mut tx, "library_entry", e.id.0, Op::Upsert, &[e.user_id]).await?;
         tx.commit().await.map_err(be)
     }
@@ -328,132 +329,6 @@ impl LibraryRepo for PgStore {
     }
 }
 
-struct HitRow {
-    id: uuid::Uuid,
-    user_id: uuid::Uuid,
-    item_id: uuid::Uuid,
-    kind: String,
-    status: String,
-    status_hlc: String,
-    rating: Option<i16>,
-    rating_hlc: String,
-    notes: Option<String>,
-    notes_hlc: String,
-    added_at: chrono::DateTime<chrono::Utc>,
-    last_activity: chrono::DateTime<chrono::Utc>,
-    total: i64,
-}
-
-const fn sort_str(s: LibrarySort) -> &'static str {
-    match s {
-        LibrarySort::LastActivity => "last_activity",
-        LibrarySort::Title => "title",
-        LibrarySort::Added => "added",
-        LibrarySort::Year => "year",
-        LibrarySort::Rating => "rating",
-        LibrarySort::Plays => "plays",
-    }
-}
-
-impl PgStore {
-    /// One page of a library query. Filters and the order are parameters of one static
-    /// statement (no SQL is built from input); the sort key picks one `CASE` column.
-    async fn query_page(
-        &self,
-        user: UserId,
-        f: &LibraryFilter,
-        offset: u64,
-        limit: u32,
-    ) -> Res<(Vec<LibraryHit>, u64)> {
-        let kinds: Vec<String> = f.kinds.iter().map(|k| k.as_str().to_string()).collect();
-        let statuses: Vec<String> = f.statuses.iter().map(|s| s.as_str().to_string()).collect();
-        let facets = serde_json::Value::Array(
-            f.facets
-                .iter()
-                .map(|(k, v)| serde_json::json!([k, v]))
-                .collect(),
-        );
-        let items: Option<Vec<uuid::Uuid>> =
-            f.items.as_ref().map(|v| v.iter().map(|i| i.0).collect());
-        let rows = sqlx::query_as!(
-            HitRow,
-            r#"WITH hits AS (
-                 SELECT e.id, e.user_id, e.item_id, e.kind, e.status, e.status_hlc, e.rating,
-                        e.rating_hlc, e.notes, e.notes_hlc, e.added_at,
-                        GREATEST(e.added_at, COALESCE(e.last_event_at, e.added_at))
-                            AS last_activity,
-                        e.plays
-                 FROM library_entries e
-                 WHERE e.user_id = $1
-                   AND (cardinality($2::text[]) = 0 OR e.kind = ANY($2))
-                   AND (cardinality($3::text[]) = 0 OR e.status = ANY($3))
-                   AND (cardinality($4::text[]) = 0
-                        OR (SELECT COUNT(*) FROM entry_tags t
-                            WHERE t.entry_id = e.id AND t.tag_key = ANY($4::text[]))
-                           = cardinality($4::text[]))
-                   AND (jsonb_array_length($5::jsonb) = 0 OR NOT EXISTS (
-                       SELECT 1 FROM catalog_items c, jsonb_array_elements($5::jsonb) AS f
-                       WHERE c.id = e.item_id AND NOT EXISTS (
-                           SELECT 1 FROM jsonb_array_elements_text(
-                               CASE WHEN jsonb_typeof(c.attributes -> (f ->> 0)) = 'array'
-                                    THEN c.attributes -> (f ->> 0)
-                                    ELSE jsonb_build_array(c.attributes -> (f ->> 0)) END) AS v
-                           WHERE v = f ->> 1)))
-                   AND ($6::uuid[] IS NULL OR e.item_id = ANY($6))
-               )
-               SELECT id AS "id!", user_id AS "user_id!", item_id AS "item_id!", kind AS "kind!",
-                      status AS "status!", status_hlc AS "status_hlc!", rating,
-                      rating_hlc AS "rating_hlc!", notes, notes_hlc AS "notes_hlc!",
-                      added_at AS "added_at!", last_activity AS "last_activity!",
-                      COUNT(*) OVER () AS "total!"
-               FROM hits
-               -- title and year are read from the catalog only when they are the sort key
-               ORDER BY
-                 CASE WHEN $7 = 'title' AND NOT $8
-                      THEN (SELECT lower(c.title) FROM catalog_items c WHERE c.id = item_id)
-                 END ASC,
-                 CASE WHEN $7 = 'title' AND $8
-                      THEN (SELECT lower(c.title) FROM catalog_items c WHERE c.id = item_id)
-                 END DESC,
-                 CASE WHEN $7 = 'added' AND NOT $8 THEN added_at END ASC,
-                 CASE WHEN $7 = 'added' AND $8 THEN added_at END DESC,
-                 CASE WHEN $7 = 'year' AND NOT $8
-                      THEN (SELECT c.year FROM catalog_items c WHERE c.id = item_id)
-                 END ASC NULLS LAST,
-                 CASE WHEN $7 = 'year' AND $8
-                      THEN (SELECT c.year FROM catalog_items c WHERE c.id = item_id)
-                 END DESC NULLS LAST,
-                 CASE WHEN $7 = 'rating' AND NOT $8 THEN rating END ASC NULLS LAST,
-                 CASE WHEN $7 = 'rating' AND $8 THEN rating END DESC NULLS LAST,
-                 CASE WHEN $7 = 'plays' AND NOT $8 THEN plays END ASC,
-                 CASE WHEN $7 = 'plays' AND $8 THEN plays END DESC,
-                 CASE WHEN $7 = 'last_activity' AND NOT $8 THEN last_activity END ASC,
-                 CASE WHEN $7 = 'last_activity' AND $8 THEN last_activity END DESC,
-                 CASE WHEN NOT $8 THEN id END ASC,
-                 CASE WHEN $8 THEN id END DESC
-               OFFSET $9 LIMIT $10"#,
-            user.0,
-            &kinds,
-            &statuses,
-            &f.tags,
-            facets,
-            items.as_deref(),
-            sort_str(f.sort),
-            f.descending,
-            i64::try_from(offset).unwrap_or(i64::MAX),
-            i64::from(limit)
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(be)?;
-        let total = rows
-            .first()
-            .map_or(0, |r| u64::try_from(r.total).unwrap_or(0));
-        let hits = rows.into_iter().map(hit_from).collect::<Res<Vec<_>>>()?;
-        Ok((hits, total))
-    }
-}
-
 struct EventRow {
     id: uuid::Uuid,
     user_id: uuid::Uuid,
@@ -492,24 +367,21 @@ fn count(n: Option<i64>) -> u64 {
     n.and_then(|n| u64::try_from(n).ok()).unwrap_or(0)
 }
 
-#[async_trait]
-impl ProgressRepo for PgStore {
-    async fn month_amounts(&self, user: UserId, zone: &str) -> Res<Vec<app::MonthAmounts>> {
+impl PgStore {
+    /// The statistics of `user` computed from all their events, without the cache (the
+    /// cache is checked against it, WP4-1).
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn month_amounts_full(
+        &self,
+        user: UserId,
+        zone: &str,
+    ) -> Res<Vec<app::MonthAmounts>> {
         // the rules of `app::month_amounts` in one statement: effective events, forward
         // moves of pages and positions per item in (occurred_at, id) order, runtimes as
         // whole numbers, durations of the user's own sessions
-        // a zone chrono-tz knows but this server's tzdata does not buckets in UTC (UX3-20)
-        let known = sqlx::query_scalar!(
-            r#"SELECT EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = $1) AS "known!""#,
-            zone
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(be)?;
-        if !known {
-            tracing::warn!(zone, "time zone unknown to Postgres; statistics use UTC");
-        }
-        let zone = if known { zone } else { "UTC" };
+        let zone = self.stats_zone(zone).await?;
         let rows = sqlx::query!(
             r#"WITH live AS (
                  SELECT x.id, x.item_id, x.occurred_at, x.status_change, c.kind, c.attributes,
@@ -579,6 +451,22 @@ impl ProgressRepo for PgStore {
                 })
             })
             .collect()
+    }
+}
+
+#[async_trait]
+impl ProgressRepo for PgStore {
+    async fn month_amounts(&self, user: UserId, zone: &str) -> Res<Vec<app::MonthAmounts>> {
+        self.cached_month_amounts(user, zone).await
+    }
+
+    async fn window_amounts(
+        &self,
+        user: UserId,
+        from: domain::Timestamp,
+        to: domain::Timestamp,
+    ) -> Res<Vec<app::KindAmounts>> {
+        self.pg_window_amounts(user, from, to).await
     }
 
     async fn append(&self, e: &ProgressEvent) -> Res<ProgressEvent> {
@@ -718,6 +606,43 @@ impl ProgressRepo for PgStore {
             .map_err(be)?,
         )
     }
+
+    async fn recent_spans(&self, user: UserId, w: &HistorySpans) -> Res<Vec<ProgressEvent>> {
+        let (from, to) = super::sessions::span_arrays(w);
+        let kinds: Vec<String> = w.kinds.iter().map(|k| k.as_str().to_string()).collect();
+        // DEC-494: the span rows first (one range scan of `progress_events_user_recent` per
+        // span; with the LIMIT outside the planner walked every event of the user instead),
+        // the kind per row by its key (a join or EXISTS hashed all catalog items)
+        events(
+            sqlx::query_as!(
+                EventRow,
+                r#"WITH x AS MATERIALIZED (
+                     SELECT x.id, x.user_id, x.item_id, x.occurred_at, x.progress, x.client_op_id,
+                            x.recorded_at, x.status_change, x.undoes
+                     FROM unnest($2::timestamptz[], $3::timestamptz[]) AS sp(lo, hi)
+                     JOIN progress_events x ON x.user_id = $1
+                          AND x.occurred_at >= sp.lo AND x.occurred_at < sp.hi)
+                 SELECT x.id AS "id!", x.user_id AS "user_id!", x.item_id AS "item_id!",
+                        x.occurred_at AS "occurred_at!", x.progress AS "progress!",
+                        x.client_op_id, x.recorded_at AS "recorded_at!", x.status_change
+                 FROM x
+                 WHERE x.undoes IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM progress_events u WHERE u.undoes = x.id)
+                   AND (cardinality($4::text[]) = 0
+                        OR (SELECT c.kind FROM catalog_items c WHERE c.id = x.item_id) = ANY($4))
+                 ORDER BY x.occurred_at DESC, x.id DESC
+                 LIMIT $5"#,
+                user.0,
+                &from,
+                &to,
+                &kinds,
+                i64::from(w.limit)
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(be)?,
+        )
+    }
 }
 
 struct ReviewRow {
@@ -812,24 +737,4 @@ impl ReviewRepo for PgStore {
         .map(Review::try_from)
         .collect()
     }
-}
-
-fn hit_from(r: HitRow) -> Res<LibraryHit> {
-    let entry = LibraryEntry::try_from(EntryRow {
-        id: r.id,
-        user_id: r.user_id,
-        item_id: r.item_id,
-        kind: r.kind,
-        status: r.status,
-        status_hlc: r.status_hlc,
-        rating: r.rating,
-        rating_hlc: r.rating_hlc,
-        notes: r.notes,
-        notes_hlc: r.notes_hlc,
-        added_at: r.added_at,
-    })?;
-    Ok(LibraryHit {
-        entry,
-        last_activity: r.last_activity,
-    })
 }

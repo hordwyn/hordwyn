@@ -17,7 +17,7 @@ use crate::settings::loaded;
 const PAGE: u32 = 100;
 
 /// The actions the filter offers (the audited set of addendum-1 3.4).
-const ACTIONS: [&str; 15] = [
+const ACTIONS: [&str; 19] = [
     "setting.changed",
     "secret.replaced",
     "secret.cleared",
@@ -33,6 +33,10 @@ const ACTIONS: [&str; 15] = [
     "eviction.run",
     "job.retried",
     "job.discarded",
+    "user.totp_reset",
+    "user.identity_unlinked",
+    "auth.link_emailed",
+    "auth.link_confirmed",
 ];
 
 #[component]

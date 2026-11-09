@@ -23,12 +23,15 @@ mod auth_pages;
 pub mod auth_redirect;
 #[cfg(feature = "ssr")]
 pub mod backend;
+mod bulk;
 pub mod charts;
 mod episode_list;
 pub mod episode_plan;
 mod events;
+pub mod funnel;
 #[cfg(feature = "gallery")]
 mod gallery;
+mod game_groups;
 mod history;
 pub mod history_state;
 mod home;
@@ -36,8 +39,10 @@ pub mod i18n;
 pub mod imports;
 mod integrations;
 mod item;
+pub mod keyboard;
 mod library;
 pub mod library_state;
+mod list_drag;
 pub mod list_share;
 mod lists;
 pub mod log_form;
@@ -48,11 +53,13 @@ mod notify_channels;
 pub mod notify_rules;
 mod notify_rules_view;
 mod nudge;
+pub mod offline;
 mod pages;
 mod palette;
 mod people;
 mod people_dialogs;
 mod reauth;
+pub mod recent;
 mod rest;
 mod settings;
 mod setup;
@@ -60,7 +67,9 @@ pub mod setup_state;
 mod sharing;
 mod shell;
 mod sign_in;
+mod sign_out;
 pub mod source_hints;
+mod stats_extras;
 pub mod widgets;
 
 pub use app::{App, CONFIG_ID, ClientConfig, shell};
@@ -72,8 +81,7 @@ pub fn provide_page_context(cfg: &ClientConfig) {
     provide_context(cfg.i18n());
     provide_context(cfg.clone());
     provide_context(palette::PaletteOpen(RwSignal::new(false)));
-    provide_context(palette::PaletteTarget(RwSignal::new(None)));
-    provide_context(palette::PaletteMatch(RwSignal::new(None)));
+    provide_context(palette::PaletteScope(RwSignal::new(None)));
 }
 
 /// Browser entry point: read the server's config, then hydrate the server-rendered page.

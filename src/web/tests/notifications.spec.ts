@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { addPerson, ADMIN, expectNoA11yViolations, expectReflow, hydrated, requestLink, signIn, signUp } from "./helpers";
+import { addPerson, ADMIN, expectNoA11yViolations, expectReflow, hydrated, importDone, requestLink, signIn, signUp } from "./helpers";
 
 // Settings > Notifications (design.md 6.8, 5.8; WP3-5): the inbox grouped by day with "Mark
 // all read"; a signed webhook added with "Add and send a test" (the result on its card); the
@@ -131,4 +131,59 @@ test("channels, rules with the defaults offer, the log and the inbox", async ({ 
     await admin.close();
     await other.close();
   }
+});
+
+test("a channel is edited in place keeping its secret; a rule for one item (DEC-344)", async ({ page }) => {
+  test.setTimeout(90_000);
+  const stamp = Date.now();
+  await signUp(page, `nedit${stamp}`, "Eda");
+  const title = `Signal Ridge ${stamp}`;
+  const file = [JSON.stringify({ format: "library-export", version: 1 }), JSON.stringify({ source_id: "1", kind: "movie", title, year: 2012, status: "planned" })].join("\n");
+  const started = await page.request.post("/api/v1/imports?format=generic-jsonl", { data: file, headers: { "content-type": "application/octet-stream" } });
+  expect(started.status()).toBe(202);
+  const { id: importId } = await started.json();
+  await page.goto(PAGE);
+  await hydrated(page);
+
+  await addChannel(page, "ntfy", "Phone", { "Server URL": "http://127.0.0.1:9", Topic: "first-topic", "Access token (optional)": "tk_secret" });
+  const phone = card(page, "Phone");
+  await expect(phone.getByRole("alert")).toContainText("The test was not delivered");
+  await phone.getByRole("button", { name: "Edit Phone" }).click();
+  const name = phone.getByLabel("Name", { exact: true });
+  await expect(name).toHaveValue("Phone");
+  await expect(phone.getByLabel("Topic", { exact: true })).toHaveValue("first-topic");
+  // secrets are write-only: never shown, blank keeps the stored one
+  await expect(phone.getByLabel("Access token (optional)", { exact: true })).toHaveValue("");
+  await name.fill("Pocket");
+  await phone.getByLabel("Topic", { exact: true }).fill("second-topic");
+  const put = page.waitForRequest((r) => r.method() === "PUT" && r.url().includes("/api/v1/notifications/channels/"));
+  await phone.getByRole("button", { name: "Save" }).click();
+  const body = (await put).postDataJSON();
+  expect(body.name).toBe("Pocket");
+  expect(body.config).toMatchObject({ kind: "ntfy", topic: "second-topic", token: "********" });
+  const pocket = card(page, "Pocket");
+  await expect(pocket).toContainText("second-topic");
+  const channels = await (await page.request.get("/api/v1/notifications/channels")).json();
+  const saved = channels.find((c: { name: string }) => c.name === "Pocket");
+  expect(saved.config.token, "the stored token is kept (still set, shown redacted)").toBe("********");
+  await expectNoA11yViolations(page, "channel edit");
+
+  // a rule for one item, picked with the search palette
+  await importDone(page, importId);
+  await tab(page, "Rules");
+  await page.getByText("Add a rule for one list, item or person").click();
+  await page.getByRole("button", { name: "Choose an item..." }).click();
+  const palette = page.getByRole("dialog", { name: "Search" });
+  await expect(palette.getByTestId("palette-target")).toHaveText("Choosing a result makes it the subject of the rule.");
+  await palette.getByRole("combobox").fill(title);
+  const option = palette.getByRole("option", { name: new RegExp(`^${title}`) }).first();
+  await expect(option).toBeVisible({ timeout: 20_000 });
+  await option.click();
+  await expect(palette).toHaveCount(0);
+  await expect(page.locator("#nf-r-for")).toHaveValue(/^item:/);
+  await expect(page.locator("#nf-r-for")).toContainText(`Item: ${title}`);
+  await page.getByRole("button", { name: "Add rule" }).click();
+  await expect(page.getByRole("list").filter({ hasText: "one item" }).first()).toBeVisible();
+  const subs = await (await page.request.get("/api/v1/notifications/subscriptions")).json();
+  expect(subs.some((s: { filter: { items?: string[] } }) => (s.filter?.items ?? []).length === 1)).toBe(true);
 });

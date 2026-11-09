@@ -161,12 +161,19 @@ async fn query_filters_by_group_kind_status_facet_and_sorts_and_pages() {
     };
     assert!(env.app.library_query(me, q).await.is_err(), "unknown facet");
 
+    // the second page starts after the first page's cursor (keyset paging, DEC-416)
     let q = LibraryQuery {
         sort: LibrarySort::Year,
         descending: Some(false),
-        offset: 1,
-        limit: 2,
+        limit: 1,
         ..LibraryQuery::default()
+    };
+    let first = env.app.library_query(me, q.clone()).await.unwrap();
+    assert_eq!(titles(&first), ["Dune"]);
+    let q = LibraryQuery {
+        after: first.next,
+        limit: 2,
+        ..q
     };
     let page = env.app.library_query(me, q).await.unwrap();
     assert_eq!(
@@ -350,4 +357,133 @@ async fn up_next_finds_the_next_in_series_behind_many_newer_planned_entries() {
             ("Movie 505", UpNextReason::Planned),
         ]
     );
+}
+
+fn entry_ids(p: &app::LibraryPage) -> Vec<domain::ids::EntryId> {
+    p.rows.iter().map(|r| r.entry.id).collect()
+}
+
+/// Keyset paging (DEC-416) on the in-memory store: walking every sort in both directions in
+/// pages of 1 to 3 returns one full read's rows, ties and missing values included, and the
+/// library page walks the same way; a cursor of another order is refused.
+#[tokio::test]
+async fn keyset_pages_walk_every_order() {
+    let env = TestEnv::new();
+    let (_, me) = common::user(&env, "kim").await;
+    let rows = [
+        ("Same", Some(2000), Some(60)),
+        ("same", Some(2000), Some(60)),
+        ("SAME", None, None),
+        ("Other", Some(1990), Some(60)),
+        ("Zed", None, Some(100)),
+    ];
+    for (n, (title, year, rating)) in rows.into_iter().enumerate() {
+        let i = env
+            .app
+            .upsert_catalog_item(NewCatalogItem {
+                kind: KindId::new("movie").unwrap(),
+                title: title.into(),
+                original_title: None,
+                year,
+                description: None,
+                external_ids: vec![ExternalId::new("test", title)],
+                attributes: serde_json::json!({}),
+                cover_url: None,
+            })
+            .await
+            .unwrap();
+        env.app.add_to_library(me, i.id, None).await.unwrap();
+        // two entries share the time they were added
+        if n != 1 {
+            env.clock.advance(chrono::Duration::minutes(1));
+        }
+        if let Some(r) = rating {
+            env.app
+                .rate(me, i.id, Some(Rating::new(r).unwrap()), None)
+                .await
+                .unwrap();
+        }
+    }
+    let full = |sort, descending| LibraryQuery {
+        sort,
+        descending: Some(descending),
+        limit: 500,
+        ..LibraryQuery::default()
+    };
+    for sort in [
+        LibrarySort::LastActivity,
+        LibrarySort::Title,
+        LibrarySort::Added,
+        LibrarySort::Year,
+        LibrarySort::Rating,
+        LibrarySort::Plays,
+    ] {
+        for descending in [false, true] {
+            let all = entry_ids(
+                &env.app
+                    .library_query(me, full(sort, descending))
+                    .await
+                    .unwrap(),
+            );
+            assert_eq!(all.len(), 5);
+            for limit in 1..=3 {
+                let mut q = LibraryQuery {
+                    limit,
+                    ..full(sort, descending)
+                };
+                let mut walked = vec![];
+                loop {
+                    let p = env.app.library_query(me, q.clone()).await.unwrap();
+                    assert_eq!(p.total, 5);
+                    walked.extend(entry_ids(&p));
+                    match p.next {
+                        Some(c) => q.after = Some(c),
+                        None => break,
+                    }
+                }
+                assert_eq!(
+                    walked, all,
+                    "{sort:?} descending={descending} limit={limit}"
+                );
+            }
+        }
+    }
+    let first = env
+        .app
+        .library_query(
+            me,
+            LibraryQuery {
+                limit: 1,
+                ..full(LibrarySort::Year, true)
+            },
+        )
+        .await
+        .unwrap();
+    let wrong = LibraryQuery {
+        after: first.next.clone(),
+        ..full(LibrarySort::Rating, true)
+    };
+    assert!(env.app.library_query(me, wrong).await.is_err());
+    assert!(
+        env.app
+            .library_page(me, first.next.as_ref(), 2)
+            .await
+            .is_err()
+    );
+
+    let mut expected = env.app.library(me).await.unwrap();
+    expected.sort_by_key(|e| std::cmp::Reverse((e.added_at, e.id)));
+    let expected: Vec<_> = expected.into_iter().map(|e| e.id).collect();
+    let mut after = None;
+    let mut walked = vec![];
+    loop {
+        let (entries, total, next) = env.app.library_page(me, after.as_ref(), 2).await.unwrap();
+        assert_eq!(total, 5);
+        walked.extend(entries.iter().map(|e| e.id));
+        match next {
+            Some(c) => after = Some(c),
+            None => break,
+        }
+    }
+    assert_eq!(walked, expected);
 }

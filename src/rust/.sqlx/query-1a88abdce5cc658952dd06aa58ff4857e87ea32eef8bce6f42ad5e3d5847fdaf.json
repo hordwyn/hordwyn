@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT cover_asset FROM catalog_items WHERE id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cover_asset",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "catalog_items",
+            "name": "cover_asset"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "1a88abdce5cc658952dd06aa58ff4857e87ea32eef8bce6f42ad5e3d5847fdaf"
+}

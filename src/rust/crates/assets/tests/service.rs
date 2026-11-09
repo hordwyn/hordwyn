@@ -271,3 +271,79 @@ async fn blocked_image_hosts_fail_permanently_and_keep_redirecting() {
     assert!(a.failed);
     assert!(a.hash.is_none());
 }
+
+/// Catalog retention (DEC-453): a purged item's cover goes from storage; the record stays.
+#[tokio::test]
+async fn forget_deletes_the_stored_image_and_keeps_the_record() {
+    let e = env(50 << 20);
+    let a = e
+        .svc
+        .register(AssetKind::Cover, URL, "tmdb", FetchPriority::Visible)
+        .await
+        .unwrap();
+    let a = e.svc.fetch(a.id).await.unwrap();
+    let hash = a.hash.clone().unwrap();
+    let key = format!("img/{hash}/card.webp");
+    assert!(e.index.get(&key).await.unwrap().is_some());
+
+    e.svc.forget(a.id).await.unwrap();
+    assert!(e.index.get(&key).await.unwrap().is_none());
+    assert_eq!(e.index.usage().await.unwrap().total, 0);
+    assert_eq!(
+        e.svc.serve(&hash, "card", "webp").await.unwrap(),
+        Served::NotFound
+    );
+    let kept = e.svc.get(a.id).await.unwrap().unwrap();
+    assert_eq!(kept.hash, None);
+    assert_eq!(kept.source_url.as_deref(), Some(URL));
+    // forgetting twice is fine
+    e.svc.forget(a.id).await.unwrap();
+}
+
+/// Catalog retention (DEC-453): an old provider image of a refreshed item is fetched again.
+#[tokio::test]
+async fn refetch_queues_a_download_of_a_fetched_image() {
+    let e = env(50 << 20);
+    let a = e
+        .svc
+        .register(AssetKind::Cover, URL, "tmdb", FetchPriority::Catalog)
+        .await
+        .unwrap();
+    assert_eq!(e.jobs.jobs().len(), 0);
+    e.svc.refetch(a.id).await.unwrap();
+    let jobs = e.jobs.jobs();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].kind, assets::FETCH_JOB);
+    assert_eq!(jobs[0].payload["asset_id"], serde_json::json!(a.id));
+}
+
+/// UX4-18: two records with the same image bytes share the stored files; forgetting one
+/// leaves them for the other.
+#[tokio::test]
+async fn forget_keeps_an_image_another_record_holds() {
+    let e = env(50 << 20);
+    let other_url = "https://image.tmdb.org/t/p/w780/same-bytes.png";
+    e.http.record("GET", other_url, 200, png(900, 1350));
+    let mut hashes = Vec::new();
+    let mut ids = Vec::new();
+    for url in [URL, other_url] {
+        let a = e
+            .svc
+            .register(AssetKind::Cover, url, "tmdb", FetchPriority::Visible)
+            .await
+            .unwrap();
+        let a = e.svc.fetch(a.id).await.unwrap();
+        hashes.push(a.hash.clone().unwrap());
+        ids.push(a.id);
+    }
+    assert_eq!(hashes[0], hashes[1]);
+    assert_ne!(ids[0], ids[1]);
+    let key = format!("img/{}/card.webp", hashes[0]);
+    e.svc.forget(ids[0]).await.unwrap();
+    assert!(
+        e.index.get(&key).await.unwrap().is_some(),
+        "the other record still shows it"
+    );
+    e.svc.forget(ids[1]).await.unwrap();
+    assert!(e.index.get(&key).await.unwrap().is_none());
+}

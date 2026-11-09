@@ -246,6 +246,22 @@ pub async fn delete_user(id: String) -> Result<(), ServerFnError> {
     a.delete_user(&t, &id).await.map_err(server::code)
 }
 
+/// Users row menu: remove the person's authenticator (gated, DEC-336).
+#[server(prefix = "/_fn")]
+pub async fn reset_user_totp(id: String) -> Result<AdminUserDto, ServerFnError> {
+    let (a, t) = server::admin_token().await?;
+    a.reset_user_totp(&t, &id).await.map_err(server::code)
+}
+
+/// Users row menu: unlink one of the person's providers (gated, DEC-336).
+#[server(prefix = "/_fn")]
+pub async fn unlink_user_identity(id: String, identity: String) -> Result<(), ServerFnError> {
+    let (a, t) = server::admin_token().await?;
+    a.unlink_user_identity(&t, &id, &identity)
+        .await
+        .map_err(server::code)
+}
+
 #[server(prefix = "/_fn")]
 pub async fn admin_invites() -> Result<Vec<AdminInviteDto>, ServerFnError> {
     let (a, t) = server::admin_token().await?;

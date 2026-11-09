@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 use app::ports::{PortError, SecretLocked};
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use domain::ids::UserId;
 use uuid::Uuid;
 
@@ -28,6 +28,8 @@ pub struct StoredSettings {
     pub storage_max_total_bytes: Option<u64>,
     pub storage_high_watermark: Option<f64>,
     pub storage_low_watermark: Option<f64>,
+    /// `usage.funnel` (WP4-5): count the logging funnel.
+    pub usage_funnel: Option<bool>,
     pub setup_completed_at: Option<DateTime<Utc>>,
     /// Last completed wizard step (resumable wizard).
     pub setup_step: Option<String>,
@@ -256,6 +258,47 @@ pub trait AdminStore: Send + Sync {
 
     /// Is the database reachable (overview health row)?
     async fn ping(&self) -> Result<(), PortError>;
+
+    /// The stored health rows (`admin.probes` job, WP4-2).
+    async fn probes(&self) -> Result<Vec<ProbeRow>, PortError>;
+    /// Insert or replace these rows.
+    async fn put_probes(&self, rows: &[ProbeRow]) -> Result<(), PortError>;
+
+    /// Add `counts` to the totals of `day` (WP4-5 funnel; no user, no item).
+    async fn usage_add(&self, day: NaiveDate, counts: &[(UsageKey, u64)]) -> Result<(), PortError>;
+    /// The totals from `since` on, newest day first, then by key.
+    async fn usage_rows(&self, since: NaiveDate) -> Result<Vec<UsageRow>, PortError>;
+    /// Delete the days before `before`; returns the rows deleted.
+    async fn usage_purge(&self, before: NaiveDate) -> Result<u64, PortError>;
+}
+
+/// What a funnel total counts (`usage_funnel_daily` without the day and the count).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UsageKey {
+    pub flow: String,
+    /// `page/section` of a disclosure; empty otherwise.
+    pub subject: String,
+    pub outcome: String,
+    pub taps_bucket: String,
+    pub ms_bucket: String,
+}
+
+/// One daily total.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsageRow {
+    pub day: NaiveDate,
+    pub key: UsageKey,
+    pub n: u64,
+}
+
+/// One Overview health row as the probe job stored it (addendum-1 3.4, DEC-285).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbeRow {
+    pub id: String,
+    pub status: String,
+    pub detail: String,
+    pub args: BTreeMap<String, String>,
+    pub checked_at: DateTime<Utc>,
 }
 
 #[derive(Default)]
@@ -267,6 +310,8 @@ struct MemState {
     keys: BTreeMap<u16, DateTime<Utc>>,
     switches: BTreeMap<String, bool>,
     mail_password: Option<String>,
+    probes: BTreeMap<String, ProbeRow>,
+    usage: BTreeMap<(NaiveDate, UsageKey), u64>,
 }
 
 /// In-memory admin store (tests). Credentials are kept in plain text here.
@@ -495,5 +540,48 @@ impl AdminStore for MemAdminStore {
 
     async fn ping(&self) -> Result<(), PortError> {
         Ok(())
+    }
+
+    async fn probes(&self) -> Result<Vec<ProbeRow>, PortError> {
+        Ok(self.s().probes.values().cloned().collect())
+    }
+
+    async fn put_probes(&self, rows: &[ProbeRow]) -> Result<(), PortError> {
+        let mut s = self.s();
+        for r in rows {
+            s.probes.insert(r.id.clone(), r.clone());
+        }
+        Ok(())
+    }
+
+    async fn usage_add(&self, day: NaiveDate, counts: &[(UsageKey, u64)]) -> Result<(), PortError> {
+        let mut s = self.s();
+        for (k, n) in counts {
+            *s.usage.entry((day, k.clone())).or_default() += n;
+        }
+        Ok(())
+    }
+
+    async fn usage_rows(&self, since: NaiveDate) -> Result<Vec<UsageRow>, PortError> {
+        let mut rows: Vec<UsageRow> = self
+            .s()
+            .usage
+            .iter()
+            .filter(|((d, _), _)| *d >= since)
+            .map(|((day, key), n)| UsageRow {
+                day: *day,
+                key: key.clone(),
+                n: *n,
+            })
+            .collect();
+        rows.sort_by(|a, b| b.day.cmp(&a.day).then_with(|| a.key.cmp(&b.key)));
+        Ok(rows)
+    }
+
+    async fn usage_purge(&self, before: NaiveDate) -> Result<u64, PortError> {
+        let mut s = self.s();
+        let n = s.usage.len();
+        s.usage.retain(|(d, _), _| *d >= before);
+        Ok(u64::try_from(n - s.usage.len()).unwrap_or(0))
     }
 }

@@ -28,6 +28,7 @@ mod error_summary;
 mod form;
 mod heading;
 mod icon;
+mod keys;
 mod nav;
 mod progress;
 mod rating;
@@ -48,11 +49,14 @@ pub use card::{Card, CardContent, CardDescription, CardFooter, CardHeader, CardT
 pub use chip::{Chip, Segmented, SegmentedMode, SegmentedOption};
 pub use class::{cn, cva, slug};
 pub use combobox::Combobox;
-pub use command::{Command, CommandItem};
+pub use command::{Command, CommandHints, CommandItem};
 pub use copy::{CopyField, KeyHint};
 pub use datagrid::{Column, DataGrid};
 pub use dialog::{Dialog, Sheet, SheetSide};
-pub use disclosure::{Disclosure, DisclosureGroup, DisclosureMode, disclosure_storage_key};
+pub use disclosure::{
+    Disclosure, DisclosureEvent, DisclosureGroup, DisclosureMode, DisclosureWatch,
+    disclosure_storage_key,
+};
 pub use dropdown::{DropdownMenu, MenuItem};
 pub use error_summary::{ErrorLink, ErrorSummary};
 pub use form::{
@@ -60,6 +64,7 @@ pub use form::{
     field_described_by,
 };
 pub use icon::{Icon, IconName};
+pub use keys::{Chord, ChordStep, columns_from_tops, roving_target};
 pub use nav::{NavGroup, NavItem, SideNav, TabBar, TabBarAction};
 pub use progress::{ProgressBar, ProgressSize, percent};
 pub use rating::{Rating, rating_steps, star_fill};

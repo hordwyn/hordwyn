@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH seen AS (\n             SELECT d.item_id FROM stats_dirty d\n             JOIN unnest($2::uuid[], $3::bigint[]) AS r(item_id, gen)\n               ON r.item_id = d.item_id AND r.gen = d.gen\n             WHERE d.user_id = $1\n             FOR UPDATE OF d SKIP LOCKED\n         )\n         DELETE FROM stats_dirty WHERE user_id = $1 AND item_id IN (SELECT item_id FROM seen)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6f289353293da7a060c8ebc6a58efd9b42091b685641073f1cd503d441ea8799"
+}

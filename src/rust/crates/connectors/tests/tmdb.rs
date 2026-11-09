@@ -111,7 +111,8 @@ async fn show_search_and_details() {
     assert_eq!(s.title, "Game of Thrones");
     assert_eq!(
         s.attributes["seasons"][1],
-        serde_json::json!({"number": 1, "episode_count": 10})
+        serde_json::json!({"number": 1, "episode_count": 10, "air_date": "2011-04-17"}),
+        "WP4-7: each season keeps its air date"
     );
     assert_eq!(s.attributes["airing_status"], "ended");
     kinds::Registry::with_builtins()
@@ -178,6 +179,17 @@ async fn refresh_turns_a_stub_into_a_full_item() {
         })
         .await
         .unwrap();
+    // updates go only to people the item matters to (DEC-490): someone has opened it
+    let user = env
+        .app
+        .register_user("ana", "Ana", None, domain::user::Role::Member)
+        .await
+        .unwrap();
+    let actor = domain::user::Actor {
+        user_id: user.id,
+        role: user.role,
+    };
+    env.app.watch_item(actor, item.id).await.unwrap();
     let mut registry = Registry::default();
     registry.register(Arc::new(tmdb()));
     env.events.clear();
@@ -281,4 +293,149 @@ async fn a_bad_base_url_is_an_error() {
     };
     let r = catalog_core::Search::search(&c, &ctx(fixtures()), &req).await;
     assert!(matches!(r, Err(ConnectorError::Parse(_))), "{r:?}");
+}
+
+/// WP4-7: `GET /3/tv/{series_id}/season/{season_number}` keeps only the episode number, the
+/// air date and the runtime (TV Seasons > Details, docs/connectors/tmdb.md).
+#[tokio::test]
+async fn season_episodes_keep_number_air_date_and_runtime() {
+    let http = fixtures();
+    let req = catalog_core::EpisodesRequest {
+        kind: "show".into(),
+        id: "1399".into(),
+        season: 1,
+    };
+    let eps = catalog_core::Episodes::season_episodes(&tmdb(), &ctx(http.clone()), &req)
+        .await
+        .unwrap();
+    assert_eq!(eps.len(), 10);
+    assert_eq!(
+        eps[0],
+        domain::catalog::CatalogEpisode {
+            season: 1,
+            number: 1,
+            air_date: chrono::NaiveDate::from_ymd_opt(2011, 4, 17),
+            runtime_minutes: Some(62),
+        }
+    );
+    assert_eq!(eps[9].number, 10);
+    assert_eq!(
+        eps[9].air_date,
+        chrono::NaiveDate::from_ymd_opt(2011, 6, 19)
+    );
+    assert_eq!(eps[9].runtime_minutes, Some(53));
+    let sent = &http.requests()[0];
+    assert_eq!(
+        sent.url,
+        "https://api.themoviedb.org/3/tv/1399/season/1?language=en-US"
+    );
+    assert_eq!(sent.op, "season");
+    // a movie has no seasons
+    let movie = catalog_core::EpisodesRequest {
+        kind: "movie".into(),
+        id: "11".into(),
+        season: 1,
+    };
+    assert!(matches!(
+        catalog_core::Episodes::season_episodes(&tmdb(), &ctx(fixtures()), &movie).await,
+        Err(ConnectorError::Unsupported(_))
+    ));
+}
+
+async fn show_stub(env: &TestEnv) -> domain::catalog::CatalogItem {
+    env.app
+        .upsert_catalog_item(app::NewCatalogItem {
+            kind: KindId::new("show").unwrap(),
+            title: "Game of Thrones".into(),
+            original_title: None,
+            year: None,
+            description: None,
+            external_ids: vec![ExternalId::new("tmdb", "1399")],
+            attributes: serde_json::json!({}),
+            cover_url: None,
+        })
+        .await
+        .unwrap()
+}
+
+fn season_calls(http: &ReplayHttp, season: u32) -> usize {
+    let path = format!("/3/tv/1399/season/{season}?");
+    http.requests()
+        .iter()
+        .filter(|r| r.url.contains(&path))
+        .count()
+}
+
+/// WP4-7: the detail refresh queues the episode fetch on the background lane; that job asks
+/// once per season, stores the dates and, on the next run, skips a season whose episode count
+/// and air date did not change and whose episodes have all aired.
+#[tokio::test]
+async fn the_episode_refresh_fetches_each_season_once_and_skips_unchanged_ones() {
+    let env = TestEnv::with_kinds(Arc::new(kinds::Registry::with_builtins()));
+    let item = show_stub(&env).await;
+    let mut registry = Registry::default();
+    registry.register(Arc::new(tmdb()));
+    let http = fixtures();
+    catalog_core::refresh::refresh_item(
+        &env.app,
+        &registry,
+        http.clone(),
+        Lane::Interactive,
+        item.id,
+    )
+    .await
+    .unwrap();
+    // no season fetched by the detail refresh itself: it is queued on the background lane
+    assert_eq!(season_calls(&http, 1), 0);
+    let queued: Vec<_> = env
+        .jobs
+        .jobs()
+        .into_iter()
+        .filter(|j| j.kind == app::EPISODES_JOB)
+        .collect();
+    assert_eq!(queued.len(), 1, "{queued:?}");
+    assert_eq!(queued[0].lane, Lane::BackgroundRefresh);
+
+    let stored = catalog_core::refresh::refresh_episodes(
+        &env.app,
+        &registry,
+        http.clone(),
+        Lane::BackgroundRefresh,
+        item.id,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        stored, 1,
+        "season 1 has a fixture, the others fail and are left out"
+    );
+    assert_eq!(season_calls(&http, 1), 1);
+    assert_eq!(season_calls(&http, 2), 1);
+    let eps = env.app.catalog_episodes(item.id).await.unwrap();
+    assert_eq!(eps.len(), 10);
+    assert_eq!(
+        eps[4].air_date,
+        chrono::NaiveDate::from_ymd_opt(2011, 5, 15)
+    );
+
+    // the same season data again: season 1 is not asked for again, the failed ones are
+    env.events.clear();
+    let again = catalog_core::refresh::refresh_episodes(
+        &env.app,
+        &registry,
+        http.clone(),
+        Lane::BackgroundRefresh,
+        item.id,
+    )
+    .await
+    .unwrap();
+    assert_eq!(again, 0);
+    assert_eq!(season_calls(&http, 1), 1);
+    assert_eq!(season_calls(&http, 2), 2);
+    assert_eq!(env.app.catalog_episodes(item.id).await.unwrap(), eps);
+    assert_eq!(
+        env.events.topics().len(),
+        0,
+        "nothing changed, nothing announced"
+    );
 }

@@ -318,3 +318,185 @@ async fn the_next_step_logs_an_episode_and_undo_takes_it_back() {
         "back to the first episode (nothing watched before)"
     );
 }
+
+/// Bulk edits over HTTP (WP4-3): 500 ids in one request with one result each and an undo
+/// that puts them back; 501 ids are refused with 400; removing one item answers an undo.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bulk_edits_500_items_and_refuses_more() {
+    if !services() {
+        return;
+    }
+    let srv = server().await;
+    let app = router(&srv);
+    let cookie = sign_up(&app, "bulky").await;
+    let user: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = 'bulky'")
+        .fetch_one(&srv.pool)
+        .await
+        .unwrap();
+    let ids: Vec<uuid::Uuid> = sqlx::query_scalar(
+        "INSERT INTO catalog_items (id, kind, title, year, state, updated_at)
+         SELECT gen_random_uuid(), 'movie', 'Bulk ' || g, 2000, 'partial', now()
+         FROM generate_series(1, 500) AS g RETURNING id",
+    )
+    .fetch_all(&srv.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO library_entries (id, user_id, item_id, kind, status, status_hlc, rating,
+             rating_hlc, notes_hlc, added_at)
+         SELECT gen_random_uuid(), $1, id, 'movie', 'planned', '0-0-0', NULL, '0-0-0', '0-0-0',
+                now() FROM unnest($2::uuid[]) AS id",
+    )
+    .bind(user)
+    .bind(&ids)
+    .execute(&srv.pool)
+    .await
+    .unwrap();
+    let item_ids: Vec<String> = ids.iter().map(ToString::to_string).collect();
+
+    let body = serde_json::json!({"item_ids": item_ids, "op": "add_tag", "tag": "Cosy"});
+    let (code, text) = call(
+        &app,
+        "POST",
+        "/api/v1/library/bulk",
+        Some(&cookie),
+        Some(body),
+    )
+    .await;
+    assert_eq!(code, 200, "{text}");
+    let out: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(out["done"], 500);
+    assert_eq!(out["results"].as_array().unwrap().len(), 500);
+    let (_, tags) = call(&app, "GET", "/api/v1/tags", Some(&cookie), None).await;
+    assert!(tags.contains(r#""entries":500"#), "{tags}");
+
+    let undo = serde_json::json!({"undo": out["undo"]});
+    let (code, text) = call(
+        &app,
+        "POST",
+        "/api/v1/library/bulk/undo",
+        Some(&cookie),
+        Some(undo),
+    )
+    .await;
+    assert_eq!(code, 204, "{text}");
+    let (_, tags) = call(&app, "GET", "/api/v1/tags", Some(&cookie), None).await;
+    assert_eq!(tags, "[]");
+
+    let mut over = item_ids.clone();
+    over.push(uuid::Uuid::new_v4().to_string());
+    let body = serde_json::json!({"item_ids": over, "op": "remove"});
+    let (code, text) = call(
+        &app,
+        "POST",
+        "/api/v1/library/bulk",
+        Some(&cookie),
+        Some(body),
+    )
+    .await;
+    assert_eq!(code, 400, "{text}");
+    let (code, _) = call(
+        &app,
+        "POST",
+        "/api/v1/library/bulk/undo",
+        Some(&cookie),
+        Some(serde_json::json!({"undo": "garbage"})),
+    )
+    .await;
+    assert_eq!(code, 400);
+
+    // one item: removed, then back
+    let uri = format!("/api/v1/library/{}", item_ids[0]);
+    let (code, text) = call(&app, "DELETE", &uri, Some(&cookie), None).await;
+    assert_eq!(code, 200, "{text}");
+    let out: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let (_, counts) = call(&app, "GET", "/api/v1/library/counts", Some(&cookie), None).await;
+    assert!(counts.contains(r#""total":499"#), "{counts}");
+    let (code, _) = call(&app, "DELETE", &uri, Some(&cookie), None).await;
+    assert_eq!(code, 404);
+    let undo = serde_json::json!({"undo": out["undo"]});
+    let (code, _) = call(
+        &app,
+        "POST",
+        "/api/v1/library/bulk/undo",
+        Some(&cookie),
+        Some(undo),
+    )
+    .await;
+    assert_eq!(code, 204);
+    let (_, counts) = call(&app, "GET", "/api/v1/library/counts", Some(&cookie), None).await;
+    assert!(counts.contains(r#""total":500"#), "{counts}");
+}
+
+/// UX4-5 / UX4-12 over HTTP: the undo token is signed and bound to the person it was
+/// handed to; an edited or someone else's token is refused with 400 and changes nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_undo_token_is_signed_and_bound_to_its_user() {
+    if !services() {
+        return;
+    }
+    let srv = server().await;
+    let app = router(&srv);
+    let alice = sign_up(&app, "alice").await;
+    let bob = sign_up(&app, "bob").await;
+    let user: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = 'alice'")
+        .fetch_one(&srv.pool)
+        .await
+        .unwrap();
+    let item: uuid::Uuid = sqlx::query_scalar(
+        "INSERT INTO catalog_items (id, kind, title, year, state, updated_at)
+         VALUES (gen_random_uuid(), 'movie', 'Heat', 1995, 'partial', now()) RETURNING id",
+    )
+    .fetch_one(&srv.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO library_entries (id, user_id, item_id, kind, status, status_hlc, rating,
+             rating_hlc, notes_hlc, added_at)
+         VALUES (gen_random_uuid(), $1, $2, 'movie', 'planned', '0-0-0', NULL, '0-0-0', '0-0-0',
+                 now())",
+    )
+    .bind(user)
+    .bind(item)
+    .execute(&srv.pool)
+    .await
+    .unwrap();
+    let (code, text) = call(
+        &app,
+        "DELETE",
+        &format!("/api/v1/library/{item}"),
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(code, 200, "{text}");
+    let out: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let token = out["undo"].as_str().unwrap().to_string();
+    let undo = |t: &str| Some(serde_json::json!({ "undo": t }));
+    let (body, tag) = token.rsplit_once('.').unwrap();
+    let forged = format!("{body}A.{tag}");
+    for (who, t) in [(&alice, forged.as_str()), (&bob, token.as_str())] {
+        let (code, text) = call(
+            &app,
+            "POST",
+            "/api/v1/library/bulk/undo",
+            Some(who),
+            undo(t),
+        )
+        .await;
+        assert_eq!(code, 400, "{text}");
+    }
+    let (_, counts) = call(&app, "GET", "/api/v1/library/counts", Some(&bob), None).await;
+    assert!(counts.contains(r#""total":0"#), "{counts}");
+    let (code, text) = call(
+        &app,
+        "POST",
+        "/api/v1/library/bulk/undo",
+        Some(&alice),
+        undo(&token),
+    )
+    .await;
+    assert_eq!(code, 204, "{text}");
+    let (_, counts) = call(&app, "GET", "/api/v1/library/counts", Some(&alice), None).await;
+    assert!(counts.contains(r#""total":1"#), "{counts}");
+}

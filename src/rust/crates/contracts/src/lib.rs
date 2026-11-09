@@ -6,11 +6,14 @@
 pub mod admin;
 pub mod auth;
 pub mod browse;
+pub mod goals;
 pub mod imports;
 pub mod locale;
 pub mod sharing;
+pub mod usage;
 
 pub use browse::*;
+pub use goals::*;
 pub use sharing::*;
 
 use serde::{Deserialize, Serialize};
@@ -119,7 +122,8 @@ pub struct LibraryPageDto {
     pub items: Vec<LibraryItemDto>,
     /// Entries in the whole library.
     pub total: u64,
-    pub offset: u64,
+    /// Pass as `after` for the next page; absent on the last page (keyset paging, DEC-416).
+    pub next: Option<String>,
     pub limit: u32,
 }
 
@@ -284,6 +288,19 @@ pub struct ItemPageDto {
     pub summary: Option<ProgressSummaryDto>,
     #[serde(default)]
     pub next_step: Option<NextStepDto>,
+    /// Release dates of the episodes, for "On release dates" (WP4-7); empty when the item has
+    /// none.
+    #[serde(default)]
+    pub episodes: Vec<EpisodeDateDto>,
+}
+
+/// When one episode was released (`YYYY-MM-DD`, `None` when the source has no date yet).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct EpisodeDateDto {
+    pub season: u32,
+    pub episode: u32,
+    pub air_date: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -436,6 +453,11 @@ pub enum SyncCommandDto {
         #[cfg_attr(feature = "openapi", schema(value_type = Object))]
         progress: serde_json::Value,
         occurred_at: Option<String>,
+        /// Client stamp for the status the log implies (planned -> in progress, finished ->
+        /// completed), from when it was logged offline; without one the server stamps that
+        /// status when it applies the log (DEC-434, DEC-455).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hlc: Option<String>,
     },
 }
 

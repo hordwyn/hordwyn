@@ -240,6 +240,57 @@ async fn button_disclosure_toggles_and_remembers() {
     storage.remove_item(&key_name).unwrap();
 }
 
+/// Addendum-1 D16 (WP4-5): a remembered disclosure reports that it was shown, opened and
+/// opened early to the watcher in context, which also knows the open ones at a save; a
+/// disclosure without a storage key reports nothing.
+#[wasm_bindgen_test]
+async fn disclosures_report_shown_opened_and_open_at_save() {
+    let seen = RwSignal::new(Vec::<(String, DisclosureEvent)>::new());
+    let watch = DisclosureWatch::new(Callback::new(move |e| seen.update(|v| v.push(e))));
+    let key_name = disclosure_storage_key("wasm", "report");
+    let storage = window().local_storage().unwrap().unwrap();
+    storage.remove_item(&key_name).unwrap();
+    let k = key_name.clone();
+    leptos::mount::mount_to_body(move || {
+        provide_context(watch);
+        view! {
+            <Disclosure id="w-rep" title="Rep" mode=DisclosureMode::Button storage_key=k.clone()>
+                <p>"x"</p>
+            </Disclosure>
+            <Disclosure id="w-plain" title="Plain"><p>"y"</p></Disclosure>
+        }
+    });
+    settle().await;
+    assert_eq!(
+        seen.get_untracked(),
+        vec![(key_name.clone(), DisclosureEvent::Shown)]
+    );
+    assert_eq!(watch.open_keys().len(), 0);
+    let button: HtmlElement = document()
+        .query_selector("#w-rep button")
+        .unwrap()
+        .expect("header button")
+        .dyn_into()
+        .unwrap();
+    button.click();
+    settle().await;
+    assert_eq!(
+        seen.get_untracked(),
+        vec![
+            (key_name.clone(), DisclosureEvent::Shown),
+            (key_name.clone(), DisclosureEvent::Opened),
+            (key_name.clone(), DisclosureEvent::OpenedEarly),
+        ],
+        "opened within 2 s of showing"
+    );
+    assert_eq!(watch.open_keys(), vec![key_name.clone()]);
+    button.click();
+    settle().await;
+    assert_eq!(seen.get_untracked().len(), 3, "closing reports nothing");
+    assert_eq!(watch.open_keys().len(), 0);
+    storage.remove_item(&key_name).unwrap();
+}
+
 #[wasm_bindgen_test]
 async fn error_summary_takes_focus_when_errors_appear() {
     let errors = RwSignal::new(Vec::<ErrorLink>::new());
@@ -494,4 +545,94 @@ async fn sheet_asks_before_closing_when_it_may_not_close() {
     key(&panel, "Escape");
     settle().await;
     assert!(!open.get_untracked());
+}
+
+fn key_with_ctrl(target: &HtmlElement, key: &str) {
+    let init = KeyboardEventInit::new();
+    init.set_key(key);
+    init.set_ctrl_key(true);
+    init.set_bubbles(true);
+    init.set_cancelable(true);
+    let ev = KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap();
+    target.dispatch_event(&ev).unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn command_ctrl_enter_runs_the_secondary_action_and_the_active_row_shows_hints() {
+    let q = RwSignal::new(String::new());
+    let chosen = RwSignal::new(String::new());
+    let second = RwSignal::new(String::new());
+    let items = Signal::derive(|| {
+        ["Dune", "Duel"]
+            .iter()
+            .map(|t| CommandItem {
+                id: t.to_lowercase(),
+                label: (*t).into(),
+                group: "g".into(),
+                keywords: String::new(),
+            })
+            .collect::<Vec<_>>()
+    });
+    let hints = CommandHints {
+        enter_keys: vec!["Enter".into()],
+        enter: Signal::derive(|| "Open".to_string()),
+        secondary_keys: vec!["Ctrl".into(), "Enter".into()],
+        secondary: Signal::derive(|| "Add".to_string()),
+    };
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <Command id="w-cmd2" label="S" placeholder="p" empty_label="none" items=items query=q
+                on_select=Callback::new(move |i: CommandItem| chosen.set(i.label))
+                on_secondary=Callback::new(move |i: CommandItem| second.set(i.label))
+                hints=hints.clone()/>
+        }
+    });
+    settle().await;
+    let input = el("w-cmd2");
+    // only the active row carries the hints
+    let active = el("w-cmd2-opt-dune");
+    assert!(active.text_content().unwrap_or_default().contains("Add"));
+    assert!(
+        !el("w-cmd2-opt-duel")
+            .text_content()
+            .unwrap_or_default()
+            .contains("Add")
+    );
+    assert!(
+        el("w-cmd2-hints")
+            .text_content()
+            .unwrap_or_default()
+            .contains("Ctrl")
+    );
+    key(&input, "ArrowDown");
+    settle().await;
+    assert!(
+        el("w-cmd2-opt-duel")
+            .text_content()
+            .unwrap_or_default()
+            .contains("Open")
+    );
+    key_with_ctrl(&input, "Enter");
+    settle().await;
+    assert_eq!(second.get_untracked(), "Duel");
+    assert_eq!(chosen.get_untracked(), "", "Ctrl+Enter is not Enter");
+    key(&input, "Enter");
+    settle().await;
+    assert_eq!(chosen.get_untracked(), "Duel");
+}
+
+#[wasm_bindgen_test]
+fn roving_index_and_chord_run_in_the_browser() {
+    // the same rules the pages use, compiled for wasm (DEC: WP4-4 keyboard)
+    assert_eq!(roving_target(1, 7, 3, "ArrowDown", false), Some(4));
+    assert_eq!(roving_target(4, 7, 3, "ArrowDown", false), Some(4));
+    assert_eq!(roving_target(4, 7, 3, "Home", true), Some(0));
+    assert_eq!(roving_target(0, 7, 3, "Enter", false), None);
+    assert_eq!(columns_from_tops(&[4.0, 4.0, 4.5, 200.0]), 3);
+    let mut c = Chord::new('g', &['h', 'l', 'y', 't', 'p'], 1500.0);
+    assert_eq!(c.key("g", 0.0), ChordStep::Started);
+    assert_eq!(c.key("Shift", 10.0), ChordStep::Ignored);
+    assert_eq!(c.key("Y", 900.0), ChordStep::Done('y'));
+    assert_eq!(c.key("g", 1000.0), ChordStep::Started);
+    assert_eq!(c.key("y", 2600.0), ChordStep::Ignored);
 }

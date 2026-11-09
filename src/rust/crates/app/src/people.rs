@@ -103,7 +103,7 @@ fn won(s: &Session, p: Option<&Participant>) -> bool {
 }
 
 /// The active companion each owned companion stands for now (merge chains followed).
-fn roots(owned: &[Companion]) -> HashMap<CompanionId, CompanionId> {
+pub(crate) fn roots(owned: &[Companion]) -> HashMap<CompanionId, CompanionId> {
     let by_id: HashMap<CompanionId, &Companion> = owned.iter().map(|c| (c.id, c)).collect();
     let mut out = HashMap::new();
     for c in owned {

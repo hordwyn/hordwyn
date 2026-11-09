@@ -411,3 +411,71 @@ async fn the_export_downloads_as_json_lines_or_csv() {
     let (s, _) = t.call("GET", "/export?format=xml", &anna, None).await;
     assert_eq!(s, 400);
 }
+
+/// DEC-383 (deferred to WP4-8): another user can neither run nor match someone's import, and
+/// a file over the 64 MiB body limit is refused before anything is stored.
+#[tokio::test]
+async fn another_users_run_and_match_are_refused_and_a_huge_file_too() {
+    if !services() {
+        return;
+    }
+    let t = T::new().await;
+    let anna = t.sign_up("anna").await;
+    let bob = t.sign_up("bob").await;
+    let dry = t.upload(&anna, "trakt-json", true, trakt_history()).await;
+    let (s, _) = t
+        .call("POST", &format!("/imports/{dry}/run"), &bob, None)
+        .await;
+    assert_eq!(s, 403, "bob runs anna's previewed import");
+    let id = t.upload(&anna, "trakt-json", false, trakt_history()).await;
+    t.run(&id).await;
+    let (_, r) = t.call("GET", &format!("/imports/{id}"), &anna, None).await;
+    let source_id = r["unmatched"][0]["row"]["source_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let item = t
+        .srv
+        .app
+        .find_or_create_catalog_item(app::NewCatalogItem {
+            kind: domain::kind::KindId::new("movie").unwrap(),
+            title: "A Home Movie".into(),
+            original_title: None,
+            year: Some(2013),
+            description: None,
+            external_ids: Vec::new(),
+            attributes: json!({}),
+            cover_url: None,
+        })
+        .await
+        .unwrap();
+    let body = json!({"source_id": source_id, "item_id": item.id.0.to_string()});
+    let (s, _) = t
+        .call("POST", &format!("/imports/{id}/match"), &bob, Some(body))
+        .await;
+    assert_eq!(s, 403, "bob matches a row of anna's import");
+    assert_eq!(t.library_len(&bob).await, 0);
+    let (_, still) = t.call("GET", &format!("/imports/{id}"), &anna, None).await;
+    assert_eq!(
+        still["unmatched"].as_array().map(Vec::len),
+        Some(1),
+        "{still}"
+    );
+
+    let resp = t
+        .raw(
+            "POST",
+            "/imports?format=trakt-json&dry_run=true",
+            &anna,
+            axum::body::Body::from(vec![b' '; (64 << 20) + 1]),
+            false,
+        )
+        .await;
+    assert_eq!(resp.status(), 413);
+    let (_, list) = t.call("GET", "/imports", &anna, None).await;
+    assert_eq!(
+        list.as_array().map(Vec::len),
+        Some(2),
+        "nothing stored: {list}"
+    );
+}

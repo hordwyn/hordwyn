@@ -8,10 +8,12 @@ use async_trait::async_trait;
 use domain::Timestamp;
 use domain::catalog::{CatalogItem, ExternalId};
 use domain::companion::{Companion, Invite, LinkRequest};
+use domain::game_group::GameGroup;
+use domain::goal::Goal;
 use domain::hlc::Hlc;
 use domain::ids::{
-    CompanionId, EntryId, EventId, InviteId, ItemId, LinkRequestId, ListId, ReviewId, SessionId,
-    UserId,
+    CompanionId, EntryId, EventId, GameGroupId, GoalId, InviteId, ItemId, LinkRequestId, ListId,
+    ReviewId, SessionId, UserId,
 };
 use domain::kind::{KindDescriptor, KindId, Status};
 use domain::library::LibraryEntry;
@@ -34,6 +36,11 @@ pub enum RepoError {
 
 pub type RepoResult<T> = Result<T, RepoError>;
 
+/// The [`RepoError::Backend`] text of [`CatalogRepo::insert_new`] when an external id was claimed
+/// by a concurrent insert and released again before its owner could be read (the caller
+/// retries only this, UX4-18).
+pub const CLAIM_RACE: &str = "external id claimed and released concurrently";
+
 // ---------------------------------------------------------------- repositories
 
 #[async_trait]
@@ -49,12 +56,21 @@ pub trait UserRepo: Send + Sync {
     async fn update(&self, user: &User) -> RepoResult<()>;
     /// Delete the user and everything they own. Companions of other users are untouched.
     async fn delete(&self, id: UserId) -> RepoResult<()>;
+    /// The user's yearly goals (private: only ever read for their owner), any order.
+    async fn goals(&self, user: UserId) -> RepoResult<Vec<Goal>>;
+    async fn goal(&self, id: GoalId) -> RepoResult<Option<Goal>>;
+    /// Insert or replace by id; another goal of the same user, year, group and measure is
+    /// [`RepoError::Duplicate`].
+    async fn upsert_goal(&self, goal: &Goal) -> RepoResult<()>;
+    async fn delete_goal(&self, id: GoalId) -> RepoResult<()>;
 }
 
 #[async_trait]
 pub trait CompanionRepo: Send + Sync {
     async fn insert(&self, c: &Companion) -> RepoResult<()>;
     async fn get(&self, id: CompanionId) -> RepoResult<Option<Companion>>;
+    /// The companions of these ids that exist, in any order.
+    async fn get_many(&self, ids: &[CompanionId]) -> RepoResult<Vec<Companion>>;
     async fn update(&self, c: &Companion) -> RepoResult<()>;
     /// Update several companions atomically (merge).
     async fn update_many(&self, cs: &[Companion]) -> RepoResult<()>;
@@ -63,6 +79,11 @@ pub trait CompanionRepo: Send + Sync {
     async fn by_owner(&self, owner: UserId) -> RepoResult<Vec<Companion>>;
     /// Companions of any owner linked to `user`.
     async fn linked_to(&self, user: UserId) -> RepoResult<Vec<Companion>>;
+    /// Game groups of `owner`, removed ones included, any order.
+    async fn game_groups(&self, owner: UserId) -> RepoResult<Vec<GameGroup>>;
+    async fn game_group(&self, id: GameGroupId) -> RepoResult<Option<GameGroup>>;
+    /// Insert or replace a group with its members (one transaction).
+    async fn upsert_game_group(&self, g: &GameGroup) -> RepoResult<()>;
 }
 
 #[async_trait]
@@ -87,6 +108,42 @@ pub trait InviteRepo: Send + Sync {
 pub trait CatalogRepo: Send + Sync {
     /// Insert or replace by id.
     async fn upsert(&self, item: &CatalogItem) -> RepoResult<()>;
+    /// Insert a new item and claim all its external ids atomically (DEC-445). When another
+    /// item already holds one of them (also one a concurrent insert committed meanwhile),
+    /// nothing is written and that item's id is returned.
+    /// `obtained_at` stamps when the data was obtained (catalog retention, DEC-453).
+    async fn insert_new(
+        &self,
+        item: &CatalogItem,
+        obtained_at: Timestamp,
+    ) -> RepoResult<Option<ItemId>>;
+    /// Items holding an external id in one of `namespaces` whose connector data was obtained
+    /// before `before` (created then, or last refreshed then: a change of `fetched_at`
+    /// restamps it), oldest first, with that time.
+    async fn provider_data_before(
+        &self,
+        namespaces: &[String],
+        before: Timestamp,
+        limit: u32,
+    ) -> RepoResult<Vec<(ItemId, Timestamp)>>;
+    /// Drop everything connectors supplied (title, year, description, original title,
+    /// attributes, cover, provenance, episodes, fetch times; the external ids stay), make the
+    /// item a stub, clear its stamp and let it be fetched again from `at` on (UX4-9). Returns the
+    /// cover asset it referenced.
+    async fn purge_provider_data(&self, id: ItemId, at: Timestamp) -> RepoResult<Option<String>>;
+    /// Delete the item when no library entry, list, session, progress event or review refers
+    /// to it (catalog retention, UX4-9); checked in the same statement as the delete.
+    async fn delete_unreferenced(&self, id: ItemId) -> RepoResult<Removal>;
+    /// Purged items (see [`CatalogRepo::purge_provider_data`]) with an id in one of `namespaces`
+    /// that may be fetched again at `now`, longest waiting first.
+    async fn expired_provider_data(
+        &self,
+        namespaces: &[String],
+        now: Timestamp,
+        limit: u32,
+    ) -> RepoResult<Vec<ItemId>>;
+    /// A purged item may be fetched again from `next` on (a refetch was just queued).
+    async fn touch_expired(&self, id: ItemId, next: Timestamp) -> RepoResult<()>;
     async fn get(&self, id: ItemId) -> RepoResult<Option<CatalogItem>>;
     async fn by_external_id(
         &self,
@@ -95,31 +152,75 @@ pub trait CatalogRepo: Send + Sync {
     ) -> RepoResult<Option<CatalogItem>>;
     /// The items with these ids that exist, in any order.
     async fn get_many(&self, ids: &[ItemId]) -> RepoResult<Vec<CatalogItem>>;
+    /// The seasons fetched for an item with their episodes, by season number (WP4-7).
+    async fn episode_seasons(
+        &self,
+        item: ItemId,
+    ) -> RepoResult<Vec<domain::catalog::EpisodeSeason>>;
+    /// Replace what is stored for these seasons of an item, in one transaction.
+    async fn put_episode_seasons(
+        &self,
+        item: ItemId,
+        seasons: &[domain::catalog::EpisodeSeason],
+    ) -> RepoResult<()>;
+    /// Who a change of the item matters to (DEC-490): the users with it in their library,
+    /// history, sessions (the owner, and linked participants when the owner shares sessions),
+    /// reviews or lists, and those who opened its page and are still watching (until after
+    /// `now`). `Everyone` when it is on a list visible to the whole instance.
+    async fn audience(&self, id: ItemId, now: Timestamp) -> RepoResult<ItemAudience>;
+    /// `user` opened the item page: changes of the item reach them until `until`. Drops the
+    /// user's watches that ended before `now`.
+    async fn watch(
+        &self,
+        id: ItemId,
+        user: UserId,
+        until: Timestamp,
+        now: Timestamp,
+    ) -> RepoResult<()>;
 }
 
 #[async_trait]
 pub trait LibraryRepo: Send + Sync {
     async fn get(&self, user: UserId, item: ItemId) -> RepoResult<Option<LibraryEntry>>;
     async fn get_by_id(&self, id: EntryId) -> RepoResult<Option<LibraryEntry>>;
+    /// Which of these entry ids are in use (by anyone). The default reads them one by one;
+    /// stores answer in one read (UX4-12).
+    async fn existing_entry_ids(&self, ids: &[EntryId]) -> RepoResult<Vec<EntryId>> {
+        let mut out = Vec::new();
+        for id in ids {
+            if self.get_by_id(*id).await?.is_some() {
+                out.push(*id);
+            }
+        }
+        Ok(out)
+    }
+    /// The user's entries of these items (those in the library), in any order.
+    async fn entries_for(&self, user: UserId, items: &[ItemId]) -> RepoResult<Vec<LibraryEntry>>;
     /// Insert or replace by `(user, item)`.
     async fn upsert(&self, entry: &LibraryEntry) -> RepoResult<()>;
     async fn by_user(&self, user: UserId) -> RepoResult<Vec<LibraryEntry>>;
-    /// One page of the user's library, most recently added first, and the total count.
+    /// Insert or replace several entries by `(user, item)` and, where given, replace their
+    /// tags (normalised, distinct by key), all in one transaction (bulk edits and their undo).
+    async fn write_many(&self, writes: &[(LibraryEntry, Option<Vec<String>>)]) -> RepoResult<()>;
+    /// Delete the user's entries with these ids and their tags in one transaction. Progress
+    /// events, sessions, reviews and list memberships stay ("delete keeps history"). Returns
+    /// the entries deleted.
+    async fn remove_many(&self, user: UserId, ids: &[EntryId]) -> RepoResult<u64>;
+    /// One page of the user's library, most recently added first (`added_at`, then id), the
+    /// total count, and whether more follow. `after` is the `(added_at, id)` of the previous
+    /// page's last row (keyset paging, DEC-416).
     async fn page(
         &self,
         user: UserId,
-        offset: u64,
+        after: Option<(Timestamp, EntryId)>,
         limit: u32,
-    ) -> RepoResult<(Vec<LibraryEntry>, u64)>;
+    ) -> RepoResult<EntryPage>;
     /// Is the item in anyone's library (pins its cover, D-8)?
     async fn any_for_item(&self, item: ItemId) -> RepoResult<bool>;
-    /// One page of the user's entries matching `filter`, in its order, and the number of
-    /// matching entries.
-    async fn query(
-        &self,
-        user: UserId,
-        filter: &LibraryFilter,
-    ) -> RepoResult<(Vec<LibraryHit>, u64)>;
+    /// One page of the user's entries matching `filter`, in its order and strictly after
+    /// `filter.after`, the number of matching entries (all pages), and the cursor of the
+    /// page's last row when more follow.
+    async fn query(&self, user: UserId, filter: &LibraryFilter) -> RepoResult<HitPage>;
     /// Number of the user's entries per `(kind, status)`.
     async fn counts(&self, user: UserId) -> RepoResult<Vec<(KindId, Status, u64)>>;
     /// Tags of the given entries, `(entry, tag)` pairs sorted by tag key.
@@ -141,6 +242,33 @@ pub trait LibraryRepo: Send + Sync {
         kinds: &[KindId],
         limit: u32,
     ) -> RepoResult<Vec<ItemId>>;
+}
+
+/// The plays logged as one game group ([`SessionRepo::group_plays`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupPlays {
+    pub group: domain::ids::GameGroupId,
+    pub plays: u32,
+    pub last_at: Timestamp,
+    pub last_item: ItemId,
+}
+
+/// Who hears about a change of a catalog item ([`CatalogRepo::audience`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ItemAudience {
+    /// Every signed-in user (the item is on a list visible to the instance).
+    Everyone,
+    /// These users; none: the change is not published.
+    Users(Vec<UserId>),
+}
+
+/// What [`CatalogRepo::delete_unreferenced`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Removal {
+    /// Deleted; the caller deletes the stored cover.
+    Deleted { cover_asset: Option<String> },
+    /// Still referenced (or already gone): kept.
+    Kept,
 }
 
 /// Order of a library query (design.md 3.5).
@@ -182,8 +310,51 @@ pub struct LibraryFilter {
     pub items: Option<Vec<ItemId>>,
     pub sort: LibrarySort,
     pub descending: bool,
-    pub offset: u64,
+    /// Rows strictly after this one in the order (keyset paging, DEC-416); its sort and
+    /// direction are the filter's.
+    pub after: Option<LibraryCursor>,
     pub limit: u32,
+}
+
+/// The value a row is ordered by under one sort: titles as lower-case text, last activity
+/// and added as times, year, rating and plays as numbers (missing ones last in both
+/// directions).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SortValue {
+    Text(String),
+    Time(Timestamp),
+    Int(Option<i64>),
+}
+
+/// Where a page ends: the sort, direction and key of its last row and the row's entry id
+/// (the tie-break).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LibraryCursor {
+    pub sort: LibrarySort,
+    pub descending: bool,
+    pub key: SortValue,
+    pub id: EntryId,
+}
+
+/// A page of library entries, most recently added first.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EntryPage {
+    pub entries: Vec<LibraryEntry>,
+    /// Entries in the whole library.
+    pub total: u64,
+    /// More entries follow the last one.
+    pub more: bool,
+}
+
+/// A page of a library query.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HitPage {
+    pub hits: Vec<LibraryHit>,
+    /// Matching entries (all pages).
+    pub total: u64,
+    /// The cursor after the last hit, when more follow.
+    pub next: Option<LibraryCursor>,
 }
 
 /// A library entry as a query returns it.
@@ -204,6 +375,37 @@ pub struct HistoryWindow {
     pub limit: u32,
 }
 
+/// Rows of a user's history in several time spans at once (the person filter of the activity
+/// feed, DEC-494): each span is `[from, to)` by time, the spans do not overlap; items of
+/// `kinds` (empty: all); newest first by `(time, id)`, at most `limit` in all.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HistorySpans {
+    pub spans: Vec<(Timestamp, Timestamp)>,
+    pub kinds: Vec<KindId>,
+    pub limit: u32,
+}
+
+impl HistorySpans {
+    /// The window of one span (`before` the span's end with the smallest id: strictly
+    /// before `to`).
+    #[must_use]
+    pub fn window(&self, (from, to): (Timestamp, Timestamp)) -> HistoryWindow {
+        HistoryWindow {
+            before: Some((to, uuid::Uuid::nil())),
+            since: Some(from),
+            kinds: self.kinds.clone(),
+            limit: self.limit,
+        }
+    }
+}
+
+/// Newest first by `key`, at most `limit` (the default span reads).
+fn newest<T>(mut rows: Vec<T>, limit: u32, key: impl Fn(&T) -> (Timestamp, uuid::Uuid)) -> Vec<T> {
+    rows.sort_by_key(|r| std::cmp::Reverse(key(r)));
+    rows.truncate(limit as usize);
+    rows
+}
+
 #[async_trait]
 pub trait ProgressRepo: Send + Sync {
     /// Append an event. If an event with the same `(user, client_op_id)` exists, nothing is
@@ -217,11 +419,28 @@ pub trait ProgressRepo: Send + Sync {
     async fn for_items(&self, user: UserId, items: &[ItemId]) -> RepoResult<Vec<ProgressEvent>>;
     /// Effective events (no undo events, none that were undone) in `window`, newest first.
     async fn recent(&self, user: UserId, window: &HistoryWindow) -> RepoResult<Vec<ProgressEvent>>;
+    /// Effective events in the spans `w`, as [`Self::recent`]. The default reads one window
+    /// per span; stores answer in one read.
+    async fn recent_spans(&self, user: UserId, w: &HistorySpans) -> RepoResult<Vec<ProgressEvent>> {
+        let mut out = Vec::new();
+        for &span in &w.spans {
+            out.extend(self.recent(user, &w.window(span)).await?);
+        }
+        Ok(newest(out, w.limit, |e| (e.occurred_at, e.id.0)))
+    }
     /// The user's statistics per kind and month in `zone` (an IANA name, DEC-239), by the
     /// rules of [`crate::month_amounts`] (sessions counted with the user's own sessions'
     /// durations).
     async fn month_amounts(&self, user: UserId, zone: &str)
     -> RepoResult<Vec<crate::MonthAmounts>>;
+    /// The amounts of the user's effective events in `[from, to)` per kind, by the rules of
+    /// [`crate::window_amounts`] (forward moves measured against the item's earlier events).
+    async fn window_amounts(
+        &self,
+        user: UserId,
+        from: Timestamp,
+        to: Timestamp,
+    ) -> RepoResult<Vec<crate::KindAmounts>>;
 }
 
 #[async_trait]
@@ -255,6 +474,65 @@ pub trait SessionRepo: Send + Sync {
     async fn by_owner(&self, owner: UserId) -> RepoResult<Vec<Session>>;
     /// Sessions in which any of `companions` participates.
     async fn with_participants(&self, companions: &[CompanionId]) -> RepoResult<Vec<Session>>;
+    /// The owner's sessions in the window `w` (DEC-235): newest first by `(started_at, id)`,
+    /// strictly before `w.before`, started at or after `w.since`, of an item of `w.kinds`
+    /// (empty: any), at most `w.limit`.
+    async fn by_owner_window(&self, owner: UserId, w: &HistoryWindow) -> RepoResult<Vec<Session>>;
+    /// Per game group of the owner's sessions: the number of plays and the newest play
+    /// (UX4-17). The default reads every session; stores answer with one grouped read.
+    async fn group_plays(&self, owner: UserId) -> RepoResult<Vec<GroupPlays>> {
+        let mut per: std::collections::HashMap<domain::ids::GameGroupId, GroupPlays> =
+            std::collections::HashMap::new();
+        for s in self.by_owner(owner).await? {
+            let Some(group) = s.game_group_id else {
+                continue;
+            };
+            let g = per.entry(group).or_insert(GroupPlays {
+                group,
+                plays: 0,
+                last_at: s.started_at,
+                last_item: s.item_id,
+            });
+            g.plays += 1;
+            if s.started_at > g.last_at {
+                g.last_at = s.started_at;
+                g.last_item = s.item_id;
+            }
+        }
+        Ok(per.into_values().collect())
+    }
+    /// Sessions in which any of `companions` participates, in the window `w` as
+    /// [`Self::by_owner_window`].
+    async fn with_participants_window(
+        &self,
+        companions: &[CompanionId],
+        w: &HistoryWindow,
+    ) -> RepoResult<Vec<Session>>;
+    /// The owner's sessions started in the spans `w`, as [`Self::by_owner_window`]. The
+    /// default reads one window per span; stores answer in one read.
+    async fn by_owner_spans(&self, owner: UserId, w: &HistorySpans) -> RepoResult<Vec<Session>> {
+        let mut out = Vec::new();
+        for &span in &w.spans {
+            out.extend(self.by_owner_window(owner, &w.window(span)).await?);
+        }
+        Ok(newest(out, w.limit, |s| (s.started_at, s.id.0)))
+    }
+    /// Sessions with any of `companions` started in the spans `w`, as
+    /// [`Self::with_participants_window`]. The default reads one window per span.
+    async fn with_participants_spans(
+        &self,
+        companions: &[CompanionId],
+        w: &HistorySpans,
+    ) -> RepoResult<Vec<Session>> {
+        let mut out = Vec::new();
+        for &span in &w.spans {
+            out.extend(
+                self.with_participants_window(companions, &w.window(span))
+                    .await?,
+            );
+        }
+        Ok(newest(out, w.limit, |s| (s.started_at, s.id.0)))
+    }
 }
 
 // ---------------------------------------------------------------- kinds
@@ -486,6 +764,10 @@ pub struct HttpRequest {
     /// client then keeps it out of the shared per-connector rejection state.
     #[serde(default)]
     pub skip_auth_record: bool,
+    /// The member an interactive request is made for (their search), for the per-user fair
+    /// share of the interactive lane in hosted mode (design.md 4.1). `None`: background work.
+    #[serde(default)]
+    pub user: Option<UserId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

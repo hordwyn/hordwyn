@@ -15,6 +15,8 @@ pub enum Capability {
     Trending,
     Translations,
     Images,
+    /// Per-episode release dates of one season (WP4-7).
+    Episodes,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +77,15 @@ pub struct DetailsRequest {
     /// An id in this connector's namespace.
     pub id: String,
     pub language: Option<String>,
+}
+
+/// The episodes of one season of an item (WP4-7).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EpisodesRequest {
+    pub kind: String,
+    /// An id in this connector's namespace.
+    pub id: String,
+    pub season: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

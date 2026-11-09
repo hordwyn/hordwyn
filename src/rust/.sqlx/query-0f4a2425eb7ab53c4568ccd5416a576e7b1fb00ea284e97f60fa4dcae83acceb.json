@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO game_group_members (group_id, companion_id, position)\n             SELECT $1, m, (n - 1)::integer FROM unnest($2::uuid[]) WITH ORDINALITY AS u (m, n)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0f4a2425eb7ab53c4568ccd5416a576e7b1fb00ea284e97f60fa4dcae83acceb"
+}

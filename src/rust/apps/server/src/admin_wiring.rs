@@ -16,6 +16,10 @@ use zeroize::Zeroizing;
 pub const AUDIT_RETENTION_JOB: &str = "admin.audit_retention";
 /// Nightly re-wrap while values are on an old key version.
 pub const REWRAP_JOB: &str = "secrets.rewrap";
+/// The Overview health rows every minute (WP4-2, DEC-285).
+pub const PROBES_JOB: &str = "admin.probes";
+/// The daily funnel totals and their retention (WP4-5).
+pub const USAGE_DAILY_JOB: &str = "usage.funnel_daily";
 
 /// The loaded key ring and where it came from.
 pub struct Keys {
@@ -201,6 +205,7 @@ pub fn config_values(
             "mail.from",
             smtp.map_or(Value::Null, |s| Value::from(s.from.as_str())),
         ),
+        ("usage.funnel", Value::from(config.usage.funnel)),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -246,6 +251,8 @@ pub struct AdminParts<'a> {
     pub search_backend: &'static str,
     pub disabled_sources: Vec<(String, String, Vec<String>)>,
     pub mailer: Arc<notify::channels::email::Mailer>,
+    /// `instance.hosting`, shared with the governed client.
+    pub hosting: Arc<std::sync::RwLock<String>>,
 }
 
 /// Add the admin API to the state, then apply the stored settings and credentials.
@@ -276,6 +283,7 @@ pub async fn with_admin(
             source: p.keys.source.as_str().into(),
             key_file: cfg.secrets.key_file.clone(),
         },
+        usage_limiter: Arc::default(),
         secret_rows: p.secret_rows,
         budget: Some(p.budget),
         queue: Some(p.queue),
@@ -302,7 +310,7 @@ pub async fn with_admin(
             oidc_configured: cfg.auth.oidc.is_some(),
         },
         secure_cookies: Arc::new(std::sync::atomic::AtomicBool::new(cfg.auth.secure_cookies)),
-        hosting: Arc::new(std::sync::RwLock::new(cfg.instance.hosting.as_str().into())),
+        hosting: p.hosting,
         mail: Some(Arc::new(EmailTransport(p.mailer))),
     });
     api::admin::load_settings(&api)

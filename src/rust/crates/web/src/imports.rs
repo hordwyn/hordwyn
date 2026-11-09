@@ -553,7 +553,7 @@ fn ResultPanel(r: ImportDto, page: Page) -> impl IntoView {
 #[component]
 fn UnmatchedRow(u: UnmatchedDto, import_id: String, page: Page) -> impl IntoView {
     let i18n = use_i18n();
-    let matching = expect_context::<crate::palette::PaletteMatch>().0;
+    let matching = expect_context::<crate::palette::PaletteScope>().0;
     let open = expect_context::<crate::palette::PaletteOpen>().0;
     let title = u.row.title.clone();
     let meta = match u.row.year {
@@ -563,16 +563,18 @@ fn UnmatchedRow(u: UnmatchedDto, import_id: String, page: Page) -> impl IntoView
     let label = i18n.t_args("imports-find-named", &[("title", title.clone().into())]);
     let find = move |_| {
         let i18n = page.i18n.get_value();
-        matching.set(Some(crate::palette::MatchTarget {
-            import_id: import_id.clone(),
-            source_id: u.row.source_id.clone(),
-            title: title.clone(),
-            done: Callback::new(move |err: Option<String>| {
-                page.outcome
-                    .set(Some(err.map_or_else(|| Ok(i18n.t("imports-matched")), Err)));
-                page.data.refetch();
-            }),
-        }));
+        matching.set(Some(crate::palette::PaletteTarget::Match(
+            crate::palette::MatchTarget {
+                import_id: import_id.clone(),
+                source_id: u.row.source_id.clone(),
+                title: title.clone(),
+                done: Callback::new(move |err: Option<String>| {
+                    page.outcome
+                        .set(Some(err.map_or_else(|| Ok(i18n.t("imports-matched")), Err)));
+                    page.data.refetch();
+                }),
+            },
+        )));
         open.set(true);
     };
     view! {

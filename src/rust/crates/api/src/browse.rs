@@ -40,6 +40,15 @@ fn parse_kind(s: &str) -> ApiResult<KindId> {
     KindId::new(s).map_err(|e| ApiError::bad_request(e.to_string()))
 }
 
+/// A library paging cursor (`after`, DEC-416).
+///
+/// # Errors
+/// Text that is no cursor of ours (`bad_request`).
+pub fn parse_cursor(s: &str) -> ApiResult<app::ports::LibraryCursor> {
+    app::ports::LibraryCursor::decode(s)
+        .ok_or_else(|| ApiError::bad_request("`after` is not a cursor from a previous page"))
+}
+
 fn parse_sort(s: &str) -> ApiResult<LibrarySort> {
     Ok(match s {
         "last_activity" => LibrarySort::LastActivity,
@@ -184,7 +193,7 @@ pub async fn library_query(
             .transpose()?
             .unwrap_or_default(),
         descending: q.descending,
-        offset: q.offset,
+        after: q.after.as_deref().map(parse_cursor).transpose()?,
         limit: q.limit,
     };
     let limit = if query.limit == 0 {
@@ -200,7 +209,7 @@ pub async fn library_query(
     Ok(LibraryRowsDto {
         rows,
         total: page.total,
-        offset: q.offset,
+        next: page.next.as_ref().map(app::ports::LibraryCursor::encode),
         limit,
     })
 }
@@ -470,7 +479,7 @@ pub async fn activity(s: &ApiState, a: Actor, q: ActivityQueryDto) -> ApiResult<
 
 // ------------------------------------------------------------ stats and home
 
-fn amounts(a: &Amounts) -> AmountsDto {
+pub(crate) fn amounts(a: &Amounts) -> AmountsDto {
     AmountsDto {
         events: a.events,
         completions: a.completions,
@@ -550,41 +559,53 @@ pub const HOME_CONTINUE: u32 = 6;
 pub const HOME_UP_NEXT: u32 = 6;
 pub const HOME_ACTIVITY: u32 = 5;
 
-/// Everything the signed-in Home page shows.
+/// Everything the signed-in Home page shows. The five parts are independent, so they are
+/// read concurrently (WP4-1: Home is their slowest part, not their sum).
 ///
 /// # Errors
 /// Storage errors.
 pub async fn home(s: &ApiState, a: Actor) -> ApiResult<HomeDto> {
-    let counts = s.app.library_counts(a).await?;
-    let mut continue_rows = Vec::new();
-    for r in s.app.continue_rows(a, HOME_CONTINUE).await? {
-        continue_rows.push(row(s, &r).await);
-    }
-    let mut up_next = Vec::new();
-    for u in s.app.up_next(a, HOME_UP_NEXT).await? {
-        up_next.push(UpNextDto {
-            row: row(s, &u.row).await,
-            reason: match u.reason {
-                UpNextReason::NextInSeries => "next_in_series".into(),
-                UpNextReason::Planned => "planned".into(),
-            },
-        });
-    }
-    let activity = s
-        .app
-        .activity_feed(
-            a,
-            ActivityQuery {
-                limit: HOME_ACTIVITY,
-                ..ActivityQuery::default()
-            },
-        )
-        .await?;
+    let counts = async { Ok::<_, ApiError>(s.app.library_counts(a).await?) };
+    let continue_rows = async {
+        let mut out = Vec::new();
+        for r in s.app.continue_rows(a, HOME_CONTINUE).await? {
+            out.push(row(s, &r).await);
+        }
+        Ok::<_, ApiError>(out)
+    };
+    let up_next = async {
+        let mut out = Vec::new();
+        for u in s.app.up_next(a, HOME_UP_NEXT).await? {
+            out.push(UpNextDto {
+                row: row(s, &u.row).await,
+                reason: match u.reason {
+                    UpNextReason::NextInSeries => "next_in_series".into(),
+                    UpNextReason::Planned => "planned".into(),
+                },
+            });
+        }
+        Ok::<_, ApiError>(out)
+    };
+    let activity = async {
+        let page = s
+            .app
+            .activity_feed(
+                a,
+                ActivityQuery {
+                    limit: HOME_ACTIVITY,
+                    ..ActivityQuery::default()
+                },
+            )
+            .await?;
+        Ok::<_, ApiError>(activity_page(&page, s.app.user_zone(a.user_id).await?))
+    };
+    let (counts, continue_rows, up_next, activity, stats) =
+        tokio::try_join!(counts, continue_rows, up_next, activity, stats_totals(s, a))?;
     Ok(HomeDto {
         library_total: counts.total,
         continue_rows,
         up_next,
-        activity: activity_page(&activity, s.app.user_zone(a.user_id).await?),
-        stats: stats_totals(s, a).await?,
+        activity,
+        stats,
     })
 }

@@ -220,6 +220,22 @@ impl UserRepo for PgStore {
         record(&mut tx, "user", id.0, Op::Delete, &[]).await?;
         tx.commit().await.map_err(be)
     }
+
+    async fn goals(&self, user: UserId) -> Res<Vec<domain::goal::Goal>> {
+        self.pg_goals(user).await
+    }
+
+    async fn goal(&self, id: domain::ids::GoalId) -> Res<Option<domain::goal::Goal>> {
+        self.pg_goal(id).await
+    }
+
+    async fn upsert_goal(&self, goal: &domain::goal::Goal) -> Res<()> {
+        self.pg_upsert_goal(goal).await
+    }
+
+    async fn delete_goal(&self, id: domain::ids::GoalId) -> Res<()> {
+        self.pg_delete_goal(id).await
+    }
 }
 
 #[async_trait]
@@ -237,6 +253,21 @@ impl CompanionRepo for PgStore {
             .map_err(be)?
             .map(Companion::try_from)
             .transpose()
+    }
+
+    async fn get_many(&self, ids: &[CompanionId]) -> Res<Vec<Companion>> {
+        let ids: Vec<uuid::Uuid> = ids.iter().map(|c| c.0).collect();
+        sqlx::query_as!(
+            CompanionRow,
+            "SELECT * FROM companions WHERE id = ANY($1)",
+            &ids
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?
+        .into_iter()
+        .map(Companion::try_from)
+        .collect()
     }
 
     async fn update(&self, c: &Companion) -> Res<()> {
@@ -291,6 +322,18 @@ impl CompanionRepo for PgStore {
         .into_iter()
         .map(Companion::try_from)
         .collect()
+    }
+    async fn game_groups(&self, owner: UserId) -> Res<Vec<domain::game_group::GameGroup>> {
+        self.pg_game_groups(owner).await
+    }
+    async fn game_group(
+        &self,
+        id: domain::ids::GameGroupId,
+    ) -> Res<Option<domain::game_group::GameGroup>> {
+        self.pg_game_group(id).await
+    }
+    async fn upsert_game_group(&self, g: &domain::game_group::GameGroup) -> Res<()> {
+        self.pg_upsert_game_group(g).await
     }
 }
 

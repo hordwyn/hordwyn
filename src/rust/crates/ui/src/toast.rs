@@ -148,7 +148,7 @@ pub fn Toaster(#[prop(into)] dismiss_label: String) -> impl IntoView {
     let toasts = use_toasts();
     let dismiss_label = StoredValue::new(dismiss_label);
     view! {
-        <div role="status" aria-live="polite" class="fixed bottom-[calc(1rem+var(--tab-bar-height))] right-4 z-[100] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+        <div role="status" aria-live="polite" data-float="" class="fixed bottom-[calc(1rem+var(--tab-bar-height))] right-4 z-[100] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
             <For each=move || toasts.list.get() key=|t| t.id let:t>
                 <div class=cn(&[
                     "rounded-md border p-4 shadow-lg",

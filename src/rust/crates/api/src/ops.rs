@@ -33,10 +33,13 @@ pub fn parse_id<T>(s: &str, wrap: impl FnOnce(uuid::Uuid) -> T) -> ApiResult<T> 
         .map_err(|_| ApiError::bad_request(format!("invalid id `{s}`")))
 }
 
+/// The stored item; a refresh it needs is queued and its `entity.updated` reaches the
+/// requester (DEC-492).
+///
 /// # Errors
 /// Unknown item.
-pub async fn item(s: &ApiState, id: &str) -> ApiResult<CatalogItemDto> {
-    let item = s.app.item_detail(parse_id(id, ItemId)?).await?;
+pub async fn item(s: &ApiState, a: Actor, id: &str) -> ApiResult<CatalogItemDto> {
+    let item = s.app.item_detail_for(a, parse_id(id, ItemId)?).await?;
     Ok(dto::item(s, &item).await)
 }
 
@@ -47,6 +50,10 @@ pub async fn item(s: &ApiState, id: &str) -> ApiResult<CatalogItemDto> {
 /// Unknown item.
 pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDto> {
     let item_id = parse_id(id, ItemId)?;
+    // the page hears about its item while it is open, also a stub not in the library (DEC-490);
+    // before the refresh is queued, so its event cannot come first; best effort (an unknown
+    // item fails below)
+    let _ = s.app.watch_item(a, item_id).await;
     let item = s.app.item_detail(item_id).await?;
     let entry = s.app.entry(a, item_id).await?;
     let progress = s.app.history(a, item_id).await?;
@@ -67,6 +74,17 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
         .into_iter()
         .filter(|a| namespaces.contains(&a.connector))
         .collect();
+    let episodes = s
+        .app
+        .catalog_episodes(item_id)
+        .await?
+        .into_iter()
+        .map(|e| contracts::EpisodeDateDto {
+            season: e.season,
+            episode: e.number,
+            air_date: e.air_date.map(|d| d.format("%Y-%m-%d").to_string()),
+        })
+        .collect();
     Ok(ItemPageDto {
         item: dto::item(s, &item).await,
         entry: entry.as_ref().map(dto::entry),
@@ -75,6 +93,7 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
         tags: state.as_ref().map(|x| x.2.clone()).unwrap_or_default(),
         summary: state.as_ref().map(|x| x.0.clone()),
         next_step: state.map(|x| x.1),
+        episodes,
     })
 }
 
@@ -142,11 +161,27 @@ pub async fn search(
             tracing::warn!(error = %e, "local search failed");
             vec![]
         });
-    let mut items = Vec::new();
-    for h in hits {
-        if let Ok(id) = uuid::Uuid::parse_str(&h.id)
-            && let Ok(item) = s.app.catalog_item(ItemId(id)).await
-        {
+    // the hits' items in one read, in the order of the hits (DEC-493)
+    let ids: Vec<ItemId> = hits
+        .iter()
+        .filter_map(|h| uuid::Uuid::parse_str(&h.id).ok().map(ItemId))
+        .collect();
+    let mut found: std::collections::HashMap<ItemId, domain::catalog::CatalogItem> = s
+        .app
+        .repos
+        .catalog
+        .get_many(&ids)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "search hits unreadable");
+            vec![]
+        })
+        .into_iter()
+        .map(|i| (i.id, i))
+        .collect();
+    let mut items = Vec::with_capacity(ids.len());
+    for id in &ids {
+        if let Some(item) = found.remove(id) {
             items.push(dto::item(s, &item).await);
         }
     }
@@ -167,10 +202,31 @@ pub async fn search(
         .into_iter()
         .collect();
     let (skipped, groups_without_source) = crate::admin::search_reasons(s, a, &kinds);
+    // nothing to ask: no credentials read, no task (DEC-493)
+    if !pending.is_empty() {
+        stream_connector_results(s, a, text, kinds, search_id.clone()).await;
+    }
+    Ok(SearchResponseDto {
+        search_id,
+        items,
+        pending,
+        skipped,
+        groups_without_source,
+    })
+}
+
+/// Ask the connectors in the background; each one's results go to the searching user as a
+/// `search.results` event.
+async fn stream_connector_results(
+    s: &ApiState,
+    a: Actor,
+    text: String,
+    kinds: Vec<String>,
+    sid: String,
+) {
     // the member's own credentials (TheTVDB PIN) go with their search (design.md 4.1)
     let user_keys = crate::admin::user_keys(s, a).await;
     let state = s.clone();
-    let sid = search_id.clone();
     tokio::spawn(async move {
         state
             .fanout
@@ -200,13 +256,6 @@ pub async fn search(
             })
             .await;
     });
-    Ok(SearchResponseDto {
-        search_id,
-        items,
-        pending,
-        skipped,
-        groups_without_source,
-    })
 }
 
 #[must_use]
@@ -224,27 +273,44 @@ pub fn sources(s: &ApiState) -> Vec<AttributionDto> {
         .collect()
 }
 
+/// One page of the library, most recently added first; `after` is the previous page's
+/// `next` (keyset paging, DEC-416). The items are read in one batch.
+///
 /// # Errors
-/// Storage errors.
+/// A malformed cursor (`bad_request`); storage errors.
 pub async fn library(
     s: &ApiState,
     a: Actor,
-    offset: u64,
+    after: Option<&str>,
     limit: u32,
 ) -> ApiResult<contracts::LibraryPageDto> {
-    let (entries, total) = s.app.library_page(a, offset, limit).await?;
+    let after = after.map(crate::browse::parse_cursor).transpose()?;
+    let (entries, total, next) = s.app.library_page(a, after.as_ref(), limit).await?;
+    let ids: Vec<ItemId> = entries.iter().map(|e| e.item_id).collect();
+    let items: std::collections::HashMap<ItemId, domain::catalog::CatalogItem> = s
+        .app
+        .repos
+        .catalog
+        .get_many(&ids)
+        .await
+        .map_err(app::AppError::from)?
+        .into_iter()
+        .map(|i| (i.id, i))
+        .collect();
     let mut out = Vec::with_capacity(entries.len());
     for e in entries {
-        let item = s.app.catalog_item(e.item_id).await?;
+        let Some(item) = items.get(&e.item_id) else {
+            return Err(app::AppError::NotFound("catalog item").into());
+        };
         out.push(LibraryItemDto {
             entry: dto::entry(&e),
-            item: dto::item(s, &item).await,
+            item: dto::item(s, item).await,
         });
     }
     Ok(contracts::LibraryPageDto {
         items: out,
         total,
-        offset,
+        next: next.as_ref().map(app::ports::LibraryCursor::encode),
         limit: limit.clamp(1, app::App::MAX_PAGE),
     })
 }
@@ -430,6 +496,12 @@ pub async fn log_play(
         Some(_) => return Err(ApiError::bad_request("coop must be `won` or `lost`")),
     };
     play.client_op_id = b.client_op_id.map(|o| parse_id(&o, |u| u)).transpose()?;
+    play.game_group = b
+        .game_group_id
+        .as_deref()
+        .filter(|g| !g.is_empty())
+        .map(|g| parse_id(g, domain::ids::GameGroupId))
+        .transpose()?;
     let (_, e) = s.app.log_play(a, play).await?;
     s.pin_cover(item_id).await;
     Ok(dto::progress(&e))

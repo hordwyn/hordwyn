@@ -8,11 +8,11 @@
 
 use std::collections::BTreeMap;
 
-use contracts::{CompanionDto, NextStepDto};
+use contracts::{CompanionDto, GameGroupDto, NextStepDto};
 use leptos::html;
 use leptos::prelude::*;
 use ui::{
-    Button, ButtonSize, ButtonVariant, Disclosure, DisclosureMode, FormField, Input, Label,
+    Button, ButtonSize, ButtonVariant, Chip, Disclosure, DisclosureMode, FormField, Input, Label,
     Segmented, SegmentedOption, Select, SelectOption, Sheet, SheetSide, Switch, Textarea,
     disclosure_storage_key,
 };
@@ -21,8 +21,8 @@ use crate::api;
 use crate::history_state::Day;
 use crate::i18n::{I18n, t, use_i18n};
 use crate::log_form::{
-    DateChip, FormError, PlayForm, Player, WatchedForm, format_position, page_progress,
-    position_progress,
+    DateChip, FormError, PlayForm, Player, WatchedForm, format_position, group_players,
+    page_progress, position_progress,
 };
 use crate::next_step::{LoggedStep, StepCtx, run_step, toast_logged};
 use crate::widgets::{CompanionPicker, RatingInput, progress_label};
@@ -145,6 +145,8 @@ fn DiscardPrompt(confirm: RwSignal<bool>, discard: Callback<()>) -> impl IntoVie
 pub struct WatchedState {
     /// Set to open the sheet for a step; cleared when it closes.
     pub target: RwSignal<Option<SheetTarget>>,
+    /// People the next opening starts with (the palette's "Log with ...", WP4-4).
+    pub preset: RwSignal<Vec<String>>,
     open: RwSignal<bool>,
     chip: RwSignal<String>,
     picked: RwSignal<String>,
@@ -169,6 +171,7 @@ impl WatchedState {
     pub fn new() -> Self {
         Self {
             target: RwSignal::new(None),
+            preset: RwSignal::new(Vec::new()),
             open: RwSignal::new(false),
             chip: RwSignal::new("today".into()),
             picked: RwSignal::new(String::new()),
@@ -197,7 +200,8 @@ impl WatchedState {
     fn reset(&self, info: &ItemInfo) {
         self.chip.set("today".into());
         self.picked.set(String::new());
-        self.with.set(Vec::new());
+        self.with.set(self.preset.get_untracked());
+        self.preset.set(Vec::new());
         self.rating.set(info.rating);
         self.note.set(info.note.clone());
         self.initial.set(self.form());
@@ -260,9 +264,16 @@ pub fn WatchedSheet(
             s.target.set(None);
         }
     });
+    crate::funnel::sheet_flow(s.open);
     let ctx = StepCtx::current();
     let i2 = i18n.clone();
-    let save = Callback::new(move |()| save_watched(s, info.get_value(), ctx.clone(), i2.clone()));
+    // sheets stay online-only (WP4-5): offline the save waits
+    let offline = crate::offline::is_offline();
+    let save = Callback::new(move |()| {
+        if !offline.get_untracked() {
+            save_watched(s, info.get_value(), ctx.clone(), i2.clone());
+        }
+    });
     let can_close = close_guard(move || s.dirty(), s.confirm);
     let discard = Callback::new(move |()| {
         s.initial.set(s.form());
@@ -315,7 +326,7 @@ fn WatchedFields(
             <DiscardPrompt confirm=s.confirm discard=discard/>
             {move || s.error.get().map(|e| view! { <p role="alert" class="text-sm text-destructive-text">{e}</p> })}
             <div class="flex justify-end gap-2">
-                <Button r#type="submit" loading=s.busy>{t("log-save")}</Button>
+                <OfflineSave busy=s.busy/>
             </div>
         </form>
     }
@@ -355,6 +366,8 @@ fn save_watched(s: WatchedState, info: ItemInfo, ctx: StepCtx, i18n: std::sync::
                     let n = Some(form.note.trim().to_string()).filter(|n| !n.is_empty());
                     let _ = api::set_entry_note(item_id, n).await;
                 }
+                ctx.funnel.saved();
+                ctx.funnel.logged();
                 toast_logged(&ctx, &target.label, title, vec![event.id], Some(refresh));
                 s.initial.set(s.form());
                 s.open.set(false);
@@ -375,6 +388,10 @@ fn save_watched(s: WatchedState, info: ItemInfo, ctx: StepCtx, i18n: std::sync::
 #[derive(Clone, Copy)]
 pub struct PlayState {
     pub open: RwSignal<bool>,
+    /// Players the next opening adds to you (the palette's "Log with ...", WP4-4).
+    pub preset: RwSignal<Vec<String>>,
+    /// The game group the next opening starts with (People's "Log a play with", WP4-6).
+    pub preset_group: RwSignal<String>,
     opened: RwSignal<bool>,
     chip: RwSignal<String>,
     picked: RwSignal<String>,
@@ -392,6 +409,9 @@ pub struct PlayState {
     errors: RwSignal<Vec<String>>,
     busy: RwSignal<bool>,
     companions: RwSignal<Vec<CompanionDto>>,
+    /// The chosen group chip (its id); empty: none.
+    group: RwSignal<String>,
+    groups: RwSignal<Vec<GameGroupDto>>,
 }
 
 impl PlayState {
@@ -399,6 +419,8 @@ impl PlayState {
     pub fn new(companions: RwSignal<Vec<CompanionDto>>) -> Self {
         Self {
             open: RwSignal::new(false),
+            preset: RwSignal::new(Vec::new()),
+            preset_group: RwSignal::new(String::new()),
             opened: RwSignal::new(false),
             chip: RwSignal::new("today".into()),
             picked: RwSignal::new(String::new()),
@@ -415,6 +437,8 @@ impl PlayState {
             errors: RwSignal::new(Vec::new()),
             busy: RwSignal::new(false),
             companions,
+            group: RwSignal::new(String::new()),
+            groups: RwSignal::new(Vec::new()),
         }
     }
 
@@ -448,6 +472,33 @@ impl PlayState {
             duration: self.duration.get_untracked(),
             location: self.location.get_untracked(),
             notes: self.notes.get_untracked(),
+            group: self.group.get_untracked(),
+        }
+    }
+
+    /// The members of a loaded group (empty for an unknown one).
+    fn members_of(&self, group: &str) -> Vec<String> {
+        self.groups.with_untracked(|gs| {
+            gs.iter()
+                .find(|g| g.id == group)
+                .map(|g| g.members.iter().map(|m| m.id.clone()).collect())
+                .unwrap_or_default()
+        })
+    }
+
+    fn me(&self) -> Option<String> {
+        self.companions
+            .with_untracked(|cs| cs.iter().find(|c| c.is_self).map(|c| c.id.clone()))
+    }
+
+    /// A group chip pressed (`on`) or released: the players become you and its members.
+    fn choose_group(&self, id: &str, on: bool) {
+        if on {
+            self.group.set(id.to_string());
+            self.players
+                .set(group_players(self.me().as_deref(), &self.members_of(id)));
+        } else if self.group.get_untracked() == id {
+            self.group.set(String::new());
         }
     }
 
@@ -463,10 +514,26 @@ impl PlayState {
         self.duration.set(String::new());
         self.location.set(String::new());
         self.notes.set(String::new());
-        let me = self
-            .companions
-            .with_untracked(|cs| cs.iter().find(|c| c.is_self).map(|c| c.id.clone()));
-        let players = if last_group.is_empty() {
+        let me = self.me();
+        let preset = self.preset.get_untracked();
+        self.preset.set(Vec::new());
+        let group = self.preset_group.get_untracked();
+        self.preset_group.set(String::new());
+        self.group.set(group.clone());
+        let players = if !group.is_empty() {
+            let mut members = self.members_of(&group);
+            members.extend(preset);
+            group_players(me.as_deref(), &members)
+        } else if !preset.is_empty() {
+            let mut p: Vec<String> = me.into_iter().collect();
+            p.extend(
+                preset
+                    .into_iter()
+                    .filter(|id| !p.contains(id))
+                    .collect::<Vec<_>>(),
+            );
+            p
+        } else if last_group.is_empty() {
             me.into_iter().collect()
         } else {
             last_group
@@ -479,6 +546,13 @@ impl PlayState {
 
     fn dirty(&self) -> bool {
         self.form() != self.initial.get_untracked()
+    }
+}
+
+/// The game groups for the chips.
+async fn load_groups(groups: RwSignal<Vec<GameGroupDto>>) {
+    if let Ok(gs) = api::game_groups().await {
+        groups.set(gs);
     }
 }
 
@@ -513,16 +587,31 @@ pub fn PlaySheet(state: PlayState, info: ItemInfo, #[prop(into)] title: String) 
                 {
                     s.companions.set(cs);
                 }
+                // the groups first only when the sheet starts with one (its members are the
+                // players); otherwise the fields are ready before the chips arrive
+                let preset = !s.preset_group.with_untracked(String::is_empty);
+                if preset {
+                    load_groups(s.groups).await;
+                }
                 s.reset(last_group(&item_id).await);
                 s.busy.set(false);
+                if !preset {
+                    load_groups(s.groups).await;
+                }
             });
         } else if !open {
             s.opened.set(false);
         }
     });
+    crate::funnel::sheet_flow(s.open);
     let ctx = StepCtx::current();
     let i2 = i18n.clone();
-    let save = Callback::new(move |()| save_play(&s, info.get_value(), ctx.clone(), i2.clone()));
+    let offline = crate::offline::is_offline();
+    let save = Callback::new(move |()| {
+        if !offline.get_untracked() {
+            save_play(&s, info.get_value(), ctx.clone(), i2.clone());
+        }
+    });
     let can_close = close_guard(move || s.dirty(), s.confirm);
     let discard = Callback::new(move |()| {
         s.initial.set(s.form());
@@ -548,6 +637,7 @@ fn PlayFields(state: PlayState, save: Callback<()>, discard: Callback<()>) -> im
                 save.run(());
             }>
             <DateChips id="play-when" chip=s.chip picked=s.picked error=no_error/>
+            <GroupChips state=s/>
             <CompanionPicker id="play-people" legend=t("log-players") companions=s.companions selected=s.players include_self=true/>
             <Scores state=s/>
             <Disclosure id="play-more" title=t("log-more") summary=t("log-more-play")
@@ -564,9 +654,39 @@ fn PlayFields(state: PlayState, save: Callback<()>, discard: Callback<()>) -> im
                 })
             }}
             <div class="flex justify-end gap-2">
-                <Button r#type="submit" loading=s.busy>{t("log-save")}</Button>
+                <OfflineSave busy=s.busy/>
             </div>
         </form>
+    }
+}
+
+/// One chip per game group (design.md 6.7): pressing one makes the players you and its
+/// members, and the play is logged as the group.
+#[component]
+fn GroupChips(state: PlayState) -> impl IntoView {
+    let s = state;
+    let groups = move || s.groups.get();
+    view! {
+        <Show when=move || !s.groups.with(Vec::is_empty)>
+            <div role="group" aria-labelledby="play-groups-legend" class="grid gap-2" data-testid="play-groups">
+                <span id="play-groups-legend" class="text-sm font-medium">{use_i18n().t("log-groups")}</span>
+                <div class="flex flex-wrap gap-2">
+                    <For each=groups key=|g| g.id.clone() let:g>
+                        {
+                            let gid = g.id.clone();
+                            let watch = gid.clone();
+                            let pressed = RwSignal::new(s.group.get_untracked() == gid);
+                            Effect::new(move |_| pressed.set(s.group.with(|x| *x == watch)));
+                            view! {
+                                <Chip pressed=pressed on_change=Callback::new(move |on: bool| s.choose_group(&gid, on))>
+                                    {g.name.clone()}
+                                </Chip>
+                            }
+                        }
+                    </For>
+                </div>
+            </div>
+        </Show>
     }
 }
 
@@ -669,6 +789,8 @@ fn save_play(s: &PlayState, info: ItemInfo, ctx: StepCtx, i18n: std::sync::Arc<I
         } = info;
         match api::log_play(item_id, payload).await {
             Ok(event) => {
+                ctx.funnel.saved();
+                ctx.funnel.logged();
                 let label = i18n.t("log-play-step");
                 toast_logged(&ctx, &label, title, vec![event.id], Some(refresh));
                 s.initial.set(s.form());
@@ -684,6 +806,60 @@ fn save_play(s: &PlayState, info: ItemInfo, ctx: StepCtx, i18n: std::sync::Arc<I
         }
         s.busy.set(false);
     });
+}
+
+/// The typed text and the error line of the inline page or position field, owned by the item
+/// page: every log refreshes the page (and its `entity.updated` event once more), and each
+/// refetch renders the action bar afresh, so state held by the field itself lost a typed
+/// "soon" and its "Enter a page number from 1 on." under a late refetch (DEC-477).
+#[derive(Clone, Copy)]
+pub struct InlineDraft {
+    /// What the person typed while it differs from the stored value; `None` shows the stored one.
+    pub text: RwSignal<Option<String>>,
+    pub error: RwSignal<Option<String>>,
+}
+
+impl InlineDraft {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            text: RwSignal::new(None),
+            error: RwSignal::new(None),
+        }
+    }
+
+    /// Forget the draft and its error (another item was opened).
+    pub fn clear(self) {
+        self.text.set(None);
+        self.error.set(None);
+    }
+
+    /// The field's signal: starts from the draft (else `stored`) and keeps the draft in step.
+    fn field(self, stored: String) -> RwSignal<String> {
+        let value = RwSignal::new(self.text.get_untracked().unwrap_or_else(|| stored.clone()));
+        Effect::new(move |_| {
+            let v = value.get();
+            let typed = (v != stored).then_some(v);
+            if self.text.with_untracked(|t| *t != typed) {
+                self.text.set(typed);
+            }
+        });
+        value
+    }
+
+    /// `refresh` after a log that went through, with the draft dropped first.
+    fn done(self, refresh: Callback<()>) -> Callback<()> {
+        Callback::new(move |()| {
+            self.text.set(None);
+            refresh.run(());
+        })
+    }
+}
+
+impl Default for InlineDraft {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Mark the entry completed (the "Finished" of pages and positions); a page or position at
@@ -704,11 +880,11 @@ fn complete(item_id: String, ctx: &StepCtx, refresh: Callback<()>) {
 
 /// Page field with Update, +10, +25 and Finished (design.md 5.4 Pages); Enter saves.
 #[component]
-pub fn PagesInline(info: ItemInfo, step: NextStepDto) -> impl IntoView {
+pub fn PagesInline(info: ItemInfo, step: NextStepDto, draft: InlineDraft) -> impl IntoView {
     let i18n = use_i18n();
     let ctx = StepCtx::current();
-    let value = RwSignal::new(step.page.map(|p| p.to_string()).unwrap_or_default());
-    let (busy, error) = (RwSignal::new(false), RwSignal::new(None::<String>));
+    let value = draft.field(step.page.map(|p| p.to_string()).unwrap_or_default());
+    let (busy, error) = (RwSignal::new(false), draft.error);
     let pages = step.pages;
     let info = StoredValue::new(info);
     let i2 = i18n.clone();
@@ -728,7 +904,7 @@ pub fn PagesInline(info: ItemInfo, step: NextStepDto) -> impl IntoView {
                 label,
                 progress,
             };
-            run_step(ctx.clone(), step, busy, error, Some(refresh));
+            run_step(ctx.clone(), step, busy, error, Some(draft.done(refresh)));
         }
     };
     let log = StoredValue::new(log);
@@ -770,12 +946,12 @@ pub fn PagesInline(info: ItemInfo, step: NextStepDto) -> impl IntoView {
 
 /// Position field (`h:mm:ss`) with Update, +15 min and Finished (design.md 5.4 Position).
 #[component]
-pub fn PositionInline(info: ItemInfo, step: NextStepDto) -> impl IntoView {
+pub fn PositionInline(info: ItemInfo, step: NextStepDto, draft: InlineDraft) -> impl IntoView {
     let i18n = use_i18n();
     let ctx = StepCtx::current();
-    let start = step.seconds.map(format_position).unwrap_or_default();
-    let value = RwSignal::new(start.clone());
-    let (busy, error) = (RwSignal::new(false), RwSignal::new(None::<String>));
+    let value = draft.field(step.seconds.map(format_position).unwrap_or_default());
+    let start = value.get_untracked();
+    let (busy, error) = (RwSignal::new(false), draft.error);
     let total = step.total_seconds;
     let info = StoredValue::new(info);
     let i2 = i18n.clone();
@@ -795,7 +971,7 @@ pub fn PositionInline(info: ItemInfo, step: NextStepDto) -> impl IntoView {
                 label,
                 progress,
             };
-            run_step(ctx.clone(), step, busy, error, Some(refresh));
+            run_step(ctx.clone(), step, busy, error, Some(draft.done(refresh)));
         }
     };
     let log = StoredValue::new(log);
@@ -831,5 +1007,18 @@ pub fn PositionInline(info: ItemInfo, step: NextStepDto) -> impl IntoView {
             </div>
             <p id="position-at-error" role="alert" class="text-sm text-destructive-text">{move || error.get()}</p>
         </form>
+    }
+}
+
+/// The save button of a sheet: disabled with "You are offline" next to it while the browser
+/// is offline (sheets are not queued, WP4-5).
+#[component]
+fn OfflineSave(busy: RwSignal<bool>) -> impl IntoView {
+    let offline = crate::offline::is_offline();
+    view! {
+        <Show when=move || offline.get()>
+            <p class="self-center text-small text-muted-foreground">{t("offline-sheet")}</p>
+        </Show>
+        <Button r#type="submit" loading=busy disabled=offline>{t("log-save")}</Button>
     }
 }

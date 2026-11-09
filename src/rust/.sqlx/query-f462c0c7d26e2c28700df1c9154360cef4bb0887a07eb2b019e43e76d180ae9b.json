@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE catalog_items SET provider_refetch_after = $2\n             WHERE id = $1 AND provider_refetch_after IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f462c0c7d26e2c28700df1c9154360cef4bb0887a07eb2b019e43e76d180ae9b"
+}

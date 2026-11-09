@@ -45,6 +45,8 @@ pub(crate) fn routes() -> OpenApiRouter<ApiState> {
         .routes(routes!(set_role))
         .routes(routes!(set_disabled))
         .routes(routes!(delete_user))
+        .routes(routes!(reset_user_totp))
+        .routes(routes!(unlink_user_identity))
         .routes(routes!(invites, create_invite))
         .routes(routes!(revoke_invite))
         .routes(routes!(sources))
@@ -302,6 +304,30 @@ async fn delete_user(
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
     admin::delete_user(&s, caller(&t), &id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Users row menu: remove the person's authenticator (fresh proof; `no_authenticator`).
+#[utoipa::path(post, path = "/admin/users/{id}/reset-totp", tag = "admin", params(("id" = String, Path)),
+    responses((status = 200, body = AdminUserDto), (status = 403, body = ErrorDto), (status = 409, body = ErrorDto)))]
+async fn reset_user_totp(
+    State(s): State<ApiState>,
+    t: AuthedToken,
+    Path(id): Path<String>,
+) -> ApiResult<Json<AdminUserDto>> {
+    Ok(Json(admin::reset_user_totp(&s, caller(&t), &id).await?))
+}
+
+/// Users row menu: unlink one of the person's providers (fresh proof; `last_sign_in_method`).
+#[utoipa::path(delete, path = "/admin/users/{id}/identities/{identity}", tag = "admin",
+    params(("id" = String, Path), ("identity" = String, Path)),
+    responses((status = 204), (status = 403, body = ErrorDto), (status = 404, body = ErrorDto), (status = 409, body = ErrorDto)))]
+async fn unlink_user_identity(
+    State(s): State<ApiState>,
+    t: AuthedToken,
+    Path((id, identity)): Path<(String, String)>,
+) -> ApiResult<StatusCode> {
+    admin::unlink_user_identity(&s, caller(&t), &id, &identity).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

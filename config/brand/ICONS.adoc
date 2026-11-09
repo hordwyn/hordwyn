@@ -34,6 +34,9 @@ unmodified: `tag`, `tags`, `filter`, `arrow-up-down`, `lock`, `copy`, `clock`, `
 `circle-alert`, `chevrons-up-down`, `hash`, `circle` and `house`. `icons.toml` maps each to
 its semantic name.
 
+UX phase 4 (WP4-3) added `grip-vertical` (the drag handle of list rows) from the same
+1.69.0 tarball, unmodified.
+
 == Service logos
 
 None vendored yet. Until they are, integrations and data sources are identified by name

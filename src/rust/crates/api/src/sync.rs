@@ -89,17 +89,20 @@ async fn apply(s: &ApiState, a: Actor, op_id: &str, c: SyncCommandDto) -> ApiRes
             item_id,
             progress,
             occurred_at,
+            hlc: h,
         } => {
             let progress: Progress = serde_json::from_value(progress)
                 .map_err(|e| ApiError::bad_request(format!("progress: {e}")))?;
             let at = crate::ops::client_time(s, "occurred_at", occurred_at.as_deref())?;
+            let stamp = h.as_deref().map(hlc).transpose()?;
             s.app
-                .log_progress(
+                .log_progress_stamped(
                     a,
                     parse_id(&item_id, ItemId)?,
                     progress,
                     at,
                     Some(parse_id(op_id, |u| u)?),
+                    stamp,
                 )
                 .await?;
         }

@@ -1,19 +1,28 @@
-//! Ctrl-K search palette (D-6.6, design.md 6.4): local results first, then each connector's
-//! results as its `search.results` event arrives for the current search id. The footer shows
-//! the source status (dots with words: which groups have no source, which sources fail) and
-//! an empty search ends in a card that says why (design.md 4.4), with "Ask admin" for
-//! members and "Set up" for admins.
+//! Ctrl-K search palette (D-6.6, design.md 5.3, 6.4): local results first, then each
+//! connector's results as its `search.results` event arrives for the current search id. The
+//! footer shows the source status (dots with words: which groups have no source, which
+//! sources fail) and an empty search ends in a card that says why (design.md 4.4), with "Ask
+//! admin" for members and "Set up" for admins. Below two characters it lists the recently
+//! opened items and suggested commands; Ctrl/Cmd+Enter adds a result as Planned (toast with
+//! Undo) or runs the next step of an entry, and the palette stays open (WP4-4). A
+//! [`PaletteTarget`] makes choosing a result do something else for one opening.
 
 use contracts::admin::{SkippedSourceDto, SourceStatusPageDto};
 use contracts::{CatalogItemDto, SearchResultsEventDto};
 use leptos::prelude::*;
 use leptos_router::hooks::use_navigate;
-use ui::{Command, CommandItem, Dialog, Segmented, SegmentedOption, StatusDot};
+use ui::{
+    Command, CommandHints, CommandItem, Dialog, Segmented, SegmentedOption, StatusDot, ToastAction,
+    ToastVariant,
+};
 
 use crate::admin_api;
 use crate::admin_state::source_state;
+use crate::api;
 use crate::events::use_events;
-use crate::i18n::{t, use_i18n};
+use crate::i18n::{I18n, t, use_i18n};
+use crate::next_step::{LoggedStep, StepCtx, next_step_label, run_step, step_progress};
+use crate::recent::RecentItem;
 use crate::settings::AskAdmin;
 use crate::source_hints::{
     FooterItem, HintAction, NoResults, SET_UP_HREF, footer_items, no_results,
@@ -22,11 +31,6 @@ use crate::source_hints::{
 /// Whether the palette is open (shared with the header button).
 #[derive(Clone, Copy)]
 pub struct PaletteOpen(pub RwSignal<bool>);
-
-/// When set (list id, list name), choosing a result adds it to that list instead of opening
-/// it: the list page's "Add" (design.md 6.5). The list page clears it when it goes away.
-#[derive(Clone, Copy)]
-pub struct PaletteTarget(pub RwSignal<Option<(String, String)>>);
 
 /// An unmatched import row the palette is matching (Settings > Imports, design.md 6.11):
 /// choosing a result matches the row with it and replays the row; `done` hears the outcome
@@ -39,9 +43,27 @@ pub struct MatchTarget {
     pub done: Callback<Option<String>>,
 }
 
-/// The row being matched, if any; cleared when the palette closes.
+/// What choosing a result does instead of opening it, for one opening of the palette (the
+/// scoped pick; DEC-344, DEC-353).
+#[derive(Clone)]
+pub enum PaletteTarget {
+    /// Add it to this list: the list page's "Add" (design.md 6.5).
+    List { id: String, name: String },
+    /// Match an unmatched import row with it.
+    Match(MatchTarget),
+    /// Make it the subject of a notification rule ("Add a rule for one item"): `done` gets
+    /// the item id and its label.
+    RuleSubject { done: Callback<(String, String)> },
+    /// Log it with this person (a People card): the item page opens its log sheet with them.
+    LogWith { companion_id: String, name: String },
+    /// Log a play of it as this game group (People > Game groups, WP4-6): the item page opens
+    /// its play sheet with the group chosen and its members as players.
+    LogWithGroup { group_id: String, name: String },
+}
+
+/// The palette's target, if any; cleared when the palette closes.
 #[derive(Clone, Copy)]
-pub struct PaletteMatch(pub RwSignal<Option<MatchTarget>>);
+pub struct PaletteScope(pub RwSignal<Option<PaletteTarget>>);
 
 /// Match the row with the chosen item (`POST /imports/{id}/match`).
 fn match_row(m: MatchTarget, item: CommandItem) {
@@ -56,7 +78,7 @@ fn match_row(m: MatchTarget, item: CommandItem) {
 
 /// Add the chosen item to the list the palette is scoped to; the answer is a toast.
 fn add_to_list(
-    (toasts, i18n): (ui::Toasts, std::sync::Arc<crate::i18n::I18n>),
+    (toasts, i18n): (ui::Toasts, std::sync::Arc<I18n>),
     list: String,
     name: String,
     item: CommandItem,
@@ -82,6 +104,161 @@ fn add_to_list(
     });
 }
 
+/// The line above the input naming what choosing a result does (test id, text).
+fn target_line(i18n: &I18n, target: &PaletteTarget) -> (&'static str, String) {
+    match target {
+        PaletteTarget::List { name, .. } => (
+            "palette-target",
+            i18n.t_args("lists-add-target", &[("name", name.clone().into())]),
+        ),
+        PaletteTarget::Match(m) => (
+            "palette-match",
+            i18n.t_args("imports-match-target", &[("title", m.title.clone().into())]),
+        ),
+        PaletteTarget::RuleSubject { .. } => ("palette-target", i18n.t("search-target-rule")),
+        PaletteTarget::LogWith { name, .. } => (
+            "palette-target",
+            i18n.t_args("search-target-log-with", &[("name", name.clone().into())]),
+        ),
+        PaletteTarget::LogWithGroup { name, .. } => (
+            "palette-target",
+            i18n.t_args("search-target-log-group", &[("name", name.clone().into())]),
+        ),
+    }
+}
+
+/// Ids of the suggested commands (item ids are UUIDs, so they never collide).
+const CMD_LISTS: &str = "cmd:lists";
+const CMD_NEW_LIST: &str = "cmd:new-list";
+const CMD_IMPORT: &str = "cmd:import";
+const CMD_PLAY: &str = "cmd:play:";
+
+/// Where a suggested command goes; `None` for an item.
+#[must_use]
+pub fn command_href(id: &str) -> Option<String> {
+    match id {
+        CMD_LISTS => Some("/lists".into()),
+        CMD_NEW_LIST => Some("/lists?new=1".into()),
+        CMD_IMPORT => Some("/settings/imports".into()),
+        _ => id
+            .strip_prefix(CMD_PLAY)
+            .map(|item| format!("/items/{item}?log=1")),
+    }
+}
+
+/// What the palette lists below two characters (design.md 5.3): the recent items, then the
+/// suggested commands (not while a target is set: they would leave it). "Log a play of ..."
+/// names the newest recent item whose kind logs plays. Signed out nothing (UX4-15): the
+/// commands and recent items belong to an account.
+#[must_use]
+pub fn idle_items(
+    i18n: &I18n,
+    recent: &[RecentItem],
+    commands: bool,
+    signed_in: bool,
+) -> Vec<CommandItem> {
+    if !signed_in {
+        return Vec::new();
+    }
+    let row = |id: String, label: String, group: &str| CommandItem {
+        id,
+        label,
+        group: group.to_string(),
+        keywords: String::new(),
+    };
+    let recent_group = i18n.t("search-recent");
+    let mut out: Vec<CommandItem> = recent
+        .iter()
+        .map(|r| row(r.id.clone(), r.label.clone(), &recent_group))
+        .collect();
+    if commands {
+        let g = i18n.t("search-suggested");
+        out.push(row(CMD_LISTS.into(), i18n.t("search-cmd-lists"), &g));
+        out.push(row(CMD_NEW_LIST.into(), i18n.t("search-cmd-new-list"), &g));
+        if let Some(game) = recent.iter().find(|r| r.plays) {
+            let label = i18n.t_args(
+                "search-cmd-log-play",
+                &[("title", game.label.clone().into())],
+            );
+            out.push(row(format!("{CMD_PLAY}{}", game.id), label, &g));
+        }
+        out.push(row(CMD_IMPORT.into(), i18n.t("search-cmd-import"), &g));
+    }
+    out
+}
+
+/// "Added to Planned" with the title and Undo, which removes the entry again (WP4-3).
+fn toast_added(ctx: &StepCtx, item_id: String, label: String) {
+    let undo_ctx = ctx.clone();
+    let undo = ToastAction::new(
+        ctx.i18n.t("library-undo"),
+        Callback::new(move |()| {
+            let (ctx, id) = (undo_ctx.clone(), item_id.clone());
+            leptos::task::spawn_local(async move {
+                let req = crate::bulk::request(vec![id], "remove");
+                match api::library_bulk(req).await {
+                    Ok(_) => {
+                        ctx.toasts
+                            .push(ctx.i18n.t("library-undone"), None, ToastVariant::Default);
+                    }
+                    Err(_) => ctx.toasts.push(
+                        ctx.i18n.t("error-generic"),
+                        None,
+                        ToastVariant::Destructive,
+                    ),
+                }
+            });
+        }),
+    );
+    ctx.toasts
+        .push_action(ctx.i18n.t("search-added-planned"), Some(label), undo);
+}
+
+/// The quick path (design.md 5.3, 3.4): a result not in the library is added as Planned; an
+/// entry runs its one-click next step; a step that needs input opens the item page. The
+/// palette stays open except for that last case; errors show in the palette.
+fn quick(
+    ctx: StepCtx,
+    item: CommandItem,
+    (busy, error): (RwSignal<bool>, RwSignal<Option<String>>),
+    open_page: Callback<String>,
+) {
+    error.set(None);
+    leptos::task::spawn_local(async move {
+        let failed = |e: &ServerFnError| {
+            ctx.i18n.t_args(
+                "library-step-failed",
+                &[("error", crate::pages::error_text(e).into())],
+            )
+        };
+        match api::item_page(item.id.clone()).await {
+            Ok(page) if page.entry.is_some() => {
+                let step = page.next_step.unwrap_or_default();
+                match step_progress(&step) {
+                    Some(progress) => {
+                        let logged = LoggedStep {
+                            item_id: item.id,
+                            title: page.item.title,
+                            label: next_step_label(&ctx.i18n, &step),
+                            progress,
+                        };
+                        run_step(ctx.clone(), logged, busy, error, None);
+                    }
+                    None => open_page.run(item.id),
+                }
+            }
+            Ok(_) => match api::add_to_library(item.id.clone()).await {
+                Ok(_) => {
+                    ctx.funnel.logged();
+                    toast_added(&ctx, item.id, item.label);
+                }
+                Err(e) => error.set(Some(failed(&e))),
+            },
+            Err(e) => error.set(Some(failed(&e))),
+        }
+    });
+}
+
 /// The palette fills the screen below 47.5rem (design.md 6.4, UX2-W13).
 const FULL_SCREEN_ON_PHONES: &str = "max-[47.5rem]:inset-0 max-[47.5rem]:left-0 max-[47.5rem]:top-0 max-[47.5rem]:h-dvh max-[47.5rem]:max-w-none \
     max-[47.5rem]:translate-x-0 max-[47.5rem]:translate-y-0 max-[47.5rem]:rounded-none \
@@ -100,8 +277,8 @@ fn to_item(i: &CatalogItemDto, group: &str) -> CommandItem {
     CommandItem {
         id: i.id.clone(),
         label: match i.year {
-            Some(y) => format!("{} ({y})", i.title),
-            None => i.title.clone(),
+            Some(y) => format!("{} ({y})", crate::i18n::title_text(&i.title)),
+            None => crate::i18n::title_text(&i.title),
         },
         group: format!("{group} - {kind}"),
         keywords: i.original_title.clone().unwrap_or_default(),
@@ -238,73 +415,209 @@ fn debounced_search(s: State) {
     });
 }
 
-/// Choosing a result opens its page, or adds it to the list the palette is scoped to. The
-/// scope lasts one opening of the palette.
+/// The palette as a funnel flow (WP4-5): opening it is the intent; closing it without a
+/// choice abandons the flow, a choice carries it on to the page it opens.
+fn funnel_flow(open: RwSignal<bool>) -> StoredValue<bool> {
+    let funnel = crate::funnel::Funnel::current();
+    let chose = StoredValue::new(false);
+    Effect::new(move |prev: Option<bool>| {
+        let now = open.get();
+        if now && prev != Some(true) {
+            chose.set_value(false);
+            funnel.intent(crate::funnel::Flow::Palette);
+        } else if !now && prev == Some(true) && !chose.get_value() {
+            funnel.abandoned_if(crate::funnel::Flow::Palette);
+        }
+        now
+    });
+    chose
+}
+
+/// Choosing a result opens its page, runs a suggested command, or does what the target says.
+/// The target lasts one opening of the palette.
 fn select_handler(
     open: RwSignal<bool>,
     query: RwSignal<String>,
-    target: RwSignal<Option<(String, String)>>,
-    i18n: std::sync::Arc<crate::i18n::I18n>,
+    i18n: std::sync::Arc<I18n>,
+    chose: StoredValue<bool>,
 ) -> Callback<CommandItem> {
-    let matching = expect_context::<PaletteMatch>().0;
+    let scope = expect_context::<PaletteScope>().0;
     let navigate = use_navigate();
     Effect::new(move |_| {
         if !open.get() {
-            target.set(None);
-            matching.set(None);
+            scope.set(None);
         }
     });
     let notify = (ui::use_toasts(), i18n);
     Callback::new(move |item: CommandItem| {
+        // the funnel flow goes on to the chosen page (WP4-5)
+        chose.set_value(true);
         open.set(false);
         query.set(String::new());
-        if let Some(m) = matching.get_untracked() {
-            matching.set(None);
-            match_row(m, item);
+        let go = |href: &str| navigate(href, leptos_router::NavigateOptions::default());
+        if let Some(href) = command_href(&item.id) {
+            go(&href);
             return;
         }
-        if let Some((list, name)) = target.get_untracked() {
-            add_to_list(notify.clone(), list, name, item);
-            return;
+        match scope.get_untracked() {
+            Some(PaletteTarget::Match(m)) => match_row(m, item),
+            Some(PaletteTarget::List { id, name }) => add_to_list(notify.clone(), id, name, item),
+            Some(PaletteTarget::RuleSubject { done }) => done.run((item.id, item.label)),
+            Some(PaletteTarget::LogWith { companion_id, .. }) => {
+                go(&format!("/items/{}?log=1&with={companion_id}", item.id));
+            }
+            Some(PaletteTarget::LogWithGroup { group_id, .. }) => {
+                go(&format!("/items/{}?log=1&group={group_id}", item.id));
+            }
+            None => go(&format!("/items/{}", item.id)),
         }
+    })
+}
+
+/// Ctrl/Cmd+Enter: the quick path for a result; with a target or on a command it is the same
+/// as Enter.
+fn secondary_handler(
+    open: RwSignal<bool>,
+    select: Callback<CommandItem>,
+    (busy, error): (RwSignal<bool>, RwSignal<Option<String>>),
+) -> Callback<CommandItem> {
+    let scope = expect_context::<PaletteScope>().0;
+    let ctx = StepCtx::current();
+    let navigate = use_navigate();
+    let open_page = Callback::new(move |id: String| {
+        open.set(false);
         navigate(
-            &format!("/items/{}", item.id),
+            &format!("/items/{id}"),
             leptos_router::NavigateOptions::default(),
         );
+    });
+    Callback::new(move |item: CommandItem| {
+        if scope.with_untracked(Option::is_some) || command_href(&item.id).is_some() {
+            select.run(item);
+        } else {
+            quick(ctx.clone(), item, (busy, error), open_page);
+        }
     })
+}
+
+/// The key hints of the active row: Enter opens (or chooses, with a target), Ctrl+Enter is
+/// the quick path (none with a target).
+fn hints(i18n: &I18n, scope: RwSignal<Option<PaletteTarget>>) -> CommandHints {
+    let (open, choose, quick) = (
+        i18n.t("search-hint-open"),
+        i18n.t("search-hint-choose"),
+        i18n.t("search-hint-quick"),
+    );
+    let enter = i18n.t("shortcuts-key-enter");
+    CommandHints {
+        enter_keys: vec![enter.clone()],
+        enter: Signal::derive(move || {
+            if scope.with(Option::is_some) {
+                choose.clone()
+            } else {
+                open.clone()
+            }
+        }),
+        secondary_keys: vec![i18n.t("shell-ctrl"), enter],
+        secondary: Signal::derive(move || {
+            if scope.with(Option::is_some) {
+                String::new()
+            } else {
+                quick.clone()
+            }
+        }),
+    }
+}
+
+/// The recent items are read when the palette opens (they change on every item page).
+fn recent_on_open(open: RwSignal<bool>) -> RwSignal<Vec<RecentItem>> {
+    let username = expect_context::<crate::app::ClientConfig>().username;
+    let recent = RwSignal::new(Vec::new());
+    Effect::new(move |_| {
+        if open.get() {
+            recent.set(crate::recent::load(&username));
+        }
+    });
+    recent
+}
+
+/// The "Asking X..." line and the list's empty text (nothing yet, searching, or none when
+/// the no-results card explains it).
+fn status_texts(
+    i18n: &std::sync::Arc<I18n>,
+    s: State,
+    empty_answer: Memo<Option<Asked>>,
+) -> (Signal<String>, Signal<String>) {
+    let (i1, i2) = (i18n.clone(), i18n.clone());
+    let waiting = s.waiting;
+    let asked = s.asked;
+    let waiting_text = Signal::derive(move || {
+        let w = waiting.get();
+        if w.is_empty() {
+            String::new()
+        } else {
+            i1.t_args("search-waiting", &[("sources", w.join(", ").into())])
+        }
+    });
+    let empty = Signal::derive(move || {
+        if empty_answer.with(Option::is_some) {
+            String::new()
+        } else if asked.with(Option::is_some) {
+            i2.t("search-searching")
+        } else {
+            i2.t("search-empty")
+        }
+    });
+    (waiting_text, empty)
 }
 
 #[component]
 pub fn SearchPalette() -> impl IntoView {
     let open = expect_context::<PaletteOpen>().0;
+    let scope = expect_context::<PaletteScope>().0;
     let i18n = use_i18n();
-    let query = RwSignal::new(String::new());
-    let scope = RwSignal::new(SCOPES[0].to_string());
-    let items = RwSignal::new(Vec::<CommandItem>::new());
-    let search_id = RwSignal::new(None::<String>);
-    let waiting = RwSignal::new(Vec::<String>::new());
-    let asked = RwSignal::new(None::<Asked>);
-    let events = use_events();
-    let status = footer_status(open);
-    open_on_ctrl_k(open);
-
-    debounced_search(State {
+    let signed_in = expect_context::<crate::app::ClientConfig>().signed_in;
+    let s = State {
+        query: RwSignal::new(String::new()),
+        scope: RwSignal::new(SCOPES[0].to_string()),
+        items: RwSignal::new(Vec::<CommandItem>::new()),
+        search_id: RwSignal::new(None::<String>),
+        waiting: RwSignal::new(Vec::<String>::new()),
+        asked: RwSignal::new(None::<Asked>),
+    };
+    let State {
         query,
-        scope,
         items,
-        search_id,
         waiting,
         asked,
-    });
-    stream_results(events, search_id, waiting, items);
-
-    let target = expect_context::<PaletteTarget>().0;
-    let on_select = select_handler(open, query, target, i18n.clone());
-    // matching an import row: search for its title
-    let matching = expect_context::<PaletteMatch>().0;
+        ..
+    } = s;
+    let status = footer_status(open);
+    open_on_ctrl_k(open);
+    debounced_search(s);
+    stream_results(use_events(), s.search_id, waiting, items);
+    let recent = recent_on_open(open);
+    let (busy, quick_error) = (RwSignal::new(false), RwSignal::new(None::<String>));
     Effect::new(move |_| {
-        if let Some(m) = matching.get() {
+        if !open.get() {
+            quick_error.set(None);
+        }
+    });
+    let chose = funnel_flow(open);
+    let on_select = select_handler(open, query, i18n.clone(), chose);
+    let on_secondary = secondary_handler(open, on_select, (busy, quick_error));
+    // matching an import row: search for its title
+    Effect::new(move |_| {
+        if let Some(PaletteTarget::Match(m)) = scope.get() {
             query.set(m.title);
+        }
+    });
+    let i2 = i18n.clone();
+    let shown = Memo::new(move |_| {
+        if query.with(|q| q.trim().chars().count() < 2) {
+            recent.with(|r| idle_items(&i2, r, scope.with(Option::is_none), signed_in))
+        } else {
+            items.get()
         }
     });
     // the no-results card shows once every asked source has answered with nothing
@@ -313,52 +626,32 @@ pub fn SearchPalette() -> impl IntoView {
             .get()
             .filter(|_| waiting.with(Vec::is_empty) && items.with(Vec::is_empty))
     });
-    let waiting_text = {
-        let i18n = i18n.clone();
-        Signal::derive(move || {
-            let w = waiting.get();
-            if w.is_empty() {
-                String::new()
-            } else {
-                i18n.t_args("search-waiting", &[("sources", w.join(", ").into())])
-            }
-        })
-    };
-    let empty = {
-        let i18n = i18n.clone();
-        Signal::derive(move || {
-            if empty_answer.with(Option::is_some) {
-                String::new()
-            } else if asked.with(Option::is_some) {
-                i18n.t("search-searching")
-            } else {
-                i18n.t("search-empty")
-            }
-        })
-    };
+    let (waiting_text, empty) = status_texts(&i18n, s, empty_answer);
     let (label, placeholder) = (i18n.t("search-label"), i18n.t("search-placeholder"));
     let scopes: Vec<SegmentedOption> = SCOPES
         .iter()
         .map(|s| SegmentedOption::new(*s, i18n.t(&format!("kind-group-{s}"))))
         .collect();
+    let hints = hints(&i18n, scope);
     view! {
         <Dialog open=open title=i18n.t("search-title") close_label=i18n.t("dialog-close") class=FULL_SCREEN_ON_PHONES>
-            {move || target.get().map(|(_, name)| view! {
-                <p class="mb-2 text-sm" data-testid="palette-target">{use_i18n().t_args("lists-add-target", &[("name", name.into())])}</p>
+            {move || scope.get().map(|target| {
+                let (id, text) = target_line(&use_i18n(), &target);
+                view! { <p class="mb-2 text-sm" data-testid=id>{text}</p> }
             })}
-            {move || matching.get().map(|m| view! {
-                <p class="mb-2 text-sm" data-testid="palette-match">{use_i18n().t_args("imports-match-target", &[("title", m.title.into())])}</p>
-            })}
-            <Segmented id="palette-scope" label=i18n.t("search-scope") value=scope options=scopes.clone() class="mb-3"/>
+            <Segmented id="palette-scope" label=i18n.t("search-scope") value=s.scope options=scopes.clone() class="mb-3"/>
             <Command
                 id="search"
                 label=label.clone()
                 placeholder=placeholder.clone()
                 empty_label=empty
-                items=Signal::derive(move || items.get())
+                items=Signal::derive(move || shown.get())
                 query=query
                 on_select=on_select
+                on_secondary=on_secondary
+                hints=hints.clone()
             />
+            {move || quick_error.get().map(|e| view! { <p role="alert" class="mt-2 text-sm text-destructive-text">{e}</p> })}
             // the reason card is announced when it appears (UX2-W8): the live region stays put
             <div role="status">
                 <Suspense fallback=|| ()>
@@ -519,5 +812,61 @@ mod tests {
         assert_eq!(SCOPES[0], "all", "All is the first segment");
         assert_eq!(scope_group("all"), None);
         assert_eq!(scope_group("play"), Some("play".to_string()));
+    }
+    #[test]
+    fn commands_go_to_their_pages_and_items_are_not_commands() {
+        assert_eq!(command_href("cmd:lists").as_deref(), Some("/lists"));
+        assert_eq!(
+            command_href("cmd:new-list").as_deref(),
+            Some("/lists?new=1")
+        );
+        assert_eq!(
+            command_href("cmd:import").as_deref(),
+            Some("/settings/imports")
+        );
+        assert_eq!(
+            command_href("cmd:play:abc").as_deref(),
+            Some("/items/abc?log=1")
+        );
+        assert_eq!(command_href("0190b6a4-0000-7000-8000-000000000001"), None);
+    }
+
+    #[test]
+    fn the_empty_palette_lists_recent_items_then_the_suggestions() {
+        let en = I18n::new("en", std::collections::BTreeMap::new());
+        let recent = vec![
+            RecentItem {
+                id: "m".into(),
+                label: "Dune (2021)".into(),
+                plays: false,
+            },
+            RecentItem {
+                id: "g".into(),
+                label: "Azul (2017)".into(),
+                plays: true,
+            },
+        ];
+        let rows = idle_items(&en, &recent, true, true);
+        let labels: Vec<_> = rows.iter().map(|r| r.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            [
+                "Dune (2021)",
+                "Azul (2017)",
+                "Go to Lists",
+                "New list",
+                "Log a play of Azul (2017)",
+                "Import a file"
+            ]
+        );
+        assert_eq!(rows[0].group, "Recent");
+        assert_eq!(rows[2].group, "Suggestions");
+        assert_eq!(rows[4].id, "cmd:play:g");
+        // with a target only the recent items: a command would leave the target
+        assert_eq!(idle_items(&en, &recent, false, true).len(), 2);
+        // no game opened lately: no "Log a play"
+        assert_eq!(idle_items(&en, &recent[..1], true, true).len(), 4);
+        // signed out: no commands and no recent items (UX4-15)
+        assert_eq!(idle_items(&en, &recent, true, false).len(), 0);
     }
 }

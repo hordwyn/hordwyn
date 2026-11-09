@@ -523,6 +523,7 @@ pub async fn set_source_credential(
         .await
         .map_err(pe)?;
     apply_credential(s, id, Some(&stored));
+    super::probes::refresh_probe(s, "data_sources").await;
     admin_source(s, &c, actor).await
 }
 
@@ -552,6 +553,7 @@ pub async fn clear_source_credential(
         .await
         .map_err(pe)?;
     apply_credential(s, id, None);
+    super::probes::refresh_probe(s, "data_sources").await;
     admin_source(s, &c, actor).await
 }
 
@@ -659,6 +661,7 @@ pub async fn test_source(
             .await
             .map_err(pe)?;
     }
+    super::probes::refresh_probe(s, "data_sources").await;
     Ok(SourceTestDto {
         ok: answer.is_ok(),
         result: result.into(),
@@ -707,10 +710,18 @@ pub async fn my_credentials(s: &ApiState, actor: Actor) -> ApiResult<Vec<UserCre
 /// design.md 4.1; DEC-246 follow-up). Credentials that cannot be decrypted are left out
 /// (the instance key applies then). Without the admin store: none.
 pub async fn user_keys(s: &ApiState, actor: Actor) -> catalog_core::search::UserKeys {
-    let mut out = catalog_core::search::UserKeys::new();
+    let mut out = catalog_core::search::UserKeys::for_user(actor.user_id);
     let Some(a) = s.admin.as_ref() else {
         return out;
     };
+    let with_user_fields: Vec<_> = registered(s)
+        .into_iter()
+        .filter(|c| !c.credentials().user_fields.is_empty())
+        .collect();
+    // no source takes a member credential: nothing to read (and decrypt) per search
+    if with_user_fields.is_empty() {
+        return out;
+    }
     let mine = match a.store.user_credentials(actor.user_id).await {
         Ok(list) => list,
         Err(e) => {
@@ -718,11 +729,8 @@ pub async fn user_keys(s: &ApiState, actor: Actor) -> catalog_core::search::User
             return out;
         }
     };
-    for c in registered(s) {
+    for c in with_user_fields {
         let names = c.credentials().user_fields;
-        if names.is_empty() {
-            continue;
-        }
         let id = &c.info().id;
         if let Some(Ok(fields)) = mine.iter().find(|m| &m.connector == id).map(|m| &m.fields)
             && let Some(key) = key_string(fields, names)
@@ -821,6 +829,7 @@ pub async fn set_source_enabled(
         .await
         .map_err(pe)?;
     s.registry.set_enabled(id, enabled);
+    super::probes::refresh_probe(s, "data_sources").await;
     admin_source(s, &c, actor).await
 }
 

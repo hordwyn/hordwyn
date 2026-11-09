@@ -67,6 +67,9 @@ pub trait AdminBackend: Send + Sync {
     async fn set_role(&self, token: &str, id: &str, role: &str) -> BResult<AdminUserDto>;
     async fn set_disabled(&self, token: &str, id: &str, disabled: bool) -> BResult<AdminUserDto>;
     async fn delete_user(&self, token: &str, id: &str) -> BResult<()>;
+    /// Users row menu (DEC-336): remove the authenticator; unlink one provider.
+    async fn reset_user_totp(&self, token: &str, id: &str) -> BResult<AdminUserDto>;
+    async fn unlink_user_identity(&self, token: &str, id: &str, identity: &str) -> BResult<()>;
     async fn invites(&self, token: &str) -> BResult<Vec<AdminInviteDto>>;
     async fn create_invite(
         &self,

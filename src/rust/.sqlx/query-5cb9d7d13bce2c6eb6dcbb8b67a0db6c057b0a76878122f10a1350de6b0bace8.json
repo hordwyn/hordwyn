@@ -1,0 +1,124 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT kind, month, events AS \"events?\", completions AS \"completions?\",\n                      finished AS \"finished?\", episodes AS \"episodes?\", pages AS \"pages?\",\n                      plays AS \"plays?\", seconds AS \"seconds?\"\n               FROM stats_months WHERE user_id = $1\n               ORDER BY kind COLLATE \"C\", month",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "stats_months",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "month",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "stats_months",
+            "name": "month"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "events?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "stats_months",
+            "name": "events"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "completions?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "stats_months",
+            "name": "completions"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "finished?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "stats_months",
+            "name": "finished"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "episodes?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "stats_months",
+            "name": "episodes"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "pages?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "stats_months",
+            "name": "pages"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "plays?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "stats_months",
+            "name": "plays"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "seconds?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "stats_months",
+            "name": "seconds"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5cb9d7d13bce2c6eb6dcbb8b67a0db6c057b0a76878122f10a1350de6b0bace8"
+}

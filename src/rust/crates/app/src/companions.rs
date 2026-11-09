@@ -57,7 +57,8 @@ impl App {
         if c.owner == actor.user_id {
             Ok(c)
         } else {
-            Err(AppError::Forbidden)
+            // like an unknown id: no oracle for other people's ids (UX4-17)
+            Err(AppError::NotFound("companion"))
         }
     }
 

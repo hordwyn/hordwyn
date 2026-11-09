@@ -200,6 +200,8 @@ pub fn gated<T, F, Fut>(
     F: Fn() -> Fut + Clone + Send + Sync + 'static,
     Fut: std::future::Future<Output = Result<T, ServerFnError>> + 'static,
 {
+    // a save with the disclosures open at that moment (addendum-1 D16, WP4-5)
+    let funnel = crate::funnel::Funnel::current();
     let i18n = use_i18n();
     // `done` runs after an `.await`, outside the page's owner: give it the owner back, so
     // it can read contexts (messages) like any handler
@@ -213,7 +215,10 @@ pub fn gated<T, F, Fut>(
         let answer = call().await;
         busy.set(false);
         match answer {
-            Ok(v) => done.run(Ok(v)),
+            Ok(v) => {
+                funnel.saved();
+                done.run(Ok(v));
+            }
             Err(e) => {
                 let again = call.clone();
                 let texts = i18n.clone();

@@ -102,6 +102,7 @@ mod tests {
             body: None,
             lane: Lane::Interactive,
             skip_auth_record: false,
+            user: None,
         }
     }
 

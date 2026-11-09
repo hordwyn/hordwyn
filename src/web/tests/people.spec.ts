@@ -135,3 +135,161 @@ test("add a person with a note, edit, and delete: the history keeps the plays", 
   await hydrated(page);
   await expect(page.getByTestId("activity-row").filter({ hasText: "Tidal Range" })).toContainText("Ben");
 });
+
+test("Log with a person: the palette picks the item, its sheet opens with them (DEC-353)", async ({ page }) => {
+  test.setTimeout(90_000);
+  const stamp = Date.now();
+  await signUp(page, `plw${stamp}`, "Lou");
+  const title = `Lantern Cove ${stamp}`;
+  const file = [JSON.stringify({ format: "library-export", version: 1 }), JSON.stringify({ source_id: "1", kind: "movie", title, year: 2011, status: "planned" })].join("\n");
+  const started = await page.request.post("/api/v1/imports?format=generic-jsonl", { data: file, headers: { "content-type": "application/octet-stream" } });
+  expect(started.status()).toBe(202);
+  await importDone(page, (await started.json()).id);
+  const ada = await person(page, "Ada");
+
+  await page.goto("/people");
+  await hydrated(page);
+  await card(page, "Ada").getByRole("button", { name: "Log with Ada" }).click();
+  const palette = page.getByRole("dialog", { name: "Search" });
+  await expect(palette.getByTestId("palette-target")).toHaveText("Choosing a result logs it with Ada.");
+  await palette.getByRole("combobox").fill(title);
+  const option = palette.getByRole("option", { name: new RegExp(`^${title}`) }).first();
+  await expect(option).toBeVisible({ timeout: 20_000 });
+  await option.click();
+  await expect(page).toHaveURL(/\/items\/.+\?log=1&with=/);
+  const sheet = page.getByRole("dialog", { name: "Log with details" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Ada", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Logged: Watched").first()).toBeVisible();
+  await page.goto(`/history?person=${ada}`);
+  await hydrated(page);
+  await expect(page.getByTestId("activity-row").filter({ hasText: title })).toHaveCount(1);
+});
+
+test("game groups: create, log a play with the group, count it, edit and delete (WP4-6)", async ({ page }) => {
+  test.setTimeout(150_000);
+  const stamp = Date.now();
+  await signUp(page, `pgg${stamp}`, "Gil");
+  const title = `Saltmarsh Keep ${stamp}`;
+  const file = [
+    JSON.stringify({ format: "library-export", version: 1 }),
+    JSON.stringify({ source_id: "1", kind: "board_game", title, year: 2019, status: "planned" }),
+  ].join("\n");
+  const started = await page.request.post("/api/v1/imports?format=generic-jsonl", { data: file, headers: { "content-type": "application/octet-stream" } });
+  expect(started.status()).toBe(202);
+  await importDone(page, (await started.json()).id);
+  await person(page, "Ada");
+  await person(page, "Bo");
+
+  await page.goto("/people");
+  await hydrated(page);
+  await page.getByRole("tab", { name: "Game groups 0" }).click();
+  await expect(page.getByText("No game groups yet")).toBeVisible();
+  await page.getByRole("button", { name: "New group" }).click();
+  const form = page.getByRole("dialog", { name: "New game group" });
+  await form.getByLabel("Name", { exact: true }).fill("Friday table");
+  await form.getByRole("button", { name: "Ada", exact: true }).click();
+  await form.getByRole("button", { name: "Bo", exact: true }).click();
+  await form.getByRole("button", { name: "Save group" }).click();
+  await expect(page.getByText("Friday table created.")).toBeVisible();
+  const group = page.getByTestId("pp-group-card").filter({ hasText: "Friday table" });
+  await expect(group).toContainText("With Ada, Bo");
+  await expect(group.getByTestId("pp-group-plays")).toHaveText("0");
+  await expect(group).toContainText("Not played as a group yet.");
+  await expectNoA11yViolations(page, "game groups");
+
+  // "Log a play with": the palette picks the game, the play sheet opens with the group
+  await group.getByRole("button", { name: "Log a play with Friday table" }).click();
+  const palette = page.getByRole("dialog", { name: "Search" });
+  await expect(palette.getByTestId("palette-target")).toHaveText("Choosing a game logs a play with Friday table.");
+  await palette.getByRole("combobox").fill(title);
+  const option = palette.getByRole("option", { name: new RegExp(`^${title}`) }).first();
+  await expect(option).toBeVisible({ timeout: 20_000 });
+  await option.click();
+  await expect(page).toHaveURL(/\/items\/.+\?log=1&group=/);
+  const sheet = page.getByRole("dialog", { name: "Log a play" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("group", { name: "Groups" }).getByRole("button", { name: "Friday table" })).toHaveAttribute("aria-pressed", "true");
+  for (const name of ["Gil", "Ada", "Bo"]) {
+    await expect(sheet.getByRole("button", { name, exact: true })).toHaveAttribute("aria-pressed", "true");
+  }
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Logged: Play" })).toBeVisible();
+
+  await page.goto("/people");
+  await hydrated(page);
+  await page.getByRole("tab", { name: "Game groups 1" }).click();
+  await expect(group.getByTestId("pp-group-plays")).toHaveText("1");
+  await expect(group).toContainText(`Last: ${title}, Today`);
+
+  // edit: rename, Bo leaves
+  await page.getByRole("button", { name: "Actions for Friday table" }).click();
+  await page.getByRole("menuitem", { name: "Edit" }).click();
+  const edit = page.getByRole("dialog", { name: "Edit Friday table" });
+  await edit.getByLabel("Name", { exact: true }).fill("Game night");
+  await edit.getByRole("button", { name: "Bo", exact: true }).click();
+  await edit.getByRole("button", { name: "Save group" }).click();
+  await expect(page.getByText("Game night saved.")).toBeVisible();
+  const renamed = page.getByTestId("pp-group-card").filter({ hasText: "Game night" });
+  await expect(renamed).toContainText("With Ada");
+  await expect(renamed).not.toContainText("Bo");
+
+  // delete: the play stays in the history
+  await page.getByRole("button", { name: "Actions for Game night" }).click();
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+  const confirm = page.getByRole("dialog", { name: "Delete Game night?" });
+  await expect(confirm).toContainText("Its play stays in your history.");
+  await confirm.getByRole("button", { name: "Delete" }).click();
+  await expect(page.getByText("Game night deleted.")).toBeVisible();
+  await expect(page.getByTestId("pp-group-card")).toHaveCount(0);
+  await page.setViewportSize({ width: 360, height: 800 });
+  await expectReflow(page, "groups 360");
+  await page.goto("/history");
+  await hydrated(page);
+  await expect(page.getByTestId("activity-row").filter({ hasText: title })).toHaveCount(1);
+});
+
+test("a game group chip fills the players and the play counts for the group (WP4-6)", async ({ page }) => {
+  test.setTimeout(150_000);
+  const stamp = Date.now();
+  await signUp(page, `grp${stamp}`, "Group Tester");
+  // only a game: this test needs no show seasons (and adds no catalog refresh to the lane)
+  const title = `Meeple Harbour ${stamp}`;
+  const file = [JSON.stringify({ format: "library-export", version: 1 }), JSON.stringify({ source_id: "1", kind: "board_game", title, year: 2017, status: "planned" })].join("\n");
+  const started = await page.request.post("/api/v1/imports?format=generic-jsonl", { data: file, headers: { "content-type": "application/octet-stream" } });
+  expect(started.status()).toBe(202);
+  await importDone(page, (await started.json()).id);
+  const lib = await (await page.request.get("/api/v1/library?limit=50")).json();
+  const gameId = lib.items.find((i: { item: { title: string } }) => i.item.title === title).item.id as string;
+  const person = async (name: string) => {
+    const r = await page.request.post("/api/v1/companions", { data: { name } });
+    expect(r.status()).toBe(201);
+    return (await r.json()).id as string;
+  };
+  const [ann, bo] = [await person("Ann"), await person("Bo")];
+  const created = await page.request.post("/api/v1/game-groups", { data: { name: "Harbour crew", members: [ann, bo] } });
+  expect(created.ok(), `group: ${created.status()}`).toBeTruthy();
+  const group = await created.json();
+
+  await page.goto(`/items/${gameId}`);
+  await hydrated(page);
+  await page.getByTestId("action-bar").getByRole("button", { name: "Log a play" }).click();
+  const sheet = page.getByRole("dialog", { name: "Log a play" });
+  const chips = sheet.getByRole("group", { name: "Groups" });
+  const chip = chips.getByRole("button", { name: "Harbour crew", exact: true });
+  await expect(chip).toHaveAttribute("aria-pressed", "false");
+  await chip.click();
+  await expect(chip).toHaveAttribute("aria-pressed", "true");
+  for (const name of ["Group Tester", "Ann", "Bo"]) {
+    await expect(sheet.getByRole("button", { name, exact: true })).toHaveAttribute("aria-pressed", "true");
+  }
+  await expectNoA11yViolations(page, "play sheet with groups");
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Logged: Play" })).toBeVisible();
+
+  const sessions = await (await page.request.get("/api/v1/sessions")).json();
+  expect((sessions[0].participants as { name: string }[]).map((p) => p.name).sort()).toEqual(["Ann", "Bo", "Group Tester"]);
+  const groups = await (await page.request.get("/api/v1/game-groups")).json();
+  expect(groups.find((g: { id: string }) => g.id === group.id)).toMatchObject({ plays: 1 });
+});

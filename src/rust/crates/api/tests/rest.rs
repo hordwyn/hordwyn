@@ -1131,6 +1131,59 @@ async fn phase1_library_home_history_and_stats() {
         (st, bad["code"].as_str()),
         (StatusCode::BAD_REQUEST, Some("bad_request"))
     );
+    // keyset paging (DEC-416): `next` leads to the second and last page; a made-up cursor
+    // is refused, and so is a cursor of another order
+    let (_, _, one) = call(
+        &app,
+        "POST",
+        "/api/v1/library/query",
+        tk,
+        Some(serde_json::json!({"sort": "title", "limit": 1})),
+    )
+    .await;
+    let next = one["next"].as_str().expect("a cursor").to_string();
+    let (st, _, two) = call(
+        &app,
+        "POST",
+        "/api/v1/library/query",
+        tk,
+        Some(serde_json::json!({"sort": "title", "limit": 1, "after": next})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{two}");
+    assert_eq!(
+        (two["total"].as_u64(), two["next"].is_null()),
+        (Some(2), true)
+    );
+    assert_ne!(two["rows"][0]["item"]["id"], one["rows"][0]["item"]["id"]);
+    for (body, code) in [
+        (serde_json::json!({"after": "50"}), StatusCode::BAD_REQUEST),
+        (
+            serde_json::json!({"sort": "year", "after": next}),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+    ] {
+        let (st, _, e) = call(&app, "POST", "/api/v1/library/query", tk, Some(body)).await;
+        assert_eq!(st, code, "{e}");
+    }
+    let (_, _, p1) = call(&app, "GET", "/api/v1/library?limit=1", tk, None).await;
+    let after = p1["next"].as_str().expect("a cursor");
+    let (st, _, p2) = call(
+        &app,
+        "GET",
+        &format!("/api/v1/library?limit=1&after={after}"),
+        tk,
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{p2}");
+    assert_eq!(
+        (p2["items"].as_array().map(Vec::len), p2["next"].is_null()),
+        (Some(1), true)
+    );
+    assert_ne!(p2["items"][0]["entry"]["id"], p1["items"][0]["entry"]["id"]);
+    let (st, _, _) = call(&app, "GET", "/api/v1/library?after=x", tk, None).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
     let (_, _, facet) = call(
         &app,
         "POST",
@@ -1222,6 +1275,18 @@ async fn phase1_library_home_history_and_stats() {
     assert_eq!(feed["next"], serde_json::Value::Null);
     let (st, _, _) = call(&app, "GET", "/api/v1/activity?group=play", tk, None).await;
     assert_eq!(st, StatusCode::OK);
+    // DEC-383 (deferred to WP4-8): History's `year` filter over REST (the test clock is in
+    // 2026, so the one row is in 2026 and none in 2025)
+    for (year, rows) in [(2026, 1), (2025, 0)] {
+        let uri = format!("/api/v1/activity?limit=5&year={year}");
+        let (st, _, feed) = call(&app, "GET", &uri, tk, None).await;
+        assert_eq!(st, StatusCode::OK, "{feed}");
+        assert_eq!(
+            feed["rows"].as_array().unwrap().len(),
+            rows,
+            "{year}: {feed}"
+        );
+    }
 
     let (st, _, totals) = call(&app, "GET", "/api/v1/stats/totals", tk, None).await;
     assert_eq!(st, StatusCode::OK, "{totals}");

@@ -2,10 +2,6 @@
 //! client address and request id behind trusted proxies, SMTP in the database, the source
 //! Disabled switch, the wizard's done flags and the per-user time zone.
 
-// End-to-end scenarios on purpose: the steps share one server and database; the short
-// names (t: server, a/m: admin/member cookie, r: answer) keep the many calls readable.
-#![allow(clippy::too_many_lines, clippy::many_single_char_names)]
-
 mod support;
 
 use std::net::SocketAddr;
@@ -156,6 +152,54 @@ fn health<'a>(overview: &'a Value, id: &str) -> &'a Value {
         .unwrap()
 }
 
+/// The id of the user called `name` (from the admin's user list).
+async fn user_id(t: &T, admin: Option<&str>, name: &str) -> String {
+    let users = call(t, "GET", "/admin/users", admin, None).await.body;
+    users
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|u| u["username"] == name)
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// A trigger that refuses every audit insert (dropped with `DROP TRIGGER refuse_audit`).
+async fn refuse_audit_writes(t: &T) {
+    sqlx::raw_sql(
+        "CREATE FUNCTION refuse_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN RAISE EXCEPTION 'audit refused'; END $$;
+         CREATE TRIGGER refuse_audit BEFORE INSERT ON admin_audit
+             FOR EACH ROW EXECUTE FUNCTION refuse_audit();",
+    )
+    .execute(&t.srv.pool)
+    .await
+    .unwrap();
+}
+
+/// A catalog movie without external ids; returns its id.
+async fn movie(t: &T, title: &str) -> String {
+    t.srv
+        .app
+        .find_or_create_catalog_item(app::NewCatalogItem {
+            kind: domain::kind::KindId::new("movie").unwrap(),
+            title: title.into(),
+            original_title: None,
+            year: Some(2020),
+            description: None,
+            external_ids: Vec::new(),
+            attributes: json!({}),
+            cover_url: None,
+        })
+        .await
+        .unwrap()
+        .id
+        .0
+        .to_string()
+}
+
 /// addendum-1 3.4 / DEC-245: "each row is written in the same transaction as the change".
 /// A trigger that refuses every audit insert stands in for a failing audit write: the
 /// change must not happen either.
@@ -173,25 +217,8 @@ async fn an_audit_row_that_cannot_be_written_rolls_its_change_back() {
     let admin = sign_up(&t, "root").await;
     let a = Some(admin.as_str());
     let _ = sign_up(&t, "mia").await;
-    let users = call(&t, "GET", "/admin/users", a, None).await.body;
-    let mia = users
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|u| u["username"] == "mia")
-        .unwrap()["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    sqlx::raw_sql(
-        "CREATE FUNCTION refuse_audit() RETURNS trigger LANGUAGE plpgsql AS $$
-         BEGIN RAISE EXCEPTION 'audit refused'; END $$;
-         CREATE TRIGGER refuse_audit BEFORE INSERT ON admin_audit
-             FOR EACH ROW EXECUTE FUNCTION refuse_audit();",
-    )
-    .execute(&t.srv.pool)
-    .await
-    .unwrap();
+    let mia = user_id(&t, a, "mia").await;
+    refuse_audit_writes(&t).await;
 
     let put = json!({"values": {"instance.hosting": "hosted"}});
     let r = call(&t, "PUT", "/admin/settings", a, Some(put.clone())).await;
@@ -737,22 +764,7 @@ async fn the_time_zone_moves_days_in_history_activity_and_stats() {
         .unwrap();
     let cookie = sign_up(&t, "root").await;
     let c = Some(cookie.as_str());
-    let item = t
-        .srv
-        .app
-        .find_or_create_catalog_item(app::NewCatalogItem {
-            kind: domain::kind::KindId::new("movie").unwrap(),
-            title: "Night Train".into(),
-            original_title: None,
-            year: Some(2020),
-            description: None,
-            external_ids: Vec::new(),
-            attributes: json!({}),
-            cover_url: None,
-        })
-        .await
-        .unwrap();
-    let id = item.id.0.to_string();
+    let id = movie(&t, "Night Train").await;
     let r = call(
         &t,
         "POST",
@@ -1150,4 +1162,59 @@ async fn a_mail_transport_that_cannot_be_built_is_reported() {
     let values = json!({"values": {"mail.from": "Shelf <noreply@example.org>"}});
     let r = call(&t, "PUT", "/admin/settings", a, Some(values)).await;
     assert!(!r.text.contains("mail_transport_unusable"), "{}", r.text);
+}
+
+/// DEC-383 (deferred to WP4-8): `mail.*` values are checked (host, port, security, sender),
+/// a refused value changes nothing, and a test mail without an address to an admin who has
+/// none is `no_recipient`.
+#[tokio::test]
+async fn mail_settings_are_validated_and_a_test_needs_a_recipient() {
+    if skip() {
+        return;
+    }
+    let t = start("[auth]\nsecure_cookies = false\n", vec![])
+        .await
+        .unwrap();
+    let admin = sign_up(&t, "root").await;
+    let a = Some(admin.as_str());
+    for (key, value) in [
+        ("mail.host", json!("smtp example.org")),
+        ("mail.port", json!(0)),
+        ("mail.port", json!(70_000)),
+        ("mail.port", json!("25")),
+        ("mail.security", json!("ssl")),
+        ("mail.from", json!("nobody")),
+    ] {
+        let r = call(
+            &t,
+            "PUT",
+            "/admin/settings",
+            a,
+            Some(json!({"values": {key: value}})),
+        )
+        .await;
+        assert_eq!(
+            (r.status, r.body["code"].as_str()),
+            (422, Some("invalid_setting")),
+            "{key} = {value}: {}",
+            r.text
+        );
+    }
+    let mail = call(&t, "GET", "/admin/mail", a, None).await.body;
+    for key in ["mail.host", "mail.port", "mail.security", "mail.from"] {
+        assert_ne!(
+            setting(&mail, key)["source"],
+            "db",
+            "{key} unchanged: {mail}"
+        );
+    }
+    for body in [json!({}), json!({"to": "  "})] {
+        let r = call(&t, "POST", "/admin/mail/test", a, Some(body)).await;
+        assert_eq!(
+            (r.status, r.body["code"].as_str()),
+            (422, Some("no_recipient")),
+            "{}",
+            r.text
+        );
+    }
 }

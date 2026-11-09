@@ -4,6 +4,8 @@
 pub mod catalog;
 pub mod companion;
 pub mod error;
+pub mod game_group;
+pub mod goal;
 pub mod hlc;
 pub mod ids;
 pub mod kind;

@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT season, connector, episode_count, air_date, fetched_at\n             FROM catalog_episode_seasons WHERE item_id = $1 ORDER BY season",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "season",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "catalog_episode_seasons",
+            "name": "season"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "connector",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "catalog_episode_seasons",
+            "name": "connector"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "episode_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "catalog_episode_seasons",
+            "name": "episode_count"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "air_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "catalog_episode_seasons",
+            "name": "air_date"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "fetched_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "catalog_episode_seasons",
+            "name": "fetched_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "a074363561280d48f7ae46d37c3a098cc1c467634a75103dfb3b586ed649151e"
+}

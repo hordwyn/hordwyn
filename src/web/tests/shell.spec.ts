@@ -269,3 +269,53 @@ test("the lock-out names the remaining minutes", async ({ page }) => {
   await submit.click();
   await expect(alert).toHaveText(/^Too many failed sign-ins\. Try again in 1[45] minutes\.$/);
 });
+
+test("palette: Ctrl+Enter adds a provider hit as Planned and stays open, Undo removes it; then the next step; recent items and suggestions", async ({ page }) => {
+  test.setTimeout(90_000);
+  await signUp(page, `quick${Date.now()}`, "Quinn");
+  const library = async () => (await (await page.request.get("/api/v1/library?limit=50")).json()).items as { entry: { status: string }; item: { title: string } }[];
+
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Search" });
+  // fewer than two characters: suggested commands (no recent items yet)
+  await expect(palette.getByRole("option", { name: "Go to Lists" })).toBeVisible();
+  await expect(palette.getByRole("option", { name: "Import a file" })).toBeVisible();
+  await palette.getByRole("combobox").fill("fight club");
+  const option = palette.getByRole("option", { name: /^Fight Club \(1999\)/ }).first();
+  await expect(option).toBeVisible({ timeout: 20_000 });
+  await option.hover();
+  // the active row shows what Enter and Ctrl+Enter do
+  await expect(option).toContainText("Add as Planned or next step");
+  await page.keyboard.press("Control+Enter");
+  const added = page.locator("[role=status][aria-live] > div").filter({ hasText: "Added to Planned" });
+  await expect(added).toBeVisible();
+  await expect(added).toContainText("Fight Club (1999)");
+  await expect(palette).toBeVisible();
+  await expect.poll(async () => (await library()).map((r) => `${r.item.title} ${r.entry.status}`)).toEqual(["Fight Club planned"]);
+  await added.getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByText("Undone").first()).toBeVisible();
+  await expect.poll(async () => (await library()).length).toBe(0);
+
+  // twice: added, then its next step (Watched) is logged; the palette stays open
+  await palette.getByRole("combobox").focus();
+  await option.hover();
+  await page.keyboard.press("Control+Enter");
+  await expect.poll(async () => (await library()).length).toBe(1);
+  await page.keyboard.press("Control+Enter");
+  await expect(page.getByText("Logged: Watched").first()).toBeVisible();
+  await expect(palette).toBeVisible();
+  await expect.poll(async () => (await library())[0]?.entry.status).toBe("completed");
+
+  // Enter opens the item; the empty palette then lists it as a recent item
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/items\//);
+  await hydrated(page);
+  await page.keyboard.press("Control+k");
+  const recent = palette.getByRole("option", { name: /^Fight Club \(1999\)/ });
+  await expect(recent).toBeVisible();
+  await expect(palette.getByText("Recent", { exact: true })).toBeVisible();
+  await palette.getByRole("option", { name: "Go to Lists" }).click();
+  await expect(page).toHaveURL(/\/lists$/);
+  // recent items stay in this browser
+  expect(await page.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith("app-recent-")))).toBe(true);
+});

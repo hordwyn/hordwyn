@@ -4,16 +4,18 @@ use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
 
 use app::ports::{
-    CatalogRepo, CompanionRepo, HistoryWindow, InviteRepo, LibraryFilter, LibraryHit, LibraryRepo,
-    LibrarySort, LinkRequestRepo, ListRepo, ProgressRepo, RepoError, RepoResult, ReviewRepo,
-    SessionRepo, UserRepo,
+    CatalogRepo, CompanionRepo, EntryPage, HistoryWindow, HitPage, InviteRepo, LibraryCursor,
+    LibraryFilter, LibraryHit, LibraryRepo, LibrarySort, LinkRequestRepo, ListRepo, ProgressRepo,
+    RepoError, RepoResult, ReviewRepo, SessionRepo, SortValue, UserRepo,
 };
 use async_trait::async_trait;
-use domain::catalog::{CatalogItem, ExternalId};
+use domain::catalog::{CatalogItem, EpisodeSeason, ExternalId};
 use domain::companion::{Companion, Invite, LinkRequest, RequestState};
+use domain::game_group::GameGroup;
+use domain::goal::Goal;
 use domain::ids::{
-    CompanionId, EntryId, EventId, InviteId, ItemId, LinkRequestId, ListId, ReviewId, SessionId,
-    UserId,
+    CompanionId, EntryId, EventId, GameGroupId, GoalId, InviteId, ItemId, LinkRequestId, ListId,
+    ReviewId, SessionId, UserId,
 };
 use domain::kind::{KindId, Status};
 use domain::library::LibraryEntry;
@@ -36,6 +38,16 @@ pub struct State {
     pub lists: HashMap<ListId, List>,
     pub sessions: HashMap<SessionId, Session>,
     pub tags: HashMap<EntryId, Vec<String>>,
+    pub goals: HashMap<GoalId, Goal>,
+    pub game_groups: HashMap<GameGroupId, GameGroup>,
+    /// Fetched seasons per item, by season number (WP4-7).
+    pub episodes: HashMap<ItemId, std::collections::BTreeMap<u32, EpisodeSeason>>,
+    /// When each item's connector data was obtained (catalog retention, DEC-453).
+    pub provider_data_at: HashMap<ItemId, domain::Timestamp>,
+    /// Purged items and from when they may be fetched again (UX4-9).
+    pub expired_at: HashMap<ItemId, domain::Timestamp>,
+    /// Open item pages and until when they hear about their item (DEC-490).
+    pub item_watchers: HashMap<(ItemId, UserId), domain::Timestamp>,
 }
 
 #[derive(Default)]
@@ -107,9 +119,43 @@ impl UserRepo for MemStore {
         s.library.retain(|_, e| e.user_id != id);
         s.progress.retain(|e| e.user_id != id);
         s.reviews.retain(|_, r| r.user_id != id);
+        s.goals.retain(|_, g| g.user_id != id);
+        s.item_watchers.retain(|(_, u), _| *u != id);
+        s.game_groups.retain(|_, g| g.owner != id);
         s.lists.retain(|_, l| l.owner != id);
         s.sessions.retain(|_, x| x.owner != id);
         s.link_requests.retain(|_, r| r.from != id && r.to != id);
+        Ok(())
+    }
+
+    async fn goals(&self, user: UserId) -> RepoResult<Vec<Goal>> {
+        Ok(self
+            .state()
+            .goals
+            .values()
+            .filter(|g| g.user_id == user)
+            .cloned()
+            .collect())
+    }
+
+    async fn goal(&self, id: GoalId) -> RepoResult<Option<Goal>> {
+        Ok(self.state().goals.get(&id).cloned())
+    }
+
+    async fn upsert_goal(&self, goal: &Goal) -> RepoResult<()> {
+        let mut s = self.state();
+        if s.goals
+            .values()
+            .any(|g| g.id != goal.id && g.same_slot(goal))
+        {
+            return Err(RepoError::Duplicate("goal".into()));
+        }
+        s.goals.insert(goal.id, goal.clone());
+        Ok(())
+    }
+
+    async fn delete_goal(&self, id: GoalId) -> RepoResult<()> {
+        self.state().goals.remove(&id);
         Ok(())
     }
 }
@@ -123,6 +169,14 @@ impl CompanionRepo for MemStore {
 
     async fn get(&self, id: CompanionId) -> RepoResult<Option<Companion>> {
         Ok(self.state().companions.get(&id).cloned())
+    }
+
+    async fn get_many(&self, ids: &[CompanionId]) -> RepoResult<Vec<Companion>> {
+        let s = self.state();
+        Ok(ids
+            .iter()
+            .filter_map(|i| s.companions.get(i).cloned())
+            .collect())
     }
 
     async fn update(&self, c: &Companion) -> RepoResult<()> {
@@ -161,6 +215,25 @@ impl CompanionRepo for MemStore {
             .filter(|c| c.linked_user == Some(user))
             .cloned()
             .collect())
+    }
+
+    async fn game_groups(&self, owner: UserId) -> RepoResult<Vec<GameGroup>> {
+        Ok(self
+            .state()
+            .game_groups
+            .values()
+            .filter(|g| g.owner == owner)
+            .cloned()
+            .collect())
+    }
+
+    async fn game_group(&self, id: GameGroupId) -> RepoResult<Option<GameGroup>> {
+        Ok(self.state().game_groups.get(&id).cloned())
+    }
+
+    async fn upsert_game_group(&self, g: &GameGroup) -> RepoResult<()> {
+        self.state().game_groups.insert(g.id, g.clone());
+        Ok(())
     }
 }
 
@@ -232,7 +305,151 @@ impl InviteRepo for MemStore {
 #[async_trait]
 impl CatalogRepo for MemStore {
     async fn upsert(&self, item: &CatalogItem) -> RepoResult<()> {
-        self.state().catalog.insert(item.id, item.clone());
+        let mut s = self.state();
+        // same rule as Postgres: a new row is stamped now, a changed `fetched_at` restamps
+        let previous = s.catalog.get(&item.id).map(|i| i.fetched_at);
+        match (previous, item.fetched_at) {
+            (None, f) => {
+                s.provider_data_at
+                    .insert(item.id, f.unwrap_or_else(chrono::Utc::now));
+            }
+            (Some(old), Some(f)) if old != Some(f) => {
+                s.provider_data_at.insert(item.id, f);
+            }
+            _ => {}
+        }
+        // data written to a purged item is stamped again and ends its expiry (UX4-9)
+        if !item.title.is_empty() {
+            s.expired_at.remove(&item.id);
+            s.provider_data_at
+                .entry(item.id)
+                .or_insert_with(|| item.fetched_at.unwrap_or_else(chrono::Utc::now));
+        }
+        s.catalog.insert(item.id, item.clone());
+        Ok(())
+    }
+
+    async fn insert_new(
+        &self,
+        item: &CatalogItem,
+        obtained_at: domain::Timestamp,
+    ) -> RepoResult<Option<ItemId>> {
+        let mut s = self.state();
+        if let Some(owner) = s.catalog.values().find(|i| {
+            i.kind == item.kind && i.external_ids.iter().any(|e| item.external_ids.contains(e))
+        }) {
+            return Ok(Some(owner.id));
+        }
+        s.catalog.insert(item.id, item.clone());
+        s.provider_data_at
+            .insert(item.id, item.fetched_at.unwrap_or(obtained_at));
+        Ok(None)
+    }
+
+    async fn provider_data_before(
+        &self,
+        namespaces: &[String],
+        before: domain::Timestamp,
+        limit: u32,
+    ) -> RepoResult<Vec<(ItemId, domain::Timestamp)>> {
+        let s = self.state();
+        let mut out: Vec<(ItemId, domain::Timestamp)> = s
+            .provider_data_at
+            .iter()
+            .filter(|(id, at)| {
+                **at < before
+                    && s.catalog.get(id).is_some_and(|i| {
+                        i.external_ids
+                            .iter()
+                            .any(|e| namespaces.contains(&e.namespace))
+                    })
+            })
+            .map(|(id, at)| (*id, *at))
+            .collect();
+        out.sort_by_key(|(id, at)| (*at, id.0));
+        out.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+        Ok(out)
+    }
+
+    async fn purge_provider_data(
+        &self,
+        id: ItemId,
+        at: domain::Timestamp,
+    ) -> RepoResult<Option<String>> {
+        let mut s = self.state();
+        s.provider_data_at.remove(&id);
+        s.episodes.remove(&id);
+        let Some(item) = s.catalog.get_mut(&id) else {
+            return Ok(None);
+        };
+        item.title = String::new();
+        item.year = None;
+        item.description = None;
+        item.original_title = None;
+        item.attributes = serde_json::json!({});
+        item.cover_url = None;
+        item.provenance.clear();
+        item.state = domain::catalog::EntityState::Stub;
+        item.fetched_at = None;
+        item.fresh_until = None;
+        let cover = item.cover_asset.take();
+        s.expired_at.insert(id, at);
+        Ok(cover)
+    }
+
+    async fn delete_unreferenced(&self, id: ItemId) -> RepoResult<app::ports::Removal> {
+        let mut s = self.state();
+        let referenced = s.library.values().any(|e| e.item_id == id)
+            || s.lists
+                .values()
+                .any(|l| l.items.iter().any(|i| i.item_id == id))
+            || s.sessions.values().any(|x| x.item_id == id)
+            || s.progress.iter().any(|x| x.item_id == id)
+            || s.reviews.values().any(|x| x.item_id == id);
+        if referenced {
+            return Ok(app::ports::Removal::Kept);
+        }
+        let Some(item) = s.catalog.remove(&id) else {
+            return Ok(app::ports::Removal::Kept);
+        };
+        s.provider_data_at.remove(&id);
+        s.expired_at.remove(&id);
+        s.episodes.remove(&id);
+        s.item_watchers.retain(|(item, _), _| *item != id);
+        Ok(app::ports::Removal::Deleted {
+            cover_asset: item.cover_asset,
+        })
+    }
+
+    async fn expired_provider_data(
+        &self,
+        namespaces: &[String],
+        before: domain::Timestamp,
+        limit: u32,
+    ) -> RepoResult<Vec<ItemId>> {
+        let s = self.state();
+        let mut out: Vec<(domain::Timestamp, ItemId)> = s
+            .expired_at
+            .iter()
+            .filter(|(id, at)| {
+                **at <= before
+                    && s.catalog.get(id).is_some_and(|i| {
+                        i.external_ids
+                            .iter()
+                            .any(|e| namespaces.contains(&e.namespace))
+                    })
+            })
+            .map(|(id, at)| (*at, *id))
+            .collect();
+        out.sort_by_key(|(at, id)| (*at, id.0));
+        out.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+        Ok(out.into_iter().map(|(_, id)| id).collect())
+    }
+
+    async fn touch_expired(&self, id: ItemId, at: domain::Timestamp) -> RepoResult<()> {
+        if let Some(t) = self.state().expired_at.get_mut(&id) {
+            *t = at;
+        }
         Ok(())
     }
 
@@ -260,6 +477,94 @@ impl CatalogRepo for MemStore {
             .filter_map(|i| s.catalog.get(i).cloned())
             .collect())
     }
+
+    async fn episode_seasons(&self, item: ItemId) -> RepoResult<Vec<EpisodeSeason>> {
+        Ok(self
+            .state()
+            .episodes
+            .get(&item)
+            .map(|m| m.values().cloned().collect())
+            .unwrap_or_default())
+    }
+
+    async fn put_episode_seasons(&self, item: ItemId, seasons: &[EpisodeSeason]) -> RepoResult<()> {
+        let mut s = self.state();
+        let m = s.episodes.entry(item).or_default();
+        for season in seasons {
+            m.insert(season.season, season.clone());
+        }
+        Ok(())
+    }
+
+    async fn audience(
+        &self,
+        id: ItemId,
+        now: domain::Timestamp,
+    ) -> RepoResult<app::ports::ItemAudience> {
+        let s = self.state();
+        let lists = || {
+            s.lists
+                .values()
+                .filter(|l| l.items.iter().any(|i| i.item_id == id))
+        };
+        if lists().any(|l| l.visibility == Visibility::Instance) {
+            return Ok(app::ports::ItemAudience::Everyone);
+        }
+        let mut users: std::collections::BTreeSet<uuid::Uuid> =
+            lists().map(|l| l.owner.0).collect();
+        users.extend(
+            s.library
+                .values()
+                .filter(|e| e.item_id == id)
+                .map(|e| e.user_id.0),
+        );
+        users.extend(
+            s.progress
+                .iter()
+                .filter(|e| e.item_id == id)
+                .map(|e| e.user_id.0),
+        );
+        users.extend(
+            s.reviews
+                .values()
+                .filter(|r| r.item_id == id)
+                .map(|r| r.user_id.0),
+        );
+        for x in s.sessions.values().filter(|x| x.item_id == id) {
+            users.insert(x.owner.0);
+            if s.users.get(&x.owner).is_some_and(|u| u.share_sessions) {
+                users.extend(
+                    x.participants
+                        .iter()
+                        .filter_map(|p| s.companions.get(&p.companion_id)?.linked_user)
+                        .map(|u| u.0),
+                );
+            }
+        }
+        users.extend(
+            s.item_watchers
+                .iter()
+                .filter(|((item, _), until)| *item == id && **until > now)
+                .map(|((_, u), _)| u.0),
+        );
+        Ok(app::ports::ItemAudience::Users(
+            users.into_iter().map(UserId).collect(),
+        ))
+    }
+
+    async fn watch(
+        &self,
+        id: ItemId,
+        user: UserId,
+        until: domain::Timestamp,
+        now: domain::Timestamp,
+    ) -> RepoResult<()> {
+        let mut s = self.state();
+        s.item_watchers
+            .retain(|(_, u), end| *u != user || *end >= now);
+        s.item_watchers.insert((id, user), until);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -277,6 +582,16 @@ impl LibraryRepo for MemStore {
         Ok(self.state().library.get(&id).cloned())
     }
 
+    async fn entries_for(&self, user: UserId, items: &[ItemId]) -> RepoResult<Vec<LibraryEntry>> {
+        Ok(self
+            .state()
+            .library
+            .values()
+            .filter(|e| e.user_id == user && items.contains(&e.item_id))
+            .cloned()
+            .collect())
+    }
+
     async fn upsert(&self, entry: &LibraryEntry) -> RepoResult<()> {
         let mut s = self.state();
         s.library.retain(|_, e| {
@@ -290,9 +605,9 @@ impl LibraryRepo for MemStore {
         Ok(self.state().library.values().any(|e| e.item_id == item))
     }
 
-    async fn query(&self, user: UserId, f: &LibraryFilter) -> RepoResult<(Vec<LibraryHit>, u64)> {
+    async fn query(&self, user: UserId, f: &LibraryFilter) -> RepoResult<HitPage> {
         let s = self.state();
-        let mut hits: Vec<(SortKey, LibraryHit)> = s
+        let mut hits: Vec<(SortValue, LibraryHit)> = s
             .library
             .values()
             .filter(|e| e.user_id == user && s.hit_matches(e, f))
@@ -310,22 +625,56 @@ impl LibraryRepo for MemStore {
                 (sort_key(&s, &hit, f.sort), hit)
             })
             .collect();
-        // values first in the chosen direction, missing values (no year, no rating) last
-        hits.sort_by(|(a, _), (b, _)| {
-            let missing = |k: &SortKey| k.0.is_none() && k.1.is_none();
-            missing(a).cmp(&missing(b)).then_with(|| {
-                let o = (&a.0, a.1, a.2).cmp(&(&b.0, b.1, b.2));
-                if f.descending { o.reverse() } else { o }
-            })
-        });
         let total = hits.len() as u64;
-        let page = hits
+        hits.sort_by(|(a, x), (b, y)| order(a, x.entry.id, b, y.entry.id, f.descending));
+        let after: Vec<(SortValue, LibraryHit)> = hits
             .into_iter()
-            .map(|(_, h)| h)
-            .skip(usize::try_from(f.offset).unwrap_or(usize::MAX))
-            .take(f.limit as usize)
+            .filter(|(k, h)| {
+                f.after
+                    .as_ref()
+                    .is_none_or(|c| order(k, h.entry.id, &c.key, c.id, f.descending).is_gt())
+            })
+            .take(f.limit as usize + 1)
             .collect();
-        Ok((page, total))
+        let more = after.len() > f.limit as usize;
+        let page: Vec<(SortValue, LibraryHit)> = after.into_iter().take(f.limit as usize).collect();
+        let next = page.last().filter(|_| more).map(|(k, h)| LibraryCursor {
+            sort: f.sort,
+            descending: f.descending,
+            key: k.clone(),
+            id: h.entry.id,
+        });
+        Ok(HitPage {
+            hits: page.into_iter().map(|(_, h)| h).collect(),
+            total,
+            next,
+        })
+    }
+
+    async fn write_many(&self, writes: &[(LibraryEntry, Option<Vec<String>>)]) -> RepoResult<()> {
+        for (e, tags) in writes {
+            LibraryRepo::upsert(self, e).await?;
+            let id = LibraryRepo::get(self, e.user_id, e.item_id)
+                .await?
+                .map_or(e.id, |x| x.id);
+            if let Some(t) = tags {
+                self.state().tags.insert(id, t.clone());
+            }
+        }
+        Ok(())
+    }
+
+    async fn remove_many(&self, user: UserId, ids: &[EntryId]) -> RepoResult<u64> {
+        let mut s = self.state();
+        let mut n = 0;
+        for id in ids {
+            if s.library.get(id).is_some_and(|e| e.user_id == user) {
+                s.library.remove(id);
+                s.tags.remove(id);
+                n += 1;
+            }
+        }
+        Ok(n)
     }
 
     async fn counts(&self, user: UserId) -> RepoResult<Vec<(KindId, Status, u64)>> {
@@ -459,18 +808,24 @@ impl LibraryRepo for MemStore {
     async fn page(
         &self,
         user: UserId,
-        offset: u64,
+        after: Option<(domain::Timestamp, EntryId)>,
         limit: u32,
-    ) -> RepoResult<(Vec<LibraryEntry>, u64)> {
+    ) -> RepoResult<EntryPage> {
         let mut v = LibraryRepo::by_user(self, user).await?;
         v.sort_by_key(|e| std::cmp::Reverse((e.added_at, e.id.0)));
         let total = v.len() as u64;
-        let page = v
+        let mut entries: Vec<LibraryEntry> = v
             .into_iter()
-            .skip(usize::try_from(offset).unwrap_or(usize::MAX))
-            .take(limit as usize)
+            .filter(|e| after.is_none_or(|(at, id)| (e.added_at, e.id) < (at, id)))
+            .take(limit as usize + 1)
             .collect();
-        Ok((page, total))
+        let more = entries.len() > limit as usize;
+        entries.truncate(limit as usize);
+        Ok(EntryPage {
+            entries,
+            total,
+            more,
+        })
     }
 }
 
@@ -529,6 +884,25 @@ impl ProgressRepo for MemStore {
             .map(|x| (x.id, u64::from(x.duration_minutes.unwrap_or(0))))
             .collect();
         Ok(app::month_amounts(&s.catalog, &events, &durations, zone))
+    }
+
+    async fn window_amounts(
+        &self,
+        user: UserId,
+        from: domain::Timestamp,
+        to: domain::Timestamp,
+    ) -> RepoResult<Vec<app::KindAmounts>> {
+        let events = ProgressRepo::by_user(self, user).await?;
+        let s = self.state();
+        let durations: HashMap<SessionId, u64> = s
+            .sessions
+            .values()
+            .filter(|x| x.owner == user)
+            .map(|x| (x.id, u64::from(x.duration_minutes.unwrap_or(0))))
+            .collect();
+        Ok(app::window_amounts(
+            &s.catalog, &events, &durations, from, to,
+        ))
     }
 
     async fn for_items(&self, user: UserId, items: &[ItemId]) -> RepoResult<Vec<ProgressEvent>> {
@@ -685,6 +1059,41 @@ impl SessionRepo for MemStore {
             .cloned()
             .collect())
     }
+
+    async fn by_owner_window(&self, owner: UserId, w: &HistoryWindow) -> RepoResult<Vec<Session>> {
+        let all = SessionRepo::by_owner(self, owner).await?;
+        Ok(self.session_window(all, w))
+    }
+
+    async fn with_participants_window(
+        &self,
+        companions: &[CompanionId],
+        w: &HistoryWindow,
+    ) -> RepoResult<Vec<Session>> {
+        let all = self.with_participants(companions).await?;
+        Ok(self.session_window(all, w))
+    }
+}
+
+impl MemStore {
+    /// `sessions` in the window `w`, newest first by `(started_at, id)`.
+    fn session_window(&self, sessions: Vec<Session>, w: &HistoryWindow) -> Vec<Session> {
+        let s = self.state();
+        let mut v: Vec<Session> = sessions
+            .into_iter()
+            .filter(|x| w.before.is_none_or(|b| (x.started_at, x.id.0) < b))
+            .filter(|x| w.since.is_none_or(|t| x.started_at >= t))
+            .filter(|x| {
+                w.kinds.is_empty()
+                    || s.catalog
+                        .get(&x.item_id)
+                        .is_some_and(|i| w.kinds.contains(&i.kind))
+            })
+            .collect();
+        v.sort_by_key(|x| std::cmp::Reverse((x.started_at, x.id.0)));
+        v.truncate(w.limit as usize);
+        v
+    }
 }
 
 // ---------------------------------------------------------------- library queries
@@ -736,16 +1145,14 @@ impl State {
     }
 }
 
-type SortKey = (Option<String>, Option<i64>, uuid::Uuid);
-
-fn sort_key(s: &State, h: &LibraryHit, sort: LibrarySort) -> SortKey {
+fn sort_key(s: &State, h: &LibraryHit, sort: LibrarySort) -> SortValue {
     let item = s.catalog.get(&h.entry.item_id);
-    let num = match sort {
-        LibrarySort::LastActivity => Some(h.last_activity.timestamp_micros()),
-        LibrarySort::Added => Some(h.entry.added_at.timestamp_micros()),
-        LibrarySort::Year => item.and_then(|i| i.year).map(i64::from),
-        LibrarySort::Rating => h.entry.rating.value.map(|r| i64::from(r.value())),
-        LibrarySort::Plays => Some(
+    match sort {
+        LibrarySort::LastActivity => SortValue::Time(h.last_activity),
+        LibrarySort::Added => SortValue::Time(h.entry.added_at),
+        LibrarySort::Year => SortValue::Int(item.and_then(|i| i.year).map(i64::from)),
+        LibrarySort::Rating => SortValue::Int(h.entry.rating.value.map(|r| i64::from(r.value()))),
+        LibrarySort::Plays => SortValue::Int(Some(
             i64::try_from(
                 s.effective_for(h.entry.user_id, h.entry.item_id)
                     .iter()
@@ -753,10 +1160,31 @@ fn sort_key(s: &State, h: &LibraryHit, sort: LibrarySort) -> SortKey {
                     .count(),
             )
             .unwrap_or(i64::MAX),
-        ),
-        LibrarySort::Title => None,
+        )),
+        LibrarySort::Title => {
+            SortValue::Text(item.map_or_else(String::new, |i| i.title.to_lowercase()))
+        }
+    }
+}
+
+/// The library order: keys in the chosen direction, then the entry id in the same direction;
+/// a missing number (no year, no rating) sorts last in both directions.
+fn order(
+    a: &SortValue,
+    a_id: EntryId,
+    b: &SortValue,
+    b_id: EntryId,
+    descending: bool,
+) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let dir = |o: Ordering| if descending { o.reverse() } else { o };
+    let keys = match (a, b) {
+        (SortValue::Int(None), SortValue::Int(Some(_))) => return Ordering::Greater,
+        (SortValue::Int(Some(_)), SortValue::Int(None)) => return Ordering::Less,
+        (SortValue::Int(x), SortValue::Int(y)) => x.cmp(y),
+        (SortValue::Text(x), SortValue::Text(y)) => x.cmp(y),
+        (SortValue::Time(x), SortValue::Time(y)) => x.cmp(y),
+        _ => Ordering::Equal,
     };
-    let title = (sort == LibrarySort::Title)
-        .then(|| item.map_or_else(String::new, |i| i.title.to_lowercase()));
-    (title, num, h.entry.id.0)
+    dir(keys.then_with(|| a_id.cmp(&b_id)))
 }

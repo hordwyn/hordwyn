@@ -23,8 +23,8 @@ use crate::events::{mentions, use_events};
 use crate::history::ActivityRow;
 use crate::i18n::{kind_label, t, use_i18n};
 use crate::log_sheet::{
-    ItemInfo, PagesInline, PlaySheet, PlayState, PositionInline, SheetTarget, WatchedSheet,
-    WatchedState,
+    InlineDraft, ItemInfo, PagesInline, PlaySheet, PlayState, PositionInline, SheetTarget,
+    WatchedSheet, WatchedState,
 };
 use crate::next_step::{
     LoggedStep, StepCtx, next_step_label, progress_text, run_step, step_progress,
@@ -45,6 +45,14 @@ struct ItemUi {
     play: PlayState,
     companions: RwSignal<Vec<CompanionDto>>,
     tags: RwSignal<Option<LibraryRowDto>>,
+    /// The list picker (`L`): the item to add.
+    pick: RwSignal<Option<Vec<String>>>,
+    /// `?log=1` (with `&with=<person>` and `&group=<game group>`): open the log sheet with
+    /// these people (and that group) once the page is there (the palette's "Log with ..." and
+    /// "Log a play of ...", WP4-4; People's "Log a play with" a group, WP4-6).
+    auto_log: RwSignal<Option<(Vec<String>, String)>>,
+    /// The inline page or position field's typed text and error (DEC-477).
+    inline: InlineDraft,
     refresh: Callback<()>,
 }
 
@@ -60,7 +68,9 @@ pub fn ItemPage() -> impl IntoView {
     // for a refresh itself): overlapping refetches rebuilt the view under a live click
     let pending = RwSignal::new(false);
     // each load renders afresh (keyed): rebuilding the old view in place kept event handlers
-    // of the previous render, whose state was already disposed
+    // of the previous render, whose state was already disposed; and again once the kinds
+    // arrive (after a client-side navigation the item can come first, and without its kind the
+    // view has no log sheets, WP4-4)
     let version = RwSignal::new(0u32);
     let refetch = move || {
         if !pending.get_untracked() {
@@ -94,8 +104,21 @@ pub fn ItemPage() -> impl IntoView {
         play: PlayState::new(companions),
         companions,
         tags: RwSignal::new(None),
+        pick: RwSignal::new(None),
+        auto_log: RwSignal::new(None),
+        inline: InlineDraft::new(),
         refresh: Callback::new(move |()| refetch()),
     };
+    let inline = ui.inline;
+    Effect::new(move |prev: Option<String>| {
+        let now = id();
+        if prev.is_some_and(|p| p != now) {
+            inline.clear();
+        }
+        now
+    });
+    item_keys(&ui, data);
+    follow_log_query(ui.auto_log);
     let known_tags = Signal::derive(move || {
         known
             .get()
@@ -106,7 +129,7 @@ pub fn ItemPage() -> impl IntoView {
     view! {
         // Transition: a refetch keeps the page (and focus) until the new data is there
         <Transition fallback=|| view! { <Skeleton class="h-64 w-full"/> }>
-            <For each=move || data.get().map(|r| (version.get_untracked(), r, kinds.get().and_then(Result::ok))) key=|(v, _, _)| *v
+            <For each=move || data.get().map(|r| (version.get_untracked(), r, kinds.get().and_then(Result::ok))) key=|(v, _, k)| (*v, k.is_some())
                 children=move |(_, r, kinds)| match r {
                 Err(e) if needs_sign_in(&e) => { go("/sign-in"); ().into_any() }
                 Err(e) => view! { <p role="alert">{error_text(&e)}</p> }.into_any(),
@@ -118,13 +141,114 @@ pub fn ItemPage() -> impl IntoView {
                 }/>
         </Transition>
         <TagEditor target=ui.tags known=known_tags on_change=ui.refresh/>
+        <crate::bulk::ListPicker target=ui.pick on_done=ui.refresh/>
     }
+}
+
+/// Follow `?log=1&with=<id>,<id>&group=<id>` into `asked`: the people (none without `with`)
+/// and the game group (empty without `group`). Read in an effect: on a client-side navigation
+/// the page is built before the query map has the new URL's values (seen in the e2e run).
+fn follow_log_query(asked: RwSignal<Option<(Vec<String>, String)>>) {
+    let q = leptos_router::hooks::use_query_map();
+    Effect::new(move |_| {
+        let wanted = q.with(|q| {
+            q.get("log").map(|_| {
+                let with = q
+                    .get("with")
+                    .map(|w| {
+                        w.split(',')
+                            .filter(|s| !s.is_empty())
+                            .map(String::from)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                (with, q.get("group").unwrap_or_default())
+            })
+        });
+        if wanted.is_some() {
+            asked.set(wanted);
+        }
+    });
+}
+
+/// The item page's keys (design.md 6.3): `W` the next step (or the first field of an inline
+/// step, or "Add to library"), `R` the rating, `T` the tags, `L` the list picker.
+fn item_keys(ui: &ItemUi, data: Res<ItemPageDto>) {
+    let ui = *ui;
+    crate::keyboard::page_keys(move |_, key| match key {
+        "w" => {
+            crate::keyboard::click("[data-action-bar] [data-next-step]")
+                || crate::keyboard::focus("[data-action-bar] input")
+        }
+        "r" => crate::keyboard::focus("#ip-rate [role=radio][tabindex=\"0\"]"),
+        "t" => crate::keyboard::click("[data-shortcut=tags]"),
+        "l" => {
+            let id = data.with_untracked(|d| {
+                d.as_ref()
+                    .and_then(|r| r.as_ref().ok())
+                    .filter(|p| p.entry.is_some())
+                    .map(|p| p.item.id.clone())
+            });
+            id.is_some_and(|id| {
+                ui.pick.set(Some(vec![id]));
+                true
+            })
+        }
+        _ => false,
+    });
+}
+
+/// Remember the opened item for the empty palette (this browser only, DEC: WP4-4).
+fn remember_recent(page: &ItemPageDto, kind: Option<&KindDto>) {
+    let username = expect_context::<crate::app::ClientConfig>().username;
+    let item = crate::recent::RecentItem {
+        id: page.item.id.clone(),
+        label: match page.item.year {
+            Some(y) => format!("{} ({y})", crate::i18n::title_text(&page.item.title)),
+            None => crate::i18n::title_text(&page.item.title),
+        },
+        plays: kind.is_some_and(|k| k.progress_model == "sessions"),
+    };
+    Effect::new(move |_| crate::recent::remember(&username, item.clone()));
+}
+
+/// Open the log sheet asked for by `?log=1` once, with the people of `&with=`: the "With..."
+/// sheet of a one-click step, or the play sheet.
+fn open_asked_sheet(page: &ItemPageDto, model: &str, ui: &ItemUi) {
+    let ui = *ui;
+    // without the kind (it can arrive after a first render) the sheet is not known yet: the
+    // view renders again with it
+    if page.entry.is_none() || model.is_empty() {
+        return;
+    }
+    let i18n = use_i18n();
+    let step = page.next_step.clone().unwrap_or_default();
+    let watched = step_progress(&step).filter(|_| matches!(model, "single" | "episodic"));
+    let label = next_step_label(&i18n, &step);
+    let plays = model == "sessions";
+    Effect::new(move |_| {
+        let Some((with, group)) = ui.auto_log.get() else {
+            return;
+        };
+        ui.auto_log.set(None);
+        let (watched, label) = (watched.clone(), label.clone());
+        crate::keyboard::when_present("[data-action-bar]", move || {
+            if plays {
+                ui.play.preset.set(with);
+                ui.play.preset_group.set(group);
+                ui.play.open.set(true);
+            } else if let Some(progress) = watched {
+                ui.watched.preset.set(with);
+                ui.watched.target.set(Some(SheetTarget { progress, label }));
+            }
+        });
+    });
 }
 
 fn info_of(page: &ItemPageDto, refresh: Callback<()>) -> ItemInfo {
     ItemInfo {
         item_id: page.item.id.clone(),
-        title: page.item.title.clone(),
+        title: crate::i18n::title_text(&page.item.title),
         rating: page.entry.as_ref().and_then(|e| e.rating),
         note: page
             .entry
@@ -153,11 +277,13 @@ fn ItemView(
     let loading = item.state == "stub";
     let square = crate::library_state::square_art(&item.kind);
     let play_title = page.next_step.as_ref().map(|s| next_step_label(&i18n, s));
+    remember_recent(&page, kind.as_ref());
+    open_asked_sheet(&page, &model, &ui);
     view! {
-        <Title text=item.title.clone()/>
+        <Title text=crate::i18n::title_text(&item.title)/>
         <article class="grid gap-6 md:grid-cols-[14rem_1fr] md:gap-8">
             <div class="flex flex-col gap-4">
-                <Cover title=item.title.clone() image=item.cover.clone() square=square sizes="(min-width: 768px) 224px, 10rem" class="w-40 md:w-full"/>
+                <Cover title=crate::i18n::title_text(&item.title) image=item.cover.clone() square=square sizes="(min-width: 768px) 224px, 10rem" class="w-40 md:w-full"/>
                 {page.entry.is_some().then(|| view! { <FactsCard page=page.clone() kind=kind.clone() ui=ui/> })}
             </div>
             <div class="flex min-w-0 flex-col gap-5">
@@ -166,7 +292,7 @@ fn ItemView(
                         <Badge variant=BadgeVariant::Secondary><Icon name=crate::library::kind_icon(&item.kind)/> {kind_label(&item.kind)}</Badge>
                         {item.year.map(|y| view! { <Badge variant=BadgeVariant::Outline>{y.to_string()}</Badge> })}
                     </div>
-                    <h1 class="text-2xl font-semibold tracking-tight md:text-3xl">{item.title.clone()}</h1>
+                    <h1 class="text-2xl font-semibold tracking-tight md:text-3xl">{crate::i18n::title_text(&item.title)}</h1>
                     {item.original_title.clone().filter(|o| o != &item.title).map(|o| view! {
                         <p class="text-sm text-muted-foreground">{use_i18n().t_args("item-original-title", &[("title", o.into())])}</p>
                     })}
@@ -218,11 +344,14 @@ fn FactsCard(page: ItemPageDto, kind: Option<KindDto>, ui: ItemUi) -> impl IntoV
         .collect();
     let status = RwSignal::new(entry.status.clone());
     let ctx = StepCtx::current();
-    let item_id = page.item.id.clone();
+    let item = (
+        page.item.id.clone(),
+        crate::i18n::title_text(&page.item.title),
+    );
     Effect::new(move |prev: Option<String>| {
         let now = status.get();
         if prev.as_ref().is_some_and(|p| *p != now) {
-            set_status(&ctx, item_id.clone(), now.clone(), ui.refresh);
+            set_status(&ctx, item.clone(), now.clone(), ui.refresh);
         }
         now
     });
@@ -254,23 +383,35 @@ fn FactsCard(page: ItemPageDto, kind: Option<KindDto>, ui: ItemUi) -> impl IntoV
     .into_any()
 }
 
-fn set_status(ctx: &StepCtx, item_id: String, status: String, refresh: Callback<()>) {
+/// Change the status; offline it is queued with a client stamp (WP4-5).
+fn set_status(
+    ctx: &StepCtx,
+    (item_id, title): (String, String),
+    status: String,
+    refresh: Callback<()>,
+) {
     let word = ctx.i18n.t(&format!("status-{status}"));
     let done = ctx
         .i18n
         .t_args("library-status-changed", &[("status", word.into())]);
     let failed = ctx.i18n.t("error-generic");
-    let toasts = ctx.toasts;
+    let (toasts, ctx) = (ctx.toasts, ctx.clone());
     leptos::task::spawn_local(async move {
-        match api::set_status(item_id, status).await {
+        match api::set_status(item_id.clone(), status.clone()).await {
             Ok(_) => toasts.push(done, None, ToastVariant::Default),
+            Err(e)
+                if crate::offline::network_error(&e)
+                    && ctx.queue_field(title, |h| {
+                        crate::offline::status_command(&item_id, &status, h)
+                    }) => {}
             Err(_) => toasts.push(failed, None, ToastVariant::Destructive),
         }
         refresh.run(());
     });
 }
 
-/// The overflow menu of the action bar: every other status of the kind.
+/// The overflow menu of the action bar: every other status of the kind, and "Remove from
+/// library" (toast with Undo; history stays).
 fn overflow(
     page: &ItemPageDto,
     kind: Option<&KindDto>,
@@ -280,27 +421,49 @@ fn overflow(
     let i18n = use_i18n();
     let ctx = StepCtx::current();
     let refresh = ui.refresh;
-    let items: Vec<MenuItem> = kind
+    let mut items: Vec<MenuItem> = kind
         .map(|k| k.statuses.clone())
         .unwrap_or_default()
         .into_iter()
         .filter(|s| *s != entry.status)
         .map(|s| {
             let word = i18n.t(&format!("status-{s}"));
-            let (ctx, id) = (ctx.clone(), page.item.id.clone());
+            let (ctx, item) = (
+                ctx.clone(),
+                (
+                    page.item.id.clone(),
+                    crate::i18n::title_text(&page.item.title),
+                ),
+            );
             MenuItem {
                 label: i18n.t_args("library-mark", &[("status", word.into())]),
                 on_select: Callback::new(move |()| {
-                    set_status(&ctx, id.clone(), s.clone(), refresh);
+                    set_status(&ctx, item.clone(), s.clone(), refresh);
                 }),
                 destructive: false,
             }
         })
         .collect();
-    let label = i18n.t_args("item-actions", &[("title", page.item.title.clone().into())]);
+    let error = RwSignal::new(None::<String>);
+    let (id, title) = (
+        page.item.id.clone(),
+        crate::i18n::title_text(&page.item.title),
+    );
+    items.push(MenuItem {
+        label: i18n.t("item-remove"),
+        on_select: Callback::new(move |()| {
+            crate::bulk::remove_one(&ctx, id.clone(), &title, error, Some(refresh));
+        }),
+        destructive: true,
+    });
+    let label = i18n.t_args(
+        "item-actions",
+        &[("title", crate::i18n::title_text(&page.item.title).into())],
+    );
     Some(view! {
         <DropdownMenu label=label items=items id="item-actions" trigger_class="h-10 px-3"
             trigger=Box::new(|| view! { <Icon name=IconName::More/> }.into_any())/>
+        {move || error.get().map(|e| view! { <p role="alert" class="w-full text-sm text-destructive-text">{e}</p> })}
     })
 }
 
@@ -329,8 +492,8 @@ fn ActionBar(
             });
         };
         return view! {
-            <section class=card data-testid="action-bar" aria-label=t("item-action-bar")>
-                <div><Button size=ButtonSize::Lg loading=busy on:click=add>{t("item-add")}</Button></div>
+            <section class=card data-testid="action-bar" data-action-bar="" aria-label=t("item-action-bar")>
+                <div><Button size=ButtonSize::Lg loading=busy attr:data-next-step="" on:click=add>{t("item-add")}</Button></div>
             </section>
         }
         .into_any();
@@ -345,12 +508,17 @@ fn ActionBar(
         "finish" | "episode" | "caught_up" | "session"
     );
     let controls = match step.action.as_str() {
-        "page" => view! { <PagesInline info=info.clone() step=step.clone()/> }.into_any(),
-        "position" => view! { <PositionInline info=info.clone() step=step.clone()/> }.into_any(),
+        "page" => {
+            view! { <PagesInline info=info.clone() step=step.clone() draft=ui.inline/> }.into_any()
+        }
+        "position" => {
+            view! { <PositionInline info=info.clone() step=step.clone() draft=ui.inline/> }
+                .into_any()
+        }
         "session" => {
             let open = ui.play.open;
             view! {
-                <Button size=ButtonSize::Lg on:click=move |_| open.set(true)>
+                <Button size=ButtonSize::Lg attr:data-next-step="" on:click=move |_| open.set(true)>
                     <Icon name=IconName::Meeple/> {next_step_label(&i18n, &step)}
                 </Button>
             }
@@ -360,7 +528,7 @@ fn ActionBar(
     };
     view! {
         <section class=format!("{card} z-20 max-md:sticky max-md:bottom-[calc(var(--tab-bar-height)+0.5rem)]")
-            data-testid="action-bar" data-sticky-action=sticky.then_some("true") aria-label=t("item-action-bar")>
+            data-testid="action-bar" data-action-bar="" data-sticky-action=sticky.then_some("true") aria-label=t("item-action-bar")>
             <div class="flex flex-wrap items-end gap-2">
                 {controls}
                 {overflow(&page, kind.as_ref(), &ui)}
@@ -398,7 +566,7 @@ fn StepButtons(step: NextStepDto, info: ItemInfo, ui: ItemUi) -> impl IntoView {
     let sheet = ui.watched.target;
     let with = i18n.t_args("item-with-named", &[("title", info.title.clone().into())]);
     view! {
-        <Button size=ButtonSize::Lg loading=busy on:click=move |_| run_step(ctx.clone(), logged.clone(), busy, error, Some(refresh))>
+        <Button size=ButtonSize::Lg loading=busy attr:data-next-step="" on:click=move |_| run_step(ctx.clone(), logged.clone(), busy, error, Some(refresh))>
             <Icon name=IconName::Check/> {label.clone()}
         </Button>
         <Button size=ButtonSize::Lg variant=ButtonVariant::Outline attr:aria-label=with
@@ -422,13 +590,40 @@ fn ItemRow(
         return ().into_any();
     };
     let rating = RwSignal::new(entry.rating);
-    let id = page.item.id.clone();
+    let rate_error = RwSignal::new(None::<String>);
+    let (id, title) = (
+        page.item.id.clone(),
+        crate::i18n::title_text(&page.item.title),
+    );
+    let ctx = StepCtx::current();
+    let stored = entry.rating;
     let rate = Callback::new(move |v: Option<u8>| {
-        let id = id.clone();
+        let (id, title, ctx) = (id.clone(), title.clone(), ctx.clone());
+        rate_error.set(None);
         leptos::task::spawn_local(async move {
             // the facts card shows the rating too: refresh it (UX1-10)
-            if api::rate(id, v).await.is_ok() {
-                ui.refresh.run(());
+            let failed = match api::rate(id.clone(), v).await {
+                Ok(_) => {
+                    ui.refresh.run(());
+                    None
+                }
+                // offline: queued with a client stamp (WP4-5); a full queue says so itself
+                Err(e) if crate::offline::network_error(&e) => {
+                    if ctx.queue_field(title, |h| crate::offline::rate_command(&id, v, h)) {
+                        None
+                    } else {
+                        Some(crate::pages::error_text(&e))
+                    }
+                }
+                Err(e) => Some(crate::pages::error_text(&e)),
+            };
+            // never swallowed (UX4-22): the stars go back and the line says why
+            if let Some(text) = failed {
+                rating.set(stored);
+                rate_error.set(Some(
+                    ctx.i18n
+                        .t_args("library-step-failed", &[("error", text.into())]),
+                ));
             }
         });
     });
@@ -445,15 +640,16 @@ fn ItemRow(
     let item_id = page.item.id.clone();
     view! {
         <div class="flex flex-wrap gap-x-8 gap-y-4">
-            <div class="grid gap-1">
+            <div class="grid gap-1" id="ip-rate">
                 <span class="text-sm text-muted-foreground">{t("item-rating")}</span>
                 <RatingInput value=rating on_change=rate/>
+                {move || rate_error.get().map(|e| view! { <p role="alert" class="text-sm text-destructive-text">{e}</p> })}
             </div>
             <div class="grid content-start gap-1">
                 <span class="text-sm text-muted-foreground">{t("item-tags")}</span>
                 <div class="flex flex-wrap items-center gap-2">
                     <TagBadges tags=page.tags.clone()/>
-                    <Button variant=ButtonVariant::Outline size=ButtonSize::Sm on:click=move |_| tags.set(Some(row.clone()))>
+                    <Button variant=ButtonVariant::Outline size=ButtonSize::Sm attr:data-shortcut="tags" on:click=move |_| tags.set(Some(row.clone()))>
                         <Icon name=IconName::Tag/> {t("item-edit-tags")}
                     </Button>
                 </div>
@@ -550,10 +746,10 @@ fn ItemTabs(page: ItemPageDto, kind: Option<KindDto>, info: ItemInfo, ui: ItemUi
                 {has_notes.then(|| view! { <TabsTrigger value="notes">{use_i18n().t("item-section-notes")}</TabsTrigger> })}
             </TabsList>
             {has_eps.then(|| {
-                let (info, attributes, progress) = (info.clone(), page.item.attributes.clone(), page.progress.clone());
+                let (info, attributes, progress, dates) = (info.clone(), page.item.attributes.clone(), page.progress.clone(), page.episodes.clone());
                 view! {
                     <TabsContent value="episodes">
-                        <EpisodeList info=info.clone() attributes=attributes.clone() progress=progress.clone() next=next ui=ui.episodes open_sheet=open_sheet/>
+                        <EpisodeList info=info.clone() attributes=attributes.clone() progress=progress.clone() dates=dates.clone() next=next ui=ui.episodes open_sheet=open_sheet/>
                     </TabsContent>
                 }
             })}
@@ -630,7 +826,7 @@ fn ItemHistory(page: ItemPageDto, refresh: Callback<()>) -> impl IntoView {
             local_time: String::new(),
             row_type: "progress".into(),
             item_id: page.item.id.clone(),
-            title: page.item.title.clone(),
+            title: crate::i18n::title_text(&page.item.title),
             kind: page.item.kind.clone(),
             group: String::new(),
             progress: Some(p.progress.clone()),

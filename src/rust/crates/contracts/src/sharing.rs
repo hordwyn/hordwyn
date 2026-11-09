@@ -68,6 +68,9 @@ pub struct PeoplePageDto {
     pub requests: Vec<LinkRequestDto>,
     pub people: Vec<PersonDto>,
     pub suggestions: Vec<MergeSuggestionDto>,
+    /// The caller's game groups (the "Game groups" tab, design.md 6.7).
+    #[serde(default)]
+    pub groups: Vec<crate::GameGroupDto>,
 }
 
 /// An entry merged into another one; the merge can be undone from its record.

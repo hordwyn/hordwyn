@@ -18,6 +18,7 @@
 //! ([`HostAllowlist`]).
 
 mod cookie;
+mod email_link;
 mod pg;
 mod provider;
 mod resolve;
@@ -44,7 +45,10 @@ use zeroize::Zeroizing;
 
 pub use cookie::{
     COOKIE_KEY_INFO, CookieError, CookieKeys, Hint, Mode, PENDING_MINUTES, PendingLink,
-    PendingLogin, StaticCookieKey, return_path,
+    PendingLogin, StaticCookieKey, open as open_signed, return_path, seal as seal_signed,
+};
+pub use email_link::{
+    EMAIL_LINK_MINUTES, EMAIL_LINK_WINDOW_MINUTES, EMAIL_LINKS_PER_WINDOW, EmailedLink,
 };
 pub use pg::PgProviderStore;
 pub use provider::{
@@ -453,6 +457,7 @@ impl Oidc {
                         body: Some(req.body().clone()).filter(|b| !b.is_empty()),
                         lane: Lane::Interactive,
                         skip_auth_record: false,
+                        user: None,
                     })
                     .await
                     .map_err(|e| OidcHttpError(e.to_string()))?;
@@ -482,6 +487,7 @@ impl Oidc {
                 body: None,
                 lane: Lane::Interactive,
                 skip_auth_record: false,
+                user: None,
             })
             .await
             .map_err(|e| Failure::new(FailureCode::Unavailable, format!("{op}: {e}")))?;

@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT day, flow, subject, outcome, taps_bucket, ms_bucket, n\n             FROM usage_funnel_daily WHERE day >= $1\n             ORDER BY day DESC, flow, subject, outcome, taps_bucket, ms_bucket",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "day",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "usage_funnel_daily",
+            "name": "day"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "flow",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_funnel_daily",
+            "name": "flow"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "subject",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_funnel_daily",
+            "name": "subject"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "outcome",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_funnel_daily",
+            "name": "outcome"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "taps_bucket",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_funnel_daily",
+            "name": "taps_bucket"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "ms_bucket",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_funnel_daily",
+            "name": "ms_bucket"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "n",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "usage_funnel_daily",
+            "name": "n"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f96a759f65c9b2902064251de2d696fdc846fd3940e904fabf460b2ad356ddb1"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO outbox (entity, entity_id, op)\n             SELECT 'library_entry', e.id, 'upsert' FROM library_entries e WHERE e.item_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "93c9e2311bf882c1ca0ec0dd662c5f0abc7f4a37f1f03d64bfaf6816a4b4d205"
+}

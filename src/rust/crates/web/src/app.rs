@@ -15,6 +15,9 @@ const THEME_BOOT: &str = "try{var t=localStorage.getItem('app-theme');if(t==='da
 /// What the browser needs to render the same page as the server (read at hydration).
 /// The session part (`signed_in` .. `unread`) is filled from the session on the server, so
 /// the shell never flashes the signed-out bar (design.md 3.2).
+// independent yes/no facts the server fills in (signed in, admin, session ended, funnel on);
+// an enum per flag would only rename them
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClientConfig {
@@ -42,6 +45,9 @@ pub struct ClientConfig {
     /// The browser sent a session cookie that is no longer a session (expired, ended by the
     /// provider): the sign-in page says "Your session ended" (addendum-1 4.4).
     pub session_ended: bool,
+    /// The instance counts the logging funnel (WP4-5, `usage.funnel`): the browser records
+    /// and sends its beacon only then, and Settings > Privacy says so.
+    pub usage_funnel: bool,
 }
 
 impl ClientConfig {
@@ -109,6 +115,7 @@ fn server_config() -> ClientConfig {
             .and_then(|s| s.today.clone())
             .unwrap_or_else(|| crate::history_state::Day::today_utc().iso()),
         session_ended,
+        usage_funnel: session.as_ref().is_some_and(|s| s.usage_funnel),
     }
 }
 

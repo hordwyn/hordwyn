@@ -6,7 +6,7 @@ use domain::ids::ItemId;
 
 use crate::connector::Ctx;
 use crate::merge::{FieldPriority, merge};
-use crate::model::{Capability, DetailsRequest};
+use crate::model::{Capability, DetailsRequest, EpisodesRequest};
 use crate::registry::Registry;
 
 /// Seconds an item stays fresh after a successful refresh.
@@ -56,21 +56,26 @@ pub async fn refresh_item(
     };
     match merge(&snapshots, &priority) {
         Some(m) => {
-            app.apply_catalog_refresh(
-                id,
-                CatalogRefresh {
-                    title: m.title,
-                    original_title: m.original_title,
-                    year: m.year,
-                    description: m.description,
-                    attributes: m.attributes,
-                    external_ids: m.external_ids,
-                    cover_url: m.cover_url,
-                    provenance: m.provenance,
-                    fresh_for_secs: FRESH_FOR_SECS,
-                },
-            )
-            .await?;
+            let item = app
+                .apply_catalog_refresh(
+                    id,
+                    CatalogRefresh {
+                        title: m.title,
+                        original_title: m.original_title,
+                        year: m.year,
+                        description: m.description,
+                        attributes: m.attributes,
+                        external_ids: m.external_ids,
+                        cover_url: m.cover_url,
+                        provenance: m.provenance,
+                        fresh_for_secs: FRESH_FOR_SECS,
+                    },
+                )
+                .await?;
+            // per-episode dates follow on the background lane (WP4-7)
+            if episode_source(registry, &item).is_some() {
+                app.queue_episode_refresh(id).await?;
+            }
         }
         None => {
             app.mark_catalog_refresh_failed(id, RETRY_FAILED_SECS)
@@ -78,4 +83,75 @@ pub async fn refresh_item(
         }
     }
     Ok(())
+}
+
+/// The connector that answers for an item's episodes: the one that supplied its season
+/// list (provenance `attributes.seasons`), else the first in priority order, as long as it
+/// knows the item (an external id in its namespace) and has [`Capability::Episodes`].
+fn episode_source(
+    registry: &Registry,
+    item: &domain::catalog::CatalogItem,
+) -> Option<(std::sync::Arc<dyn crate::Connector>, String)> {
+    let usable: Vec<_> = registry
+        .for_kind(item.kind.as_str(), Capability::Episodes)
+        .into_iter()
+        .filter_map(|c| {
+            let ext = item
+                .external_ids
+                .iter()
+                .find(|e| e.namespace == c.info().id)?
+                .value
+                .clone();
+            Some((c, ext))
+        })
+        .collect();
+    let seasons_from = item.provenance.get("attributes.seasons");
+    let pick = usable
+        .iter()
+        .position(|(c, _)| Some(&c.info().id) == seasons_from)
+        .unwrap_or(0);
+    usable.into_iter().nth(pick)
+}
+
+/// `catalog.episodes`: ask the item's episode source once per season that needs it
+/// ([`App::seasons_to_fetch`]: new, changed, or with episodes still to air) and store the
+/// answers. A season that fails is logged and left as it was. Returns the number of seasons
+/// whose stored episodes changed.
+///
+/// # Errors
+/// Unknown item or storage errors.
+pub async fn refresh_episodes(
+    app: &App,
+    registry: &Registry,
+    http: std::sync::Arc<dyn app::ports::HttpFetch>,
+    lane: Lane,
+    id: ItemId,
+) -> Result<usize, AppError> {
+    let item = app.catalog_item(id).await?;
+    let Some((connector, ext)) = episode_source(registry, &item) else {
+        return Ok(0);
+    };
+    let Some(source) = connector.as_episodes() else {
+        return Ok(0);
+    };
+    let ctx = Ctx::new(http, lane);
+    let mut fetched = Vec::new();
+    for key in app.seasons_to_fetch(id).await? {
+        let req = EpisodesRequest {
+            kind: item.kind.to_string(),
+            id: ext.clone(),
+            season: key.number,
+        };
+        match source.season_episodes(&ctx, &req).await {
+            Ok(episodes) => fetched.push(app::SeasonFetch {
+                key,
+                connector: connector.info().id.clone(),
+                episodes,
+            }),
+            Err(e) => {
+                tracing::warn!(connector = %connector.info().id, item = %id, season = req.season, error = %e, "season episodes failed");
+            }
+        }
+    }
+    app.store_episodes(id, &fetched).await
 }

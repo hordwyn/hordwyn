@@ -1,4 +1,4 @@
-# Handoff: state, rules, owner rulings, open items (updated 2026-11-08)
+# Handoff: state, rules, owner rulings, open items (updated 2026-11-09)
 
 Read this first when resuming. It replaces the conversation context: the rules that govern
 all work, where the build stands, every owner ruling (2026-11-06 and 2026-11-07), what is
@@ -9,43 +9,46 @@ Sources of truth, in this order: the owner's words in this file (section 4), the
 rules (section 2, verbatim), `docs/DECISIONS.md`, `docs/design/DESIGN.md`, the UX design
 (`docs/design/ux/design.md` plus `addendum-1.md`), `docs/REPORT.adoc`.
 
-## 0. Resume here (2026-11-08, phase 3 done)
+## 0. Resume here (2026-11-09, phase 4 done)
 
 **Standing instruction from the owner (2026-11-07, confirmed in chat 2026-11-07 with explicit
-permission to commit, tag and push):** work through the open phases sequentially (phase 4,
-then the parallel workstreams) WITHOUT waiting for a go between phases, under the KICKOFF
-rules (section 2): test-driven, decisions logged, an independent review per phase whose
-findings are applied or rejected in DECISIONS, `cargo xtask ci` and `cargo xtask e2e` green,
-commit, push, tag `ux<N>`. Report a short status at each phase boundary; ask the owner only
-when a decision really needs them.
+permission to commit, tag and push):** work through the open phases sequentially WITHOUT
+waiting for a go between phases, under the KICKOFF rules (section 2): test-driven, decisions
+logged, an independent review per phase whose findings are applied or rejected in DECISIONS,
+`cargo xtask ci` and `cargo xtask e2e` green, commit, push, tag. Report a short status at each
+boundary; ask the owner only when a decision really needs them.
 
 **Where the code is:**
 
-- `main` = tag `ux3` (UX phase 3 done, one squashed commit on top of `ux2`). The branch
-  `wip/ux3` holds the per-package wip history and may be deleted.
-- The anonymised legacy fixture is committed with the legacy importer (WP3-7). The full owner
-  export stays in the git-ignored `owner-inbox/legacy/export.json`.
-- Plans and briefs: `docs/handoff/phase3-plan.md` (how phase 3 was cut into seven packages; use
-  the same approach for phase 4), `docs/handoff/agent-briefs/` (rules.md first).
+- `main` = tag `ux4` (UX phases 0-4 done; phase 4 is one squashed commit on top of `ux3`). The
+  branch `wip/ux4` holds the per-package wip history and may be deleted.
+- Plans: `docs/handoff/phase3-plan.md`, `docs/handoff/phase4-plan.md` (how a phase is cut into
+  packages); agent briefs in `docs/handoff/agent-briefs/` (rules.md first).
 
 **Next steps, in order:**
 
 1. `nix develop`, then `cd src/rust && cargo xtask services up` (services do not survive a
-   reboot). The VM has 16 GB RAM and 4 vCPU: builds use `CARGO_BUILD_JOBS=3`.
-2. Phase 4 (section 7). First have a planning agent cut it into packages like
-   `phase3-plan.md`, folding in everything phase 3 deferred: DEC-285 and 286 (probes, TheTVDB
-   cache key), 312 (emailed link, email sync), 316, 326, 335, 336 (Users row menu: reset
-   authenticator, unlink provider; localised health times), 344 (rule for one item, channel
-   edit in place), 353 (game groups tab, drag handles, log with a person, avatar upload),
-   355, 363 ("On release dates" needs per-episode air dates), 382, 383, 388 (linked-accounts
-   column, stacked admin tables), 390, 394, 396, and UX3-25 in DEC-384 (a rare "reactive value
-   disposed" panic in leptos transition.rs, not reproduced; a first fix attempt deadlocked).
-3. e2e and test harness notes: `cargo test -p server` relinks `target/debug/server` without
-   the cargo-leptos settings, so run `cargo leptos build` (or `cargo xtask e2e`) before
-   Playwright; `--repeat-each` also repeats the setup project; the Playwright `sso` project
-   runs last (DEC-334); server test requests time out after 90 s naming the page (DEC-384);
-   the route list is built once per process because leptos' route listing suppresses resource
-   loads process-wide (DEC-384).
+   reboot). 16 GB RAM, 4 vCPU: `CARGO_BUILD_JOBS=3`. Check free disk first (section 8).
+2. The design's UX phases are done. Continue with the parallel workstreams (section 7), each as
+   a planned package with review: attribution page (credit lines incl. the Trakt line from
+   DEC-360 and TMDB/TheTVDB notices); board games on Wikidata (DEC-192..198; brings the owned
+   flag, then "Mark owned" and "unplayed owned games", DEC-420); anime/manga connectors
+   (DEC-213..221); Open Library, MusicBrainz, VNDB, Metron, Radarr/Sonarr, Jellyfin;
+   importers waiting for owner samples (Goodreads, BG Stats, BGG); web push (R-P5, DEC-141).
+3. Performance workstream follow-ups (DEC-476 P-1..P-3, DEC-494): the first stats read after a
+   zone change (~750 ms, target 500), the library query count on the first page (~210 ms p95
+   under 8 clients), `/people` in the load set, the optional `sessions (started_at DESC, id
+   DESC)` index, cover lookups batched in `dto::item`.
+4. Other deferred items are listed by DEC: "Date unknown" on events (DEC-355, own package);
+   saved views (decide after the funnel review on 2026-12-06, section 6); avatar upload, fuzzy
+   duplicate suggestions, restoring a removed person (DEC-353); TheTVDB episode paging
+   (DEC-447); per-episode runtime in stats and the "Up to date" badge (DEC-450); tests deferred
+   in DEC-457, 473, 483.
+5. Harness notes: `cargo xtask e2e` captures the server log (set `E2E_SERVER_LOG` outside the
+   repo) and fails on any `panicked at` or a missing/empty log (DEC-456, 463, 487);
+   `cargo xtask load [--release] [--clients N]` with `LOAD_*` variables (DEC-399) needs 15 GB
+   free disk, delete `target/release` afterwards; catalog events go only to their audience
+   (DEC-490, 492), so e2e background events must come from the same user (`changeMine`).
 
 ## 1. How we continue: agent-based work
 
@@ -273,7 +276,7 @@ Everything you write in `docs/` is AsciiDoc for Antora.
 ## 3. State of the build
 
 - **Tags on `origin`:** `m00`-`m17` (see REPORT.adoc; M10/M11 board games and most of M12
-  importers not done), `ux0` (UX phase 0), `ux1` (UX phase 1), `ux2` (UX phase 2), `ux3` (UX phase 3). Last green runs at `ux3`: `cargo xtask ci` 679 passed / 0 failed / 4 ignored, `cargo xtask e2e` 94 passed, load test p95 search 106, Home 164, stats 90, library 64-89, activity 13 ms (Home and stats grew with the per-user time zone; budget 300 ms). At `ux2`: `cargo xtask ci` 538 passed / 0 failed / 3 ignored, `cargo xtask e2e` 62 passed, load test p95 under 106 ms everywhere (search 95, Home 105). At `ux1`:
+  importers not done), `ux0` (UX phase 0), `ux1` (UX phase 1), `ux2` (UX phase 2), `ux3` (UX phase 3), `ux4` (UX phase 4, numbers in the phase 4 bullet below). Last green runs at `ux3`: `cargo xtask ci` 679 passed / 0 failed / 4 ignored, `cargo xtask e2e` 94 passed, load test p95 search 106, Home 164, stats 90, library 64-89, activity 13 ms (Home and stats grew with the per-user time zone; budget 300 ms). At `ux2`: `cargo xtask ci` 538 passed / 0 failed / 3 ignored, `cargo xtask e2e` 62 passed, load test p95 under 106 ms everywhere (search 95, Home 105). At `ux1`:
   `cargo xtask ci` 449 passed / 0 failed / 3 ignored, `cargo xtask e2e` 51 passed; GitLab
   pipeline for `ux0` green incl. the S3 test against RustFS in CI.
 - **UX phase 0 (done, `ux0`):** tokens per design 2.7, Atkinson Hyperlegible Next vendored
@@ -416,6 +419,190 @@ Everything you write in `docs/` is AsciiDoc for Antora.
     `apps/server/tests/imports.rs`, `imports.spec.ts`, `item.spec.ts` (+1). Cuts in DEC-365
     ("On release dates" needs per-episode air dates, DEC-363; Goodreads, BG Stats, BGG wait
     for samples).
+- **UX phase 4 (done, `ux4`):** plan `docs/handoff/phase4-plan.md`; review `docs/reviews/2026-11-09-ux4-review.md` (UX4-1..22) applied, deferred or rejected in DEC-460..494. Last green runs at `ux4`: `cargo xtask ci` 834 passed / 0 failed / 4 ignored, `cargo xtask e2e` 125 passed with 0 server panics; release load (8 clients, 2 writers, 40k events) in DEC-494.
+  - WP4-1 measure-perf done (DEC-399..404): load harness `LOAD_CLIENTS`, `LOAD_SESSIONS`,
+    `LOAD_SHARED`, `LOAD_WRITERS`, new endpoints (`/stats/series`, History person/year, `POST`
+    progress, totals after a zone change), `cargo xtask load [--release] [--clients N]` (not in
+    `ci`, refuses below 15 GB free disk); baselines in DEC-399. Statistics cache (migration
+    `0023_stats_cache.sql`: per item and month, rolled up per kind and month, dirty marks by
+    triggers, zone stamp, lazy recompute on read); activity and History read sessions in
+    windows (`SessionRepo::*_window`, `CompanionRepo::get_many`); Home reads its parts
+    concurrently; per-user fair share on the interactive lane in hosted mode (`Ctx.user`,
+    `HttpRequest.user`, `Gate::acquire_for`); TheTVDB token cache keyed by blake3(PIN). p95
+    before -> after, debug 40k events / 20k sessions / 2k shared: stats totals 386 -> 11, series
+    382 -> 6, Home 652 -> 52, activity 220 -> 18, History person 255 -> 86, year 217 -> 19;
+    debug 5k: totals 91 -> 10, Home 168 -> 49; release single client all <= 100; release 8
+    clients + 2 writers: Home 1400 -> 143, totals 1000 -> 66, one of two runs failed only on the
+    unchanged deep library page (306 ms, the other 297). Missed: first stats read after a zone
+    change 773 ms (target 500, DEC-404). After a SQL change on `0023` in a dev database, undo
+    it before `cargo xtask sqlx-prepare` (checksum).
+  - WP4-2 admin-ops done (DEC-405..415; migration `0024_admin_ops.sql`): Overview reads the
+    health rows from `health_probes`, written by cron `admin.probes` every minute (and once at
+    start, and at once for the row an admin's own change affects); missing rows "Not checked
+    yet", rows older than 3 min "Not checked recently", times in the admin's zone. Data-source
+    counters flushed by every process every 60 s into `source_stats` / `source_stats_hours`
+    and read back (status = database + unflushed deltas). Back-channel `jti` replay cache in
+    `oidc_used_jti`. `locked_totp_count` by key version. Users row menu "More": Reset
+    authenticator (`POST /admin/users/{id}/reset-totp`) and Unlink provider (`DELETE
+    /admin/users/{id}/identities/{identity}`), gated, audited in the transaction, the person
+    notified (`account.authenticator_reset`, `account.sign_in_unlinked`), last method refused.
+    Providers table "Linked accounts". `ui::Table` `stacked` (+ `TableCell` `label`) on
+    providers, Users and the delivery log; the rules matrix keeps the scroll wrapper (DEC-412).
+    Emailed one-time link on `/sign-in/link` (`POST /auth/oidc/link/email`, `.../confirm`; 30
+    min, single use, hashed, bound to the browser's link ticket, throttled, audited). OD-21
+    email sync closed by the owner's ruling (DEC-414). E2E has a mail sink
+    (`src/web/tests/mail-sink.mjs`, SMTP 3013 / HTTP 3014). Tests: `catalog-core/tests/
+    stats_shared.rs`, `admin.rs` (probes), `oidc.rs` (+3), `auth/tests/pg.rs`, `admin.spec.ts`
+    (row menu, stacked Users, local time), `signin.spec.ts` (emailed link).
+  - WP4-3 bulk-lists done (DEC-416..421, no migration). Keyset paging for the library (added
+    by the orchestrator): `GET /library` and `POST /library/query` take `after` and answer
+    `next` instead of `offset` (opaque cursor, `app::ports::LibraryCursor`); `GET /library`
+    reads its items in one batch; the web "Load more" follows the cursor past 500 rows; release
+    8 clients + 2 writers p95: library last 100 310 -> 27/31 ms, first 223 -> 29/27, query last
+    247 -> 146/146 (DEC-416). Remove from library (`App::remove_from_library`, `DELETE
+    /library/{item_id}`): entry and tags go, events, plays, reviews and list items stay. Bulk
+    `POST /library/bulk` (set_status, add_tag, remove_tag, add_to_list, remove; at most 500
+    ids, 400 above; per-id results; one undo token = snapshot held by the client) and `POST
+    /library/bulk/undo`. Web: list view checkboxes, "Select all on this page", the sticky bulk
+    bar (Set status, Add tag, Add to list, Remove with a confirm, Clear; toasts with Undo),
+    selection kept through refreshes and cleared on any URL state change; quick menu "Add to
+    list..." and "Remove from library"; item overflow "Remove from library"; list page drag
+    handles (pointer events, aria-hidden, Lucide `grip-vertical`) next to Move up/down. No
+    "Mark owned" (DEC-420). Tests: `app/tests/bulk.rs`, keyset walks in `app/tests/browse.rs`
+    and `store-pg/tests/phase1.rs` (+ remove on Postgres), `library_page.rs` (500 / 501 ids),
+    `rest.rs` cursors, `library.spec.ts` (+2 bulk), `lists.spec.ts` (+1 drag).
+  - WP4-4 keyboard-palette done (DEC-422..430, no server change, no migration). Keyboard map:
+    `G then H/L/Y/T/P` (1.5 s, "G pressed: ..." hint in a polite live region, focus on the new
+    page's `h1`), never while typing, in a dialog or menu, or with Ctrl/Cmd/Alt; `?` lists
+    every shortcut by section (`web/src/keyboard.rs`, pure rules in `ui/src/keys.rs`: `Chord`,
+    `roving_target`, `columns_from_tops`). Page keys via `keyboard::page_keys` (listener removed
+    with the page; the old Library `/` listener leaked). Home `J`/`K` focus the Continue cards'
+    next step; Library grid roving tabindex (one card's link, pill and menu in the tab order;
+    arrows from the rendered column count, Home/End, Ctrl+Home/End, Enter, `W`, `T`, `L`); item
+    page `W`/`R`/`T`/`L` (`L` = the WP4-3 list picker). "Keyboard shortcuts" switch in Settings
+    > Account (WCAG 2.1.4; `localStorage` `app-shortcuts`, DEC-423). Palette: `ui::Command`
+    `on_secondary` + `CommandHints`; Ctrl+Enter adds a result as Planned (toast, Undo = WP4-3
+    remove) or runs an entry's one-click step, palette stays open (DEC-426); below two
+    characters the last 8 opened items (`localStorage` `app-recent-<username>`, never sent) and
+    suggestions Go to Lists, New list (`/lists?new=1`), Log a play of <last game>
+    (`/items/{id}?log=1`), Import a file. `PaletteScope(Option<PaletteTarget>)` with `List`,
+    `Match`, `RuleSubject` ("Add a rule for one item", DEC-344) and `LogWith` (People card "Log
+    with...", opens the item's sheet with the person, `?log=1&with=`). Channel edit in place
+    (secrets write-only, blank sends the stored placeholder back, DEC-429). Item page now
+    re-renders when the kinds arrive after a client-side navigation (it had no log sheets
+    then). Tests: `keyboard.spec.ts` (5), `shell.spec.ts`, `people.spec.ts`,
+    `notifications.spec.ts` (+1 each), ui unit + wasm tests (keys, Ctrl+Enter), web unit tests
+    (`keyboard`, `recent`, `palette`, `notify_channels`). Not built: `1-5` on a focused rating;
+    "Log with" for page/position steps or items not in the library (DEC-425, 428).
+  - WP4-5 offline-funnel done (DEC-431..438; migration `0025_usage_funnel.sql`). Offline queue
+    (`web/src/offline.rs`): on a network failure the next step, episode marks, status changes
+    and the item rating go into `localStorage` `app-offline-<username>` as sync commands (log op
+    ids kept, client HLC `ClientClock` because `web` may not use `domain`, DEC-433); toast
+    "Saved offline, will sync" with Undo; flushed on page load and on `online` through `POST
+    /sync/commands` in one push in queue order with the queue-time stamps (DEC-455 replaced the
+    two pushes with send-time stamps of DEC-434); refusals
+    dropped with a toast naming the item; the banner says "N changes waiting". Sheets and the
+    bulk bar are disabled offline; plays, sessions, notes, tags and the inline page/position
+    fields stay online-only (DEC-432). Logging funnel (`web/src/funnel.rs`, `api/src/usage.rs`):
+    flows palette, next_step, sheet, episode_mark, bulk from intent to logged/abandoned with tap
+    and time buckets, plus D16 disclosure numbers from `ui::DisclosureWatch` (shown, opened,
+    opened within 2 s, open at a save); one keepalive beacon `POST /usage/funnel` (signed in,
+    30 a minute, at most 50 events, no ids) into `usage_funnel_daily` (no user or item column,
+    UTC day); cron `usage.funnel_daily` emits one `metrics` event per flow and keeps 180 days;
+    `GET /admin/usage` + CSV and "Usage measurement" on Admin > Storage and jobs; setting
+    `usage.funnel` (default on, `APP__USAGE__FUNNEL`, editable); one line on Settings > Privacy
+    (DEC-435..437). Review the numbers on 2026-12-06 (section 6). Tests: `apps/server/tests/
+    usage.rs` (4), `offline.rs` (2), `offline.spec.ts` (3), `home.spec.ts` beacon (+1), ui wasm
+    `disclosures_report_shown_opened_and_open_at_save`, web unit tests (`offline`, `funnel`),
+    `api::usage` and config unit tests.
+  - WP4-6 stats-goals-people done (DEC-439..445; migration `0026_goals_groups.sql`). Opt-in
+    yearly goals (`goals`, one per year, group or all, measure; private, another user's goal
+    is 404): Stats page only, cards "120 of 500 in 2026" with a `ProgressBar`, Edit dialog,
+    Delete confirm, "Set a goal" behind a disclosure; progress = the year's months of the WP4-1
+    cache; never on Home, no pace wording (R-04). "<year> so far" against the same days last
+    year (Feb 29 -> Feb 28, the user's zone) on Stats per tab and in the History side panel:
+    whole months from the cache plus the current month from `ProgressRepo::window_amounts`
+    (SQL over the items touched in the window). "Most often with" (top 5 by sessions together;
+    3 on History). Game groups (`game_groups`, `game_group_members`, `sessions.game_group_id`):
+    People tab "Game groups" with cards (members through merges, plays logged as the group,
+    last), "Log a play with" via `PaletteTarget::LogWithGroup` (`?log=1&group=`), new/edit/delete
+    dialogs; play sheet "Groups" chips fill you plus the members; a removed group keeps its
+    plays. REST `/stats/goals`, `/stats/compare`, `/game-groups`. `home::MeasureChart` and
+    `widgets::QuickMenu` split under 100 lines. Not built: H-index and unplayed owned games on
+    History (DEC-440). Tests: `app/tests/{goals,game_groups}.rs`, `store-pg/tests/goals_groups.rs`
+    and the window/comparison test in `phase1.rs`, `stats.spec.ts` (new, 2), `people.spec.ts`
+    (+2), web unit tests (`stats_extras`, `log_form`). Found, not fixed: concurrent imports of
+    one TMDB id can create duplicate catalog items (DEC-445).
+  - WP4-7 episode-air-dates done (DEC-446..451; migration `0027_catalog_episodes.sql`). TMDB
+    `GET /3/tv/{id}/season/{n}` and TheTVDB `GET /series/{id}/episodes/official?page=0&season=n`
+    verified against the official docs on 2026-11-08 (docs/connectors/{tmdb,tvdb}.md); only
+    episode number, air date and runtime are kept (`catalog_episode_seasons`,
+    `catalog_episodes`; `SeasonInfo.air_date`). TMDB terms raise no doubt for these fields, so
+    the fetch is on (no off flag). New capability `catalog_core::Episodes`; the detail refresh
+    queues `catalog.episodes` on `background_refresh` when a season needs asking (new, changed
+    count or air date, or episodes still to air); one call per season through the http cache.
+    `ItemPageDto.episodes`; `BulkDates` "On release dates" only when every open episode of the
+    season shown has a release day up to today, else a hint with the count; a bulk mark with a
+    missing or future episode is refused. `tmdb-mock.mjs` serves a synthetic show 990001 of its
+    own. Not built: runtimes into stats minutes, "Up to date" badge, TheTVDB paging (the purge of
+    TMDB data older than six months for unviewed items, DEC-450, was built in WP4-8, DEC-453).
+    Tests: connectors
+    `tmdb.rs`/`tvdb.rs` (+3), `app/tests/episodes.rs` (3) and an app unit test,
+    `store-pg/tests/episodes.rs`, a web unit test in `episode_plan`, `item.spec.ts` (+1).
+  - WP4-8 hardening done (DEC-452..459; migration `0028_catalog_retention.sql`). Catalog race
+    (DEC-445) fixed in the database: `CatalogRepo::insert_new` claims all external ids in one
+    transaction, a loser updates the winner (connector data), fills it (search) or leaves it
+    (user data); old duplicates not migrated (DEC-452). TMDB terms 1.C: hourly cron
+    `catalog.retention` (lane `background_refresh`) refreshes items whose TMDB data is older
+    than `jobs.catalog_max_age_days` (default 150, 1..170) or purges it when no refresh is
+    possible or past 175 days (title, year, ids stay; cover image deleted; stale HTTP cache
+    entries go too); `catalog_items.provider_data_at` (DEC-453, docs/connectors/tmdb.md). D16
+    "open at a save" through `reauth::gated` verified by `admin.spec.ts` (DEC-454). Offline
+    queue: commands keep their queue-time stamps, one push in queue order, a log carries the
+    stamp of the status it implies (`SyncCommandDto::LogProgress.hlc`), so another device's later
+    change wins (DEC-455, revises DEC-434). UX3-25 panic guard: `cargo xtask e2e` logs the
+    server to a temp file and fails on `panicked at`; it caught the panic once (leptos
+    Transition memo read with a try-lock while another thread wrote the task set); fixed by
+    rendering the Library Transition without `set_pending` on the server; then 3 x 117 passed,
+    0 panics (DEC-456). Deferred tests: 13 groups added, 2 already covered, 13 cut and named
+    (DEC-457); a Trakt rating outside 1..10 no longer creates an empty row. Splits: `cli.rs`,
+    `instance.rs` without file-level allows, `ui::DropdownMenu` under 100 lines (DEC-458).
+    Final load (DEC-459), p95 ms: debug 5k: search 90, library 10.7/10.7, Home 53, query 86/64,
+    totals 9.8, series 3.4, activity 15, person 59, year 13, POST 8.4, zone change 142; debug
+    40k: search 107, Home 52, query 89/64, totals 12, series 5.7, activity 18, person 85, year
+    19, zone change 770; release 8 clients + 2 writers, 40k: search 290, library 37/51, query
+    250/184, Home 207, person 233, year 67, activity 59, totals 76, series 59, POST 51, writers
+    80, zone change 767 - all under the 300 ms budget, one run, higher than the WP4-1/WP4-3
+    runs across the board (host variation, not proven). Open: first stats read after a zone
+    change still ~770 ms (target 500), "library query, first 100" ~250 ms under 8 clients
+    (full scan for the count; follow-up in DEC-459).
+  - Review ux4 fixes, server half (DEC-460..476, review `docs/reviews/2026-11-09-ux4-review.md`;
+    migrations `0029_stats_dirty_gen.sql`, `0030_catalog_expiry.sql`): stats marks with a
+    generation (no lost mark, UX4-1); fair-share rounds and a cancel-safe gate (UX4-2/3); the
+    panic guard also in the GitLab e2e job, log kept on failure (UX4-4); bulk undo is the
+    per-op inverse in an HMAC-signed, user-bound, one-hour token, refused over 1 MiB (UX4-5/12);
+    strict TMDB retention: title and year purged too, placeholder, refetch once TMDB is usable,
+    unreferenced items deleted (UX4-9, owner may reverse, section 6); admin menu self and
+    break-glass guards (UX4-10); emailed-link re-check (UX4-11); pairing window (UX4-16); one
+    session read on People, 404 for foreign people (UX4-17); shared-hash `forget` (UX4-18).
+    Load after the fixes (DEC-476), release, 8 clients + 2 writers, 40k, two runs, p95 ms:
+    search 216/208, library 26/26 and 29/31, query 214/215 and 148/157, Home 144/140, person
+    207/202, year 58/45, activity 53/45, totals 58/66, series 43/46, POST 33/30, writers
+    40/42 (n 323/320; the count follows the client phase length), zone change 768/779 (now
+    asserted under 1000). Follow-ups P-1 zone-change rebuild, P-2 query count, P-3 `/people` in
+    the load set: performance workstream after the tag (DEC-476). Search before the tag
+    (DEC-493): words first, typos (`word_similarity`) only when the page is not full, hits read
+    in one batch; search p95 282.7 -> 85.7/84.0 (two passing runs; person 227/232, Home 184/184,
+    query 215/210 and 144/143). `GET /items/{id}` watches the item when it queues a refresh
+    (DEC-492). History person filter (DEC-494): the person's sessions drive the reads (regions
+    of 121 s around them, one span read per source per round, window walk only after a dense
+    round) instead of filtering doubling windows; same rows (new equivalence tests in
+    `app/tests/activity_person.rs` and `store-pg/tests/windows.rs`). Release, 8 clients + 2
+    writers, 40k, three runs (the first right after the build), p95 ms: History person
+    45.5/45.7/46.5 (was 335.8/347.2 right after a build, ~230 later), activity 49/55/47, year
+    68/60/61, Home 192/158/185, query 212/207/212 and 144/155/147, library 39/29/33 and
+    38/30/39, search 108/100/102, totals 58/56/53, series 42/45/44, POST 34/35/32, writers
+    48/44/43, zone change 745/755/753; all asserts pass in all three.
 - **Research done** (in `docs/research/`): icons, notification channels, RustFS, OD-12
   re-auth window, board game sources, anime/manga sources. Connector doc for BGG rewritten
   from the owner-supplied terms (`docs/connectors/bgg.md`, DEC-190).
@@ -559,6 +746,15 @@ Decided later the same day: **OD-12** 15 minutes, sliding, 1 hour cap, provider 
 - Questions with safe defaults in force: MAL developer agreement (register a client, then
   `KK_MAL_CLIENT_ID`), Kitsu terms (save the page into owner-inbox), MangaDex metadata yes/no,
   open product databases as a barcode source yes/no.
+- **Review the logging funnel after four weeks, on 2026-12-06** (design.md 9, R-54, DEC-431):
+  read Admin > Storage and jobs > Usage measurement (or `/api/v1/admin/usage.csv`), cut what is
+  not used, promote a disclosure opened on more than half of its visits (D16), and decide on
+  saved views (phase4-plan.md deferrals).
+- **TMDB retention, strict reading (orchestrator decision after review UX4-9, DEC-466):** past
+  the six-month limit without a possible refresh every TMDB field goes, title and year included
+  (a neutral placeholder "Title unavailable - source data expired" is shown, the item is fetched
+  again once TMDB is usable), and items nobody refers to are deleted. To reverse: keep title and
+  year as the person's record (DEC-453's reading) - see DEC-466 "how to reverse".
 - Optional: more RAM for the VM (section 8).
 - New owner questions go to a review page or a short chat question; never block work (rule 2).
 
@@ -583,7 +779,7 @@ test by hand, commit, push, tag.
   People, Lists, Imports (with the legacy Ryot importer from the fixture, Trakt), per-user
   time zone on the settings page (DEC-239), "Mark show" and backfill date modes and the
   History export link (DEC-237).
-- **Phase 4, fluency and measurement.** Keyboard map, bulk edits, offline queue (DEC-237),
+- **Phase 4 (done, `ux4`), fluency and measurement.** Keyboard map, bulk edits, offline queue (DEC-237),
   stats polish and goals, in-app logging funnel measurement; performance: incremental stats
   totals and a paged activity query (DEC-235), a release-build load run and a
   concurrent-clients load variant.
@@ -633,7 +829,14 @@ test by hand, commit, push, tag.
   `Action::new_local` abort SSR streams; read resources only inside `<Suspense>` /
   `<Transition>`; key refetched row lists with `<For>` or stale click handlers remain; test
   and DOM ids must not start with a Fluent key prefix (the locale checker treats them as key
-  families).
+  families); on a client-side navigation a page is built before `use_query_map` has the new
+  URL's values and before every resource of its `<Transition>` is there, so read query
+  parameters in effects and key a `<For>` on what can arrive late (DEC-428); `window_event_listener`
+  is not removed with the component, so pair it with `on_cleanup(move || h.remove())`. WP4-5: inside
+  `view!` an attribute closure like `when=move || n() > 0` ends the tag at `>` (define the
+  closure before `view!`); `<Show>` children must be `Fn`, so a closure there must not move an
+  `Arc` (call `use_i18n()` inside it instead); `web_sys::RequestInit` 0.3.107 has no
+  `set_keepalive` (set it through `js_sys::Reflect`).
 - GitLab: `glab` works on this host (`glab ci list -R hordwyn/hordwyn`).
 - Commits: Conventional Commits, no attribution lines of any kind, never force-push `main`,
   tag milestones.

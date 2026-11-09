@@ -236,9 +236,20 @@ pub struct HealthRowDto {
     pub id: String,
     /// `ok`, `warning`, `error`, `off`.
     pub status: String,
-    /// Message key `admin-health-<id>-<detail>` plus arguments.
+    /// Message key `admin-health-<id>-<detail>` plus arguments. Status `unknown` with
+    /// `not_checked`: the probe job has not written this row yet.
     pub detail: String,
+    /// An argument `at` (RFC 3339) comes with `at_local` (`YYYY-MM-DDTHH:MM` in the admin's
+    /// time zone, DEC-336).
     pub args: BTreeMap<String, String>,
+    /// When the `admin.probes` job wrote the row (RFC 3339), and in the admin's zone.
+    #[serde(default)]
+    pub checked_at: Option<String>,
+    #[serde(default)]
+    pub checked_local: Option<String>,
+    /// Older than three minutes: "not checked recently".
+    #[serde(default)]
+    pub stale: bool,
 }
 
 /// The read-only brand card.
@@ -300,6 +311,9 @@ pub struct AdminUserDto {
     /// and not editable here.
     #[serde(default)]
     pub role_via_provider: Option<String>,
+    /// The person's linked sign-ins (the row menu's "Unlink provider", DEC-336).
+    #[serde(default)]
+    pub identities: Vec<LinkedIdentityDto>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -740,6 +754,9 @@ pub struct OidcProviderDto {
     pub last_callback_at: Option<String>,
     /// `ok` or `failed: <code>`.
     pub last_callback_result: Option<String>,
+    /// Accounts with an identity linked through this provider (DEC-388).
+    #[serde(default)]
+    pub linked_accounts: u64,
 }
 
 /// What the provider's discovery document advertises.
@@ -878,6 +895,31 @@ pub struct OidcLinkPendingDto {
     pub provider: String,
     /// The account has a password (else: "ask your admin to link it").
     pub has_password: bool,
+    /// No password, a stored address and mail works: "Email me a link" (DEC-312).
+    #[serde(default)]
+    pub can_email: bool,
+}
+
+/// "Email me a link" was sent (to this address, partly hidden).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct OidcLinkEmailedDto {
+    pub sent_to: String,
+    /// Minutes the link works.
+    pub minutes: i64,
+}
+
+/// The code of an emailed link (`/sign-in/link?code=...`).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct OidcLinkCodeDto {
+    pub code: String,
+}
+
+impl std::fmt::Debug for OidcLinkCodeDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("OidcLinkCodeDto(***)")
+    }
 }
 
 /// The password (and TOTP when enrolled) of the matched account.

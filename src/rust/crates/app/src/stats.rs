@@ -35,7 +35,7 @@ pub struct Amounts {
 }
 
 impl Amounts {
-    fn add(&mut self, o: &Self) {
+    pub(crate) fn add(&mut self, o: &Self) {
         self.events += o.events;
         self.completions += o.completions;
         self.finished += o.finished;
@@ -71,7 +71,7 @@ pub struct StatsTotals {
     pub groups: Vec<GroupTotals>,
 }
 
-/// Time-series bucket size (UTC calendar).
+/// Time-series bucket size (calendar of the user's zone, `bucket_of`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Bucket {
@@ -187,6 +187,52 @@ pub fn month_amounts<S: BuildHasher, T: BuildHasher>(
         .map(|((kind, month), (amounts, seconds))| MonthAmounts {
             kind,
             month,
+            amounts,
+            seconds,
+        })
+        .collect()
+}
+
+/// The amounts of one kind over a period, with seconds not yet turned into minutes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KindAmounts {
+    pub kind: KindId,
+    pub amounts: Amounts,
+    pub seconds: u64,
+}
+
+/// The rules of [`month_amounts`] for the effective events in `[from, to)` only, summed per
+/// kind (sorted by kind): pages and positions still count forward moves against the item's
+/// earlier events, so `events` must hold every event of the items concerned.
+#[must_use]
+pub fn window_amounts<S: BuildHasher, T: BuildHasher>(
+    items: &HashMap<ItemId, CatalogItem, S>,
+    events: &[ProgressEvent],
+    durations: &HashMap<SessionId, u64, T>,
+    from: Timestamp,
+    to: Timestamp,
+) -> Vec<KindAmounts> {
+    let mut by_item: BTreeMap<ItemId, Vec<ProgressEvent>> = BTreeMap::new();
+    for e in events {
+        by_item.entry(e.item_id).or_default().push(e.clone());
+    }
+    let mut out: BTreeMap<KindId, (Amounts, u64)> = BTreeMap::new();
+    for (id, events) in &by_item {
+        let Some(item) = items.get(id) else { continue };
+        let mut live = effective(events);
+        live.sort_by_key(|e| (e.occurred_at, e.id));
+        for (at, a, secs) in contributions(item, &live, durations) {
+            if at < from || at >= to {
+                continue;
+            }
+            let (sum, s) = out.entry(item.kind.clone()).or_default();
+            sum.add(&a);
+            *s += secs;
+        }
+    }
+    out.into_iter()
+        .map(|(kind, (amounts, seconds))| KindAmounts {
+            kind,
             amounts,
             seconds,
         })

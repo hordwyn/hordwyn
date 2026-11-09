@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT h AS \"h!\" FROM unnest($1::text[]) AS g(h)\n               WHERE NOT EXISTS (SELECT 1 FROM http_cache c WHERE c.entry->>'body_hash' = g.h)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "h!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b0c85ad3cfff9dc2648b5f49177c0adefd6d744d4789ef7cbcafcc7cf94ecd6a"
+}

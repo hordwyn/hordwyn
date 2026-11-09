@@ -53,6 +53,9 @@ pub const CATALOGUE: &[EventDef] = &[
     user("integration.failing", &["name", "error"]),
     user("import.finished", &["imported", "errors"]),
     user("import.failed", &["error"]),
+    // an admin changed how the person signs in (Users row menu, DEC-336)
+    user("account.authenticator_reset", &["by"]),
+    user("account.sign_in_unlinked", &["by", "provider"]),
     admin("admin.storage_high", &["used", "cap"]),
     admin("admin.storage_full", &["used", "cap"]),
     admin("admin.connector_down", &["connector"]),

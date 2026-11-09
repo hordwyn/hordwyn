@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT zone, bucket_zone FROM stats_users WHERE user_id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "zone",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "stats_users",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "bucket_zone",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "stats_users",
+            "name": "bucket_zone"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "f90a9ddc685b94561da35573dd2ae363f27ef1b23b0b3a2882eab3ac982dc00b"
+}

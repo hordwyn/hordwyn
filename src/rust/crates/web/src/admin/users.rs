@@ -6,12 +6,14 @@
 
 use std::collections::BTreeMap;
 
-use contracts::admin::{AdminInviteCreatedDto, AdminInviteDto, AdminUserDto, SettingDto};
+use contracts::admin::{
+    AdminInviteCreatedDto, AdminInviteDto, AdminUserDto, LinkedIdentityDto, SettingDto,
+};
 use leptos::prelude::*;
 use ui::{
     Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, CopyField, Disclosure, DisclosureMode,
-    FormField, Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-    disclosure_storage_key, field_described_by,
+    DropdownMenu, FormField, Input, MenuItem, Table, TableBody, TableCell, TableHead, TableHeader,
+    TableRow, disclosure_storage_key, field_described_by,
 };
 
 use super::{AdminFrame, ConfirmDialog, SettingNote};
@@ -249,6 +251,8 @@ fn UserTable() -> impl IntoView {
         let name = target.get().map(|u| u.display_name).unwrap_or_default();
         i18n_title.t_args("admin-users-delete-title", &[("name", name.into())])
     });
+    let pick = RwSignal::new(None::<Pick>);
+    let (reset_open, unlink_open) = (RwSignal::new(false), RwSignal::new(false));
     let delete = Callback::new(move |()| {
         let Some(u) = target.get_untracked() else {
             return;
@@ -271,7 +275,7 @@ fn UserTable() -> impl IntoView {
             {loaded(data, move |list| {
                 let admins = list.iter().filter(|u| u.role == "admin" && !u.disabled).count();
                 view! {
-                    <Table>
+                    <Table stacked=true attr:data-testid="users-table">
                         <caption class="sr-only">{t("admin-users-people")}</caption>
                         <TableHeader>
                             <TableRow>
@@ -285,6 +289,10 @@ fn UserTable() -> impl IntoView {
                         <TableBody>
                             {list.into_iter().map(|u| view! {
                                 <UserRow u=u only_admin=admins == 1 data=data row_error=row_error
+                                    on_menu=Callback::new(move |p: Pick| {
+                                        match &p { Pick::Reset(_) => reset_open.set(true), Pick::Unlink(..) => unlink_open.set(true) }
+                                        pick.set(Some(p));
+                                    })
                                     on_delete=Callback::new(move |u: AdminUserDto| { target.set(Some(u)); confirm.set(true); })/>
                             }).collect_view()}
                         </TableBody>
@@ -293,6 +301,7 @@ fn UserTable() -> impl IntoView {
             })}
             <ConfirmDialog open=confirm title=title body=Signal::derive(move || i18n.t("admin-users-delete-body"))
                 confirm=t("admin-users-delete") on_confirm=delete/>
+            <MenuDialogs pick=pick reset_open=reset_open unlink_open=unlink_open data=data row_error=row_error/>
         </section>
     }
 }
@@ -300,12 +309,17 @@ fn UserTable() -> impl IntoView {
 fn signs_in_with(u: &AdminUserDto) -> String {
     u.signs_in_with
         .iter()
-        .map(|m| {
-            t(match m.as_str() {
-                "password" => "admin-users-with-password",
-                "totp" => "admin-users-with-totp",
-                _ => "admin-users-with-oidc",
-            })
+        .map(|m| match m.as_str() {
+            "password" => t("admin-users-with-password"),
+            "totp" => t("admin-users-with-totp"),
+            // the providers by name (the linked sign-ins the row menu can unlink)
+            _ if !u.identities.is_empty() => u
+                .identities
+                .iter()
+                .map(|i| i.provider.clone())
+                .collect::<Vec<_>>()
+                .join(", "),
+            _ => t("admin-users-with-oidc"),
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -318,6 +332,7 @@ fn UserRow(
     data: Resource<Result<Vec<AdminUserDto>, ServerFnError>>,
     row_error: RwSignal<Option<(String, String)>>,
     on_delete: Callback<AdminUserDto>,
+    on_menu: Callback<Pick>,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let role = if u.role == "admin" {
@@ -352,12 +367,12 @@ fn UserRow(
     };
     view! {
         <TableRow attr:data-testid="user-row">
-            <TableCell>
+            <TableCell label=t("admin-users-person")>
                 <span class="font-medium">{display}</span>
                 {is_self.then(|| view! { " " <span class="text-muted-foreground">{t("admin-users-you")}</span> })}
                 <span class="block font-mono text-xs text-muted-foreground">{username}</span>
             </TableCell>
-            <TableCell>
+            <TableCell label=t("admin-users-role")>
                 {role}
                 {via.map(|(badge, hint)| view! {
                     " " <Badge variant=BadgeVariant::Info>{badge}</Badge>
@@ -365,14 +380,14 @@ fn UserRow(
                 })}
                 {disabled.then(|| view! { " " <Badge variant=BadgeVariant::Secondary>{t("admin-users-disabled")}</Badge> })}
             </TableCell>
-            <TableCell>{signs}</TableCell>
-            <TableCell class="sm:whitespace-nowrap">{seen}</TableCell>
-            <TableCell>
+            <TableCell label=t("admin-users-signs-in")>{signs}</TableCell>
+            <TableCell label=t("admin-users-last-seen") class="sm:whitespace-nowrap">{seen}</TableCell>
+            <TableCell label=t("admin-users-actions")>
                 {if is_self {
                     let guard = if only_admin { t("admin-users-only-admin") } else { t("admin-users-self") };
                     view! { <p data-testid="self-guard" class="max-w-56 text-sm text-muted-foreground">{guard}</p> }.into_any()
                 } else {
-                    view! { <UserActions u=u data=data row_error=row_error on_delete=on_delete/> }.into_any()
+                    view! { <UserActions u=u data=data row_error=row_error on_delete=on_delete on_menu=on_menu/> }.into_any()
                 }}
                 {move || error().map(|e| view! { <p role="alert" class="mt-1 text-sm text-destructive-text">{e}</p> })}
             </TableCell>
@@ -388,7 +403,9 @@ fn UserActions(
     data: Resource<Result<Vec<AdminUserDto>, ServerFnError>>,
     row_error: RwSignal<Option<(String, String)>>,
     on_delete: Callback<AdminUserDto>,
+    on_menu: Callback<Pick>,
 ) -> impl IntoView {
+    let menu = row_menu(&u, on_menu);
     let reauth = use_reauth();
     let i18n = use_i18n();
     let busy = RwSignal::new(false);
@@ -439,7 +456,123 @@ fn UserActions(
                 on:click=move |_| on_delete.run(u.clone())>
                 {t("admin-users-delete")}
             </Button>
+            {menu}
         </div>
+    }
+}
+
+/// A row menu choice waiting for its confirmation (DEC-336).
+#[derive(Clone)]
+enum Pick {
+    Reset(AdminUserDto),
+    Unlink(AdminUserDto, LinkedIdentityDto),
+}
+
+/// "More" for another person's row: Reset authenticator (when one is enrolled) and Unlink
+/// for each linked provider. Nothing when neither applies.
+fn row_menu(u: &AdminUserDto, on_menu: Callback<Pick>) -> Option<impl IntoView + use<>> {
+    let mut items = Vec::new();
+    if u.signs_in_with.iter().any(|m| m == "totp") {
+        let user = u.clone();
+        items.push(MenuItem {
+            label: t("admin-users-reset-totp"),
+            on_select: Callback::new(move |()| on_menu.run(Pick::Reset(user.clone()))),
+            destructive: true,
+        });
+    }
+    let i18n = use_i18n();
+    for i in &u.identities {
+        let (user, identity) = (u.clone(), i.clone());
+        items.push(MenuItem {
+            label: i18n.t_args(
+                "admin-users-unlink",
+                &[("provider", i.provider.clone().into())],
+            ),
+            on_select: Callback::new(move |()| {
+                on_menu.run(Pick::Unlink(user.clone(), identity.clone()));
+            }),
+            destructive: true,
+        });
+    }
+    if items.is_empty() {
+        return None;
+    }
+    let label = i18n.t_args(
+        "admin-users-more",
+        &[("name", u.display_name.clone().into())],
+    );
+    let id = format!("user-menu-{}", u.id);
+    Some(view! {
+        <DropdownMenu label=label id=id items=items trigger_class="h-8 px-3 text-sm"
+            trigger=Box::new(|| view! { {t("admin-users-more-short")} }.into_any())/>
+    })
+}
+
+/// The confirmations of the row menu, naming what changes for the person; the change runs
+/// through the re-auth gate and its refusal shows in the row.
+#[component]
+fn MenuDialogs(
+    pick: RwSignal<Option<Pick>>,
+    reset_open: RwSignal<bool>,
+    unlink_open: RwSignal<bool>,
+    data: Resource<Result<Vec<AdminUserDto>, ServerFnError>>,
+    row_error: RwSignal<Option<(String, String)>>,
+) -> impl IntoView {
+    let reauth = use_reauth();
+    let busy = RwSignal::new(false);
+    let i18n = use_i18n();
+    let names = move || match pick.get() {
+        Some(Pick::Reset(u)) => (u.display_name, String::new()),
+        Some(Pick::Unlink(u, i)) => (u.display_name, i.provider),
+        None => (String::new(), String::new()),
+    };
+    let text = move |key: &'static str| {
+        let i18n = i18n.clone();
+        Signal::derive(move || {
+            let (name, provider) = names();
+            i18n.t_args(key, &[("name", name.into()), ("provider", provider.into())])
+        })
+    };
+    // made once, under this component: the confirm button lives in the dialog's own scope,
+    // which closes (and is disposed) before the answer arrives
+    let row = RwSignal::new(String::new());
+    let done = Callback::new(move |r: Result<(), String>| match r {
+        Ok(()) => {
+            row_error.set(None);
+            data.refetch();
+        }
+        Err(e) => row_error.set(Some((row.get_untracked(), e))),
+    });
+    let owner = Owner::current();
+    let in_scope = move |f: Box<dyn FnOnce()>| match &owner {
+        Some(o) => o.with(f),
+        None => f(),
+    };
+    let in_scope_unlink = in_scope.clone();
+    let reset = Callback::new(move |()| {
+        if let Some(Pick::Reset(u)) = pick.get_untracked() {
+            let id = u.id.clone();
+            let call = move || {
+                let id = id.clone();
+                async move { admin_api::reset_user_totp(id).await.map(|_| ()) }
+            };
+            row.set(u.id);
+            in_scope(Box::new(move || gated(reauth, busy, call, done)));
+        }
+    });
+    let unlink = Callback::new(move |()| {
+        if let Some(Pick::Unlink(u, i)) = pick.get_untracked() {
+            let (id, identity) = (u.id.clone(), i.id);
+            let call = move || admin_api::unlink_user_identity(id.clone(), identity.clone());
+            row.set(u.id);
+            in_scope_unlink(Box::new(move || gated(reauth, busy, call, done)));
+        }
+    });
+    view! {
+        <ConfirmDialog open=reset_open title=text("admin-users-reset-totp-title")
+            body=text("admin-users-reset-totp-body") confirm=t("admin-users-reset-totp") on_confirm=reset/>
+        <ConfirmDialog open=unlink_open title=text("admin-users-unlink-title")
+            body=text("admin-users-unlink-body") confirm=t("admin-users-unlink-confirm") on_confirm=unlink/>
     }
 }
 

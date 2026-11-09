@@ -30,7 +30,7 @@ wasm-bindgen = { workspace = true, optional = true }
 wasm-bindgen-futures = { workspace = true, optional = true }
 js-sys = { workspace = true, optional = true }
 send_wrapper = { workspace = true, optional = true }
-web-sys = { workspace = true, optional = true, features = ["EventSource", "MessageEvent", "Location", "Window", "Document", "Element", "HtmlElement", "Storage", "MediaQueryList", "DomTokenList", "Navigator", "Node", "NodeList", "EventTarget", "KeyboardEvent", "PointerEvent", "Request", "RequestInit", "RequestCredentials", "Response", "Headers", "History", "UrlSearchParams", "File", "FileList", "HtmlInputElement", "Blob", "DataTransfer", "DragEvent"] }
+web-sys = { workspace = true, optional = true, features = ["EventSource", "MessageEvent", "Location", "Window", "Document", "Element", "HtmlElement", "HtmlFormElement", "Storage", "MediaQueryList", "DomTokenList", "Navigator", "Node", "NodeList", "EventTarget", "KeyboardEvent", "PointerEvent", "Request", "RequestInit", "RequestCredentials", "Response", "Headers", "History", "UrlSearchParams", "File", "FileList", "HtmlInputElement", "Blob", "DataTransfer", "DragEvent", "DomRect", "VisibilityState"] }
 # server side only
 brand = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }

@@ -222,7 +222,7 @@ impl LibraryState {
 
     /// The server query for one block of rows.
     #[must_use]
-    pub fn query_dto(&self, offset: u64, limit: u32) -> LibraryQueryDto {
+    pub fn query_dto(&self, limit: u32) -> LibraryQueryDto {
         LibraryQueryDto {
             group: self.group.clone(),
             kinds: self.kinds.clone(),
@@ -239,7 +239,7 @@ impl LibraryState {
             q: clean(&self.q),
             sort: Some(self.sort_key().to_string()),
             descending: Some(self.is_descending()),
-            offset,
+            after: None,
             limit,
         }
     }
@@ -644,14 +644,14 @@ mod tests {
     #[test]
     fn the_server_query_carries_the_state() {
         let s = LibraryState::from_pairs(&[("kind", "book"), ("status", "planned"), ("q", " x ")]);
-        let q = s.query_dto(48, PAGE_SIZE);
+        let q = s.query_dto(PAGE_SIZE);
         assert_eq!(q.kinds, ["book"]);
         assert_eq!(q.statuses, ["planned"]);
         assert_eq!(q.q.as_deref(), Some("x"));
         assert_eq!(q.sort.as_deref(), Some("last_activity"));
         assert_eq!(q.descending, Some(true));
-        assert_eq!((q.offset, q.limit), (48, 48));
-        let t = LibraryState::from_pairs(&[("sort", "title")]).query_dto(0, 1);
+        assert_eq!((q.after, q.limit), (None, 48));
+        let t = LibraryState::from_pairs(&[("sort", "title")]).query_dto(1);
         assert_eq!(t.descending, Some(false));
     }
 

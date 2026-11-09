@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT connector, hour, calls, rate_limited FROM source_stats_hours WHERE hour >= $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "connector",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_stats_hours",
+            "name": "connector"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "hour",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "source_stats_hours",
+            "name": "hour"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "calls",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "source_stats_hours",
+            "name": "calls"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "rate_limited",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "source_stats_hours",
+            "name": "rate_limited"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ed346493fe3f119024365613372fa53a017168843531a33c40f66cc052c1c84b"
+}

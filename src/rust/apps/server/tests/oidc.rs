@@ -4,7 +4,9 @@
 //! (addendum-1 4.2 steps 1-4, OD-15), group rules (OD-16), the admin API with re-auth and
 //! audit, the encrypted client secret and the read-only environment provider.
 
-// End-to-end scenarios on purpose: the steps share one server and database; short names
+// End-to-end scenarios on purpose: the steps share one server and database, so a scenario
+// stays one test (the longest, about 180 to 210 lines: `admin_resets_an_authenticator_and_
+// unlinks_a_provider`, `emailed_link_links_a_passwordless_account_once`; UX4-19); short names
 // (t: server, a: admin cookie, r: answer) keep the many calls readable.
 #![allow(clippy::too_many_lines, clippy::many_single_char_names)]
 
@@ -30,6 +32,8 @@ struct T {
     srv: Server,
     a: Arc<TestIssuer>,
     b: Arc<TestIssuer>,
+    /// The database, for a second process on it.
+    db: String,
 }
 
 fn skip() -> bool {
@@ -43,6 +47,16 @@ fn skip() -> bool {
 
 async fn start(extra: &str, env: Vec<(String, String)>) -> Option<T> {
     let db = store_pg::testing::fresh_db_url().await?;
+    Some(start_on(&db, extra, env, None).await)
+}
+
+/// A server on `db`; with `issuers`, a second process sharing the test issuers of another.
+async fn start_on(
+    db: &str,
+    extra: &str,
+    env: Vec<(String, String)>,
+    issuers: Option<(Arc<TestIssuer>, Arc<TestIssuer>)>,
+) -> T {
     let toml = format!(
         "[database]\nurl = \"{db}\"\n[secrets]\nephemeral = true\n[storage]\nbackend = \"memory\"\n[search]\nbackend = \"postgres\"\n\
          [server]\npublic_url = \"https://app.example.test\"\n\
@@ -50,8 +64,12 @@ async fn start(extra: &str, env: Vec<(String, String)>) -> Option<T> {
         repo("config/brand/default")
     );
     let cfg = config::AppConfig::from_sources(&toml, env).unwrap();
-    let a = TestIssuer::new(A, "client-a", "secret-a");
-    let b = TestIssuer::new(B, "client-b", "secret-b");
+    let (a, b) = issuers.unwrap_or_else(|| {
+        (
+            TestIssuer::new(A, "client-a", "secret-a"),
+            TestIssuer::new(B, "client-b", "secret-b"),
+        )
+    });
     let http = Arc::new(Issuers(vec![a.clone(), b.clone()]));
     let srv = Server::build(
         cfg,
@@ -66,13 +84,14 @@ async fn start(extra: &str, env: Vec<(String, String)>) -> Option<T> {
     let options = leptos::prelude::LeptosOptions::builder()
         .output_name("app")
         .build();
-    Some(T {
+    T {
         app: srv.base_router(),
         pages: srv.app_router(&options),
         srv,
         a,
         b,
-    })
+        db: db.to_string(),
+    }
 }
 
 struct Resp {
@@ -1965,4 +1984,603 @@ async fn live_provider_honours_max_age_zero() {
     )
     .await;
     assert_eq!(r.location.as_deref(), Some("/admin?probe=max_age_ok"));
+}
+
+// ------------------------------------------------------------------ WP4-2: admin-ops
+
+/// DEC-336: the Users row menu. An admin removes another person's authenticator and unlinks
+/// one of their providers; both need a fresh proof, are audited, notify the person, and the
+/// last way to sign in is refused. DEC-388 (1): the providers count their linked accounts.
+#[tokio::test]
+async fn admin_resets_an_authenticator_and_unlinks_a_provider() {
+    if skip() {
+        return;
+    }
+    let Some(t) = start("", vec![]).await else {
+        return;
+    };
+    let admin = first_admin(&t).await;
+    add_provider(&t, &admin, "a", &t.a, json!({"is_default": true})).await;
+    add_provider(&t, &admin, "b", &t.b, json!({})).await;
+    // carla: through A (no password), then B linked from Settings
+    let r = round_trip(&t, &t.a, "/auth/oidc/start", &Login::new("carla"), None).await;
+    let carla = r.cookie("_session").unwrap();
+    let carla_id = me(&t, &carla).await["id"].as_str().unwrap().to_string();
+    let r = round_trip(
+        &t,
+        &t.b,
+        "/auth/oidc/start?provider=b&mode=link",
+        &Login::new("carla-at-b"),
+        Some(&carla),
+    )
+    .await;
+    assert_eq!(r.location.as_deref(), Some("/settings/account"));
+    // dan: through A only; and a password account with an authenticator
+    let r = round_trip(&t, &t.a, "/auth/oidc/start", &Login::new("dan"), None).await;
+    let dan = r.cookie("_session").unwrap();
+    let dan_id = me(&t, &dan).await["id"].as_str().unwrap().to_string();
+    let eve = invited(&t, &admin, "eve").await;
+    let eve_id = me(&t, &eve).await["id"].as_str().unwrap().to_string();
+    enrol_totp(&t, "eve").await;
+
+    // the providers table counts the accounts linked through each
+    let r = call(&t, "GET", "/admin/oidc", Some(&admin), None).await;
+    let count = |slug: &str| {
+        r.body["providers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["slug"] == slug)
+            .unwrap()["linked_accounts"]
+            .clone()
+    };
+    assert_eq!((count("a"), count("b")), (json!(2), json!(1)), "{}", r.body);
+
+    // Users lists each person's linked sign-ins for the row menu
+    let r = call(&t, "GET", "/admin/users", Some(&admin), None).await;
+    let row = |id: &str| {
+        r.body
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|u| u["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    let carla_row = row(&carla_id);
+    let ids = carla_row["identities"].as_array().unwrap().clone();
+    assert_eq!(ids.len(), 2, "{carla_row}");
+    let a_identity = ids.iter().find(|i| i["provider_slug"] == "a").unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let dan_identity = row(&dan_id)["identities"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(row(&dan_id)["identities"][0]["can_unlink"], false);
+
+    // both need a fresh proof
+    stale(&t).await;
+    let reset = format!("/admin/users/{eve_id}/reset-totp");
+    let unlink = format!("/admin/users/{carla_id}/identities/{a_identity}");
+    let r = call(&t, "POST", &reset, Some(&admin), None).await;
+    assert_eq!(
+        (r.status, r.body["code"].as_str()),
+        (403, Some("reauth_required"))
+    );
+    let r = call(&t, "DELETE", &unlink, Some(&admin), None).await;
+    assert_eq!(
+        (r.status, r.body["code"].as_str()),
+        (403, Some("reauth_required"))
+    );
+    let r = call(
+        &t,
+        "POST",
+        "/auth/reauth",
+        Some(&admin),
+        Some(json!({"password": "correct horse battery"})),
+    )
+    .await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    let admin = r.cookie("_session").unwrap_or(admin);
+
+    // members never reach them
+    let r = call(&t, "POST", &reset, Some(&dan), None).await;
+    assert_eq!(r.status, 403);
+
+    // reset the authenticator: gone, audited, the person is told
+    let r = call(&t, "POST", &reset, Some(&admin), None).await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert!(
+        !r.body["signs_in_with"].to_string().contains("totp"),
+        "{}",
+        r.body
+    );
+    let enabled: bool =
+        sqlx::query_scalar("SELECT totp_enabled FROM credentials WHERE user_id = $1::uuid")
+            .bind(&eve_id)
+            .fetch_one(&t.srv.pool)
+            .await
+            .unwrap();
+    assert!(!enabled);
+    let r = call(&t, "POST", &reset, Some(&admin), None).await;
+    assert_eq!(
+        (r.status, r.body["code"].as_str()),
+        (409, Some("no_authenticator"))
+    );
+    let inbox = call(&t, "GET", "/notifications/inbox", Some(&eve), None).await;
+    assert!(
+        inbox.text.contains("account.authenticator_reset"),
+        "{}",
+        inbox.text
+    );
+
+    // unlink: the last way to sign in is refused; with two, one may go
+    let r = call(
+        &t,
+        "DELETE",
+        &format!("/admin/users/{dan_id}/identities/{dan_identity}"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (r.status, r.body["code"].as_str()),
+        (409, Some("last_sign_in_method")),
+        "{}",
+        r.body
+    );
+    let r = call(
+        &t,
+        "DELETE",
+        &format!("/admin/users/{carla_id}/identities/{dan_identity}"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, 404, "another person's identity: {}", r.body);
+    let r = call(&t, "DELETE", &unlink, Some(&admin), None).await;
+    assert_eq!(r.status, 204, "{}", r.body);
+    let r = call(&t, "GET", "/auth/me/identities", Some(&carla), None).await;
+    assert_eq!(r.body.as_array().unwrap().len(), 1, "{}", r.body);
+    let inbox = call(&t, "GET", "/notifications/inbox", Some(&carla), None).await;
+    assert!(
+        inbox.text.contains("account.sign_in_unlinked"),
+        "{}",
+        inbox.text
+    );
+    let r = call(&t, "GET", "/admin/oidc", Some(&admin), None).await;
+    assert_eq!(r.body["providers"][0]["linked_accounts"], 1, "{}", r.body);
+
+    // both audited with the proof
+    for action in ["user.totp_reset", "user.identity_unlinked"] {
+        let r = call(
+            &t,
+            "GET",
+            &format!("/admin/audit?action={action}"),
+            Some(&admin),
+            None,
+        )
+        .await;
+        let rows = r.body["entries"].as_array().unwrap();
+        assert_eq!(rows.len(), 1, "{action}: {}", r.body);
+        assert_eq!(rows[0]["detail"]["proof"], "password", "{}", r.body);
+    }
+}
+
+/// Reads every message a fake SMTP server receives (the DATA part).
+async fn smtp_outbox() -> (u16, Arc<std::sync::Mutex<Vec<String>>>) {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let outbox = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let out = outbox.clone();
+    tokio::spawn(async move {
+        while let Ok((sock, _)) = listener.accept().await {
+            let out = out.clone();
+            tokio::spawn(async move {
+                let (r, mut w) = sock.into_split();
+                let mut lines = BufReader::new(r).lines();
+                w.write_all(b"220 test ESMTP\r\n").await.unwrap();
+                let mut data: Option<String> = None;
+                while let Ok(Some(l)) = lines.next_line().await {
+                    let reply: &[u8] = if let Some(msg) = data.as_mut() {
+                        if l == "." {
+                            out.lock().unwrap().push(data.take().unwrap_or_default());
+                            b"250 queued\r\n"
+                        } else {
+                            msg.push_str(&l);
+                            msg.push('\n');
+                            continue;
+                        }
+                    } else if l.starts_with("EHLO") {
+                        b"250-test\r\n250 AUTH PLAIN LOGIN\r\n"
+                    } else if l.starts_with("DATA") {
+                        data = Some(String::new());
+                        b"354 go on\r\n"
+                    } else if l.starts_with("QUIT") {
+                        let _ = w.write_all(b"221 bye\r\n").await;
+                        break;
+                    } else {
+                        b"250 ok\r\n"
+                    };
+                    if w.write_all(reply).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+    });
+    (port, outbox)
+}
+
+/// The one-time code in the newest message.
+fn mailed_code(outbox: &std::sync::Mutex<Vec<String>>) -> String {
+    let all = outbox.lock().unwrap();
+    // the body may be quoted-printable (RFC 2045 6.7): soft line breaks and `=3D`
+    let msg = all
+        .last()
+        .expect("a message")
+        .replace("=\n", "")
+        .replace("=3D", "=");
+    let at = msg.find("/sign-in/link?code=").expect("the link") + "/sign-in/link?code=".len();
+    msg[at..]
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect()
+}
+
+/// DEC-312/316, addendum-1 4.2 step 3: a password-less account whose verified address a
+/// second provider names gets "Email me a link" when mail works. The link works once, for 30
+/// minutes, only in the browser holding the link ticket, and never as a password reset.
+#[tokio::test]
+async fn emailed_link_links_a_passwordless_account_once() {
+    if skip() {
+        return;
+    }
+    let (port, outbox) = smtp_outbox().await;
+    let Some(t) = start("", vec![]).await else {
+        return;
+    };
+    let admin = first_admin(&t).await;
+    add_provider(&t, &admin, "a", &t.a, json!({"is_default": true})).await;
+    add_provider(&t, &admin, "b", &t.b, json!({})).await;
+    // anna's account comes from A: no password, the verified address is kept
+    let anna_a = Login::new("anna").email("anna@example.test", true);
+    let r = round_trip(&t, &t.a, "/auth/oidc/start", &anna_a, None).await;
+    let anna = r.cookie("_session").unwrap();
+    let anna_id = me(&t, &anna).await["id"].as_str().unwrap().to_string();
+    // B names the same verified address: "Is this your account?"
+    let link_via_b = |sub: &str| Login::new(sub).email("Anna@Example.test", true);
+    let r = round_trip(
+        &t,
+        &t.b,
+        "/auth/oidc/start?provider=b",
+        &link_via_b("anna-b"),
+        None,
+    )
+    .await;
+    assert_eq!(r.location.as_deref(), Some("/sign-in/link"), "{}", r.body);
+    let ticket = r.cookie("_oidc_link").unwrap();
+
+    // without mail there is no offer
+    let r = call(&t, "GET", "/auth/oidc/link", Some(&ticket), None).await;
+    assert_eq!(
+        (
+            r.body["has_password"].as_bool(),
+            r.body["can_email"].as_bool()
+        ),
+        (Some(false), Some(false)),
+        "{}",
+        r.body
+    );
+    let r = call(&t, "POST", "/auth/oidc/link/email", Some(&ticket), None).await;
+    assert_eq!(
+        (r.status, r.body["code"].as_str()),
+        (409, Some("email_unavailable")),
+        "{}",
+        r.body
+    );
+
+    let values = json!({"values": {
+        "mail.host": "127.0.0.1", "mail.port": port, "mail.security": "none",
+        "mail.from": "Shelf <noreply@example.org>"
+    }});
+    let r = call(&t, "PUT", "/admin/settings", Some(&admin), Some(values)).await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    let r = call(&t, "GET", "/auth/oidc/link", Some(&ticket), None).await;
+    assert_eq!(r.body["can_email"], true, "{}", r.body);
+
+    // the link goes to the stored address; the ticket now lasts as long as the link
+    let r = call(&t, "POST", "/auth/oidc/link/email", Some(&ticket), None).await;
+    assert_eq!(r.status, 202, "{}", r.body);
+    let ticket = r.cookie("_oidc_link").expect("the ticket is renewed");
+    assert_eq!(outbox.lock().unwrap().len(), 1);
+    assert!(outbox.lock().unwrap()[0].contains("anna@example.test"));
+    let code = mailed_code(&outbox);
+    assert!(code.len() > 20, "{code}");
+    let stored: String =
+        sqlx::query_scalar("SELECT token_hash FROM password_resets WHERE purpose = 'oidc_link'")
+            .fetch_one(&t.srv.pool)
+            .await
+            .unwrap();
+    assert_ne!(stored, code, "only the hash is stored");
+
+    // never a password reset
+    let r = call(
+        &t,
+        "POST",
+        "/auth/reset-password",
+        None,
+        Some(json!({"token": code, "password": "another horse battery"})),
+    )
+    .await;
+    assert!(r.status >= 400, "{}", r.body);
+    // another browser: no ticket, or the ticket of another link request
+    let confirm = json!({"code": code});
+    let r = call(
+        &t,
+        "POST",
+        "/auth/oidc/link/email/confirm",
+        None,
+        Some(confirm.clone()),
+    )
+    .await;
+    assert_eq!(
+        (r.status, r.body["code"].as_str()),
+        (400, Some("link_expired"))
+    );
+    let r = round_trip(
+        &t,
+        &t.b,
+        "/auth/oidc/start?provider=b",
+        &link_via_b("anna-b2"),
+        None,
+    )
+    .await;
+    let other = r.cookie("_oidc_link").unwrap();
+    let r = call(
+        &t,
+        "POST",
+        "/auth/oidc/link/email/confirm",
+        Some(&other),
+        Some(confirm.clone()),
+    )
+    .await;
+    assert_eq!(
+        (r.status, r.body["code"].as_str()),
+        (400, Some("code_invalid"))
+    );
+
+    // UX4-11: the offer exists only without a password; one set since the link was mailed
+    // makes the link void (and does not use up the code)
+    sqlx::query(
+        "INSERT INTO credentials (user_id, password_hash) VALUES ($1::uuid, 'x')
+         ON CONFLICT (user_id) DO UPDATE SET password_hash = 'x'",
+    )
+    .bind(&anna_id)
+    .execute(&t.srv.pool)
+    .await
+    .unwrap();
+    let r = call(
+        &t,
+        "POST",
+        "/auth/oidc/link/email/confirm",
+        Some(&ticket),
+        Some(confirm.clone()),
+    )
+    .await;
+    assert_eq!(
+        (r.status, r.body["code"].as_str()),
+        (409, Some("email_unavailable")),
+        "{}",
+        r.body
+    );
+    sqlx::query("UPDATE credentials SET password_hash = NULL WHERE user_id = $1::uuid")
+        .bind(&anna_id)
+        .execute(&t.srv.pool)
+        .await
+        .unwrap();
+
+    // the right browser: linked and signed in, audited
+    let r = call(
+        &t,
+        "POST",
+        "/auth/oidc/link/email/confirm",
+        Some(&ticket),
+        Some(confirm.clone()),
+    )
+    .await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(r.body["user"]["id"], anna_id.as_str());
+    assert!(r.cookie("_session").is_some());
+    let r = call(&t, "GET", "/auth/me/identities", Some(&anna), None).await;
+    assert_eq!(r.body.as_array().unwrap().len(), 2, "{}", r.body);
+    let r = call(
+        &t,
+        "GET",
+        "/admin/audit?action=auth.link_emailed",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.body["entries"].as_array().unwrap().len(), 1, "{}", r.body);
+    // once
+    let r = call(
+        &t,
+        "POST",
+        "/auth/oidc/link/email/confirm",
+        Some(&ticket),
+        Some(confirm),
+    )
+    .await;
+    assert_eq!(r.status, 400, "{}", r.body);
+
+    // an expired link is refused
+    let r = call(&t, "POST", "/auth/oidc/link/email", Some(&other), None).await;
+    assert_eq!(r.status, 202, "{}", r.body);
+    let other = r.cookie("_oidc_link").unwrap();
+    let code = mailed_code(&outbox);
+    sqlx::query("UPDATE password_resets SET expires_at = created_at WHERE purpose = 'oidc_link'")
+        .execute(&t.srv.pool)
+        .await
+        .unwrap();
+    let r = call(
+        &t,
+        "POST",
+        "/auth/oidc/link/email/confirm",
+        Some(&other),
+        Some(json!({"code": code})),
+    )
+    .await;
+    assert_eq!(
+        (r.status, r.body["code"].as_str()),
+        (400, Some("code_invalid"))
+    );
+
+    // sending is throttled per account
+    let mut last = 0;
+    for _ in 0..5 {
+        last = call(&t, "POST", "/auth/oidc/link/email", Some(&other), None)
+            .await
+            .status;
+    }
+    assert_eq!(last, 429);
+}
+
+/// Back-Channel Logout 2.6 step 7 across processes (DEC-326): a `jti` one process accepted
+/// is refused by another process on the same database.
+#[tokio::test]
+async fn back_channel_jti_replay_through_a_second_process_is_refused() {
+    if skip() {
+        return;
+    }
+    let key = format!(
+        "v1:{}",
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [7u8; 32])
+    );
+    let env = || vec![("APP__SECRETS__KEYS".to_string(), key.clone())];
+    let Some(t) = start("", env()).await else {
+        return;
+    };
+    let admin = first_admin(&t).await;
+    t.a.behave(|b| b.logout = true);
+    add_provider(&t, &admin, "a", &t.a, json!({})).await;
+    let two = start_on(&t.db, "", env(), Some((t.a.clone(), t.b.clone()))).await;
+    let start_a = "/auth/oidc/start?provider=a";
+    round_trip(&t, &t.a, start_a, &Login::new("mia").sid("s1"), None).await;
+    let post = |token: &str| Req {
+        method: "POST",
+        uri: "/api/v1/auth/oidc/backchannel-logout".into(),
+        cookie: None,
+        body: format!("logout_token={token}"),
+        content_type: "application/x-www-form-urlencoded",
+        peer: None,
+    };
+    let token = t.a.logout_token(Some("mia"), Some("s1"));
+    assert_eq!(send(&t.app, post(&token)).await.status, 200);
+    let r = send(&two.app, post(&token)).await;
+    assert_eq!(
+        r.status, 400,
+        "replay through the other process: {}",
+        r.text
+    );
+    // a new token is fine on either
+    let token = t.a.logout_token(Some("mia"), None);
+    assert_eq!(send(&two.app, post(&token)).await.status, 200);
+}
+
+/// UX4-10: the row menu refuses the caller's own row, keeps an `auto` instance's break-glass
+/// admin, and counts only sign-ins through an enabled provider as another way in.
+#[tokio::test]
+async fn admin_menu_refuses_self_keeps_break_glass_and_counts_enabled_providers() {
+    if skip() {
+        return;
+    }
+    let Some(t) = start("", vec![]).await else {
+        return;
+    };
+    let admin = first_admin(&t).await;
+    let admin_id = me(&t, &admin).await["id"].as_str().unwrap().to_string();
+    add_provider(&t, &admin, "a", &t.a, json!({"is_default": true})).await;
+    add_provider(&t, &admin, "b", &t.b, json!({})).await;
+    let own = [
+        ("POST", format!("/admin/users/{admin_id}/reset-totp")),
+        (
+            "DELETE",
+            format!("/admin/users/{admin_id}/identities/{}", uuid::Uuid::nil()),
+        ),
+    ];
+    for (method, uri) in &own {
+        let r = call(&t, method, uri, Some(&admin), None).await;
+        assert_eq!(
+            (r.status, r.body["code"].as_str()),
+            (409, Some("self_change")),
+            "{uri}"
+        );
+    }
+
+    // carla: A and B, no password; with B disabled, A is her only way in
+    let r = round_trip(&t, &t.a, "/auth/oidc/start", &Login::new("carla"), None).await;
+    let carla = r.cookie("_session").unwrap();
+    let carla_id = me(&t, &carla).await["id"].as_str().unwrap().to_string();
+    round_trip(
+        &t,
+        &t.b,
+        "/auth/oidc/start?provider=b&mode=link",
+        &Login::new("carla-at-b"),
+        Some(&carla),
+    )
+    .await;
+    sqlx::query("UPDATE oidc_providers SET enabled = false WHERE slug = 'b'")
+        .execute(&t.srv.pool)
+        .await
+        .unwrap();
+    let r = call(&t, "GET", "/auth/me/identities", Some(&carla), None).await;
+    let a_identity = r
+        .body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["provider_slug"] == "a")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let uri = format!("/admin/users/{carla_id}/identities/{a_identity}");
+    let r = call(&t, "DELETE", &uri, Some(&admin), None).await;
+    assert_eq!(
+        (r.status, r.body["code"].as_str()),
+        (409, Some("last_sign_in_method")),
+        "{}",
+        r.body
+    );
+
+    // auto mode: eve is the only admin with a password and an authenticator
+    let eve = invited(&t, &admin, "eve").await;
+    let eve_id = me(&t, &eve).await["id"].as_str().unwrap().to_string();
+    enrol_totp(&t, "eve").await;
+    sqlx::query("UPDATE users SET role = 'admin' WHERE username = 'eve'")
+        .execute(&t.srv.pool)
+        .await
+        .unwrap();
+    let id = provider_id(&t, &admin, "a").await;
+    test_provider(&t, &admin, &id).await;
+    let r = set_mode(&t, &admin, "auto").await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    let r = call(
+        &t,
+        "POST",
+        &format!("/admin/users/{eve_id}/reset-totp"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (r.status, r.body["code"].as_str()),
+        (409, Some("auto_needs_admin_authenticator")),
+        "{}",
+        r.body
+    );
 }

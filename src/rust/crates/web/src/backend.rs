@@ -25,6 +25,8 @@ pub struct ShellSession {
     pub locale: Option<String>,
     /// Today in the user's time zone (`2026-02-01`, DEC-239); `None`: UTC.
     pub today: Option<String>,
+    /// Is the logging funnel counted on this instance (WP4-5)?
+    pub usage_funnel: bool,
 }
 
 /// Value of the cookie `name` in `headers`, if set and not empty.
@@ -221,6 +223,13 @@ pub trait Backend: Send + Sync {
         item_id: &str,
         status: &str,
     ) -> BResult<LibraryEntryDto>;
+    /// One operation on many library items (WP4-3), and its undo.
+    async fn library_bulk(
+        &self,
+        token: &str,
+        b: contracts::BulkRequestDto,
+    ) -> BResult<contracts::BulkResponseDto>;
+    async fn library_bulk_undo(&self, token: &str, undo: &str) -> BResult<()>;
     async fn tags(&self, token: &str) -> BResult<Vec<contracts::TagDto>>;
     async fn add_tag(&self, token: &str, item_id: &str, tag: &str) -> BResult<Vec<String>>;
     async fn remove_tag(&self, token: &str, item_id: &str, tag: &str) -> BResult<Vec<String>>;
@@ -245,4 +254,10 @@ pub trait Backend: Send + Sync {
         bucket: Option<String>,
     ) -> BResult<contracts::StatsSeriesDto>;
     async fn home(&self, token: &str) -> BResult<contracts::HomeDto>;
+    /// The caller's yearly goals (WP4-6).
+    async fn goals(&self, token: &str) -> BResult<Vec<contracts::GoalDto>>;
+    /// This year so far vs the same period last year, and the people seen most often.
+    async fn stats_compare(&self, token: &str) -> BResult<contracts::StatsCompareDto>;
+    /// The caller's game groups (the play sheet's chips).
+    async fn game_groups(&self, token: &str) -> BResult<Vec<contracts::GameGroupDto>>;
 }

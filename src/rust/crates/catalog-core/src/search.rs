@@ -22,12 +22,28 @@ use crate::registry::Registry;
 /// joined with `:`), handed to that connector only ([`Ctx::user_key`]). `Debug` prints the
 /// connector ids only (UX2-S9).
 #[derive(Clone, Default, PartialEq, Eq)]
-pub struct UserKeys(BTreeMap<String, Zeroizing<String>>);
+pub struct UserKeys(
+    BTreeMap<String, Zeroizing<String>>,
+    Option<domain::ids::UserId>,
+);
 
 impl UserKeys {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// No credentials yet, for searches of `user` (the fair share of the interactive lane in
+    /// hosted mode, design.md 4.1).
+    #[must_use]
+    pub fn for_user(user: domain::ids::UserId) -> Self {
+        Self(BTreeMap::new(), Some(user))
+    }
+
+    /// The member these searches are made for.
+    #[must_use]
+    pub fn user(&self) -> Option<domain::ids::UserId> {
+        self.1
     }
 
     pub fn insert(&mut self, connector: String, key: Zeroizing<String>) {
@@ -143,6 +159,7 @@ impl SearchFanout {
             };
             let mut ctx = base.clone();
             ctx.user_key = user_keys.get(&connector).cloned();
+            ctx.user = user_keys.user();
             let req = SearchRequest {
                 kind,
                 query: query.to_string(),

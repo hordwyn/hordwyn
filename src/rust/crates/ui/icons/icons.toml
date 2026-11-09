@@ -87,3 +87,5 @@ circle = "lucide:circle"
 chevrons-up-down = "lucide:chevrons-up-down"
 hash = "lucide:hash"
 home = "lucide:house"
+# UX phase 4 (WP4-3, DEC-419): the drag handle of list rows
+grip-vertical = "lucide:grip-vertical"

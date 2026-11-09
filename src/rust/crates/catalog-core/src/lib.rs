@@ -20,20 +20,21 @@ pub mod pg;
 mod plain;
 pub mod refresh;
 mod registry;
+pub mod retention;
 pub mod search;
 mod singleflight;
 mod stats;
 
 pub use breaker::Breaker;
-pub use connector::{Connector, Ctx, Details, Images, Search};
+pub use connector::{Connector, Ctx, Details, Episodes, Images, Search};
 pub use credentials::{CredentialSpec, CredentialState, KeySlot};
 pub use gate::Gate;
 pub use http::{ConnectorPolicy, GovernedHttp, HostList};
 pub use model::{
-    Attribution, Auth, Capability, ConnectorError, ConnectorInfo, DetailsRequest, ImageKind,
-    ImageRef, RateLimit, SearchRequest, Snapshot,
+    Attribution, Auth, Capability, ConnectorError, ConnectorInfo, DetailsRequest, EpisodesRequest,
+    ImageKind, ImageRef, RateLimit, SearchRequest, Snapshot,
 };
 pub use plain::PlainHttp;
 pub use registry::Registry;
 pub use singleflight::SingleFlight;
-pub use stats::{SourceCounters, SourceStats};
+pub use stats::{ConnectorStats, SourceCounters, SourceStats, StatsMarks, StatsStore};

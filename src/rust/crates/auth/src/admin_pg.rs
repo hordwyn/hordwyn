@@ -193,7 +193,7 @@ impl AdminStore for PgAdminStore {
                     storage_high_watermark, storage_low_watermark, setup_completed_at, setup_step,
                     sign_in_mode, mail_host, mail_port, mail_security, mail_username, mail_from,
                     mail_password IS NOT NULL AS "mail_password_set!", mail_last_test_at,
-                    mail_last_test_result, updated_at, updated_by
+                    mail_last_test_result, updated_at, updated_by, usage_funnel
              FROM instance_settings WHERE id"#
         )
         .fetch_optional(&self.pool)
@@ -209,6 +209,7 @@ impl AdminStore for PgAdminStore {
                 .and_then(|b| u64::try_from(b).ok()),
             storage_high_watermark: r.storage_high_watermark,
             storage_low_watermark: r.storage_low_watermark,
+            usage_funnel: r.usage_funnel,
             setup_completed_at: r.setup_completed_at,
             setup_step: r.setup_step,
             sign_in_mode: r.sign_in_mode,
@@ -238,14 +239,15 @@ impl AdminStore for PgAdminStore {
             "INSERT INTO instance_settings (id, hosting, signup, session_days, secure_cookies,
                  storage_max_total_bytes, storage_high_watermark, storage_low_watermark,
                  setup_completed_at, setup_step, updated_at, updated_by, sign_in_mode, mail_host,
-                 mail_port, mail_security, mail_username, mail_from)
+                 mail_port, mail_security, mail_username, mail_from, usage_funnel)
              VALUES (true, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-                     $17)
+                     $17, $18)
              ON CONFLICT (id) DO UPDATE SET hosting = $1, signup = $2, session_days = $3,
                  secure_cookies = $4, storage_max_total_bytes = $5, storage_high_watermark = $6,
                  storage_low_watermark = $7, setup_completed_at = $8, setup_step = $9,
                  updated_at = $10, updated_by = $11, sign_in_mode = $12, mail_host = $13,
-                 mail_port = $14, mail_security = $15, mail_username = $16, mail_from = $17",
+                 mail_port = $14, mail_security = $15, mail_username = $16, mail_from = $17,
+                 usage_funnel = $18",
             s.hosting,
             s.signup,
             s.session_days.and_then(|d| i32::try_from(d).ok()),
@@ -263,7 +265,8 @@ impl AdminStore for PgAdminStore {
             s.mail.port.map(i32::from),
             s.mail.security,
             s.mail.username,
-            s.mail.from
+            s.mail.from,
+            s.usage_funnel
         )
         .execute(&mut *tx)
         .await
@@ -629,6 +632,110 @@ impl AdminStore for PgAdminStore {
             .await
             .map_err(pe)?;
         Ok(())
+    }
+
+    async fn probes(&self) -> Result<Vec<crate::admin::ProbeRow>, PortError> {
+        sqlx::query!("SELECT id, status, detail, args, checked_at FROM health_probes")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(pe)?
+            .into_iter()
+            .map(|r| {
+                Ok(crate::admin::ProbeRow {
+                    id: r.id,
+                    status: r.status,
+                    detail: r.detail,
+                    args: serde_json::from_value(r.args).unwrap_or_default(),
+                    checked_at: r.checked_at,
+                })
+            })
+            .collect()
+    }
+
+    async fn put_probes(&self, rows: &[crate::admin::ProbeRow]) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(pe)?;
+        for r in rows {
+            let args = serde_json::to_value(&r.args).map_err(|e| PortError(e.to_string()))?;
+            sqlx::query!(
+                "INSERT INTO health_probes (id, status, detail, args, checked_at)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (id) DO UPDATE SET status = $2, detail = $3, args = $4,
+                     checked_at = $5",
+                r.id,
+                r.status,
+                r.detail,
+                args,
+                r.checked_at
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(pe)?;
+        }
+        tx.commit().await.map_err(pe)
+    }
+
+    async fn usage_add(
+        &self,
+        day: chrono::NaiveDate,
+        counts: &[(crate::admin::UsageKey, u64)],
+    ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(pe)?;
+        for (k, n) in counts {
+            sqlx::query!(
+                "INSERT INTO usage_funnel_daily
+                     (day, flow, subject, outcome, taps_bucket, ms_bucket, n)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 ON CONFLICT (day, flow, subject, outcome, taps_bucket, ms_bucket)
+                 DO UPDATE SET n = usage_funnel_daily.n + EXCLUDED.n",
+                day,
+                k.flow,
+                k.subject,
+                k.outcome,
+                k.taps_bucket,
+                k.ms_bucket,
+                i64::try_from(*n).unwrap_or(i64::MAX)
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(pe)?;
+        }
+        tx.commit().await.map_err(pe)
+    }
+
+    async fn usage_rows(
+        &self,
+        since: chrono::NaiveDate,
+    ) -> Result<Vec<crate::admin::UsageRow>, PortError> {
+        Ok(sqlx::query!(
+            "SELECT day, flow, subject, outcome, taps_bucket, ms_bucket, n
+             FROM usage_funnel_daily WHERE day >= $1
+             ORDER BY day DESC, flow, subject, outcome, taps_bucket, ms_bucket",
+            since
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(pe)?
+        .into_iter()
+        .map(|r| crate::admin::UsageRow {
+            day: r.day,
+            key: crate::admin::UsageKey {
+                flow: r.flow,
+                subject: r.subject,
+                outcome: r.outcome,
+                taps_bucket: r.taps_bucket,
+                ms_bucket: r.ms_bucket,
+            },
+            n: u64::try_from(r.n).unwrap_or(0),
+        })
+        .collect())
+    }
+
+    async fn usage_purge(&self, before: chrono::NaiveDate) -> Result<u64, PortError> {
+        let r = sqlx::query!("DELETE FROM usage_funnel_daily WHERE day < $1", before)
+            .execute(&self.pool)
+            .await
+            .map_err(pe)?;
+        Ok(r.rows_affected())
     }
 }
 

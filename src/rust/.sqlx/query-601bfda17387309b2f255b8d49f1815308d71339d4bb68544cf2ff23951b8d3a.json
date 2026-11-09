@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO catalog_episode_seasons\n                     (item_id, season, connector, episode_count, air_date, fetched_at)\n                 VALUES ($1, $2, $3, $4, $5, $6)\n                 ON CONFLICT (item_id, season) DO UPDATE SET connector = EXCLUDED.connector,\n                     episode_count = EXCLUDED.episode_count, air_date = EXCLUDED.air_date,\n                     fetched_at = EXCLUDED.fetched_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Int4",
+        "Date",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "601bfda17387309b2f255b8d49f1815308d71339d4bb68544cf2ff23951b8d3a"
+}

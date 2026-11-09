@@ -11,8 +11,9 @@ use axum::http::header::{CACHE_CONTROL, LOCATION, SET_COOKIE};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use contracts::admin::{
-    LinkedIdentityDto, OidcAdminDto, OidcButtonDto, OidcLinkConfirmDto, OidcLinkPendingDto,
-    OidcProviderDto, OidcProviderInputDto, OidcSecretDto, OidcTestDto,
+    LinkedIdentityDto, OidcAdminDto, OidcButtonDto, OidcLinkCodeDto, OidcLinkConfirmDto,
+    OidcLinkEmailedDto, OidcLinkPendingDto, OidcProviderDto, OidcProviderInputDto, OidcSecretDto,
+    OidcTestDto,
 };
 use contracts::{ErrorDto, SessionDto};
 use serde::Deserialize;
@@ -34,6 +35,8 @@ pub(crate) fn routes() -> OpenApiRouter<ApiState> {
         .routes(routes!(oidc_start))
         .routes(routes!(oidc_callback))
         .routes(routes!(link_pending, confirm_link))
+        .routes(routes!(email_link))
+        .routes(routes!(confirm_email_link))
         .routes(routes!(my_identities))
         .routes(routes!(unlink_identity))
         .routes(routes!(admin_oidc))
@@ -298,6 +301,25 @@ fn link_error(e: LinkError) -> ApiError {
             "identity_in_use",
             "this sign-in is linked to another account",
         ),
+        LinkError::NoEmail => ApiError::new(
+            StatusCode::CONFLICT,
+            "email_unavailable",
+            "no link can be emailed for this account; ask your admin",
+        ),
+        LinkError::Code => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "code_invalid",
+            "this link does not work any more; ask for a new one",
+        ),
+        LinkError::TooMany { retry_after_secs } => {
+            let mut e = ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "too_many_attempts",
+                "too many links asked for; try again later",
+            );
+            e.retry_after_secs = u64::try_from(retry_after_secs).ok();
+            e
+        }
         LinkError::Auth(e) => e.into(),
     }
 }
@@ -316,12 +338,143 @@ async fn link_pending(
         .link_pending(&s.auth, ticket.as_deref())
         .await
         .map_err(link_error)?;
+    let can_email = auth::oidc::Oidc::can_email(&user, has_password, admin::mail_ready(&s).await);
     Ok(Json(OidcLinkPendingDto {
         username: user.username,
         display_name: user.display_name,
         provider: provider.display_name,
         has_password,
+        can_email,
     }))
+}
+
+/// `a***@example.org`: enough to recognise the address, not to learn it.
+fn masked(address: &str) -> String {
+    match address.split_once('@') {
+        Some((local, domain)) => {
+            let first: String = local.chars().take(1).collect();
+            format!("{first}***@{domain}")
+        }
+        None => "***".into(),
+    }
+}
+
+/// "Email me a link" (DEC-312, addendum-1 4.2 step 3): a one-time link to the account's
+/// stored address, for an account without a password, when mail works. Throttled per
+/// account, audited; the ticket cookie is renewed to last as long as the link.
+#[utoipa::path(post, path = "/auth/oidc/link/email", tag = "auth",
+    responses((status = 202, body = OidcLinkEmailedDto), (status = 400, body = ErrorDto),
+              (status = 409, body = ErrorDto), (status = 429, body = ErrorDto)))]
+async fn email_link(State(s): State<ApiState>, req: axum::extract::Request) -> ApiResult<Response> {
+    let o = oidc(&s)?;
+    let (parts, _) = req.into_parts();
+    let ticket = cookie(&parts, &s.naming.oidc_link_cookie);
+    let ready = admin::mail_ready(&s).await;
+    let link = o
+        .email_link(&s.auth, ticket.as_deref(), ready)
+        .await
+        .map_err(link_error)?;
+    let url = format!(
+        "{}/sign-in/link?code={}",
+        s.public_url.trim_end_matches('/'),
+        link.code
+    );
+    let locale = link.user.locale.clone().unwrap_or_else(|| "en".into());
+    let mut args = serde_json::Map::new();
+    args.insert("url".into(), url.into());
+    args.insert("provider".into(), link.provider.display_name.clone().into());
+    args.insert("username".into(), link.user.username.clone().into());
+    args.insert("minutes".into(), auth::oidc::EMAIL_LINK_MINUTES.into());
+    let text = match &s.notify {
+        Some(n) => n
+            .engine
+            .templates()
+            .render("sign_in_link", "email", &locale, &args),
+        None => return Err(link_error(LinkError::NoEmail)),
+    };
+    if let Err(e) = admin::send_mail(&s, &link.to, &text.title, &text.body).await {
+        tracing::warn!(error = %e, "sending the sign-in link failed");
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "mail_failed",
+            "the link could not be sent; ask your admin",
+        ));
+    }
+    admin::audit(
+        &s,
+        None,
+        "auth.link_emailed",
+        Some(("user", link.user.id.0.to_string())),
+        serde_json::json!({"username": link.user.username, "provider": link.provider.slug}),
+    )
+    .await;
+    let mut r = (
+        StatusCode::ACCEPTED,
+        Json(OidcLinkEmailedDto {
+            sent_to: masked(&link.to),
+            minutes: auth::oidc::EMAIL_LINK_MINUTES,
+        }),
+    )
+        .into_response();
+    r.headers_mut().append(
+        SET_COOKIE,
+        set_cookie(
+            &s,
+            &s.naming.oidc_link_cookie,
+            &link.ticket,
+            auth::oidc::EMAIL_LINK_MINUTES * 60,
+        ),
+    );
+    Ok(r)
+}
+
+/// Use an emailed link in the browser that asked for it: link and sign in, once.
+#[utoipa::path(post, path = "/auth/oidc/link/email/confirm", tag = "auth",
+    request_body = OidcLinkCodeDto,
+    responses((status = 200, body = SessionDto), (status = 400, body = ErrorDto),
+              (status = 409, body = ErrorDto)))]
+async fn confirm_email_link(
+    State(s): State<ApiState>,
+    req: axum::extract::Request,
+) -> ApiResult<Response> {
+    let o = oidc(&s)?;
+    let (parts, body) = req.into_parts();
+    let ticket = cookie(&parts, &s.naming.oidc_link_cookie);
+    let bytes = axum::body::to_bytes(body, crate::routes::JSON_BODY_LIMIT)
+        .await
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let b: OidcLinkCodeDto =
+        serde_json::from_slice(&bytes).map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let (token, _, user) = o
+        .confirm_email_link(&s.auth, ticket.as_deref(), &b.code)
+        .await
+        .map_err(link_error)?;
+    admin::audit(
+        &s,
+        None,
+        "auth.link_confirmed",
+        Some(("user", user.id.0.to_string())),
+        serde_json::json!({"username": user.username, "method": "email_link"}),
+    )
+    .await;
+    Ok(linked_session(&s, &token.0, &user))
+}
+
+/// The session answer of a completed link: cookie set, link ticket cleared.
+fn linked_session(s: &ApiState, token: &str, user: &domain::user::User) -> Response {
+    let days = i64::from(s.auth.settings().session_days);
+    let mut r = Json(SessionDto {
+        token: token.to_string(),
+        user: crate::dto::user(user),
+    })
+    .into_response();
+    r.headers_mut().append(
+        SET_COOKIE,
+        crate::routes::session_cookie(s, token, days * 86_400),
+    );
+    r.headers_mut()
+        .append(SET_COOKIE, set_cookie(s, &s.naming.oidc_link_cookie, "", 0));
+    r
 }
 
 /// Confirm with the account's password (TOTP when enrolled): link and sign in.

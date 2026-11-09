@@ -10,7 +10,7 @@ use ui::{Alert, AlertRole, AlertVariant, StatusDot};
 use super::{AdminFrame, Attention, AuditTable};
 use crate::admin_api;
 use crate::admin_state::health_state;
-use crate::i18n::{t, use_i18n};
+use crate::i18n::{I18n, t, use_i18n};
 use crate::settings::loaded;
 
 #[component]
@@ -42,18 +42,64 @@ fn status_word(status: &str) -> String {
         "ok" => "admin-status-ok",
         "warning" => "admin-status-warning",
         "error" => "admin-status-error",
+        "unknown" => "admin-status-unknown",
         _ => "admin-status-off",
     })
 }
 
-/// The one-line detail (`admin-health-<id>-<detail>` with the server's arguments).
+/// `YYYY-MM-DDTHH:MM` in the admin's zone (the server computes it, DEC-336) in the locale's
+/// date and time format.
+fn local_stamp(i18n: &I18n, s: &str) -> Option<String> {
+    let day = s.get(0..10)?;
+    let h: u32 = s.get(11..13)?.parse().ok()?;
+    let m: u32 = s.get(14..16)?.parse().ok()?;
+    Some(i18n.t_args(
+        "datetime-local",
+        &[
+            ("date", i18n.date(day).into()),
+            ("time", i18n.time(h, m).into()),
+        ],
+    ))
+}
+
+/// The one-line detail (`admin-health-<id>-<detail>` with the server's arguments); a time
+/// argument shows in the admin's zone. A row the probe job has not written yet says so.
 fn health_detail(h: &HealthRowDto) -> String {
+    let i18n = use_i18n();
+    if h.status == "unknown" {
+        return i18n.t("admin-health-not-checked");
+    }
+    let local = h.args.get("at_local").and_then(|l| local_stamp(&i18n, l));
     let args: Vec<(&str, FluentValue<'_>)> = h
         .args
         .iter()
-        .map(|(k, v)| (k.as_str(), FluentValue::from(v.as_str())))
+        .filter(|(k, _)| k.as_str() != "at_local")
+        .map(|(k, v)| match (k.as_str(), &local) {
+            ("at", Some(l)) => ("at", FluentValue::from(l.clone())),
+            // the mail test's outcome is a category (`connection`, `auth`, ...), in words here
+            ("result", _) if h.id == "mail" => (
+                "result",
+                FluentValue::from(i18n.t(&format!("admin-health-mail-result-{v}"))),
+            ),
+            _ => (k.as_str(), FluentValue::from(v.as_str())),
+        })
         .collect();
-    use_i18n().t_args(&format!("admin-health-{}-{}", h.id, h.detail), &args)
+    i18n.t_args(&format!("admin-health-{}-{}", h.id, h.detail), &args)
+}
+
+/// "Not checked recently" with the time of the last check, for a row older than three
+/// minutes (the probe job is not running).
+fn stale_note(h: &HealthRowDto) -> Option<String> {
+    if !h.stale {
+        return None;
+    }
+    let i18n = use_i18n();
+    let at = h
+        .checked_local
+        .as_deref()
+        .and_then(|l| local_stamp(&i18n, l))
+        .unwrap_or_default();
+    Some(i18n.t_args("admin-health-stale", &[("time", at.into())]))
 }
 
 /// Where a row's one action leads (rows without a page of their own have none).
@@ -128,7 +174,10 @@ fn HealthRow(h: HealthRowDto) -> impl IntoView {
         <li data-testid="health-row" class="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border bg-card px-4 py-3">
             <span class="font-medium sm:w-40 sm:shrink-0">{name}</span>
             <StatusDot state=health_state(&h.status) label=status_word(&h.status) class="sm:w-36 sm:shrink-0"/>
-            <span class="min-w-0 flex-1 text-sm text-muted-foreground">{health_detail(&h)}</span>
+            <span class="min-w-0 flex-1 text-sm text-muted-foreground">
+                {health_detail(&h)}
+                {stale_note(&h).map(|s| view! { <span data-testid="health-stale" class="block font-medium text-foreground">{s}</span> })}
+            </span>
             {health_action(&h.id).map(|href| view! {
                 <a class="text-sm underline" href=href aria-label=label>{t("admin-overview-details")}</a>
             })}

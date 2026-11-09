@@ -272,17 +272,44 @@ pub async fn send_test_mail(
             Err(err) => Err(err),
         },
     };
+    // the admin sees the transport's own text now; only its category is stored (UX4-22)
     let result = match &outcome {
         Ok(()) => "ok".to_string(),
         Err(err) => format!("failed: {err}"),
     };
     let at = s.app.clock.now();
-    adm.store.record_mail_test(at, &result).await.map_err(pe)?;
+    adm.store
+        .record_mail_test(at, &stored_result(&outcome))
+        .await
+        .map_err(pe)?;
+    super::probes::refresh_probe(s, "mail").await;
     Ok(MailTestDto {
         ok: outcome.is_ok(),
         result,
         at: ts(at),
     })
+}
+
+/// What is stored of a mail test (and read into `health_probes.args`): `ok` or `failed: <category>`
+/// with one of `not_configured`, `connection`, `auth`, `rejected`, `send_failed`; never the
+/// transport's text, which can name the SMTP host (UX4-22).
+fn stored_result(outcome: &Result<(), String>) -> String {
+    let Err(err) = outcome else {
+        return "ok".to_string();
+    };
+    let e = err.to_ascii_lowercase();
+    let code = if e.contains("not configured") {
+        "not_configured"
+    } else if e.contains("authentication") || e.contains("(535)") || e.contains("(534)") {
+        "auth"
+    } else if e.contains("connection") || e.contains("timed out") || e.contains("dns") {
+        "connection"
+    } else if e.contains("permanent error") || e.contains("transient error") {
+        "rejected"
+    } else {
+        "send_failed"
+    };
+    format!("failed: {code}")
 }
 
 /// The Overview's mail row: off, configured, tested, or the last test failed.
@@ -310,3 +337,71 @@ pub(crate) fn health_row(a: &AdminApi, st: &StoredSettings) -> HealthRowDto {
 
 /// The transport handle for the admin API.
 pub type SharedTransport = Arc<dyn MailTransport>;
+
+/// Can mail be sent now: settings in effect and a transport (the emailed link, DEC-312)?
+pub(crate) async fn mail_ready(s: &ApiState) -> bool {
+    let Ok(adm) = admin(s) else {
+        return false;
+    };
+    let Ok(st) = adm.store.settings().await else {
+        return false;
+    };
+    adm.mail.is_some() && matches!(effective_mail(adm, &st).await, Ok(Some(_)))
+}
+
+/// Send one message with the settings in effect now (as the test mail does).
+///
+/// # Errors
+/// Mail is not configured, the transport refused the settings, or the SMTP error.
+pub(crate) async fn send_mail(
+    s: &ApiState,
+    to: &str,
+    subject: &str,
+    body: &str,
+) -> Result<(), String> {
+    let adm = admin(s).map_err(|e| e.message)?;
+    let st = adm.store.settings().await.map_err(|e| e.to_string())?;
+    match (
+        effective_mail(adm, &st).await.map_err(|e| e.message)?,
+        &adm.mail,
+    ) {
+        (Some(settings), Some(transport)) => {
+            transport.configure(Some(&settings))?;
+            transport.send(to.trim(), subject, body).await
+        }
+        _ => Err("mail is not configured".into()),
+    }
+}
+
+#[cfg(test)]
+mod stored_result_tests {
+    use super::stored_result;
+
+    #[test]
+    fn a_failed_test_is_stored_as_a_category_without_hosts_or_text() {
+        // UX4-22: the raw transport text can name the SMTP host; only a category is kept
+        let raw = [
+            (
+                "Connection error: connection refused (os error 111) smtp.example.org:587",
+                "connection",
+            ),
+            ("timed out", "connection"),
+            (
+                "permanent error (535): 5.7.8 Authentication credentials invalid",
+                "auth",
+            ),
+            (
+                "permanent error (550): mailbox unavailable at mx.example.org",
+                "rejected",
+            ),
+            ("mail is not configured", "not_configured"),
+            ("something else at host.example.org", "send_failed"),
+        ];
+        for (text, code) in raw {
+            let stored = stored_result(&Err(text.to_string()));
+            assert_eq!(stored, format!("failed: {code}"), "{text}");
+            assert!(!stored.contains("example.org"));
+        }
+        assert_eq!(stored_result(&Ok(())), "ok");
+    }
+}

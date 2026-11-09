@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id FROM catalog_items c\n             WHERE c.provider_refetch_after <= $2\n               AND EXISTS (SELECT 1 FROM external_ids e\n                           WHERE e.item_id = c.id AND e.namespace = ANY($1))\n             ORDER BY c.provider_refetch_after, c.id\n             LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "catalog_items",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fe82bcbfd7a6550b9a83770f0b5e4907b1b660d8646fa7dd7aa67f03a8c9cc5f"
+}

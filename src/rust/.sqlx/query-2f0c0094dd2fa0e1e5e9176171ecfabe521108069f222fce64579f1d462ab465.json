@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH gone AS (\n                 DELETE FROM stats_item_months\n                 WHERE user_id = $1 AND ($2::uuid[] IS NULL OR item_id = ANY($2))\n                 RETURNING kind, month, events, completions, finished, episodes, pages, plays,\n                           seconds\n             )\n             INSERT INTO stats_months AS m (user_id, kind, month, events, completions,\n                                            finished, episodes, pages, plays, seconds)\n             SELECT $1, kind, month, -SUM(events), -SUM(completions), -SUM(finished),\n                    -SUM(episodes), -SUM(pages), -SUM(plays), -SUM(seconds)\n             FROM gone GROUP BY kind, month\n             ON CONFLICT (user_id, kind, month) DO UPDATE SET\n                 events = m.events + EXCLUDED.events,\n                 completions = m.completions + EXCLUDED.completions,\n                 finished = m.finished + EXCLUDED.finished,\n                 episodes = m.episodes + EXCLUDED.episodes,\n                 pages = m.pages + EXCLUDED.pages, plays = m.plays + EXCLUDED.plays,\n                 seconds = m.seconds + EXCLUDED.seconds",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2f0c0094dd2fa0e1e5e9176171ecfabe521108069f222fce64579f1d462ab465"
+}

@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO external_ids (item_id, kind, namespace, value) VALUES ($1, $2, $3, $4)\n                 ON CONFLICT (kind, namespace, value) DO NOTHING RETURNING item_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "item_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "external_ids",
+            "name": "item_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9bebd1bd9b7f3f31e4a8a3e84507859a4c45e1c5132da42721491b59a3868c88"
+}

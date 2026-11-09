@@ -207,7 +207,7 @@ impl App {
         Ok((added, there))
     }
 
-    async fn owned_list(&self, actor: Actor, id: ListId) -> AppResult<List> {
+    pub(crate) async fn owned_list(&self, actor: Actor, id: ListId) -> AppResult<List> {
         let list = self.repos.lists.get(id).await?.found("list")?;
         if list.owner == actor.user_id {
             Ok(list)
@@ -216,7 +216,7 @@ impl App {
         }
     }
 
-    async fn save_list(&self, mut list: List) -> AppResult<List> {
+    pub(crate) async fn save_list(&self, mut list: List) -> AppResult<List> {
         list.updated_at = self.now();
         self.repos.lists.update(&list).await?;
         self.publish_list(&list).await;

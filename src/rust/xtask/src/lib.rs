@@ -2,6 +2,8 @@
 #![deny(unsafe_code)]
 
 pub mod arch;
+pub mod e2e_log;
+pub mod load;
 pub mod locales;
 pub mod record;
 pub mod services;

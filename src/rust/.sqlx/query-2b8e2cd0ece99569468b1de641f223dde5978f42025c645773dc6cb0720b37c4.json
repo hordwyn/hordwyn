@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM catalog_episodes WHERE item_id = $1 AND season = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2b8e2cd0ece99569468b1de641f223dde5978f42025c645773dc6cb0720b37c4"
+}

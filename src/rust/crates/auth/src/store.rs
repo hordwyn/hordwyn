@@ -173,8 +173,23 @@ pub trait AuthStore: Send + Sync {
     async fn link_identity(&self, i: &OidcIdentity) -> Result<bool, PortError>;
     /// Record the provider, `sid`, claims hash and groups of a sign-in.
     async fn touch_identity(&self, i: &OidcIdentity) -> Result<(), PortError>;
-    /// Remove the identity `id` of `user`; `false` when there is no such link.
-    async fn unlink_identity(&self, user: UserId, id: Uuid) -> Result<bool, PortError>;
+    /// Remove the identity `id` of `user`, with the audit row in the same transaction when
+    /// given (an admin unlinking, DEC-336); `false` when there is no such link.
+    async fn unlink_identity(
+        &self,
+        user: UserId,
+        id: Uuid,
+        audit: Option<&crate::admin::AuditEntry>,
+    ) -> Result<bool, PortError>;
+    /// Linked identities per provider (Admin > Sign-in and SSO, DEC-388).
+    async fn identity_counts(&self) -> Result<Vec<(Uuid, u64)>, PortError>;
+    /// Remove the authenticator and every recovery code of `user`, with the audit row in the
+    /// same transaction when given; `false` when none was enrolled.
+    async fn reset_totp(
+        &self,
+        user: UserId,
+        audit: Option<&crate::admin::AuditEntry>,
+    ) -> Result<bool, PortError>;
     /// Identities linked to `user`.
     async fn identities_of(&self, user: UserId) -> Result<Vec<OidcIdentity>, PortError>;
     /// Replace every recovery code of `user`.
@@ -213,6 +228,18 @@ pub trait AuthStore: Send + Sync {
         now: DateTime<Utc>,
         password_hash: &str,
     ) -> Result<Option<UserId>, PortError>;
+    /// An emailed one-time sign-in link (DEC-312): like a reset, but never usable as one, and
+    /// bound to `binding` (the hash of the link ticket the asking browser holds). Earlier
+    /// open links of the account stop working.
+    async fn insert_sign_in_link(&self, r: &PasswordReset, binding: &str) -> Result<(), PortError>;
+    /// Use the open link with this hash and binding; `None` when there is none (unknown,
+    /// used, expired, or another browser).
+    async fn claim_sign_in_link(
+        &self,
+        token_hash: &str,
+        binding: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Option<UserId>, PortError>;
     /// Delete resets that expired before `now` (daily retention job); returns the count.
     async fn purge_password_resets(&self, now: DateTime<Utc>) -> Result<u64, PortError>;
 }
@@ -237,6 +264,8 @@ struct State {
     secrets: HashMap<(String, SessionSecret), String>,
     /// (reset, used)
     resets: Vec<(PasswordReset, bool)>,
+    /// (link, binding, used)
+    links: Vec<(PasswordReset, String, bool)>,
 }
 
 #[derive(Default)]
@@ -404,12 +433,43 @@ impl AuthStore for MemAuthStore {
         Ok(())
     }
 
-    async fn unlink_identity(&self, user: UserId, id: Uuid) -> Result<bool, PortError> {
+    async fn unlink_identity(
+        &self,
+        user: UserId,
+        id: Uuid,
+        _audit: Option<&crate::admin::AuditEntry>,
+    ) -> Result<bool, PortError> {
         let mut s = self.s();
         let before = s.identities.len();
         s.identities
             .retain(|_, i| !(i.id == id && i.user_id == user));
         Ok(s.identities.len() < before)
+    }
+
+    async fn identity_counts(&self) -> Result<Vec<(Uuid, u64)>, PortError> {
+        let mut m: HashMap<Uuid, u64> = HashMap::new();
+        for p in self.s().identities.values().filter_map(|i| i.provider_id) {
+            *m.entry(p).or_default() += 1;
+        }
+        Ok(m.into_iter().collect())
+    }
+
+    async fn reset_totp(
+        &self,
+        user: UserId,
+        _audit: Option<&crate::admin::AuditEntry>,
+    ) -> Result<bool, PortError> {
+        let mut s = self.s();
+        let had = s.creds.get_mut(&user).is_some_and(|c| {
+            let had = c.totp_enabled || c.totp_secret.is_some() || c.totp_locked;
+            c.totp_secret = None;
+            c.totp_enabled = false;
+            c.totp_last_step = None;
+            c.totp_locked = false;
+            had
+        });
+        s.codes.remove(&user);
+        Ok(had)
     }
 
     async fn identities_of(&self, user: UserId) -> Result<Vec<OidcIdentity>, PortError> {
@@ -488,6 +548,32 @@ impl AuthStore for MemAuthStore {
             .map(|(r, _)| r.user))
     }
 
+    async fn insert_sign_in_link(&self, r: &PasswordReset, binding: &str) -> Result<(), PortError> {
+        let mut s = self.s();
+        s.links.retain(|(o, _, used)| *used || o.user != r.user);
+        s.links.push((r.clone(), binding.to_string(), false));
+        Ok(())
+    }
+
+    async fn claim_sign_in_link(
+        &self,
+        token_hash: &str,
+        binding: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Option<UserId>, PortError> {
+        Ok(self
+            .s()
+            .links
+            .iter_mut()
+            .find(|(r, b, used)| {
+                !*used && r.token_hash == token_hash && b == binding && r.expires_at > now
+            })
+            .map(|(r, _, used)| {
+                *used = true;
+                r.user
+            }))
+    }
+
     async fn complete_password_reset(
         &self,
         token_hash: &str,
@@ -521,6 +607,7 @@ impl AuthStore for MemAuthStore {
         let mut s = self.s();
         let before = s.resets.len();
         s.resets.retain(|(r, _)| r.expires_at > now);
+        s.links.retain(|(r, _, _)| r.expires_at > now);
         Ok((before - s.resets.len()) as u64)
     }
 }

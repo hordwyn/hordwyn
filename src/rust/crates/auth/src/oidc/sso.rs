@@ -14,8 +14,9 @@
 //! - The provider Test's probes (OD-19, od-12 4.4 step 5) and the re-auth round trip with
 //!   `max_age=0` (Core 3.1.2.1 `max_age`, DEC-191).
 //!
-//! Counters (outages, `jti`s, the back-channel budget) live in memory per process, like the
-//! sign-in throttle (DEC-155).
+//! Counters (outages, the back-channel budget) live in memory per process, like the
+//! sign-in throttle (DEC-155); a logout token's `jti` is also kept in a table, so every process
+//! refuses a replay (DEC-326, WP4-2).
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -75,6 +76,8 @@ pub(crate) struct Guards {
     jtis: Mutex<HashMap<String, DateTime<Utc>>>,
     budget: Mutex<Option<(DateTime<Utc>, u32)>>,
     refetched: Mutex<HashMap<Uuid, DateTime<Utc>>>,
+    /// Emailed links per account (`email_link`), newest last.
+    link_mails: Mutex<HashMap<Uuid, Vec<DateTime<Utc>>>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -93,6 +96,21 @@ impl Guards {
         }
         r.insert(provider, now);
         true
+    }
+
+    /// Count one emailed link for `user`; `Some(seconds)` to wait when the account asked for
+    /// [`super::EMAIL_LINKS_PER_WINDOW`] within the window already.
+    pub(crate) fn take_link_mail(&self, user: Uuid, now: DateTime<Utc>) -> Option<i64> {
+        let window = Duration::minutes(super::EMAIL_LINK_WINDOW_MINUTES);
+        let mut m = lock(&self.link_mails);
+        m.retain(|_, v| v.last().is_some_and(|t| now - *t < window));
+        let v = m.entry(user).or_default();
+        v.retain(|t| now - *t < window);
+        if v.len() >= super::EMAIL_LINKS_PER_WINDOW {
+            return Some((v[0] + window - now).num_seconds().max(1));
+        }
+        v.push(now);
+        None
     }
 
     fn outage(&self, provider: Uuid, now: DateTime<Utc>) {
@@ -641,12 +659,28 @@ impl Oidc {
         if !self.guards.first_jti(&key, now) {
             return Err(bad("jti seen before"));
         }
-        let sessions = end_sessions(auth, &provider, &claims)
+        // the process cache answers repeats cheaply; the table answers for every process
+        // (DEC-326, WP4-2)
+        let first = self
+            .parts
+            .store
+            .claim_jti(&key, now + Duration::minutes(JTI_MINUTES), now)
             .await
             .map_err(|err| {
                 self.guards.forget_jti(&key);
                 LogoutTokenError::Store(err.0)
             })?;
+        if !first {
+            return Err(bad("jti seen before"));
+        }
+        let sessions = match end_sessions(auth, &provider, &claims).await {
+            Ok(s) => s,
+            Err(err) => {
+                self.guards.forget_jti(&key);
+                let _ = self.parts.store.release_jti(&key).await;
+                return Err(LogoutTokenError::Store(err.0));
+            }
+        };
         Ok(BackchannelLogout {
             by_sid: claims["sid"].is_string(),
             provider,

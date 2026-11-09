@@ -8,7 +8,8 @@ use async_trait::async_trait;
 use zeroize::Zeroizing;
 
 use crate::model::{
-    ConnectorError, ConnectorInfo, DetailsRequest, ImageRef, SearchRequest, Snapshot,
+    ConnectorError, ConnectorInfo, DetailsRequest, EpisodesRequest, ImageRef, SearchRequest,
+    Snapshot,
 };
 
 /// Everything a connector may use. HTTP goes through `http` only (governed in production).
@@ -24,6 +25,9 @@ pub struct Ctx {
     /// The connector runs with an unsaved candidate key (Admin > Data sources > Test): a
     /// rejection must not mark the live key (UX2-S5).
     pub candidate_key: bool,
+    /// The member the request is made for (their search), for the per-user fair share of
+    /// the interactive lane in hosted mode (design.md 4.1). `None` for background work.
+    pub user: Option<domain::ids::UserId>,
 }
 
 impl Ctx {
@@ -34,6 +38,7 @@ impl Ctx {
             lane,
             user_key: None,
             candidate_key: false,
+            user: None,
         }
     }
 
@@ -76,6 +81,17 @@ pub trait Details: Send + Sync {
     async fn details(&self, ctx: &Ctx, req: &DetailsRequest) -> Result<Snapshot, ConnectorError>;
 }
 
+/// Release data of the episodes of one season (WP4-7): number, air date, runtime; the
+/// connector keeps nothing else (no titles or overviews).
+#[async_trait]
+pub trait Episodes: Send + Sync {
+    async fn season_episodes(
+        &self,
+        ctx: &Ctx,
+        req: &EpisodesRequest,
+    ) -> Result<Vec<domain::catalog::CatalogEpisode>, ConnectorError>;
+}
+
 #[async_trait]
 pub trait Images: Send + Sync {
     async fn images(
@@ -115,6 +131,10 @@ pub trait Connector: Send + Sync {
     }
 
     fn as_images(&self) -> Option<&dyn Images> {
+        None
+    }
+
+    fn as_episodes(&self) -> Option<&dyn Episodes> {
         None
     }
 }

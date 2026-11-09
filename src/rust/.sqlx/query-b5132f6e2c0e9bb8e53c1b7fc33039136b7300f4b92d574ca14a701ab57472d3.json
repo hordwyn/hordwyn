@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM password_resets WHERE user_id = $1 AND used_at IS NULL AND purpose = 'password'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b5132f6e2c0e9bb8e53c1b7fc33039136b7300f4b92d574ca14a701ab57472d3"
+}

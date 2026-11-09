@@ -24,7 +24,7 @@ use crate::history::ActivityRow;
 use crate::i18n::{I18n, kind_label, t, use_i18n};
 use crate::library_state::square_art;
 use crate::next_step::{NextStepButton, percent, progress_text};
-use crate::pages::{PageTitle, error_text, fresh, go, needs_sign_in};
+use crate::pages::{PageTitle, error_text, go, needs_sign_in};
 use crate::widgets::Cover;
 
 /// A count in the locale's digits.
@@ -63,14 +63,15 @@ fn SignedInHome() -> impl IntoView {
     let cfg = expect_context::<crate::app::ClientConfig>();
     let i18n = use_i18n();
     let data = Resource::new(|| (), |()| api::home());
-    let renders = StoredValue::new(0u32);
+    let shown = StoredValue::new(Shown::default());
     let refresh = Callback::new(move |()| data.refetch());
     let events = use_events();
+    let on_event = crate::offline::refresh_when_online(refresh);
     Effect::new(move |_| {
         if let Some((topic, _)) = events.0.get()
             && topic == "entity.updated"
         {
-            data.refetch();
+            on_event.run(());
         }
     });
     let title = i18n.t_args(
@@ -79,12 +80,13 @@ fn SignedInHome() -> impl IntoView {
     );
     let product = cfg.product_name.clone();
     let tab = i18n.t("nav-home");
+    continue_keys();
     view! {
         <leptos_meta::Title text=format!("{tab} - {product}")/>
         <h1 class="mb-6 text-2xl font-semibold tracking-tight">{title}</h1>
         {cfg.is_admin.then(|| view! { <crate::nudge::AdminNudge/> })}
         <Transition fallback=|| view! { <HomeSkeleton/> }>
-            <For each=move || data.get().map(|r| (fresh(renders), r)) key=|(k, _)| *k
+            <For each=move || data.get().and_then(|r| shown.try_update_value(|s| s.next(r))) key=|(k, _)| *k
                 children=move |(_, r)| match r {
                 Err(e) if needs_sign_in(&e) => {
                     go("/sign-in?next=/");
@@ -100,6 +102,42 @@ fn SignedInHome() -> impl IntoView {
                 Ok(home) => view! { <HomeSections home=home refresh=refresh/> }.into_any(),
             }/>
         </Transition>
+    }
+}
+
+/// What Home shows of its answers. Each new answer renders Home afresh (its handlers carry the
+/// new data, UX1-2), but a refetch with the same answer keeps the render, so a background refresh
+/// (any catalog change on the instance is announced to every page) leaves the focus where J/K
+/// put it and the next step under the pointer. A refetch that never reached the server (offline,
+/// the connection dropped) keeps the last answer instead of "Home could not be loaded" (DEC-486).
+#[derive(Default)]
+struct Shown {
+    /// The answer on screen and its render key.
+    last: Option<(Result<HomeDto, ServerFnError>, u32)>,
+    /// The last answer that loaded.
+    good: Option<HomeDto>,
+}
+
+impl Shown {
+    /// The render key and the answer to show for the resource's next answer.
+    fn next(
+        &mut self,
+        answer: Result<HomeDto, ServerFnError>,
+    ) -> (u32, Result<HomeDto, ServerFnError>) {
+        let answer = match (answer, &self.good) {
+            (Err(e), Some(good)) if crate::offline::network_error(&e) => Ok(good.clone()),
+            (other, _) => other,
+        };
+        if let Ok(home) = &answer {
+            self.good = Some(home.clone());
+        }
+        let key = match &self.last {
+            Some((same, key)) if *same == answer => *key,
+            Some((_, key)) => key.wrapping_add(1),
+            None => 0,
+        };
+        self.last = Some((answer.clone(), key));
+        (key, answer)
     }
 }
 
@@ -190,6 +228,60 @@ fn HomeSections(home: HomeDto, refresh: Callback<()>) -> impl IntoView {
     }
 }
 
+/// `J`/`K` (design.md 6.1): focus the next or previous Continue card's next step (its title
+/// when the step is a label only), so Enter runs it; stops at the ends.
+fn continue_keys() {
+    crate::keyboard::page_keys(|_, key| {
+        let by = match key {
+            "j" => 1,
+            "k" => -1,
+            _ => return false,
+        };
+        move_continue(by)
+    });
+}
+
+#[cfg(feature = "hydrate")]
+fn move_continue(by: isize) -> bool {
+    use wasm_bindgen::JsCast;
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return false;
+    };
+    let Ok(cards) = doc.query_selector_all("[data-continue-card]") else {
+        return false;
+    };
+    let cards: Vec<web_sys::Element> = (0..cards.length())
+        .filter_map(|i| cards.item(i))
+        .filter_map(|n| n.dyn_into().ok())
+        .collect();
+    if cards.is_empty() {
+        return false;
+    }
+    let focused = crate::keyboard::focused();
+    let at = cards.iter().position(|c| {
+        focused
+            .as_ref()
+            .is_some_and(|f| c.contains(Some(f.as_ref())))
+    });
+    let last = cards.len() - 1;
+    let to = match at {
+        None => 0,
+        Some(i) => i.saturating_add_signed(by).min(last),
+    };
+    let target = cards[to]
+        .query_selector("[data-next-step]")
+        .ok()
+        .flatten()
+        .or_else(|| cards[to].query_selector("a[data-title]").ok().flatten())
+        .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok());
+    target.is_some_and(|el| el.focus().is_ok())
+}
+
+#[cfg(not(feature = "hydrate"))]
+fn move_continue(_: isize) -> bool {
+    false
+}
+
 /// An in-progress entry: small cover, title, progress in words and as a bar, one button.
 #[component]
 fn ContinueCard(row: LibraryRowDto, on_done: Callback<()>) -> impl IntoView {
@@ -205,16 +297,16 @@ fn ContinueCard(row: LibraryRowDto, on_done: Callback<()>) -> impl IntoView {
         None => kind_label(&item.kind),
     };
     view! {
-        <li class="flex gap-3 rounded-xl border border-border p-3" data-testid="continue-card">
+        <li class="flex gap-3 rounded-xl border border-border p-3" data-testid="continue-card" data-continue-card="">
             <a href=format!("/items/{}", item.id) class="w-14 shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" tabindex="-1" aria-hidden="true">
-                <Cover title=item.title.clone() image=item.cover.clone() square=square_art(&item.kind) sizes="56px"/>
+                <Cover title=crate::i18n::title_text(&item.title) image=item.cover.clone() square=square_art(&item.kind) sizes="56px"/>
             </a>
             <div class="flex min-w-0 flex-1 flex-col gap-1.5">
-                <a href=format!("/items/{}", item.id) class="truncate font-medium hover:underline">{item.title.clone()}</a>
+                <a href=format!("/items/{}", item.id) data-title="" class="truncate font-medium hover:underline">{crate::i18n::title_text(&item.title)}</a>
                 <span class="text-xs text-muted-foreground">{meta}</span>
                 {bar}
                 <div class="mt-auto">
-                    <NextStepButton item_id=item.id.clone() title=item.title.clone() step=row.next_step.clone() on_done=on_done/>
+                    <NextStepButton item_id=item.id.clone() title=crate::i18n::title_text(&item.title) step=row.next_step.clone() on_done=on_done/>
                 </div>
             </div>
         </li>
@@ -231,8 +323,8 @@ fn UpNextCard(up: UpNextDto) -> impl IntoView {
     view! {
         <li class="w-28 shrink-0 snap-start sm:w-32" data-testid="up-next-card">
             <a href=format!("/items/{}", item.id) class="group flex flex-col gap-1.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                <Cover title=item.title.clone() image=item.cover.clone() square=square_art(&item.kind) sizes="128px"/>
-                <span class="line-clamp-2 text-sm font-medium group-hover:underline">{item.title.clone()}</span>
+                <Cover title=crate::i18n::title_text(&item.title) image=item.cover.clone() square=square_art(&item.kind) sizes="128px"/>
+                <span class="line-clamp-2 text-sm font-medium group-hover:underline">{crate::i18n::title_text(&item.title)}</span>
             </a>
             <span class="text-xs text-muted-foreground">{kind_label(&item.kind)} " - " {reason}</span>
         </li>
@@ -415,6 +507,7 @@ pub fn Stats() -> impl IntoView {
                     }
                 })}
             </Suspense>
+            <crate::stats_extras::StatsCompare group=group_q/>
             <Transition fallback=|| view! { <Skeleton class="h-48 w-full"/> }>
                 {move || series.get().map(|r| match r {
                     Err(e) => view! {
@@ -427,6 +520,7 @@ pub fn Stats() -> impl IntoView {
                 })}
             </Transition>
         </section>
+        <div class="mt-8"><crate::stats_extras::Goals/></div>
     }
 }
 
@@ -497,35 +591,7 @@ fn MeasureChart(
         .map(|p| (bucket_label(&i18n, &p.bucket), measure.value(&p.amounts)))
         .collect();
     let total: u64 = rows.iter().map(|(_, v)| v).sum();
-    let peak = rows.iter().max_by_key(|(_, v)| *v).cloned();
-    // an empty series has no peak: "none yet", not "0 in total, most in <last month>"
-    let summary = i18n.t_args(
-        if total == 0 {
-            "stats-chart-summary-empty"
-        } else {
-            "stats-chart-summary"
-        },
-        &[
-            ("measure", name.clone().into()),
-            ("group", group.into()),
-            ("total", total.into()),
-            (
-                "from",
-                rows.first().map(|r| r.0.clone()).unwrap_or_default().into(),
-            ),
-            (
-                "to",
-                rows.last().map(|r| r.0.clone()).unwrap_or_default().into(),
-            ),
-            (
-                "peak",
-                peak.as_ref()
-                    .map(|p| p.0.clone())
-                    .unwrap_or_default()
-                    .into(),
-            ),
-        ],
-    );
+    let summary = chart_summary(&i18n, &name, group, &rows);
     let columns: Vec<Column> = rows
         .iter()
         .map(|(label, v)| Column {
@@ -544,44 +610,84 @@ fn MeasureChart(
             ),
         })
         .collect();
-    let (fig_label, cap_id, table_id) = (
-        format!("{id}-title"),
-        format!("{id}-title"),
-        format!("{id}-table"),
-    );
-    let (name_cap, name_head) = (name.clone(), name.clone());
     let head = i18n.t(if bucket == "year" {
         "stats-col-year"
     } else {
         "stats-col-month"
     });
+    let (fig_label, cap_id) = (format!("{id}-title"), format!("{id}-title"));
+    let caption_name = name.clone();
     view! {
         <figure class="flex flex-col gap-3 rounded-xl border border-border p-4" aria-labelledby=fig_label>
             <figcaption id=cap_id class="flex items-baseline justify-between gap-2">
-                <span class="font-semibold">{name}</span>
+                <span class="font-semibold">{caption_name}</span>
                 <span class="text-sm text-muted-foreground tabular-nums">{count(&i18n, total)}</span>
             </figcaption>
             <ColumnChart summary=summary columns=columns/>
-            <Disclosure id=table_id title=i18n.t("stats-show-table") mode=DisclosureMode::Native class="border-0">
-                <Table>
-                    <TableCaption class="sr-only">{name_cap}</TableCaption>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead attr:scope="col">{head}</TableHead>
-                            <TableHead attr:scope="col" class="text-right">{name_head}</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {rows.into_iter().rev().map(|(label, v)| view! {
-                            <TableRow>
-                                <TableCell>{label}</TableCell>
-                                <TableCell class="text-right tabular-nums">{count(&use_i18n(), v)}</TableCell>
-                            </TableRow>
-                        }).collect_view()}
-                    </TableBody>
-                </Table>
-            </Disclosure>
+            <MeasureTable id=format!("{id}-table") name=name head=head rows=rows/>
         </figure>
+    }
+}
+
+/// The chart's sentence: total, range and the peak bucket (an empty series has no peak:
+/// "none yet", not "0 in total, most in <last month>").
+fn chart_summary(i18n: &I18n, name: &str, group: String, rows: &[(String, u64)]) -> String {
+    let total: u64 = rows.iter().map(|(_, v)| v).sum();
+    let peak = rows.iter().max_by_key(|(_, v)| *v).cloned();
+    i18n.t_args(
+        if total == 0 {
+            "stats-chart-summary-empty"
+        } else {
+            "stats-chart-summary"
+        },
+        &[
+            ("measure", name.to_string().into()),
+            ("group", group.into()),
+            ("total", total.into()),
+            (
+                "from",
+                rows.first().map(|r| r.0.clone()).unwrap_or_default().into(),
+            ),
+            (
+                "to",
+                rows.last().map(|r| r.0.clone()).unwrap_or_default().into(),
+            ),
+            (
+                "peak",
+                peak.as_ref()
+                    .map(|p| p.0.clone())
+                    .unwrap_or_default()
+                    .into(),
+            ),
+        ],
+    )
+}
+
+/// A chart's numbers as a table behind "Show as a table", newest first.
+#[component]
+fn MeasureTable(id: String, name: String, head: String, rows: Vec<(String, u64)>) -> impl IntoView {
+    let i18n = use_i18n();
+    let caption = name.clone();
+    view! {
+        <Disclosure id=id title=i18n.t("stats-show-table") mode=DisclosureMode::Native class="border-0">
+            <Table>
+                <TableCaption class="sr-only">{caption}</TableCaption>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead attr:scope="col">{head}</TableHead>
+                        <TableHead attr:scope="col" class="text-right">{name}</TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {rows.into_iter().rev().map(|(label, v)| view! {
+                        <TableRow>
+                            <TableCell>{label}</TableCell>
+                            <TableCell class="text-right tabular-nums">{count(&use_i18n(), v)}</TableCell>
+                        </TableRow>
+                    }).collect_view()}
+                </TableBody>
+            </Table>
+        </Disclosure>
     }
 }
 
@@ -615,6 +721,70 @@ mod tests {
                 .ends_with(": 2 geplant, 1 begonnen, 0 abgeschlossen, 0 pausiert, 0 abgebrochen"),
             "{}",
             totals_summary(&de, &g)
+        );
+    }
+
+    fn answer(total: u64) -> HomeDto {
+        let none = TotalsDto {
+            group: "all".into(),
+            entries: total,
+            planned: 0,
+            in_progress: 0,
+            completed: 0,
+            paused: 0,
+            dropped: 0,
+            amounts: contracts::AmountsDto::default(),
+        };
+        HomeDto {
+            library_total: total,
+            continue_rows: Vec::new(),
+            up_next: Vec::new(),
+            activity: contracts::ActivityPageDto {
+                rows: Vec::new(),
+                next: None,
+            },
+            stats: contracts::StatsTotalsDto {
+                overall: none,
+                groups: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn a_refetch_renders_afresh_only_for_a_new_answer_and_offline_keeps_the_last_one() {
+        // J/K lost the focus and the next step was detached when every refetch rendered Home
+        // afresh; offline, a failed refetch replaced Home with "Home could not be loaded"
+        let mut shown = Shown::default();
+        let (first, r) = shown.next(Ok(answer(2)));
+        assert_eq!(r, Ok(answer(2)));
+        let (same, _) = shown.next(Ok(answer(2)));
+        assert_eq!(same, first, "the same answer keeps its render");
+        let offline = ServerFnError::Request("Failed to fetch".into());
+        let (key, r) = shown.next(Err(offline.clone()));
+        assert_eq!(
+            (key, r),
+            (first, Ok(answer(2))),
+            "offline: the last answer stays"
+        );
+        let (changed, r) = shown.next(Ok(answer(3)));
+        assert_ne!(
+            changed, first,
+            "a new answer renders afresh (handlers with the new data)"
+        );
+        assert_eq!(r, Ok(answer(3)));
+        let refused = ServerFnError::ServerError("unauthorized".into());
+        let (key, r) = shown.next(Err(refused.clone()));
+        assert_ne!(key, changed);
+        assert_eq!(
+            r,
+            Err(refused),
+            "an answer of the server is shown, errors too"
+        );
+        let mut cold = Shown::default();
+        assert_eq!(
+            cold.next(Err(offline.clone())).1,
+            Err(offline),
+            "nothing to keep yet"
         );
     }
 }

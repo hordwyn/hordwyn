@@ -137,7 +137,15 @@ e2e:
     - rustup target add wasm32-unknown-unknown
     - cargo leptos build --bin-features gallery,all-connectors --lib-features hydrate,gallery
     - cd ../web && npm ci --no-audit --no-fund && npx playwright install --with-deps chromium
-    - CI=1 npx playwright test
+    # UX3-25 panic guard (DEC-456, UX4-4): the server's output goes to a file that the same
+    # check as `cargo xtask e2e` scans; a panic fails the job and the log is kept as an artifact
+    - |
+      export E2E_SERVER_LOG=/tmp/e2e-server.log
+      status=0
+      CI=1 npx playwright test || status=1
+      (cd ../rust && cargo xtask e2e-scan "$E2E_SERVER_LOG") || status=1
+      if [ "$status" != 0 ]; then mkdir -p test-results && cp "$E2E_SERVER_LOG" test-results/ || true; fi
+      exit "$status"
   artifacts:
     when: on_failure
     paths: [src/web/playwright-report, src/web/test-results]

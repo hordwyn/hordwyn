@@ -127,3 +127,34 @@ test("keyboard reorder, edit, remove, add through the palette; others add it all
   await expect(guest.getByText("Added 3 to your library; 0 were there already.")).toBeVisible();
   await other.close();
 });
+
+test("drag handles reorder with the pointer; the order persists and the keyboard buttons stay", async ({ page }) => {
+  // WP4-3 (DEC-353): the handle is aria-hidden, Move up/down remain (WCAG 2.5.7)
+  test.setTimeout(120_000);
+  await signUp(page, `ldrag${Date.now()}`, "Drag Tester");
+  const items = await seed(page);
+  const made = await page.request.post("/api/v1/lists", { data: { name: "Drag test" } });
+  const list = (await made.json()).id as string;
+  for (const t of ["Alpha Night", "Bravo Pages", "Charlie Tiles"]) {
+    expect((await page.request.post(`/api/v1/lists/${list}/items`, { data: { item_id: items[t] } })).ok()).toBeTruthy();
+  }
+  await page.goto(`/lists/${list}`);
+  await hydrated(page);
+  const handles = page.getByTestId("lst-handle");
+  await expect(handles).toHaveCount(3);
+  await expect(handles.first()).toHaveAttribute("aria-hidden", "true");
+  // Charlie Tiles to the top
+  await handles.nth(2).dragTo(page.getByTestId("lst-row").first(), { targetPosition: { x: 10, y: 2 } });
+  await expect.poll(() => titles(page)).toEqual(["Charlie Tiles (2003)", "Alpha Night (2001)", "Bravo Pages (2002)"]);
+  await expect(page.getByTestId("lst-status")).toHaveText("Charlie Tiles is now number 1 of 3.");
+  // Charlie Tiles back down to the end
+  await page.getByTestId("lst-handle").first().dragTo(page.getByTestId("lst-row").last(), { targetPosition: { x: 10, y: 40 } });
+  await expect.poll(() => titles(page)).toEqual(["Alpha Night (2001)", "Bravo Pages (2002)", "Charlie Tiles (2003)"]);
+  await page.reload();
+  await hydrated(page);
+  expect(await titles(page)).toEqual(["Alpha Night (2001)", "Bravo Pages (2002)", "Charlie Tiles (2003)"]);
+  // the keyboard still works
+  await page.getByRole("button", { name: "Move up: Bravo Pages" }).click();
+  await expect.poll(() => titles(page)).toEqual(["Bravo Pages (2002)", "Alpha Night (2001)", "Charlie Tiles (2003)"]);
+  await expectNoA11yViolations(page, "list with handles");
+});

@@ -145,6 +145,12 @@ pub fn parse(bytes: &[u8]) -> Parsed {
             *lost.entry("season_episode_ratings").or_insert(0) += 1;
             continue;
         }
+        // a refused rating adds nothing, not even an empty row for its item
+        let rating = item["rating"].as_u64().unwrap_or(0);
+        if history.is_none() && rated && !(1..=10).contains(&rating) {
+            errors.push(fail(format!("item {line}: rating {rating} is not 1..10")));
+            continue;
+        }
         let entry = rows.entry(key.clone()).or_insert_with(|| {
             order.push(key.clone());
             Acc {
@@ -167,12 +173,7 @@ pub fn parse(bytes: &[u8]) -> Parsed {
                 *lost.entry("action").or_insert(0) += 1;
             }
         } else if rated {
-            let r = item["rating"].as_u64().unwrap_or(0);
-            if !(1..=10).contains(&r) {
-                errors.push(fail(format!("item {line}: rating {r} is not 1..10")));
-                continue;
-            }
-            entry.rating = u8::try_from(r * 10).ok();
+            entry.rating = u8::try_from(rating * 10).ok();
             *lost.entry("rated_at").or_insert(0) += 1;
         } else {
             entry.planned = true;
@@ -214,4 +215,49 @@ fn add_history(acc: &mut Acc, item: &Value, sub: &str, date: &str) -> Result<(),
         event_id: id_text(&item["id"]),
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    /// DEC-383 (deferred to WP4-8): watchlist entries of a season or an episode add their
+    /// show as planned; an item without trakt id or slug is keyed by title and year; a rating
+    /// outside 1..10 is a row error. Synthetic items in the shape of the fixtures.
+    #[test]
+    fn season_and_episode_watchlist_rows_title_keys_and_bad_ratings() {
+        let show = json!({"title": "Harbour", "year": 2019, "ids": {"tmdb": 77}});
+        let file = json!([
+            {"type": "season", "listed_at": "2026-01-01T00:00:00.000Z", "season": {"number": 2}, "show": show},
+            {"type": "episode", "listed_at": "2026-01-02T00:00:00.000Z",
+             "episode": {"season": 2, "number": 1}, "show": show},
+            {"type": "movie", "rated_at": "2026-01-03T00:00:00.000Z", "rating": 11,
+             "movie": {"title": "Heat", "year": 1995, "ids": {"tmdb": 949}}},
+            {"type": "movie", "rated_at": "2026-01-03T00:00:00.000Z", "rating": 0,
+             "movie": {"title": "Ronin", "year": 1998, "ids": {}}}
+        ]);
+        let p = super::parse(file.to_string().as_bytes());
+        let errors: Vec<_> = p.rows.iter().filter_map(|r| r.as_ref().err()).collect();
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(
+            errors[0].message.contains("rating 11 is not 1..10"),
+            "{errors:?}"
+        );
+        assert!(
+            errors[1].message.contains("rating 0 is not 1..10"),
+            "{errors:?}"
+        );
+        let rows: Vec<_> = p.rows.iter().filter_map(|r| r.as_ref().ok()).collect();
+        assert_eq!(rows.len(), 1, "season and episode fold into their show");
+        let r = rows[0];
+        assert_eq!(
+            (r.kind.as_str(), r.title.as_str(), r.status.as_deref()),
+            ("show", "Harbour", Some("planned"))
+        );
+        assert_eq!(
+            r.source_id, "show:title:Harbour:2019",
+            "no trakt id or slug"
+        );
+        assert_eq!(r.external_ids["tmdb"], "77");
+    }
 }

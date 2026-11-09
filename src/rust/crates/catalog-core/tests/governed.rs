@@ -47,6 +47,7 @@ fn get(server: &MockServer, p: &str) -> HttpRequest {
         body: None,
         lane: Lane::Interactive,
         skip_auth_record: false,
+        user: None,
     }
 }
 
@@ -318,6 +319,7 @@ async fn network_errors_do_not_carry_the_url() {
             body: None,
             lane: Lane::Interactive,
             skip_auth_record: false,
+            user: None,
         })
         .await
         .unwrap_err();

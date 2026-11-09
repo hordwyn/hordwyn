@@ -95,6 +95,7 @@ impl Backend for WebBackend {
                 .ok()
                 .map(|d| d.format("%Y-%m-%d").to_string()),
             locale: user.locale,
+            usage_funnel: api::usage::enabled(&self.0).await,
         })
     }
 
@@ -146,7 +147,7 @@ impl Backend for WebBackend {
 
     async fn library(&self, token: &str, limit: u32) -> BResult<contracts::LibraryPageDto> {
         let a = self.actor(token).await?;
-        ops::library(&self.0, a, 0, limit).await.map_err(err)
+        ops::library(&self.0, a, None, limit).await.map_err(err)
     }
 
     async fn item(&self, token: &str, id: &str) -> BResult<ItemPageDto> {
@@ -445,6 +446,20 @@ impl Backend for WebBackend {
             .map_err(err)
     }
 
+    async fn library_bulk(
+        &self,
+        token: &str,
+        b: contracts::BulkRequestDto,
+    ) -> BResult<contracts::BulkResponseDto> {
+        let a = self.actor(token).await?;
+        api::bulk::bulk(&self.0, a, b).await.map_err(err)
+    }
+
+    async fn library_bulk_undo(&self, token: &str, undo: &str) -> BResult<()> {
+        let a = self.actor(token).await?;
+        api::bulk::undo(&self.0, a, undo).await.map_err(err)
+    }
+
     async fn tags(&self, token: &str) -> BResult<Vec<contracts::TagDto>> {
         let a = self.actor(token).await?;
         browse::tags(&self.0, a).await.map_err(err)
@@ -513,5 +528,20 @@ impl Backend for WebBackend {
     async fn home(&self, token: &str) -> BResult<contracts::HomeDto> {
         let a = self.actor(token).await?;
         browse::home(&self.0, a).await.map_err(err)
+    }
+
+    async fn goals(&self, token: &str) -> BResult<Vec<contracts::GoalDto>> {
+        let a = self.actor(token).await?;
+        api::goals::goals(&self.0, a).await.map_err(err)
+    }
+
+    async fn stats_compare(&self, token: &str) -> BResult<contracts::StatsCompareDto> {
+        let a = self.actor(token).await?;
+        api::goals::stats_compare(&self.0, a).await.map_err(err)
+    }
+
+    async fn game_groups(&self, token: &str) -> BResult<Vec<contracts::GameGroupDto>> {
+        let a = self.actor(token).await?;
+        api::goals::game_groups(&self.0, a).await.map_err(err)
     }
 }

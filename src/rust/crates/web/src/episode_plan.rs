@@ -185,6 +185,43 @@ pub fn spread_over(n: usize, from: Day, to: Day) -> Vec<String> {
         .collect()
 }
 
+/// Release day of each episode the item has a date for (WP4-7).
+pub type AirDates = std::collections::BTreeMap<Ep, Day>;
+
+/// The episodes' release days from the item page (bad or missing dates left out).
+#[must_use]
+pub fn air_dates(episodes: &[contracts::EpisodeDateDto]) -> AirDates {
+    episodes
+        .iter()
+        .filter_map(|e| Some(((e.season, e.episode), Day::parse(e.air_date.as_deref()?)?)))
+        .collect()
+}
+
+/// How many of `eps` have no release day up to `today` (none known, or still to come).
+#[must_use]
+pub fn missing_release(eps: &[Ep], dates: &AirDates, today: Day) -> usize {
+    eps.iter()
+        .filter(|e| dates.get(e).is_none_or(|d| d.days() > today.days()))
+        .count()
+}
+
+/// "On release dates" (design.md 5.4 R-09): each episode at noon UTC of its release day, in
+/// the order given.
+///
+/// # Errors
+/// The number of episodes without a release day up to today; then nothing is logged
+/// (episodes still to come are refused).
+pub fn release_dates(eps: &[Ep], dates: &AirDates, today: Day) -> Result<Vec<String>, usize> {
+    match missing_release(eps, dates, today) {
+        0 => Ok(eps
+            .iter()
+            .filter_map(|e| dates.get(e))
+            .map(|d| format!("{}T12:00:00Z", d.iso()))
+            .collect()),
+        n => Err(n),
+    }
+}
+
 /// The remembered answer to "Also mark the earlier episodes?" for one show (per person and
 /// browser, DEC in docs/DECISIONS.md).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -378,6 +415,52 @@ mod tests {
             Err(RangeError::Future)
         );
         assert_eq!(RangeError::Future.key(), "episodes-range-future");
+    }
+
+    fn dated(dates: &[(u32, u32, Option<&str>)]) -> AirDates {
+        air_dates(
+            &dates
+                .iter()
+                .map(|(s, e, d)| contracts::EpisodeDateDto {
+                    season: *s,
+                    episode: *e,
+                    air_date: d.map(str::to_string),
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    #[test]
+    fn release_dates_log_each_episode_on_its_day_and_refuse_missing_or_future_ones() {
+        let today = day("2026-03-10");
+        let dates = dated(&[
+            (1, 1, Some("2011-04-17")),
+            (1, 2, Some("2011-04-24")),
+            (1, 3, None),
+            (2, 1, Some("2026-03-10")),
+            (2, 2, Some("2026-03-11")),
+            (2, 3, Some("not a day")),
+        ]);
+        assert_eq!(
+            release_dates(&[(1, 2), (1, 1)], &dates, today),
+            Ok(vec![
+                "2011-04-24T12:00:00Z".to_string(),
+                "2011-04-17T12:00:00Z".to_string()
+            ]),
+            "one date per episode, in the order given"
+        );
+        // today counts as released; tomorrow, no date, a bad date and an unknown episode do not
+        assert_eq!(
+            release_dates(&[(2, 1)], &dates, today),
+            Ok(vec!["2026-03-10T12:00:00Z".to_string()])
+        );
+        assert_eq!(
+            release_dates(&[(1, 1), (1, 3), (2, 2), (2, 3), (4, 1)], &dates, today),
+            Err(4)
+        );
+        assert_eq!(missing_release(&[(1, 1), (1, 2)], &dates, today), 0);
+        assert_eq!(missing_release(&[(1, 1), (2, 2)], &dates, today), 1);
+        assert_eq!(release_dates(&[], &dates, today), Ok(Vec::new()));
     }
 
     #[test]

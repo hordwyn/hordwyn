@@ -1,0 +1,149 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, user_id, item_id, kind, status, status_hlc, rating, rating_hlc, notes,\n                    notes_hlc, added_at FROM library_entries\n             WHERE user_id = $1 AND item_id = ANY($2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "library_entries",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "library_entries",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "item_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "library_entries",
+            "name": "item_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "library_entries",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "library_entries",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "status_hlc",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "library_entries",
+            "name": "status_hlc"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "rating",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "library_entries",
+            "name": "rating"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "rating_hlc",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "library_entries",
+            "name": "rating_hlc"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "notes",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "library_entries",
+            "name": "notes"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "notes_hlc",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "library_entries",
+            "name": "notes_hlc"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "added_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "library_entries",
+            "name": "added_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "27b857cf5b5063ac799f53173c2de45af50c43582477c461b5edaa9694e298aa"
+}

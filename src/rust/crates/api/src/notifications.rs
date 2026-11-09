@@ -551,3 +551,54 @@ pub async fn instance_defaults(s: &ApiState) -> ApiResult<Vec<SubscriptionDto>> 
         .map(sub_dto)
         .collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use notify::model::{Delivery, DeliveryState};
+
+    fn delivery(state: DeliveryState, last_error: Option<&str>) -> Delivery {
+        let at = chrono::DateTime::parse_from_rfc3339("2026-03-01T10:00:00Z")
+            .unwrap()
+            .to_utc();
+        Delivery {
+            id: uuid::Uuid::nil(),
+            user: domain::ids::UserId(uuid::Uuid::nil()),
+            channel: uuid::Uuid::nil(),
+            event: "admin.signup".into(),
+            dedupe_key: String::new(),
+            title: String::new(),
+            body: String::new(),
+            link: None,
+            state,
+            attempts: 1,
+            last_error: last_error.map(String::from),
+            due_at: at,
+            created_at: at,
+            sent_at: Some(at + chrono::Duration::minutes(1)),
+        }
+    }
+
+    /// DEC-383 (deferred to WP4-8): sent -> working at the send time; queued or digest ->
+    /// waiting; queued after a failed attempt -> failing with that error.
+    #[test]
+    fn channel_health_states() {
+        let h = super::health(Some(&delivery(DeliveryState::Sent, None)));
+        assert_eq!(
+            (h.state.as_str(), h.at.as_deref(), h.error),
+            ("working", Some("2026-03-01T10:01:00+00:00"), None)
+        );
+        for s in [DeliveryState::Queued, DeliveryState::Digest] {
+            let h = super::health(Some(&delivery(s, None)));
+            assert_eq!((h.state.as_str(), h.error), ("waiting", None), "{s:?}");
+        }
+        let h = super::health(Some(&delivery(
+            DeliveryState::Queued,
+            Some("connection refused"),
+        )));
+        assert_eq!(
+            (h.state.as_str(), h.error.as_deref()),
+            ("failing", Some("connection refused"))
+        );
+        assert_eq!(super::health(None).state, "never");
+    }
+}

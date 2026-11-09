@@ -14,6 +14,9 @@ use domain::user::Actor;
 use crate::ports::HistoryWindow;
 use crate::{App, AppResult, UNDO_WINDOW_HOURS};
 
+mod person;
+use person::Feed;
+
 /// A "watched with" session belongs to the progress event logged within this many seconds.
 const PAIR_SECS: i64 = 120;
 /// Largest page.
@@ -91,8 +94,96 @@ struct Ctx {
     items: HashMap<ItemId, CatalogItem>,
     names: HashMap<CompanionId, String>,
     mine: HashSet<CompanionId>,
-    owners: HashMap<domain::ids::UserId, String>,
+    /// Owners of shared rows: their display name, `None` when they do not share sessions.
+    owners: HashMap<domain::ids::UserId, Option<String>>,
 }
+
+type Key = (Timestamp, uuid::Uuid);
+
+fn session_key(s: &Session) -> Key {
+    (s.started_at, s.id.0)
+}
+
+fn event_key(e: &ProgressEvent) -> Key {
+    (e.occurred_at, e.id.0)
+}
+
+/// Rows of one window in the three sources, as read (each newest first, at most `limit`).
+struct Streams {
+    events: Vec<ProgressEvent>,
+    own: Vec<Session>,
+    theirs: Vec<Session>,
+}
+
+impl Streams {
+    /// The lower end of the window: the newest last key among the sources that filled their
+    /// page (older rows of the others come with the next window); `None` when none did.
+    fn low(&self, limit: u32) -> Option<Key> {
+        let full = |n: usize| n == limit as usize;
+        let lasts = [
+            self.events
+                .last()
+                .filter(|_| full(self.events.len()))
+                .map(event_key),
+            self.own
+                .last()
+                .filter(|_| full(self.own.len()))
+                .map(session_key),
+            self.theirs
+                .last()
+                .filter(|_| full(self.theirs.len()))
+                .map(session_key),
+        ];
+        lasts.into_iter().flatten().max()
+    }
+}
+
+/// The window `[low, before)` being turned into rows, with the query's own bounds (the
+/// year) that no read may cross.
+#[derive(Clone, Copy)]
+struct Window {
+    before: Option<Key>,
+    low: Option<Key>,
+    since: Option<Timestamp>,
+    end: Option<Key>,
+}
+
+impl Window {
+    fn contains(&self, k: Key) -> bool {
+        self.before.is_none_or(|b| k < b) && self.low.is_none_or(|l| k >= l)
+    }
+
+    /// The upper end of the pairing read `reach` pair spans above `t`, never past the
+    /// query's own bounds (a year), as one big read would not be.
+    fn top(&self, t: Timestamp, reach: i32) -> Key {
+        let k = (
+            t + chrono::Duration::seconds(PAIR_SECS) * reach,
+            uuid::Uuid::nil(),
+        );
+        self.end.map_or(k, |e| e.min(k))
+    }
+
+    /// The lower end of the pairing read below `t`.
+    fn bottom(&self, t: Timestamp) -> Timestamp {
+        let pair = chrono::Duration::seconds(PAIR_SECS);
+        self.since.map_or(t - pair, |s| s.max(t - pair))
+    }
+}
+
+/// The own sessions of the window plus those within [`PAIR_SECS`] of its ends, and the
+/// events just above and below it: a "watched with" pair split by a window end is matched
+/// as in one big read.
+struct Pairing {
+    sessions: Vec<Session>,
+    above: Vec<ProgressEvent>,
+    below: Vec<ProgressEvent>,
+}
+
+/// Largest window per source (rows), reached by doubling from `2 * limit + 1`.
+const MAX_WINDOW: u32 = 2_000;
+
+/// Rows read near a window end (pairs are logged together, so a handful at most).
+const EDGE_LIMIT: u32 = 64;
 
 fn year_bounds(year: i32) -> Option<(Timestamp, Timestamp)> {
     use chrono::TimeZone;
@@ -104,7 +195,10 @@ fn year_bounds(year: i32) -> Option<(Timestamp, Timestamp)> {
 }
 
 impl App {
-    /// One page of the activity feed.
+    /// One page of the activity feed. Events, own sessions and shared sessions are read in
+    /// windows of `2 * limit + 1` rows each, doubling while the page is not full (DEC-235,
+    /// WP4-1), never all of them. With the person filter the person's sessions drive the
+    /// reads (`person::person_walk`, DEC-494); the windows take over only after a dense round.
     ///
     /// # Errors
     /// Storage errors.
@@ -125,72 +219,75 @@ impl App {
             });
         };
         let bounds = q.year.and_then(year_bounds);
-        let mut before = match (q.before, bounds) {
-            (Some(b), Some((_, end))) => Some(b.min((end, uuid::Uuid::nil()))),
-            (Some(b), None) => Some(b),
-            (None, Some((_, end))) => Some((end, uuid::Uuid::nil())),
-            (None, None) => None,
+        let end = bounds.map(|(_, e)| (e, uuid::Uuid::nil()));
+        let mut before = match (q.before, end) {
+            (Some(b), Some(e)) => Some(b.min(e)),
+            (b, e) => b.or(e),
         };
         let since = bounds.map(|(s, _)| s);
         let me = self.user(actor.user_id).await?;
-        let own_sessions = if q.shared_only {
-            vec![]
-        } else {
-            self.my_sessions(actor).await?
-        };
-        let shared = self.shared_sessions(actor).await?;
-        let mut ctx = self
-            .feed_context(actor, &own_sessions, &shared, me.self_companion)
-            .await?;
         let people = match q.person {
             Some(p) => Some(self.person_ids(actor, p).await?),
             None => None,
         };
+        let representing: Vec<CompanionId> = self
+            .companion_ids_representing(actor)
+            .await?
+            .into_iter()
+            .collect();
+        let mut ctx = self.feed_context(actor, me.self_companion).await?;
         let mut rows: Vec<ActivityRow> = Vec::new();
         let mut done = false;
-        let fetch = u32::try_from(limit * 2 + 1).unwrap_or(u32::MAX);
+        if let Some(p) = &people {
+            let feed = Feed {
+                actor,
+                q: &q,
+                kinds: &kinds,
+                people: p,
+                representing: &representing,
+                base: Window {
+                    before,
+                    low: None,
+                    since,
+                    end,
+                },
+            };
+            let walk = self.person_walk(&mut ctx, &feed, limit).await?;
+            (rows, before, done) = (walk.rows, walk.before, walk.done);
+        }
+        let mut fetch = u32::try_from(limit * 2 + 1).unwrap_or(u32::MAX);
         while rows.len() <= limit && !done {
-            let events = if q.shared_only {
-                vec![]
-            } else {
-                self.repos
-                    .progress
-                    .recent(
-                        actor.user_id,
-                        &HistoryWindow {
-                            before,
-                            since,
-                            kinds: kinds.clone(),
-                            limit: fetch,
-                        },
-                    )
-                    .await?
+            let w = HistoryWindow {
+                before,
+                since,
+                kinds: kinds.clone(),
+                limit: fetch,
             };
-            done = events.len() < fetch as usize;
-            let low = if done {
-                since.map(|s| (s, uuid::Uuid::nil()))
-            } else {
-                events.last().map(|e| (e.occurred_at, e.id.0))
+            let streams = self
+                .feed_streams(actor, q.shared_only, &w, &representing)
+                .await?;
+            let low = streams.low(fetch);
+            done = low.is_none();
+            let window = Window {
+                before,
+                low: low.or(since.map(|s| (s, uuid::Uuid::nil()))),
+                since,
+                end,
             };
-            let in_window = |s: &Session| {
-                let k = (s.started_at, s.id.0);
-                before.is_none_or(|b| k < b)
-                    && low.is_none_or(|l| k >= l)
-                    && since.is_none_or(|t| s.started_at >= t)
-            };
-            let own: Vec<&Session> = own_sessions.iter().filter(|s| in_window(s)).collect();
-            let theirs: Vec<&Session> = shared.iter().filter(|s| in_window(s)).collect();
-            self.load_items(&mut ctx, &events, &own, &theirs).await?;
-            let batch = self.batch_rows(&ctx, &events, &own, &theirs);
+            let batch = self
+                .window_rows(actor, &mut ctx, streams, window, &kinds)
+                .await?;
             rows.extend(
                 batch
                     .into_iter()
                     .filter(|r| keep(r, &q, &kinds, people.as_ref())),
             );
-            before = low;
-            if low.is_none() {
+            before = window.low;
+            if before.is_none() {
                 done = true;
             }
+            // a filter that drops most rows (a person, a type) needs fewer, larger windows
+            fetch = fetch.saturating_mul(2).min(MAX_WINDOW);
         }
         rows.sort_by_key(|r| std::cmp::Reverse(r.key));
         let more = rows.len() > limit || !done;
@@ -201,6 +298,141 @@ impl App {
             None
         };
         Ok(ActivityPage { rows, next })
+    }
+
+    async fn feed_streams(
+        &self,
+        actor: Actor,
+        shared_only: bool,
+        w: &HistoryWindow,
+        representing: &[CompanionId],
+    ) -> AppResult<Streams> {
+        let (events, own) = if shared_only {
+            (vec![], vec![])
+        } else {
+            (
+                self.repos.progress.recent(actor.user_id, w).await?,
+                self.repos
+                    .sessions
+                    .by_owner_window(actor.user_id, w)
+                    .await?,
+            )
+        };
+        let theirs = if representing.is_empty() {
+            vec![]
+        } else {
+            self.repos
+                .sessions
+                .with_participants_window(representing, w)
+                .await?
+        };
+        Ok(Streams {
+            events,
+            own,
+            theirs,
+        })
+    }
+
+    /// The rows of one window: its events (paired with their sessions), its own sessions
+    /// that no event took, and the shared sessions of owners who share.
+    async fn window_rows(
+        &self,
+        actor: Actor,
+        ctx: &mut Ctx,
+        streams: Streams,
+        window: Window,
+        kinds: &[KindId],
+    ) -> AppResult<Vec<ActivityRow>> {
+        let events: Vec<ProgressEvent> = streams
+            .events
+            .into_iter()
+            .filter(|e| window.contains(event_key(e)))
+            .collect();
+        let own: Vec<Session> = streams
+            .own
+            .into_iter()
+            .filter(|s| window.contains(session_key(s)))
+            .collect();
+        let mut theirs = Vec::new();
+        for s in streams.theirs {
+            if s.owner != actor.user_id
+                && window.contains(session_key(&s))
+                && self.owner_shares(ctx, s.owner).await?
+            {
+                theirs.push(s);
+            }
+        }
+        let pairing = if events.is_empty() && own.is_empty() {
+            Pairing {
+                sessions: own,
+                above: vec![],
+                below: vec![],
+            }
+        } else {
+            self.pairing(actor, window, kinds, own).await?
+        };
+        let all_sessions: Vec<&Session> = pairing.sessions.iter().chain(&theirs).collect();
+        self.load_names(ctx, &all_sessions).await?;
+        self.load_items(ctx, &events, &all_sessions).await?;
+        Ok(self.batch_rows(ctx, &events, &pairing, window, &theirs))
+    }
+
+    /// Display name of a shared row's owner; `false` when they do not share sessions.
+    async fn owner_shares(&self, ctx: &mut Ctx, owner: domain::ids::UserId) -> AppResult<bool> {
+        if let Some(name) = ctx.owners.get(&owner) {
+            return Ok(name.is_some());
+        }
+        let u = self.user_opt(owner).await?;
+        let name = u.filter(|u| u.share_sessions).map(|u| u.display_name);
+        let shares = name.is_some();
+        ctx.owners.insert(owner, name);
+        Ok(shares)
+    }
+
+    async fn pairing(
+        &self,
+        actor: Actor,
+        window: Window,
+        kinds: &[KindId],
+        own: Vec<Session>,
+    ) -> AppResult<Pairing> {
+        let near = |before: Option<Key>, since: Option<Timestamp>| HistoryWindow {
+            before,
+            since,
+            kinds: kinds.to_vec(),
+            limit: EDGE_LIMIT,
+        };
+        let top = |t: Timestamp, reach: i32| Some(window.top(t, reach));
+        let bottom = |t: Timestamp| Some(window.bottom(t));
+        let user = actor.user_id;
+        let mut sessions = own;
+        let mut above = vec![];
+        let mut below = vec![];
+        if let Some(b) = window.before {
+            // UX4-16: an event up to two pair spans above the page can take a session within one
+            // span of it, choosing the newest within its own span (so sessions up to three
+            // spans are read). Exact unless a chain of three or more events and sessions of one
+            // item, each within two minutes of the next, crosses the boundary.
+            let w = near(top(b.0, 2), Some(b.0));
+            above = self.repos.progress.recent(user, &w).await?;
+            above.retain(|e| event_key(e) >= b);
+            let w = near(top(b.0, 3), Some(b.0));
+            let mut s = self.repos.sessions.by_owner_window(user, &w).await?;
+            s.retain(|s| session_key(s) >= b);
+            sessions.extend(s);
+        }
+        if let Some(l) = window.low {
+            let w = near(Some(l), bottom(l.0));
+            below = self.repos.progress.recent(user, &w).await?;
+            sessions.extend(self.repos.sessions.by_owner_window(user, &w).await?);
+        }
+        sessions.sort_by_key(|s| std::cmp::Reverse(session_key(s)));
+        sessions.dedup_by_key(|s| s.id);
+        Ok(Pairing {
+            sessions,
+            above,
+            below,
+        })
     }
 
     /// `person` and every companion of the actor whose merge chain ends in them (UX3-16):
@@ -233,107 +465,126 @@ impl App {
         Ok(out)
     }
 
-    async fn feed_context(
-        &self,
-        actor: Actor,
-        own: &[Session],
-        shared: &[Session],
-        self_companion: CompanionId,
-    ) -> AppResult<Ctx> {
+    async fn feed_context(&self, actor: Actor, self_companion: CompanionId) -> AppResult<Ctx> {
         let mut mine = HashSet::from([self_companion]);
         for c in self.repos.companions.linked_to(actor.user_id).await? {
             mine.insert(c.id);
         }
-        let mut names = HashMap::new();
-        let mut owners = HashMap::new();
-        for s in own.iter().chain(shared) {
-            for p in &s.participants {
-                if let std::collections::hash_map::Entry::Vacant(v) = names.entry(p.companion_id)
-                    && let Some(c) = self.repos.companions.get(p.companion_id).await?
-                {
-                    if c.merged_into.is_some_and(|m| mine.contains(&m)) {
-                        mine.insert(c.id);
-                    }
-                    v.insert(c.name);
-                }
-            }
-            if s.owner != actor.user_id && !owners.contains_key(&s.owner) {
-                let name = self
-                    .user_opt(s.owner)
-                    .await?
-                    .map(|u| u.display_name)
-                    .unwrap_or_default();
-                owners.insert(s.owner, name);
-            }
-        }
         Ok(Ctx {
             items: HashMap::new(),
-            names,
+            names: HashMap::new(),
             mine,
-            owners,
+            owners: HashMap::new(),
         })
+    }
+
+    /// Names of the participants not seen yet, in one read.
+    async fn load_names(&self, ctx: &mut Ctx, sessions: &[&Session]) -> AppResult<()> {
+        let missing: Vec<CompanionId> = sessions
+            .iter()
+            .flat_map(|s| s.participants.iter().map(|p| p.companion_id))
+            .filter(|c| !ctx.names.contains_key(c))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        for c in self.repos.companions.get_many(&missing).await? {
+            if c.merged_into.is_some_and(|m| ctx.mine.contains(&m)) {
+                ctx.mine.insert(c.id);
+            }
+            ctx.names.insert(c.id, c.name);
+        }
+        Ok(())
     }
 
     async fn load_items(
         &self,
         ctx: &mut Ctx,
         events: &[ProgressEvent],
-        own: &[&Session],
-        theirs: &[&Session],
+        sessions: &[&Session],
     ) -> AppResult<()> {
         let missing: Vec<ItemId> = events
             .iter()
             .map(|e| e.item_id)
-            .chain(own.iter().chain(theirs).map(|s| s.item_id))
+            .chain(sessions.iter().map(|s| s.item_id))
             .filter(|i| !ctx.items.contains_key(i))
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
         for i in self.repos.catalog.get_many(&missing).await? {
             ctx.items.insert(i.id, i);
         }
         Ok(())
     }
 
+    /// The session an event goes with: its own for a play, else the newest own session of
+    /// the same item within [`PAIR_SECS`] that no newer event took ("watched with").
+    fn pair_of<'a>(
+        e: &ProgressEvent,
+        sessions: &'a [Session],
+        used: &HashSet<SessionId>,
+    ) -> Option<&'a Session> {
+        match e.progress {
+            Progress::Session { session_id } => sessions.iter().find(|s| s.id == session_id),
+            _ => sessions.iter().find(|s| {
+                s.item_id == e.item_id
+                    && !used.contains(&s.id)
+                    && (s.started_at - e.occurred_at).num_seconds().abs() <= PAIR_SECS
+            }),
+        }
+    }
+
     fn batch_rows(
         &self,
         ctx: &Ctx,
         events: &[ProgressEvent],
-        own: &[&Session],
-        theirs: &[&Session],
+        pairing: &Pairing,
+        window: Window,
+        theirs: &[Session],
     ) -> Vec<ActivityRow> {
         let now = self.now();
-        let by_id: HashMap<SessionId, &Session> = own.iter().map(|s| (s.id, *s)).collect();
         let mut used: HashSet<SessionId> = HashSet::new();
+        // newer events outside the window took their sessions first
+        for e in &pairing.above {
+            if let Some(s) = Self::pair_of(e, &pairing.sessions, &used) {
+                used.insert(s.id);
+            }
+        }
         let mut rows = Vec::new();
         for e in events {
-            let Some(item) = ctx.items.get(&e.item_id) else {
-                continue;
-            };
-            let session = match e.progress {
-                Progress::Session { session_id } => by_id.get(&session_id).copied(),
-                _ => own.iter().copied().find(|s| {
-                    s.item_id == e.item_id
-                        && !used.contains(&s.id)
-                        && (s.started_at - e.occurred_at).num_seconds().abs() <= PAIR_SECS
-                        && !matches!(e.progress, Progress::Session { .. })
-                }),
-            };
+            let session = Self::pair_of(e, &pairing.sessions, &used);
             if let Some(s) = session {
                 used.insert(s.id);
             }
+            let Some(item) = ctx.items.get(&e.item_id) else {
+                continue;
+            };
             let row_type = if matches!(e.progress, Progress::Session { .. }) {
                 ActivityType::Session
             } else {
                 ActivityType::Progress
             };
-            let mut row = self.row(ctx, item, (e.occurred_at, e.id.0), row_type, session);
+            let mut row = self.row(ctx, item, event_key(e), row_type, session);
             row.progress = (row_type == ActivityType::Progress).then(|| e.progress.clone());
             row.event_id = Some(e.id);
             row.undoable = now - e.recorded_at <= chrono::Duration::hours(UNDO_WINDOW_HOURS);
             rows.push(row);
         }
-        for s in own.iter().filter(|s| !used.contains(&s.id)) {
+        for e in &pairing.below {
+            if let Some(s) = Self::pair_of(e, &pairing.sessions, &used) {
+                used.insert(s.id);
+            }
+        }
+        for s in pairing
+            .sessions
+            .iter()
+            .filter(|s| window.contains(session_key(s)) && !used.contains(&s.id))
+        {
             // plays of session kinds appear through their event; "watched with" sessions
             // without a matching event (claimed copies) stand alone
             let Some(item) = ctx.items.get(&s.item_id) else {
@@ -344,28 +595,16 @@ impl App {
                 .get(&item.kind)
                 .is_some_and(|k| k.progress_model == ProgressModel::Sessions);
             if !sessions_kind {
-                rows.push(self.row(
-                    ctx,
-                    item,
-                    (s.started_at, s.id.0),
-                    ActivityType::Session,
-                    Some(s),
-                ));
+                rows.push(self.row(ctx, item, session_key(s), ActivityType::Session, Some(s)));
             }
         }
         for s in theirs {
             let Some(item) = ctx.items.get(&s.item_id) else {
                 continue;
             };
-            let mut row = self.row(
-                ctx,
-                item,
-                (s.started_at, s.id.0),
-                ActivityType::Session,
-                Some(s),
-            );
+            let mut row = self.row(ctx, item, session_key(s), ActivityType::Session, Some(s));
             row.shared = true;
-            row.owner_name = ctx.owners.get(&s.owner).cloned();
+            row.owner_name = ctx.owners.get(&s.owner).cloned().flatten();
             rows.push(row);
         }
         rows

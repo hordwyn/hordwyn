@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM catalog_items c WHERE c.id = $1\n                 AND NOT EXISTS (SELECT 1 FROM library_entries x WHERE x.item_id = c.id)\n                 AND NOT EXISTS (SELECT 1 FROM list_items x WHERE x.item_id = c.id)\n                 AND NOT EXISTS (SELECT 1 FROM sessions x WHERE x.item_id = c.id)\n                 AND NOT EXISTS (SELECT 1 FROM progress_events x WHERE x.item_id = c.id)\n                 AND NOT EXISTS (SELECT 1 FROM reviews x WHERE x.item_id = c.id)\n               RETURNING c.cover_asset",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cover_asset",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "catalog_items",
+            "name": "cover_asset"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "7df8eb168467de941437007ac2380f00c2ad6b736ddc9442ff5fb5d3edfd4f96"
+}

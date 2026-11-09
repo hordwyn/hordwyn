@@ -140,6 +140,7 @@ pub async fn people_page(s: &ApiState, a: Actor) -> ApiResult<PeoplePageDto> {
             .map(|c| ctx.person(c, stats.get(&c.id)))
             .collect(),
         suggestions,
+        groups: crate::goals::game_groups(s, a).await?,
     })
 }
 

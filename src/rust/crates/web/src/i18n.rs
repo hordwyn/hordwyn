@@ -307,9 +307,40 @@ pub fn t(key: &str) -> String {
     use_i18n().t(key)
 }
 
+/// A catalog title as shown: an item whose provider data expired was purged to an empty title
+/// (DEC-466) and reads "Title unavailable - source data expired" (`catalog-title-unavailable`).
+#[must_use]
+pub fn title_text(title: &str) -> String {
+    use_context::<Arc<I18n>>().map_or_else(|| title.to_string(), |i| i.title(title))
+}
+
+impl I18n {
+    /// [`title_text`] with these messages.
+    #[must_use]
+    pub fn title(&self, title: &str) -> String {
+        if title.trim().is_empty() {
+            self.t("catalog-title-unavailable")
+        } else {
+            title.to_string()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_expired_title_reads_as_the_placeholder() {
+        let en = I18n::new("en", BTreeMap::new());
+        assert_eq!(en.title(""), "Title unavailable - source data expired");
+        assert_eq!(en.title("Dune"), "Dune");
+        let de = I18n::new("de", BTreeMap::new());
+        assert_eq!(
+            de.title(" "),
+            "Titel nicht verf\u{fc}gbar - Quelldaten abgelaufen"
+        );
+    }
 
     #[test]
     fn translates_with_plurals_and_falls_back() {

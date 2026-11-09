@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM password_resets\n             WHERE user_id = $1 AND used_at IS NULL AND purpose = 'oidc_link'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "424365fdefc20fc26b4a5e4273807895f175c74fe4d478196e98b98cc5418f98"
+}

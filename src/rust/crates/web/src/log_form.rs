@@ -126,6 +126,20 @@ pub struct PlayForm {
     pub duration: String,
     pub location: String,
     pub notes: String,
+    /// The game group chosen with a chip (its id); empty: none.
+    pub group: String,
+}
+
+/// The players a group chip sets: you first, then the members (each once).
+#[must_use]
+pub fn group_players(me: Option<&str>, members: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = me.map(String::from).into_iter().collect();
+    for m in members {
+        if !out.contains(m) {
+            out.push(m.clone());
+        }
+    }
+    out
 }
 
 /// A score that is not a (finite) number.
@@ -243,6 +257,7 @@ impl PlayForm {
                 .coop
                 .then(|| if self.coop_won { "won" } else { "lost" }.to_string()),
             client_op_id: Some(op),
+            game_group_id: trimmed(&self.group),
         })
     }
 }
@@ -417,6 +432,26 @@ mod tests {
             ..PlayForm::default()
         };
         assert_eq!(none.winner(), None);
+    }
+
+    #[test]
+    fn a_group_chip_sets_you_and_the_members_and_the_group_is_sent() {
+        let members = vec!["ann".to_string(), "me".to_string(), "ben".to_string()];
+        assert_eq!(group_players(Some("me"), &members), ["me", "ann", "ben"]);
+        assert_eq!(group_players(None, &members[..1]), ["ann"]);
+        let form = PlayForm {
+            players: vec![player("me", "")],
+            group: "g1".into(),
+            ..PlayForm::default()
+        };
+        let p = form
+            .payload(Day::parse("2026-03-07").unwrap(), "op".into())
+            .unwrap();
+        assert_eq!(p.game_group_id.as_deref(), Some("g1"));
+        let none = PlayForm::default()
+            .payload(Day::parse("2026-03-07").unwrap(), "op".into())
+            .unwrap();
+        assert_eq!(none.game_group_id, None);
     }
 
     #[test]

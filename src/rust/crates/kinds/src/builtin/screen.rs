@@ -15,6 +15,9 @@ const GROUP: KindGroup = KindGroup::Watch;
 pub struct SeasonInfo {
     pub number: u32,
     pub episode_count: u32,
+    /// First air date of the season (WP4-7; TMDB `seasons[].air_date`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub air_date: Option<NaiveDate>,
 }
 
 attributes!(

@@ -101,6 +101,17 @@
             "name": "incomplete"
           }
         }
+      },
+      {
+        "ordinal": 9,
+        "name": "game_group_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "game_group_id"
+          }
+        }
       }
     ],
     "parameters": {
@@ -117,7 +128,8 @@
       true,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
   "hash": "f3610e24d35df352584e44bd5f34eca7fda81f523df2804cc1c577cd0b38386c"

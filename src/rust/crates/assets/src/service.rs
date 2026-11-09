@@ -302,6 +302,7 @@ impl AssetService {
                 body: None,
                 lane: lane_for(a.priority),
                 skip_auth_record: false,
+                user: None,
             })
             .await;
         let resp = match resp {
@@ -498,5 +499,53 @@ impl AssetService {
     /// Repository failures.
     pub async fn get(&self, id: Uuid) -> Result<Option<AssetRecord>, AssetError> {
         Ok(self.repo.get(id).await?)
+    }
+
+    /// Queue a new download of a provider image (catalog retention, DEC-453: an image kept
+    /// longer than its source allows is fetched again with the item's data).
+    ///
+    /// # Errors
+    /// Repository failures.
+    pub async fn refetch(&self, id: Uuid) -> Result<(), AssetError> {
+        if let Some(a) = self.repo.get(id).await?
+            && a.source_url.is_some()
+        {
+            self.queue_fetch(id, a.priority).await;
+        }
+        Ok(())
+    }
+
+    /// Delete the stored image of an asset (every variant and the original) and forget its
+    /// hash; the record stays, so a later registration of the same source URL fetches it again
+    /// (catalog retention, DEC-453). Files another record with the same hash still holds stay.
+    /// Unknown or never fetched assets are left alone.
+    ///
+    /// # Errors
+    /// Repository or storage failures.
+    pub async fn forget(&self, id: Uuid) -> Result<(), AssetError> {
+        let Some(mut a) = self.repo.get(id).await? else {
+            return Ok(());
+        };
+        let Some(hash) = a.hash.take() else {
+            return Ok(());
+        };
+        a.width = None;
+        a.height = None;
+        a.thumbhash = None;
+        a.dominant_color = None;
+        a.failed = false;
+        self.repo.upsert(&a).await?;
+        // the files are per content hash: another record with the same bytes keeps them
+        // (UX4-18)
+        if self.repo.by_hash(&hash).await?.is_some() {
+            return Ok(());
+        }
+        let mut keys: Vec<String> = Variant::ALL
+            .iter()
+            .flat_map(|v| Format::ALL.iter().map(|f| object_key(&hash, *v, *f)))
+            .collect();
+        keys.push(format!("orig/{hash}"));
+        self.budget.remove(&keys).await?;
+        Ok(())
     }
 }

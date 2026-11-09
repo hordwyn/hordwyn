@@ -2,9 +2,6 @@
 //! link used through `POST /auth/reset-password`, reset-totp, disable-sso-only, setup reopen
 //! and `secrets status|rotate|prune`; every one writes an audit row with actor `cli`.
 
-// One scenario on purpose: the steps share one server and database.
-#![allow(clippy::too_many_lines)]
-
 mod support;
 
 use serde_json::{Value, json};
@@ -55,11 +52,19 @@ async fn cli_rows(pool: &sqlx::PgPool) -> Vec<String> {
         .unwrap()
 }
 
-#[tokio::test]
-async fn the_cli_escape_hatches_work_and_are_audited_as_cli() {
-    let Some(db) = store_pg::testing::fresh_db_url().await else {
-        return;
-    };
+/// One server and database for the escape-hatch scenario: an admin `root`, a member `mia`
+/// (both signed in) and one encrypted value on key v1.
+struct Hatches {
+    cfg: config::AppConfig,
+    srv: Server,
+    app: axum::Router,
+    pool: sqlx::PgPool,
+    root: String,
+    mia: String,
+    dir: std::path::PathBuf,
+}
+
+async fn hatches(db: &str) -> Hatches {
     let dir = std::env::temp_dir().join(format!("cli-{}", uuid::Uuid::now_v7()));
     let key_file = dir.join("secrets.key");
     let toml = format!(
@@ -83,7 +88,6 @@ async fn the_cli_escape_hatches_work_and_are_audited_as_cli() {
         Some(account("root", "correct horse battery")),
     )
     .await;
-    let root = root.unwrap();
     let (_, _, mia) = call(
         &app,
         "POST",
@@ -92,8 +96,7 @@ async fn the_cli_escape_hatches_work_and_are_audited_as_cli() {
         Some(account("mia", "correct horse battery")),
     )
     .await;
-    let mia = mia.unwrap();
-    // one encrypted value on key v1
+    let root = root.unwrap();
     let (code, _, _) = call(
         &app,
         "PUT",
@@ -103,13 +106,24 @@ async fn the_cli_escape_hatches_work_and_are_audited_as_cli() {
     )
     .await;
     assert_eq!(code, 200);
+    Hatches {
+        cfg,
+        srv,
+        app,
+        pool,
+        root,
+        mia: mia.unwrap(),
+        dir,
+    }
+}
 
-    let e = Escape::open(&cfg).await.unwrap();
-
-    // promote
+/// promote, then a one-time reset link (a weak password does not use it up; the old
+/// sessions end), then reset-totp with none enrolled (still audited).
+async fn promote_and_reset(h: &Hatches, e: &Escape) {
+    let app = &h.app;
     assert!(e.promote("nobody").await.is_err());
     e.promote("mia").await.unwrap();
-    let (_, users, _) = call(&app, "GET", "/admin/users", Some(&root), None).await;
+    let (_, users, _) = call(app, "GET", "/admin/users", Some(&h.root), None).await;
     let m = users
         .as_array()
         .unwrap()
@@ -118,17 +132,16 @@ async fn the_cli_escape_hatches_work_and_are_audited_as_cli() {
         .unwrap();
     assert_eq!(m["role"], "admin");
 
-    // reset-password: a one-time link, a weak password does not use it up
     let link = e.reset_password("mia").await.unwrap();
     let token = link
         .strip_prefix("https://shelf.example.org/reset-password/")
         .unwrap_or_else(|| panic!("{link}"))
         .to_string();
     let reset = |pw: &str| Some(json!({"token": token, "password": pw}));
-    let (code, body, _) = call(&app, "POST", "/auth/reset-password", None, reset("short")).await;
+    let (code, body, _) = call(app, "POST", "/auth/reset-password", None, reset("short")).await;
     assert_eq!(code, 422, "{body}");
     let (code, body, _) = call(
-        &app,
+        app,
         "POST",
         "/auth/reset-password",
         None,
@@ -137,7 +150,7 @@ async fn the_cli_escape_hatches_work_and_are_audited_as_cli() {
     .await;
     assert_eq!(code, 204, "{body}");
     let (code, body, _) = call(
-        &app,
+        app,
         "POST",
         "/auth/reset-password",
         None,
@@ -148,10 +161,10 @@ async fn the_cli_escape_hatches_work_and_are_audited_as_cli() {
         (code, body["code"].as_str()),
         (404, Some("reset_link_invalid"))
     );
-    let (code, _, _) = call(&app, "GET", "/auth/me", Some(&mia), None).await;
+    let (code, _, _) = call(app, "GET", "/auth/me", Some(&h.mia), None).await;
     assert_eq!(code, 401, "the old sessions ended");
     let (code, _, _) = call(
-        &app,
+        app,
         "POST",
         "/auth/sign-in",
         None,
@@ -159,32 +172,32 @@ async fn the_cli_escape_hatches_work_and_are_audited_as_cli() {
     )
     .await;
     assert_eq!(code, 200);
-
-    // reset-totp (none enrolled: still fine, still audited)
     assert!(!e.reset_totp("mia").await.unwrap());
+}
 
-    // disable-sso-only defines auth.sign_in_mode and sets it back to the sign-in page
+/// disable-sso-only sets the sign-in page back; setup reopen answers the wizard again.
+async fn sso_and_setup(h: &Hatches, e: &Escape) {
     sqlx::query("UPDATE instance_settings SET sign_in_mode = 'auto'")
-        .execute(&pool)
+        .execute(&h.pool)
         .await
         .unwrap();
     assert!(e.disable_sso_only().await.unwrap());
     let mode: Option<String> = sqlx::query_scalar("SELECT sign_in_mode FROM instance_settings")
-        .fetch_one(&pool)
+        .fetch_one(&h.pool)
         .await
         .unwrap();
     assert_eq!(mode.as_deref(), Some("page"));
-
-    // setup reopen: the wizard answers again after completion
-    let (code, _, _) = call(&app, "POST", "/setup/complete", Some(&root), None).await;
+    let (code, _, _) = call(&h.app, "POST", "/setup/complete", Some(&h.root), None).await;
     assert_eq!(code, 204);
-    let (code, _, _) = call(&app, "GET", "/setup", Some(&root), None).await;
+    let (code, _, _) = call(&h.app, "GET", "/setup", Some(&h.root), None).await;
     assert_eq!(code, 404);
     e.setup_reopen().await.unwrap();
-    let (code, body, _) = call(&app, "GET", "/setup", Some(&root), None).await;
+    let (code, body, _) = call(&h.app, "GET", "/setup", Some(&h.root), None).await;
     assert_eq!(code, 200, "{body}");
+}
 
-    // secrets status, rotate, prune
+/// secrets status, rotate (v2 active, rows left on v1) and prune (v1 still in use).
+async fn secrets(h: &Hatches, e: &Escape) {
     let st = e.secrets_status().await.unwrap();
     assert_eq!(st.active_version, 1);
     assert!(
@@ -192,7 +205,7 @@ async fn the_cli_escape_hatches_work_and_are_audited_as_cli() {
         "{st:?}"
     );
     assert_eq!(e.secrets_rotate().await.unwrap(), 2);
-    let st = Escape::open(&cfg)
+    let st = Escape::open(&h.cfg)
         .await
         .unwrap()
         .secrets_status()
@@ -200,16 +213,27 @@ async fn the_cli_escape_hatches_work_and_are_audited_as_cli() {
         .unwrap();
     assert_eq!(st.active_version, 2);
     assert!(st.rows_to_rewrap >= 1, "{st:?}");
-    api::admin::reload_keys(&srv.api).await.unwrap();
-    let e = Escape::open(&cfg).await.unwrap();
+    api::admin::reload_keys(&h.srv.api).await.unwrap();
+    let e = Escape::open(&h.cfg).await.unwrap();
     assert_eq!(
         e.secrets_prune().await.unwrap(),
         Vec::<u16>::new(),
         "v1 still in use"
     );
+}
 
+#[tokio::test]
+async fn the_cli_escape_hatches_work_and_are_audited_as_cli() {
+    let Some(db) = store_pg::testing::fresh_db_url().await else {
+        return;
+    };
+    let h = Box::pin(hatches(&db)).await;
+    let e = Escape::open(&h.cfg).await.unwrap();
+    promote_and_reset(&h, &e).await;
+    sso_and_setup(&h, &e).await;
+    secrets(&h, &e).await;
     assert_eq!(
-        cli_rows(&pool).await,
+        cli_rows(&h.pool).await,
         [
             "role.changed",
             "password_reset.created",
@@ -220,7 +244,7 @@ async fn the_cli_escape_hatches_work_and_are_audited_as_cli() {
             "secrets.pruned",
         ]
     );
-    std::fs::remove_dir_all(&dir).unwrap();
+    std::fs::remove_dir_all(&h.dir).unwrap();
 }
 
 /// DEC-283: SIGHUP re-reads the key file; a set without a version still in use is refused
@@ -544,5 +568,116 @@ async fn reset_links_are_atomic_and_only_the_newest_is_open() {
     )
     .await;
     assert_eq!(code, 200);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// DEC-383 (deferred to WP4-8): with the keys from `APP__SECRETS__KEYS` (no key file)
+/// `rotate` and `prune` refuse and point to the variable; `promote` of an admin keeps the
+/// admin and says so in the audit row; `reset-totp` reports and removes an enrolled
+/// authenticator; a reset link of a disabled account sets the password but signs nobody in.
+#[tokio::test]
+async fn env_keys_an_admin_promoted_an_enrolled_reset_and_a_disabled_reset() {
+    let Some(db) = store_pg::testing::fresh_db_url().await else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("cli-env-{}", uuid::Uuid::now_v7()));
+    let key_file = dir.join("secrets.key");
+    let keys = "v1:".to_string() + &"Q".repeat(43) + "=";
+    let cfg = cli_config(&db, &key_file, vec![("APP__SECRETS__KEYS".into(), keys)]);
+    let srv = Box::pin(Server::build(
+        cfg.clone(),
+        config::ServerRole::All,
+        Overrides::default(),
+    ))
+    .await
+    .unwrap();
+    let app = srv.base_router();
+    let (_, _, root) = call(
+        &app,
+        "POST",
+        "/auth/sign-up",
+        None,
+        Some(account("root", "correct horse battery")),
+    )
+    .await;
+    root.unwrap();
+    call(
+        &app,
+        "POST",
+        "/auth/sign-up",
+        None,
+        Some(account("mia", "correct horse battery")),
+    )
+    .await;
+    let e = Escape::open(&cfg).await.unwrap();
+    for err in [
+        e.secrets_rotate().await.unwrap_err(),
+        e.secrets_prune().await.map(|_| ()).unwrap_err(),
+    ] {
+        assert!(err.to_string().contains("APP__SECRETS__KEYS"), "{err}");
+    }
+    assert!(!key_file.exists(), "no key file was written");
+
+    e.promote("root").await.unwrap();
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM admin_audit WHERE action = 'role.changed' AND actor_kind = 'cli'",
+    )
+    .fetch_one(&srv.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (&detail["from"], &detail["to"]),
+        (&json!("admin"), &json!("admin"))
+    );
+
+    sqlx::query(
+        "UPDATE credentials SET totp_enabled = true
+         WHERE user_id = (SELECT id FROM users WHERE username = 'mia')",
+    )
+    .execute(&srv.pool)
+    .await
+    .unwrap();
+    assert!(e.reset_totp("mia").await.unwrap(), "it was enrolled");
+    let enabled: bool = sqlx::query_scalar(
+        "SELECT totp_enabled FROM credentials
+         WHERE user_id = (SELECT id FROM users WHERE username = 'mia')",
+    )
+    .fetch_one(&srv.pool)
+    .await
+    .unwrap();
+    assert!(!enabled);
+    assert!(!e.reset_totp("mia").await.unwrap(), "nothing left to reset");
+
+    sqlx::query(
+        "INSERT INTO user_disabled (user_id, disabled_by, disabled_at)
+         SELECT m.id, r.id, now() FROM users m, users r WHERE m.username = 'mia' AND r.username = 'root'",
+    )
+    .execute(&srv.pool)
+    .await
+    .unwrap();
+    let link = e.reset_password("mia").await.unwrap();
+    let token = link.rsplit('/').next().unwrap().to_string();
+    let (code, body, _) = call(
+        &app,
+        "POST",
+        "/auth/reset-password",
+        None,
+        Some(json!({"token": token, "password": "a brand new passphrase"})),
+    )
+    .await;
+    assert_eq!(code, 204, "{body}");
+    let (code, body, cookie) = call(
+        &app,
+        "POST",
+        "/auth/sign-in",
+        None,
+        Some(json!({"username": "mia", "password": "a brand new passphrase"})),
+    )
+    .await;
+    assert_eq!(
+        (code, body["code"].as_str(), cookie),
+        (403, Some("account_disabled"), None),
+        "{body}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

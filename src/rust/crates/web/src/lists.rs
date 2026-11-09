@@ -1,6 +1,6 @@
 //! Lists (design.md 6.5, 5.10; mockup `lists.html`): the overview with the tabs Mine / Shared
 //! with me / On this instance and list cards; the list page (`/lists/:id`) with the editable
-//! title and description, keyboard "Move up/down", Remove, "Add" through the search palette
+//! title and description, a drag handle and keyboard "Move up/down" (DEC-353), Remove, "Add" through the search palette
 //! scoped to the list, "Add all to my library" for lists of others; the share dialog with the
 //! three visibility choices; the public page of a link-shared list (`/shared/lists/:token`).
 //! Reads come from server functions, changes go to the REST routes (`web::rest`, DEC-327).
@@ -23,6 +23,7 @@ use crate::rest;
 use crate::settings::{Lead, Outcome, kept, loaded};
 use crate::sharing::share_error;
 
+use crate::list_drag::{DragHandle, ListDrag, row_class};
 use crate::list_share::{ShareDialog, ShareMeta};
 
 /// The visibility as a word (`lists-vis-<choice>`); a badge, never colour alone.
@@ -53,6 +54,14 @@ pub fn Lists() -> impl IntoView {
     let data = Resource::new(|| (), |()| api::lists_overview());
     refetch_on_update(move || data.refetch());
     let new = RwSignal::new(false);
+    // the palette's "New list" (`?new=1`, WP4-4) opens the sheet once the page is in the
+    // browser; read in the effect (a client-side navigation builds the page first)
+    let query = leptos_router::hooks::use_query_map();
+    Effect::new(move |_| {
+        if query.with(|q| q.get("new").is_some()) {
+            new.set(true);
+        }
+    });
     view! {
         <PageTitle text=t("lists-title")/>
         <Lead text=t("lists-lead")/>
@@ -210,8 +219,9 @@ pub fn ListPage() -> impl IntoView {
         meta: RwSignal::new(None),
     };
     provide_context(page);
+    provide_context(ListDrag::new());
     // the palette's scope ends with the page
-    let target = expect_context::<crate::palette::PaletteTarget>().0;
+    let target = expect_context::<crate::palette::PaletteScope>().0;
     on_cleanup(move || target.set(None));
     view! {
         <p class="mb-2 text-sm"><a href="/lists" class="underline">{t("lists-back")}</a></p>
@@ -271,12 +281,15 @@ fn ListBody(l: ListPageDto) -> impl IntoView {
 /// "Add": the search palette, scoped to this list (choosing a result adds it here).
 #[component]
 fn AddButton(id: String, name: String) -> impl IntoView {
-    let target = expect_context::<crate::palette::PaletteTarget>().0;
+    let target = expect_context::<crate::palette::PaletteScope>().0;
     let open = expect_context::<crate::palette::PaletteOpen>().0;
     let label = use_i18n().t_args("lists-add-named", &[("name", name.clone().into())]);
     view! {
         <Button class="w-fit" attr:aria-label=label on:click=move |_| {
-            target.set(Some((id.clone(), name.clone())));
+            target.set(Some(crate::palette::PaletteTarget::List {
+                id: id.clone(),
+                name: name.clone(),
+            }));
             open.set(true);
         }>{t("lists-add")}</Button>
     }
@@ -369,19 +382,41 @@ fn EditForm(l: ListPageDto, editing: RwSignal<bool>) -> impl IntoView {
     }
 }
 
-/// One item: title, kind, "In your library"; for the owner Move up / Move down and Remove.
+/// One item: title, kind, "In your library"; for the owner a drag handle, Move up / Move
+/// down and Remove.
 #[component]
 fn Row(r: ListRowDto, index: usize, count: usize, list: String, mine: bool) -> impl IntoView {
     let i18n = use_i18n();
     let item = r.item;
     let kind = kind_label(&item.kind);
     let title = match item.year {
-        Some(y) => format!("{} ({y})", item.title),
-        None => item.title.clone(),
+        Some(y) => format!("{} ({y})", crate::i18n::title_text(&item.title)),
+        None => crate::i18n::title_text(&item.title),
     };
-    let controls = mine.then(|| view! { <RowControls list=list item=item.id.clone() title=item.title.clone() index=index count=count/> });
+    let drag = expect_context::<ListDrag>();
+    let (handle, controls) = if mine {
+        let mv = move_action(
+            list.clone(),
+            item.id.clone(),
+            crate::i18n::title_text(&item.title),
+            count,
+        );
+        let on_drop = Callback::new(move |to: usize| {
+            mv.dispatch((to, None));
+        });
+        (
+            Some(view! { <DragHandle index=index count=count on_drop=on_drop/> }),
+            Some(
+                view! { <RowControls mv=mv item=item.id.clone() title=crate::i18n::title_text(&item.title) list=list index=index count=count/> },
+            ),
+        )
+    } else {
+        (None, None)
+    };
     view! {
-        <li class="flex flex-wrap items-center gap-3 rounded-md border border-border px-3 py-2" data-testid="lst-row">
+        <li class=move || format!("flex flex-wrap items-center gap-3 rounded-md border border-border px-3 py-2 {}", row_class(drag, index))
+            data-testid="lst-row" data-drag-row="">
+            {handle}
             <span class="w-6 text-right text-sm text-muted-foreground" aria-hidden="true">{index + 1}</span>
             {item.cover.clone().map(|c| view! { <img src=c.url alt="" loading="lazy" class="h-12 w-8 rounded object-cover"/> })}
             <span class="min-w-0 flex-1">
@@ -394,8 +429,50 @@ fn Row(r: ListRowDto, index: usize, count: usize, list: String, mine: bool) -> i
     }
 }
 
+/// A move of one row to an index; with a focus target (the keyboard buttons) the moved row's
+/// button gets the focus back after the refetch.
+type MoveAction = Action<(usize, Option<String>), ()>;
+
+fn move_action(list: String, item: String, title: String, count: usize) -> MoveAction {
+    let page = expect_context::<Page>();
+    Action::new(move |(to, focus): &(usize, Option<String>)| {
+        let (to, focus) = (*to, focus.clone());
+        let path = format!("/lists/{list}/items/{item}/position");
+        let title = title.clone();
+        let i18n = use_i18n();
+        async move {
+            match rest::send("PUT", &path, Some(json!({"to": to}))).await {
+                Ok(()) => {
+                    page.status.set(i18n.t_args(
+                        "lists-moved",
+                        &[
+                            ("title", title.into()),
+                            ("position", (to + 1).into()),
+                            ("count", count.into()),
+                        ],
+                    ));
+                    if let Some(focus) = focus {
+                        page.focus.set(Some(focus.clone()));
+                        set_timeout(
+                            move || {
+                                if page.focus.get_untracked() == Some(focus) {
+                                    page.focus.set(None);
+                                }
+                            },
+                            std::time::Duration::from_secs(FOCUS_KEEP_SECS),
+                        );
+                    }
+                    page.data.refetch();
+                }
+                Err(e) => page.outcome.set(Some(Err(share_error(&e)))),
+            }
+        }
+    })
+}
+
 #[component]
 fn RowControls(
+    mv: MoveAction,
     list: String,
     item: String,
     title: String,
@@ -414,40 +491,6 @@ fn RowControls(
             && (f == u || f == d)
         {
             focus_by_id(&f);
-        }
-    });
-    let mv = Action::new({
-        let (list, item, title) = (list.clone(), item.clone(), title.clone());
-        move |(to, focus): &(usize, String)| {
-            let (to, focus) = (*to, focus.clone());
-            let path = format!("/lists/{list}/items/{item}/position");
-            let title = title.clone();
-            let i18n = use_i18n();
-            async move {
-                match rest::send("PUT", &path, Some(json!({"to": to}))).await {
-                    Ok(()) => {
-                        page.status.set(i18n.t_args(
-                            "lists-moved",
-                            &[
-                                ("title", title.into()),
-                                ("position", (to + 1).into()),
-                                ("count", count.into()),
-                            ],
-                        ));
-                        page.focus.set(Some(focus.clone()));
-                        set_timeout(
-                            move || {
-                                if page.focus.get_untracked() == Some(focus) {
-                                    page.focus.set(None);
-                                }
-                            },
-                            std::time::Duration::from_secs(FOCUS_KEEP_SECS),
-                        );
-                        page.data.refetch();
-                    }
-                    Err(e) => page.outcome.set(Some(Err(share_error(&e)))),
-                }
-            }
         }
     });
     let remove = Action::new({
@@ -489,9 +532,9 @@ fn RowControls(
     view! {
         <span class="flex flex-wrap gap-1">
             <Button size=ButtonSize::Sm variant=ButtonVariant::Outline disabled=first attr:id=up_id attr:aria-label=up_label
-                on:click=move |_| { mv.dispatch((index.saturating_sub(1), u2.clone())); }>{t("lists-move-up")}</Button>
+                on:click=move |_| { mv.dispatch((index.saturating_sub(1), Some(u2.clone()))); }>{t("lists-move-up")}</Button>
             <Button size=ButtonSize::Sm variant=ButtonVariant::Outline disabled=last attr:id=down_id attr:aria-label=down_label
-                on:click=move |_| { mv.dispatch((index + 1, d2.clone())); }>{t("lists-move-down")}</Button>
+                on:click=move |_| { mv.dispatch((index + 1, Some(d2.clone()))); }>{t("lists-move-down")}</Button>
             <Button size=ButtonSize::Sm variant=ButtonVariant::Ghost attr:aria-label=remove_label
                 on:click=move |_| { remove.dispatch(()); }>{t("lists-remove")}</Button>
         </span>
@@ -615,8 +658,8 @@ fn SharedBody(l: contracts::SharedListDto, token: String, signed_in: bool) -> im
         .into_iter()
         .map(|i| {
             let title = match i.year {
-                Some(y) => format!("{} ({y})", i.title),
-                None => i.title.clone(),
+                Some(y) => format!("{} ({y})", crate::i18n::title_text(&i.title)),
+                None => crate::i18n::title_text(&i.title),
             };
             view! {
                 <li class="grid gap-1">

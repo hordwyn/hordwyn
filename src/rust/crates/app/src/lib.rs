@@ -6,9 +6,14 @@
 
 mod activity;
 mod browse;
+mod bulk;
 mod catalog;
 mod companions;
+mod cursor;
+mod episodes;
 mod error;
+mod game_groups;
+mod goals;
 mod library;
 mod lists;
 mod next_step;
@@ -28,14 +33,21 @@ pub use browse::{
     CountCell, DEFAULT_PAGE, LibraryCounts, LibraryPage, LibraryQuery, LibraryRow, TagCount,
     UpNext, UpNextReason, series_of,
 };
-pub use catalog::{CatalogRefresh, NewCatalogItem, REFRESH_JOB};
+pub use bulk::{
+    BulkFailure, BulkOp, BulkOutcome, BulkUndo, EntrySnapshot, MAX_BULK, MAX_UNDO_BYTES, StatusBack,
+};
+pub use catalog::{CatalogRefresh, ITEM_WATCH_SECS, NewCatalogItem, REFRESH_JOB};
+pub use episodes::{EPISODES_JOB, SeasonFetch, SeasonKey, season_keys, season_needs_fetch};
 pub use error::{AppError, AppResult};
+pub use game_groups::{GameGroupInput, GameGroupView};
+pub use goals::{ComparePair, GoalProgress, NewGoal, YearCompare, same_day_last_year};
 pub use library::UNDO_WINDOW_HOURS;
 pub use next_step::{NextStep, next_step};
 pub use people::{CompanionStats, MergeSuggestion, MostPlayed, StatItem, suggest_merges};
 pub use sessions::NewSession;
 pub use stats::{
-    Amounts, Bucket, GroupTotals, MonthAmounts, SeriesPoint, StatsTotals, Totals, month_amounts,
+    Amounts, Bucket, GroupTotals, KindAmounts, MonthAmounts, SeriesPoint, StatsTotals, Totals,
+    month_amounts, window_amounts,
 };
 
 use domain::Timestamp;

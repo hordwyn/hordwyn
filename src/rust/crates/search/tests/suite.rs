@@ -84,6 +84,21 @@ async fn suite(ix: Arc<dyn SearchIndex>) {
             .contains(&"c1".to_string()),
         "tolerates typos"
     );
+    ix.upsert(
+        "catalog",
+        vec![SearchDoc {
+            id: "c4".into(),
+            owner: None,
+            fields: json!({"title": "Harry Potter and the Philosopher's Stone", "kind": "book"}),
+        }],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        ids(ix.as_ref(), q("catalog", "harry poter", a, &[])).await,
+        ["c4"],
+        "a typo in a long title (DEC-493)"
+    );
     assert_eq!(
         ids(ix.as_ref(), q("catalog", "desert", b, &[])).await,
         ["c3"],

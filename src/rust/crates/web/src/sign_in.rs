@@ -329,14 +329,42 @@ pub fn SignedOut() -> impl IntoView {
     }
 }
 
+/// Replace the address with `/sign-in/link`, without the emailed code (no reload).
+fn forget_code() {
+    #[cfg(feature = "hydrate")]
+    if let Some(w) = web_sys::window()
+        && let Ok(h) = w.history()
+    {
+        let _ = h.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some("/sign-in/link"));
+    }
+}
+
 /// `/sign-in/link`, "Is this your account?" (addendum-1 4.2 step 3, OD-15): the provider's
 /// verified address matches an account here; its password links them, once. The ticket
 /// cookie lives on the API path, so the page asks the API from the browser.
 #[component]
 pub fn LinkAccount() -> impl IntoView {
+    // `?code=`: the emailed one-time link (DEC-312) is used in this browser right away
+    let code = query("code").filter(|c| !c.trim().is_empty());
     let pending = RwSignal::new(None::<Result<OidcLinkPendingDto, String>>);
+    let has_code = code.is_some();
     Effect::new(move |_| {
+        // single use: never leave it in the history (UX4-22)
+        if has_code {
+            forget_code();
+        }
+        let code = code.clone();
         leptos::task::spawn_local(async move {
+            if let Some(code) = code {
+                let body = json!({"code": code});
+                match rest::call::<SessionDto>("POST", "/auth/oidc/link/email/confirm", Some(body))
+                    .await
+                {
+                    Ok(_) => go("/"),
+                    Err(e) => pending.set(Some(Err(api::error_code(&e)))),
+                }
+                return;
+            }
             let r = rest::call::<OidcLinkPendingDto>("GET", "/auth/oidc/link", None).await;
             pending.set(Some(match r {
                 Ok(Some(p)) => Ok(p),
@@ -349,6 +377,7 @@ pub fn LinkAccount() -> impl IntoView {
         <AuthFrame>
             <PageTitle text=t("signin-link-title")/>
             {move || match pending.get() {
+                None if has_code => view! { <p role="status">{t("signin-link-linking")}</p> }.into_any(),
                 None => view! { <Skeleton class="h-40 w-full"/> }.into_any(),
                 Some(Ok(p)) => view! { <LinkForm p=p/> }.into_any(),
                 Some(Err(code)) => view! { <LinkGone code=code/> }.into_any(),
@@ -360,10 +389,10 @@ pub fn LinkAccount() -> impl IntoView {
 /// The link request expired or was used: start again.
 #[component]
 fn LinkGone(code: String) -> impl IntoView {
-    let key = if code == "identity_in_use" {
-        "signin-error-identity_in_use"
-    } else {
-        "signin-link-expired"
+    let key = match code.as_str() {
+        "identity_in_use" => "signin-error-identity_in_use",
+        "code_invalid" => "signin-link-code-invalid",
+        _ => "signin-link-expired",
     };
     view! {
         <Alert variant=AlertVariant::Destructive role=AlertRole::Alert class="mb-4">{t(key)}</Alert>
@@ -384,7 +413,11 @@ fn LinkForm(p: OidcLinkPendingDto) -> impl IntoView {
     if !p.has_password {
         return view! {
             <p class="mb-4">{lead}</p>
-            <Alert variant=AlertVariant::Info role=AlertRole::None class="mb-4">{t("signin-link-no-password")}</Alert>
+            {if p.can_email {
+                view! { <EmailLink/> }.into_any()
+            } else {
+                view! { <Alert variant=AlertVariant::Info role=AlertRole::None class="mb-4">{t("signin-link-no-password")}</Alert> }.into_any()
+            }}
             <a class="underline" href="/sign-in">{t("signin-link-back")}</a>
         }
         .into_any();
@@ -433,6 +466,45 @@ fn LinkForm(p: OidcLinkPendingDto) -> impl IntoView {
         <p class="mt-4 text-sm"><a class="underline" href="/sign-in">{t("signin-link-not-mine")}</a></p>
     }
     .into_any()
+}
+
+/// "Email me a link" for an account without a password (DEC-312): a one-time link to the
+/// account's address, to be opened in this browser.
+#[component]
+fn EmailLink() -> impl IntoView {
+    let sent = RwSignal::new(None::<String>);
+    let error = RwSignal::new(None::<String>);
+    let send = Action::new(move |(): &()| {
+        let i18n = use_i18n();
+        async move {
+            match rest::call::<contracts::admin::OidcLinkEmailedDto>(
+                "POST",
+                "/auth/oidc/link/email",
+                None,
+            )
+            .await
+            {
+                Ok(Some(d)) => sent.set(Some(i18n.t_args(
+                    "signin-link-emailed",
+                    &[("address", d.sent_to.into()), ("minutes", d.minutes.into())],
+                ))),
+                Ok(None) => sent.set(Some(i18n.t("signin-link-emailed-short"))),
+                Err(e) => error.set(Some(match api::error_code(&e).as_str() {
+                    "email_unavailable" | "mail_failed" => i18n.t("signin-link-email-failed"),
+                    code => crate::auth::form_message_after(&i18n, code, api::retry_after_secs(&e)),
+                })),
+            }
+        }
+    });
+    view! {
+        <p class="mb-4">{t("signin-link-email-lead")}</p>
+        <form class="mb-4 grid gap-3" novalidate
+            on:submit=move |ev: SubmitEvent| { ev.prevent_default(); error.set(None); send.dispatch(()); }>
+            <SubmitButton pending=send.pending() label=t("signin-link-email")/>
+            <p role="status" data-testid="link-emailed" class="text-sm">{move || sent.get()}</p>
+            <FormAlert error=error/>
+        </form>
+    }
 }
 
 /// `/reset-password/:token` (DEC-301): a one-time link from `cli admin reset-password`;

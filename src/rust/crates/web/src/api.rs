@@ -484,6 +484,25 @@ pub async fn library_query(
     b.library_query(&t, query).await.map_err(server::code)
 }
 
+/// One operation on many library items (the bulk bar, quick menu and item page "Remove";
+/// WP4-3): results per id and an undo token.
+#[server(prefix = "/_fn", input = Json)]
+pub async fn library_bulk(
+    request: contracts::BulkRequestDto,
+) -> Result<contracts::BulkResponseDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.library_bulk(&t, request).await.map_err(server::code)
+}
+
+/// Put back what [`library_bulk`] changed.
+#[server(prefix = "/_fn")]
+pub async fn library_bulk_undo(undo: String) -> Result<(), ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.library_bulk_undo(&t, &undo).await.map_err(server::code)
+}
+
 #[server(prefix = "/_fn")]
 pub async fn set_status(item_id: String, status: String) -> Result<LibraryEntryDto, ServerFnError> {
     let b = server::backend()?;
@@ -574,6 +593,31 @@ pub async fn stats_series(
     b.stats_series(&t, group, bucket)
         .await
         .map_err(server::code)
+}
+
+/// The caller's yearly goals with their progress (Stats page only, never Home: R-04).
+#[server(prefix = "/_fn")]
+pub async fn goals() -> Result<Vec<contracts::GoalDto>, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.goals(&t).await.map_err(server::code)
+}
+
+/// This year so far vs the same period last year and the people seen most often (Stats page,
+/// History side panel).
+#[server(prefix = "/_fn")]
+pub async fn stats_compare() -> Result<contracts::StatsCompareDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.stats_compare(&t).await.map_err(server::code)
+}
+
+/// The caller's game groups (the play sheet's chips).
+#[server(prefix = "/_fn")]
+pub async fn game_groups() -> Result<Vec<contracts::GameGroupDto>, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.game_groups(&t).await.map_err(server::code)
 }
 
 /// Everything the signed-in Home page shows.

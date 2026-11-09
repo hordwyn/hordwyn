@@ -322,3 +322,74 @@ for (const size of [
     });
   });
 }
+
+/**
+ * WP4-7: a show of its own (the mock's synthetic "Lantern Coast", DEC-445: no shared seed),
+ * imported and waited for until the background job has fetched its episode dates.
+ */
+async function seedReleased(page: Page): Promise<string> {
+  const row = { source_id: "1", kind: "show", title: "Lantern Coast", year: 2024, status: "in_progress", external_ids: { tmdb: "990001" } };
+  const file = [JSON.stringify({ format: "library-export", version: 1 }), JSON.stringify(row)].join("\n");
+  const started = await page.request.post("/api/v1/imports?format=generic-jsonl", {
+    data: file,
+    headers: { "content-type": "application/octet-stream" },
+  });
+  expect(started.status()).toBe(202);
+  await importDone(page, (await started.json()).id);
+  const lib = await (await page.request.get("/api/v1/library?limit=50")).json();
+  const id: string = lib.items.find((i: { item: { title: string } }) => i.item.title === "Lantern Coast").item.id;
+  await expect
+    .poll(
+      async () => {
+        const p = await (await page.request.get(`/api/v1/items/${id}/page`)).json();
+        return (p.episodes ?? []).length;
+      },
+      // detail refresh, then the episode job on the background lane (UX3-22)
+      { timeout: 120_000 },
+    )
+    .toBe(5);
+  return id;
+}
+
+test("episodes: a season marks on its release dates; the option is hidden while dates are missing", async ({ page }) => {
+  test.setTimeout(240_000);
+  await signUp(page, `eprelease${Date.now()}`, "Release Tester");
+  const show = await seedReleased(page);
+  await open(page, `/items/${show}`);
+  const tab = page.getByRole("tabpanel", { name: "Episodes" });
+  await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("0/3");
+
+  await tab.getByRole("radio", { name: "On release dates" }).click();
+  await expect(tab.getByText("log each episode on the day it was released")).toBeVisible();
+  await tab.getByRole("button", { name: "Mark season watched" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Logged: 3 episodes" })).toBeVisible();
+  await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("3/3");
+  const events: { occurred_at: string }[] = await (await page.request.get(`/api/v1/items/${show}/progress`)).json();
+  expect(events.map((e) => e.occurred_at.slice(0, 19)).sort()).toEqual([
+    "2024-01-05T12:00:00",
+    "2024-01-12T12:00:00",
+    "2024-01-19T12:00:00",
+  ]);
+  // History: one entry on each release day
+  await page.getByRole("tab", { name: /^History/ }).click();
+  const history = page.getByRole("tabpanel", { name: /^History/ });
+  for (const day of ["Jan 5, 2024", "Jan 12, 2024", "Jan 19, 2024"]) {
+    await expect(history.getByText(day, { exact: false })).toHaveCount(1);
+  }
+
+  // season 2 has an episode still to come: the option is not offered, a hint says why
+  await page.getByRole("tab", { name: "Episodes" }).click();
+  await tab.getByRole("button", { name: /^Season 2/ }).click();
+  await expect(tab.getByRole("radio", { name: "On release dates" })).toHaveCount(0);
+  await expect(tab.getByRole("radio", { name: "Now" })).toHaveAttribute("aria-checked", "true");
+  await expect(tab.getByTestId("ep-release-missing")).toHaveText(
+    '"On release dates" is not offered: one open episode of this season has no release date up to today.',
+  );
+
+  // from season 1 (all aired) "Mark show" would take the future episode too: refused, nothing logged
+  await tab.getByRole("button", { name: /^Season 1/ }).click();
+  await tab.getByRole("radio", { name: "On release dates" }).click();
+  await tab.getByRole("button", { name: "Mark show watched" }).click();
+  await expect(tab.getByRole("alert")).toHaveText("One of these episodes has no release date up to today, so nothing was marked.");
+  await expect(tab.getByRole("button", { name: /^Season 2/ })).toContainText("0/2");
+});

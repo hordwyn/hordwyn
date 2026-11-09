@@ -332,6 +332,37 @@ impl ProviderStore for PgProviderStore {
         .rows_affected()
             == 1)
     }
+
+    async fn claim_jti(
+        &self,
+        key: &str,
+        expires_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<bool, PortError> {
+        sqlx::query!("DELETE FROM oidc_used_jti WHERE expires_at <= $1", now)
+            .execute(&self.pool)
+            .await
+            .map_err(pe)?;
+        Ok(sqlx::query!(
+            "INSERT INTO oidc_used_jti (jti_key, expires_at) VALUES ($1, $2)
+             ON CONFLICT (jti_key) DO NOTHING",
+            key,
+            expires_at
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(pe)?
+        .rows_affected()
+            == 1)
+    }
+
+    async fn release_jti(&self, key: &str) -> Result<(), PortError> {
+        sqlx::query!("DELETE FROM oidc_used_jti WHERE jti_key = $1", key)
+            .execute(&self.pool)
+            .await
+            .map_err(pe)?;
+        Ok(())
+    }
 }
 
 /// The client secret column for the rotation job and the security page.

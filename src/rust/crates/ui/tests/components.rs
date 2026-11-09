@@ -687,3 +687,26 @@ fn table_heads_are_column_headers_and_command_rows_are_touch_sized() {
     });
     assert!(html.contains("max-[47.5rem]:min-h-11"), "{html}");
 }
+
+#[test]
+fn a_stacked_table_keeps_its_table_roles() {
+    // UX4-22: `display:block` and `grid` below 47.5rem drop the implicit roles
+    let html = render(|| {
+        view! {
+            <Table stacked=true>
+                <TableHeader><TableRow><TableHead>"Name"</TableHead></TableRow></TableHeader>
+                <TableBody><TableRow><TableCell label="Name">"Ann"</TableCell></TableRow></TableBody>
+            </Table>
+        }
+    });
+    for role in ["table", "rowgroup", "row", "columnheader", "cell"] {
+        assert!(html.contains(&format!("role=\"{role}\"")), "{role}: {html}");
+    }
+    let plain = render(|| {
+        view! { <Table><TableBody><TableRow><TableCell>"Ann"</TableCell></TableRow></TableBody></Table> }
+    });
+    assert!(
+        !plain.contains("role=\"row\""),
+        "a plain table needs none: {plain}"
+    );
+}

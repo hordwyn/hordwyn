@@ -139,10 +139,19 @@ pub fn PosterCard(
     /// Opens the tag editor for this row.
     #[prop(optional_no_strip, into)]
     on_tags: Option<Callback<LibraryRowDto>>,
+    /// Opens the list picker for this row.
+    #[prop(optional_no_strip, into)]
+    on_list: Option<Callback<LibraryRowDto>>,
     /// Whether the quick menu is open, kept by the caller across rebuilds of the card.
     #[prop(optional_no_strip, into)]
     menu_open: Option<RwSignal<bool>>,
+    /// In a roving grid: whether this card holds the grid's one tab stop (its link, pill and
+    /// menu get `tabindex` 0, else -1).
+    #[prop(optional_no_strip, into)]
+    tab_stop: Option<Signal<bool>>,
 ) -> impl IntoView {
+    let tab =
+        Signal::derive(move || tab_stop.map(|s| if s.get() { "0" } else { "-1" }.to_string()));
     let i18n = use_i18n();
     let item = row.item.clone();
     let href = format!("/items/{}", item.id);
@@ -155,7 +164,7 @@ pub fn PosterCard(
     let active = matches!(status.as_str(), "planned" | "in_progress");
     let pill = if active {
         view! {
-            <NextStepButton item_id=item.id.clone() title=item.title.clone() step=row.next_step.clone() compact=true on_done=on_change/>
+            <NextStepButton item_id=item.id.clone() title=crate::i18n::title_text(&item.title) step=row.next_step.clone() compact=true on_done=on_change tabindex=tab/>
         }
         .into_any()
     } else {
@@ -169,16 +178,16 @@ pub fn PosterCard(
         }
     });
     view! {
-        <li class="group/card relative flex min-w-0 flex-col gap-1.5" data-testid="library-card">
-            <a href=href id=format!("card-{}", row.entry.id) class="group flex flex-col gap-1.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <li class="group/card relative flex min-w-0 flex-col gap-1.5" data-testid="library-card" data-entry=row.entry.id.clone()>
+            <a href=href id=format!("card-{}", row.entry.id) tabindex=move || tab.get() class="group flex flex-col gap-1.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 <div class="relative">
-                    <Cover title=item.title.clone() image=item.cover.clone() square=square sizes="(min-width: 768px) 180px, 45vw"/>
+                    <Cover title=crate::i18n::title_text(&item.title) image=item.cover.clone() square=square sizes="(min-width: 768px) 180px, 45vw"/>
                     {bar}
                 </div>
-                <span class="line-clamp-2 text-sm font-medium group-hover:underline">{item.title.clone()}</span>
+                <span class="line-clamp-2 text-sm font-medium group-hover:underline">{crate::i18n::title_text(&item.title)}</span>
             </a>
             <div class="absolute left-1.5 top-1.5 flex max-w-[calc(100%-3.5rem)] flex-col items-start gap-1">{pill}</div>
-            <QuickMenu row=row.clone() statuses=statuses on_change=on_change on_tags=on_tags open=menu_open
+            <QuickMenu row=row.clone() statuses=statuses on_change=on_change on_tags=on_tags on_list=on_list open=menu_open tabindex=tab
                 class="absolute right-1.5 top-1.5 [@media(hover:hover)]:opacity-0 group-hover/card:opacity-100 focus-within:opacity-100"/>
             <span class="text-xs text-muted-foreground">
                 {kind}
@@ -208,25 +217,87 @@ pub fn TagBadges(tags: Vec<String>, #[prop(optional)] max: Option<usize>) -> imp
     })
 }
 
+/// "Mark as <status>" in the quick menu: the change with a toast, queued while offline.
+fn status_item(
+    ctx: &StepCtx,
+    (item_id, title): (&str, &str),
+    s: String,
+    error: RwSignal<Option<String>>,
+    on_change: Option<Callback<()>>,
+) -> MenuItem {
+    let i18n = ctx.i18n.clone();
+    let word = i18n.t(&format!("status-{s}"));
+    let done = i18n.t_args("library-status-changed", &[("status", word.clone().into())]);
+    let (id, toasts, i, c, title) = (
+        item_id.to_string(),
+        ctx.toasts,
+        ctx.i18n.clone(),
+        ctx.clone(),
+        title.to_string(),
+    );
+    MenuItem {
+        label: i18n.t_args("library-mark", &[("status", word.into())]),
+        on_select: Callback::new(move |()| {
+            let (id, s, done, i, c, title) = (
+                id.clone(),
+                s.clone(),
+                done.clone(),
+                i.clone(),
+                c.clone(),
+                title.clone(),
+            );
+            error.set(None);
+            leptos::task::spawn_local(async move {
+                match api::set_status(id.clone(), s.clone()).await {
+                    Ok(_) => {
+                        toasts.push(done, None, ToastVariant::Default);
+                        if let Some(cb) = on_change {
+                            cb.run(());
+                        }
+                    }
+                    // offline: queued with a client stamp (WP4-5)
+                    Err(e)
+                        if crate::offline::network_error(&e)
+                            && c.queue_field(title, |h| {
+                                crate::offline::status_command(&id, &s, h)
+                            }) => {}
+                    Err(e) => {
+                        let text = crate::pages::error_text(&e);
+                        error.set(Some(
+                            i.t_args("library-step-failed", &[("error", text.into())]),
+                        ));
+                    }
+                }
+            });
+        }),
+        destructive: false,
+    }
+}
+
 /// The quick menu of a card or list row (design.md 6.2): the next step, "Mark as" each other
-/// status, edit tags, open the item.
+/// status, edit tags, add to a list, open the item, remove from the library (toast with
+/// Undo).
 #[component]
 pub fn QuickMenu(
     row: LibraryRowDto,
     statuses: Vec<String>,
     #[prop(optional_no_strip, into)] on_change: Option<Callback<()>>,
     #[prop(optional_no_strip, into)] on_tags: Option<Callback<LibraryRowDto>>,
+    #[prop(optional_no_strip, into)] on_list: Option<Callback<LibraryRowDto>>,
     #[prop(into, optional)] class: MaybeProp<String>,
     /// Whether the menu is open, kept by the caller across rebuilds of the row.
     #[prop(optional_no_strip, into)]
     open: Option<RwSignal<bool>>,
+    /// The trigger's tab stop (see [`PosterCard`]).
+    #[prop(into, optional)]
+    tabindex: MaybeProp<String>,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let ctx = StepCtx::current();
     let busy = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
     let item_id = row.item.id.clone();
-    let title = row.item.title.clone();
+    let title = crate::i18n::title_text(&row.item.title);
     let mut items = Vec::new();
     if let Some(progress) = step_progress(&row.next_step) {
         let label = next_step_label(&i18n, &row.next_step);
@@ -246,38 +317,20 @@ pub fn QuickMenu(
         });
     }
     for s in statuses.into_iter().filter(|s| *s != row.entry.status) {
-        let word = i18n.t(&format!("status-{s}"));
-        let done = i18n.t_args("library-status-changed", &[("status", word.clone().into())]);
-        let (id, toasts, i) = (item_id.clone(), ctx.toasts, ctx.i18n.clone());
-        items.push(MenuItem {
-            label: i18n.t_args("library-mark", &[("status", word.into())]),
-            on_select: Callback::new(move |()| {
-                let (id, s, done, i) = (id.clone(), s.clone(), done.clone(), i.clone());
-                error.set(None);
-                leptos::task::spawn_local(async move {
-                    match api::set_status(id, s).await {
-                        Ok(_) => {
-                            toasts.push(done, None, ToastVariant::Default);
-                            if let Some(cb) = on_change {
-                                cb.run(());
-                            }
-                        }
-                        Err(e) => {
-                            let text = crate::pages::error_text(&e);
-                            error.set(Some(
-                                i.t_args("library-step-failed", &[("error", text.into())]),
-                            ));
-                        }
-                    }
-                });
-            }),
-            destructive: false,
-        });
+        items.push(status_item(&ctx, (&item_id, &title), s, error, on_change));
     }
     if let Some(cb) = on_tags {
         let r = row.clone();
         items.push(MenuItem {
             label: i18n.t("library-edit-tags"),
+            on_select: Callback::new(move |()| cb.run(r.clone())),
+            destructive: false,
+        });
+    }
+    if let Some(cb) = on_list {
+        let r = row.clone();
+        items.push(MenuItem {
+            label: i18n.t("library-add-to-list"),
             on_select: Callback::new(move |()| cb.run(r.clone())),
             destructive: false,
         });
@@ -291,10 +344,20 @@ pub fn QuickMenu(
         }),
         destructive: false,
     });
+    {
+        let (ctx, id, title) = (ctx.clone(), item_id.clone(), title.clone());
+        items.push(MenuItem {
+            label: i18n.t("library-remove"),
+            on_select: Callback::new(move |()| {
+                crate::bulk::remove_one(&ctx, id.clone(), &title, error, on_change);
+            }),
+            destructive: true,
+        });
+    }
     let label = i18n.t_args("library-actions", &[("title", title.into())]);
     view! {
         <div class=move || cn(&["flex flex-col items-end gap-1", &class.get().unwrap_or_default()])>
-            <DropdownMenu label=label items=items id=format!("actions-{}", row.entry.id) open=open
+            <DropdownMenu label=label items=items id=format!("actions-{}", row.entry.id) open=open trigger_tabindex=tabindex
                 trigger_class="size-8 rounded-full border border-border bg-background/95 px-0 shadow-sm"
                 trigger=Box::new(|| view! { <Icon name=IconName::More/> }.into_any())/>
             {move || error.get().map(|e| view! { <p role="alert" class="rounded bg-background px-1 text-xs text-destructive-text">{e}</p> })}
@@ -368,7 +431,7 @@ pub fn TagEditor(
     });
     let title = move || {
         target
-            .with(|r| r.as_ref().map(|r| r.item.title.clone()))
+            .with(|r| r.as_ref().map(|r| crate::i18n::title_text(&r.item.title)))
             .unwrap_or_default()
     };
     view! {

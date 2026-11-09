@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO oidc_used_jti (jti_key, expires_at) VALUES ($1, $2)\n             ON CONFLICT (jti_key) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "511c19c231d3f57420682e405e3f67a56d8283c14a09731efb25af3284704ccb"
+}

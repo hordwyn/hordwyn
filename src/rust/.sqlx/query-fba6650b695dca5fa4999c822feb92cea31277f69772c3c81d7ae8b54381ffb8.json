@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH ended AS (DELETE FROM catalog_watchers WHERE user_id = $2 AND item_id <> $1 AND until < $4)\n             INSERT INTO catalog_watchers (item_id, user_id, until) VALUES ($1, $2, $3)\n             ON CONFLICT (item_id, user_id) DO UPDATE SET until = EXCLUDED.until",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fba6650b695dca5fa4999c822feb92cea31277f69772c3c81d7ae8b54381ffb8"
+}

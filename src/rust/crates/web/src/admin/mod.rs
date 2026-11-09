@@ -10,6 +10,7 @@ mod security;
 mod sources;
 mod sso;
 mod storage;
+mod usage;
 mod users;
 
 use contracts::admin::{AuditEntryDto, SettingDto};

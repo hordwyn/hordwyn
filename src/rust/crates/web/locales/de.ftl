@@ -1459,7 +1459,7 @@ notify-section-integration = Absender
 notify-section-import = Importe
 notify-section-admin = Instanz (Admin)
 notify-section-patterns = Mehrere Ereignisse auf einmal
-notify-filtered = Regeln für eine Liste oder Person
+notify-filtered = Regeln für eine Liste, einen Titel oder eine Person
 notify-filtered-empty = Noch keine.
 notify-add-filtered = Regel für eine Liste, einen Titel oder eine Person hinzufügen
 notify-filter-for = Für
@@ -1470,8 +1470,8 @@ notify-filter-items = { $count ->
     [one] ein Titel
    *[other] { $count } Titel
 }
-notify-filter-items-later = Regeln für einen einzelnen Titel kommen später mit der Suchpalette; die API nimmt sie schon an.
-notify-filter-required = Wähle eine Liste oder eine Person.
+notify-filter-items-later = Einen einzelnen Titel wählst du unten mit der Suche.
+notify-filter-required = Wähle eine Liste, eine Person oder einen Titel.
 notify-add-rule = Regel hinzufügen
 integrations-senders = Absender
 integrations-connect = Absender verbinden
@@ -1839,4 +1839,264 @@ episodes-range-hint = Staffel, Serie und bis hier markieren verteilen die Folgen
 episodes-range-missing = Wähle beide Tage des Zeitraums.
 episodes-range-reversed = Der letzte Tag liegt vor dem ersten.
 episodes-range-future = Der Zeitraum darf nicht nach heute enden.
+episodes-when-release = Am Erscheinungstag
+episodes-release-hint = Staffel, Serie und bis hier markieren tragen jede Folge an dem Tag ein, an dem sie erschienen ist.
+episodes-release-missing = { $count ->
+    [one] „Am Erscheinungstag“ wird nicht angeboten: Eine offene Folge dieser Staffel hat bis heute kein Erscheinungsdatum.
+   *[other] „Am Erscheinungstag“ wird nicht angeboten: { $count } offene Folgen dieser Staffel haben bis heute kein Erscheinungsdatum.
+}
+episodes-release-refused = { $count ->
+    [one] Eine dieser Folgen hat bis heute kein Erscheinungsdatum, daher wurde nichts markiert.
+   *[other] { $count } dieser Folgen haben bis heute kein Erscheinungsdatum, daher wurde nichts markiert.
+}
 imports-match-target = Ein gewählter Treffer wird der importierten Zeile „{ $title }“ zugeordnet und die Zeile importiert.
+
+# WP4-2 admin-ops: Prüfzeilen, Menü der Personenliste, verknüpfte Konten, Link per E-Mail
+admin-status-unknown = Noch nicht geprüft
+admin-health-not-checked = Die Prüfung im Hintergrund lief noch nicht.
+admin-health-stale = Länger nicht geprüft (zuletzt { $time })
+admin-users-more = Weitere Aktionen für { $name }
+admin-users-more-short = Mehr
+admin-users-reset-totp = Authenticator zurücksetzen
+admin-users-reset-totp-title = Authenticator von { $name } zurücksetzen?
+admin-users-reset-totp-body = { $name } meldet sich dann nur mit dem Passwort an, bis eine neue Authenticator-App eingerichtet ist. Die Wiederherstellungscodes gelten nicht mehr, und { $name } wird benachrichtigt.
+admin-users-unlink = { $provider } trennen
+admin-users-unlink-title = { $provider } von { $name } trennen?
+admin-users-unlink-body = { $name } kann sich nicht mehr mit { $provider } anmelden und wird benachrichtigt. Konto und Bibliothek bleiben.
+admin-users-unlink-confirm = Trennen
+admin-error-no_authenticator = Diese Person hat keinen Authenticator.
+admin-sso-linked = Verknüpfte Konten
+admin-audit-user_totp_reset = Authenticator zurückgesetzt
+admin-audit-user_identity_unlinked = Anmeldung getrennt
+admin-audit-auth_link_emailed = Anmeldelink gesendet
+admin-audit-auth_link_confirmed = Anmeldung über einen gesendeten Link verknüpft
+notify-event-account-authenticator_reset = Dein Authenticator wurde entfernt
+notify-event-account-sign_in_unlinked = Eine Anmeldung wurde von deinem Konto getrennt
+signin-link-email-lead = Dieses Konto hat kein Passwort. Wir können einen einmaligen Link an seine Adresse senden; öffne ihn in diesem Browser, um die Anmeldung zu verknüpfen.
+signin-link-email = Link per E-Mail senden
+signin-link-emailed = Wir haben einen Link an { $address } gesendet. Öffne ihn innerhalb von { $minutes } Minuten in diesem Browser.
+signin-link-emailed-short = Wir haben einen Link gesendet. Öffne ihn in diesem Browser.
+signin-link-email-failed = Der Link konnte nicht gesendet werden. Bitte deinen Admin, die Anmeldung zu verknüpfen.
+signin-link-code-invalid = Dieser Link funktioniert nicht mehr: Er wurde schon benutzt, ist abgelaufen oder wurde in einem anderen Browser geöffnet. Melde dich erneut an, um neu zu beginnen.
+signin-link-linking = Dein Konto wird verknüpft ...
+
+## Mehrfachbearbeitung und Entfernen aus der Bibliothek (WP4-3)
+library-select = { $title } auswählen
+library-select-all = Alle auf dieser Seite auswählen
+library-add-to-list = Zu einer Liste hinzufügen...
+library-remove = Aus der Bibliothek entfernen
+library-removed = { $title } aus deiner Bibliothek entfernt
+library-bulk-label = Aktionen für die Auswahl
+library-bulk-count = { $count } ausgewählt
+library-bulk-status-menu = Status setzen
+library-bulk-tag = Schlagwort hinzufügen
+library-bulk-tag-title = Den ausgewählten Einträgen ein Schlagwort geben
+library-bulk-list = Zu einer Liste
+library-bulk-remove = Entfernen
+library-bulk-clear = Auswahl aufheben
+library-bulk-remove-title = { $count ->
+    [one] Einen Eintrag aus deiner Bibliothek entfernen?
+   *[other] { $count } Einträge aus deiner Bibliothek entfernen?
+}
+library-bulk-remove-body = Status, Bewertung, Notiz und Schlagwörter gehen verloren. Partien, Fortschritt, Rezensionen und Listen bleiben, und Rückgängig stellt alles wieder her.
+library-bulk-remove-confirm = Entfernen
+library-bulk-status = { $count ->
+    [one] Ein Eintrag als { $status } markiert
+   *[other] { $count } Einträge als { $status } markiert
+}
+library-bulk-tagged = { $count ->
+    [one] Einem Eintrag das Schlagwort { $tag } gegeben
+   *[other] { $count } Einträgen das Schlagwort { $tag } gegeben
+}
+library-bulk-listed = { $count ->
+    [one] Ein Eintrag zu { $list } hinzugefügt
+   *[other] { $count } Einträge zu { $list } hinzugefügt
+}
+library-bulk-removed = { $count ->
+    [one] Ein Eintrag aus deiner Bibliothek entfernt
+   *[other] { $count } Einträge aus deiner Bibliothek entfernt
+}
+library-bulk-failed = { $count ->
+    [one] Ein Eintrag konnte nicht geändert werden.
+   *[other] { $count } Einträge konnten nicht geändert werden.
+}
+library-list-pick-title = { $count ->
+    [one] Zu welcher Liste hinzufügen?
+   *[other] { $count } Einträge zu welcher Liste hinzufügen?
+}
+library-list-none = Du hast noch keine Listen.
+library-list-create = Liste anlegen
+item-remove = Aus der Bibliothek entfernen
+# Tastaturkürzel und Suchpalette (WP4-4)
+shortcuts-chord-waiting = G gedrückt: dann H, L, Y, T oder P, um zu einem Bereich zu wechseln.
+shortcuts-then = dann
+shortcuts-or = oder
+shortcuts-everywhere = Überall
+shortcuts-home = Start
+shortcuts-library = Bibliothek
+shortcuts-item = Titelseite
+shortcuts-search = Suche
+shortcuts-go-home = Zu Start
+shortcuts-go-library = Zur Bibliothek
+shortcuts-go-history = Zum Verlauf
+shortcuts-go-lists = Zu den Listen
+shortcuts-go-people = Zu den Personen
+shortcuts-home-move = Zwischen den Karten unter „Weitermachen“ wechseln
+shortcuts-home-run = Nächsten Schritt der fokussierten Karte ausführen
+shortcuts-library-move = Zwischen den Karten wechseln
+shortcuts-library-row = Erste oder letzte Karte der Zeile
+shortcuts-library-first = Erste Karte überhaupt (Strg+Ende: die letzte)
+shortcuts-library-open = Fokussierte Karte öffnen
+shortcuts-library-step = Nächster Schritt der fokussierten Karte
+shortcuts-library-tags = Schlagwörter der fokussierten Karte
+shortcuts-library-list = Fokussierte Karte zu einer Liste hinzufügen
+shortcuts-library-filter = Bibliothek filtern
+shortcuts-item-step = Nächsten Schritt eintragen
+shortcuts-item-rating = Zur eigenen Bewertung springen
+shortcuts-item-tags = Schlagwörter bearbeiten
+shortcuts-item-list = Zu einer Liste hinzufügen
+shortcuts-search-open = Treffer öffnen oder für die Seite auswählen, die die Suche geöffnet hat
+shortcuts-search-quick = Als „Geplant“ hinzufügen oder den nächsten Schritt ausführen
+shortcuts-key-enter = Eingabe
+shortcuts-key-home = Pos1
+shortcuts-key-end = Ende
+shortcuts-key-arrows = Pfeiltasten
+shortcuts-off-note = Kürzel mit einer Taste sind ausgeschaltet (Einstellungen > Konto). Strg+K und die Tasten in Rastern, Menüs und der Suche funktionieren weiter.
+search-target-rule = Ein gewählter Treffer wird zum Gegenstand der Regel.
+search-target-log-with = Ein gewählter Treffer wird mit { $name } eingetragen.
+search-recent = Zuletzt geöffnet
+search-suggested = Vorschläge
+search-cmd-lists = Zu den Listen
+search-cmd-new-list = Neue Liste
+search-cmd-log-play = Partie von { $title } eintragen
+search-cmd-import = Datei importieren
+search-added-planned = Als „Geplant“ hinzugefügt
+search-hint-open = Öffnen
+search-hint-choose = Auswählen
+search-hint-quick = Als „Geplant“ hinzufügen oder nächster Schritt
+companions-log-with = Eintragen mit...
+companions-log-with-named = Eintragen mit { $name }
+notify-filter-pick-item = Titel auswählen...
+notify-filter-item = Titel: { $name }
+notify-hint-secret-keep = Leer lassen, um den gespeicherten Wert zu behalten.
+notify-edit = Bearbeiten
+notify-edit-named = { $name } bearbeiten
+notify-channel-enabled = An diesen Kanal senden
+notify-channel-save = Speichern
+notify-channel-cancel = Abbrechen
+settings-shortcuts = Tastaturkürzel
+settings-shortcuts-hint = Einzelne Tasten wie G, N, W oder ? wirken außerhalb von Textfeldern als Kürzel. Schalte sie aus, wenn sie Spracheingabe oder Screenreader stören. Wird in diesem Browser gespeichert.
+# WP4-5 Offline-Warteschlange und Messung des Eintragens
+offline-saved = Offline gespeichert, wird synchronisiert
+offline-waiting = { $count ->
+    [one] 1 Änderung wartet
+   *[other] { $count } Änderungen warten
+}
+offline-dropped = Nicht gespeichert: { $what } - der Server hat diese offline gemachte Änderung abgelehnt
+offline-sheet = Du bist offline. Speichere, wenn du wieder online bist.
+offline-bulk = Du bist offline. Sammelbearbeitungen warten, bis du wieder online bist.
+privacy-usage-on = Diese Instanz zählt pro Tag und ohne deinen Namen oder Titel, wie viele Klicks und Sekunden das Eintragen braucht (vom Öffnen der Suche, eines Formulars oder des nächsten Schritts bis zum gespeicherten Eintrag), und wie oft diese aufklappbaren Abschnitte gezeigt, geöffnet, innerhalb von 2 Sekunden geöffnet und beim Speichern offen sind: die Filter der Bibliothek; „Mehr“ in den Formularen zum Eintragen und für Partien eines Eintrags; „Ein Ziel setzen“ in der Statistik; „Anmeldung“ in Einstellungen > Konto; und für Admins die Einladungen unter Personen, „E-Mail“, „Gespeicherte Geheimnisse“ und „Erweitert“ unter Instanz sowie „Nutzungsmessung“ unter Speicher und Aufgaben. Die Summen werden 180 Tage aufbewahrt; der Admin kann das abschalten.
+privacy-usage-off = Diese Instanz zählt nicht, wie das Eintragen genutzt wird.
+admin-setting-usage_funnel = Eintragen messen
+admin-usage-title = Nutzungsmessung
+admin-usage-summary = Tagessummen ohne Personen, 180 Tage aufbewahrt
+admin-usage-what = Pro Tag gezählt: wie ein Eintrag von seinem Beginn (Suche geöffnet, nächster Schritt geklickt, Formular geöffnet, Folge markiert, Zeilen ausgewählt) zu gespeichert oder abgebrochen kam, in Stufen von Klicks (1 bis 5 und mehr) und Sekunden (unter 2, 5, 10, 30, 60 und mehr); und wie oft jeder der zehn gemessenen aufklappbaren Abschnitte (Filter der Bibliothek, die beiden „Mehr“ der Formulare, „Ein Ziel setzen“, „Anmeldung“ in den Einstellungen, die Einladungen, E-Mail, Gespeicherte Geheimnisse, Erweitert und dieser) gezeigt, geöffnet, innerhalb von 2 Sekunden geöffnet und beim Speichern offen war. Keine Person, kein Eintrag, kein Titel wird gespeichert.
+admin-usage-on = An
+admin-usage-off = Aus
+admin-usage-csv = Tagessummen herunterladen (CSV)
+admin-usage-caption = Summen der letzten { $days } Tage ({ $retention } Tage aufbewahrt)
+admin-usage-none = In den letzten 28 Tagen wurde nichts gezählt.
+admin-usage-flow = Ablauf
+admin-usage-section = Abschnitt
+admin-usage-outcome = Ergebnis
+admin-usage-count = Anzahl
+# WP4-6 Ziele, Jahresvergleich, häufigste Personen, Spielgruppen
+stats-compare-title = { $year } bisher
+stats-compare-lead = Vom 1. Januar bis { $through }, neben denselben Tagen im Vorjahr (bis { $last }).
+stats-compare-none = In beiden Zeiträumen ist noch nichts eingetragen.
+stats-compare-value = { $this } in { $year }, { $last } in { $last_year }
+stats-often-with = Am häufigsten mit
+stats-often-none = Trage etwas mit einer Person ein, dann erscheint sie hier.
+stats-often-together = { $count ->
+    [one] einmal zusammen
+   *[other] { $count }-mal zusammen
+}
+goals-heading = Ziele
+goals-lead = Freiwillig und nur für dich. Ein Ziel zählt, was du in seinem Jahr einträgst, sonst nichts.
+goals-set = Ein Ziel setzen
+goals-set-summary = Eine Jahreszahl für eine Gruppe und eine Größe
+goals-title = { $group }: { $measure }
+goals-progress = { $done } von { $target } in { $year }
+goals-bar = { $title } in { $year }
+goals-edit = Bearbeiten
+goals-edit-named = Ziel { $title } bearbeiten
+goals-delete = Löschen
+goals-delete-named = Ziel { $title } löschen
+goals-delete-title = Das Ziel { $title } löschen?
+goals-delete-body = Nur das Ziel geht; alles Eingetragene bleibt.
+goals-year = Jahr
+goals-group = Gruppe
+goals-metric = Größe
+goals-target = Zielwert
+goals-target-hint = Eine ganze Zahl, 1 oder mehr.
+goals-target-invalid = Gib als Zielwert eine ganze Zahl ab 1 ein.
+goals-error-conflict = Für dieses Jahr, diese Gruppe und diese Größe gibt es schon ein Ziel. Bearbeite stattdessen dieses.
+goals-save = Ziel speichern
+companions-tab-groups = Spielgruppen { $count }
+groups-list = Spielgruppen
+groups-new = Neue Gruppe
+groups-new-title = Neue Spielgruppe
+groups-edit-title = { $name } bearbeiten
+groups-empty = Noch keine Spielgruppen
+groups-empty-body = Eine Gruppe sind die Leute, mit denen du oft spielst. Wählst du sie, stehen die Mitspielenden einer Partie in einem Schritt fest.
+groups-members = Mit { $names }
+groups-no-members = In dieser Gruppe ist niemand mehr.
+groups-plays = Partien als Gruppe
+groups-last = Zuletzt: { $title }, { $when }
+groups-never = Noch keine Partie als Gruppe.
+groups-log = Partie eintragen mit...
+groups-log-named = Partie eintragen mit { $name }
+groups-menu-named = Aktionen für { $name }
+groups-edit = Bearbeiten
+groups-delete = Löschen
+groups-delete-title = { $name } löschen?
+groups-delete-body = { $count ->
+    [0] Die Gruppe verschwindet aus Personen und dem Partie-Formular.
+    [one] Die Gruppe verschwindet aus Personen und dem Partie-Formular. Ihre Partie bleibt in deinem Verlauf.
+   *[other] Die Gruppe verschwindet aus Personen und dem Partie-Formular. Ihre { $count } Partien bleiben in deinem Verlauf.
+}
+groups-deleted = { $name } gelöscht.
+groups-name = Name
+groups-members-legend = Mitglieder
+groups-need-members = Wähle mindestens eine Person.
+groups-save = Gruppe speichern
+groups-created = { $name } angelegt.
+groups-saved = { $name } gespeichert.
+log-groups = Gruppen
+search-target-log-group = Ein Spiel wählen trägt eine Partie mit { $name } ein.
+
+# UX phase 4 review (web)
+catalog-title-unavailable = Titel nicht verfügbar - Quelldaten abgelaufen
+offline-what-status = Status { $status }
+offline-what-rating = Bewertung
+offline-what-notes = Notizen
+offline-what-add = zur Bibliothek hinzugefügt
+offline-full = Nicht gespeichert: Schon { $count } Änderungen warten, mehr behält dieser Browser nicht. Geh erst wieder online, damit sie gesendet werden.
+offline-undo-sending = Nicht rückgängig gemacht: Diese Änderung wird gerade gesendet. Ändere sie zurück, sobald sie synchronisiert ist.
+offline-undo-sent = Nicht rückgängig gemacht: Diese Änderung ist schon synchronisiert. Ändere sie auf der Seite des Eintrags oder im Verlauf zurück.
+signout-waiting-title = { $count ->
+    [one] Eine Änderung ist noch nicht synchronisiert
+   *[other] { $count } Änderungen sind noch nicht synchronisiert
+}
+signout-waiting-body = Sie entstanden, als der Server nicht erreichbar war, und bleiben in diesem Browser, bis er es wieder ist. Wenn du dich jetzt abmeldest, werden sie verworfen.
+signout-stay = Angemeldet bleiben
+signout-discard = Abmelden und verwerfen
+library-undo-failed = Rückgängig machen hat nicht geklappt: { $error }
+library-undo-expired = Diese Änderung lässt sich hier nicht mehr rückgängig machen (das geht nur eine Stunde lang).
+library-bulk-too-large = Zu viele Einträge, um sie auf einmal mit Rückgängig zu ändern. Wähle weniger aus und versuch es noch einmal.
+admin-error-self_change = Das kannst du hier nicht für dein eigenes Konto tun. Nutze stattdessen Einstellungen > Konto.
+admin-health-mail-result-not_configured = E-Mail ist nicht eingerichtet
+admin-health-mail-result-connection = der Mailserver war nicht erreichbar
+admin-health-mail-result-auth = der Mailserver hat die Anmeldung abgelehnt
+admin-health-mail-result-rejected = der Mailserver hat die Nachricht abgelehnt
+admin-health-mail-result-send_failed = das Senden ist fehlgeschlagen

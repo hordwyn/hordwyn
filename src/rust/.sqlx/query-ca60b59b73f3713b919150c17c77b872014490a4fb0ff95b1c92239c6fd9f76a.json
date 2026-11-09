@@ -1,0 +1,160 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT * FROM companions WHERE id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "companions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "companions",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "companions",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "avatar_asset",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "companions",
+            "name": "avatar_asset"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "notes",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "companions",
+            "name": "notes"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "linked_user",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "companions",
+            "name": "linked_user"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "snapshot",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "companions",
+            "name": "snapshot"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "is_self",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "companions",
+            "name": "is_self"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "merged_into",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "companions",
+            "name": "merged_into"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "companions",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "merge_record",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "companions",
+            "name": "merge_record"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "removed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "companions",
+            "name": "removed_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "ca60b59b73f3713b919150c17c77b872014490a4fb0ff95b1c92239c6fd9f76a"
+}

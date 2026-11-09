@@ -124,6 +124,15 @@ impl Templates {
         fargs.set("product", FluentValue::from(self.product.clone()));
         for (k, v) in args {
             let value = match v {
+                // a purged item has no title (catalog retention, UX4-9): name it neutrally
+                serde_json::Value::String(s) if k == "title" && s.is_empty() => FluentValue::from(
+                    self.format(
+                        locale,
+                        &["item_unavailable-title".into()],
+                        &serde_json::Map::new(),
+                    )
+                    .unwrap_or_default(),
+                ),
                 serde_json::Value::String(s) => FluentValue::from(s.clone()),
                 serde_json::Value::Number(n) => n
                     .as_f64()
@@ -198,7 +207,14 @@ mod tests {
         let events: Vec<String> = CATALOGUE
             .iter()
             .map(|e| message_id(e.id))
-            .chain(["digest".to_string(), "test".to_string()])
+            // transactional mail that is no event: the emailed sign-in link (DEC-312)
+            .chain([
+                "digest".to_string(),
+                "test".to_string(),
+                "sign_in_link".to_string(),
+                // the name of an item whose source data expired (UX4-9)
+                "item_unavailable".to_string(),
+            ])
             .collect();
         let keys = source("en")
             .lines()
@@ -283,5 +299,27 @@ mod tests {
         );
         assert!(as_resource("bad key", "x").is_none());
         assert_eq!(t.digest_title("de", 3), "3 Benachrichtigungen");
+    }
+}
+
+#[cfg(test)]
+mod expired_title_tests {
+    use super::*;
+
+    #[test]
+    fn an_expired_title_reads_as_the_placeholder() {
+        // UX4-9: a purged item has no title; texts name it neutrally instead of leaving a gap
+        let t = Templates::new("Shelf", &Overrides::new(), &Overrides::new());
+        let mut a = serde_json::Map::new();
+        a.insert("title".into(), "".into());
+        a.insert("season".into(), 1.into());
+        a.insert("episode".into(), 2.into());
+        let en = t.render("release.episode", "inbox", "en", &a);
+        assert_eq!(
+            en.title,
+            "New episode of Title unavailable - source data expired"
+        );
+        let de = t.render("release.episode", "inbox", "de", &a);
+        assert!(de.title.contains("Titel nicht verf"), "{}", de.title);
     }
 }

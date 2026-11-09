@@ -12,10 +12,14 @@ const USAGE: &str = "usage: cargo xtask <command>
                      when TEST_DATABASE_URL is unset)
   fmt                format the workspace
   e2e                run the Playwright end-to-end suite
+  e2e-scan <log>     fail when a server log of an e2e run holds a panic (CI job)
   dev                start the development server
   services up|down   start or stop local Postgres, Meilisearch and RustFS (S3)
   sqlx-prepare       migrate the dev database and refresh the sqlx offline cache
-  record <connector> re-record connector fixtures from the live API (needs its key)";
+  record <connector> re-record connector fixtures from the live API (needs its key)
+  load [--release] [--clients N]
+                     the ignored load test against the local services (not in ci;
+                     needs 15 GB free disk; delete target/release after a release run)";
 
 fn main() -> Result<()> {
     let cmd = std::env::args().nth(1).unwrap_or_default();
@@ -23,6 +27,11 @@ fn main() -> Result<()> {
         "ci" => ci(),
         "fmt" => cargo(&["fmt", "--all"], &[]),
         "e2e" => e2e(),
+        // the job keeps the file either way (an artifact on failure), so it never deletes it
+        "e2e-scan" => match std::env::args().nth(2) {
+            Some(log) => scan_server_log(std::path::Path::new(&log), false),
+            None => bail!("usage: cargo xtask e2e-scan <server log>"),
+        },
         "dev" => dev(),
         "services" => match std::env::args().nth(2).as_deref() {
             Some("up") => xtask::services::up()
@@ -32,6 +41,7 @@ fn main() -> Result<()> {
             _ => bail!("usage: cargo xtask services up|down"),
         },
         "sqlx-prepare" => sqlx_prepare(false),
+        "load" => load(),
         "record" => match std::env::args().nth(2) {
             Some(id) => xtask::record::record(&id),
             None => bail!("usage: cargo xtask record <connector>"),
@@ -133,6 +143,46 @@ fn ci() -> Result<()> {
     Ok(())
 }
 
+/// The load test (WP4-1) against the local services; `LOAD_*` variables pass through.
+fn load() -> Result<()> {
+    let args = xtask::load::parse_args(std::env::args().skip(2))?;
+    let root = xtask::workspace_root();
+    let free = xtask::load::free_bytes(&root)?;
+    // a release tree that exists already is rebuilt in place, not added
+    let needed = if args.release && root.join("target/release").exists() {
+        xtask::load::MIN_FREE_BYTES_REBUILD
+    } else {
+        xtask::load::MIN_FREE_BYTES
+    };
+    if free < needed {
+        bail!(
+            "only {} GB free disk; the load run needs {} GB (a release build is a second target tree)",
+            free / 1_000_000_000,
+            needed / 1_000_000_000
+        );
+    }
+    let test_db = if let Ok(url) = std::env::var("TEST_DATABASE_URL") {
+        url
+    } else {
+        xtask::services::up()?;
+        xtask::services::drop_dbs("test\\_%")?;
+        xtask::services::pg_admin_url()
+    };
+    let clients = args.clients.map(|n| n.to_string());
+    let mut env = vec![
+        ("TEST_DATABASE_URL", test_db.as_str()),
+        ("REQUIRE_SERVICES", "1"),
+    ];
+    if let Some(n) = clients.as_deref() {
+        env.push(("LOAD_CLIENTS", n));
+    }
+    cargo(&xtask::load::cargo_args(args), &env)?;
+    if args.release {
+        println!("xtask load: delete target/release when done (it is a second target tree)");
+    }
+    Ok(())
+}
+
 /// Build the site with the dev gallery and run the Playwright suite against it.
 fn e2e() -> Result<()> {
     let web = xtask::repo_root().join("src/web");
@@ -159,10 +209,48 @@ fn e2e() -> Result<()> {
             .args(["ci", "--no-audit", "--no-fund"])
             .current_dir(&web))?;
     }
-    run(Command::new("npx")
+    // the server's output goes to a file outside the repo; any panic in it fails the run
+    // (UX3-25 panic guard, DEC-384)
+    let log = std::env::temp_dir().join(format!(
+        "e2e-server-{}.log",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs())
+    ));
+    let tests = run(Command::new("npx")
         .args(["playwright", "test"])
         .env("E2E_DATABASE_URL", db)
-        .current_dir(web))
+        .env("E2E_SERVER_LOG", &log)
+        .current_dir(web));
+    let scan = scan_server_log(&log, tests.is_ok());
+    tests?;
+    scan
+}
+
+/// The UX3-25 panic guard on a server log: report its panics, keep the file (path printed)
+/// when a panic was found or the tests failed, and fail when it holds a panic. Used by
+/// `e2e` and, as `cargo xtask e2e-scan <log>`, by the GitLab e2e job (UX4-4).
+fn scan_server_log(log: &std::path::Path, tests_passed: bool) -> Result<()> {
+    let found = xtask::e2e_log::settle(log, tests_passed)
+        .with_context(|| format!("checking the server log {}", log.display()))?;
+    println!(
+        "==> server log: {} lines, {} panic(s)",
+        found.lines,
+        found.panics.len()
+    );
+    for p in &found.panics {
+        eprintln!("server panic during e2e:\n{p}\n");
+    }
+    if found.kept {
+        println!("==> server log kept at {}", log.display());
+    }
+    if !found.panics.is_empty() {
+        bail!(
+            "the server panicked {} time(s) during the e2e run",
+            found.panics.len()
+        );
+    }
+    Ok(())
 }
 
 fn dev() -> Result<()> {

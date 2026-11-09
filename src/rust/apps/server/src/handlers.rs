@@ -82,6 +82,31 @@ impl Handler for Refresh {
     }
 }
 
+/// `catalog.episodes`: per-episode release dates of one item, one call per season that needs
+/// it, on the background lane it was queued on (WP4-7).
+struct Episodes {
+    app: App,
+    registry: Registry,
+    http: Arc<dyn HttpFetch>,
+}
+
+#[async_trait]
+impl Handler for Episodes {
+    async fn run(&self, job: &Job) -> Result<(), String> {
+        let id = ItemId(uuid_field(job, "item_id")?);
+        catalog_core::refresh::refresh_episodes(
+            &self.app,
+            &self.registry,
+            self.http.clone(),
+            job.lane,
+            id,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    }
+}
+
 struct FetchAsset(Arc<assets::AssetService>);
 
 #[async_trait]
@@ -201,6 +226,101 @@ impl Handler for Rewrap {
     }
 }
 
+/// `admin.probes`: the Overview health rows, every minute on the background lane (DEC-285).
+struct Probes(api::ApiState);
+
+#[async_trait]
+impl Handler for Probes {
+    async fn run(&self, _job: &Job) -> Result<(), String> {
+        api::admin::run_probes(&self.0)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.message)
+    }
+}
+
+/// `usage.funnel_daily`: one `metrics` event per flow of yesterday, then the 180-day
+/// retention of the funnel totals (WP4-5).
+struct UsageDaily(api::ApiState);
+
+#[async_trait]
+impl Handler for UsageDaily {
+    async fn run(&self, _job: &Job) -> Result<(), String> {
+        api::usage::daily(&self.0, chrono::Utc::now().date_naive())
+            .await
+            .map(|_| ())
+            .map_err(|e| e.message)
+    }
+}
+
+/// `catalog.retention`: catalog data of sources whose terms limit caching (TMDB 1.C) is
+/// refreshed, or purged with its stored cover when no refresh is possible; stale stored
+/// provider responses older than the same age go too (DEC-453).
+struct Retention {
+    app: App,
+    registry: Registry,
+    assets: Arc<assets::AssetService>,
+    cache: catalog_core::cache::HttpCache,
+    max_age_days: u32,
+}
+
+#[async_trait]
+impl Handler for Retention {
+    async fn run(&self, _job: &Job) -> Result<(), String> {
+        let report = catalog_core::retention::sweep(&self.app, &self.registry, self.max_age_days)
+            .await
+            .map_err(|e| e.to_string())?;
+        for id in &report.refreshed {
+            // the stored image is as old as the data: fetch it again with it
+            let item = self
+                .app
+                .catalog_item(*id)
+                .await
+                .map_err(|e| e.to_string())?;
+            if let Some(asset) = item
+                .cover_asset
+                .as_deref()
+                .and_then(|a| uuid::Uuid::parse_str(a).ok())
+            {
+                self.assets
+                    .refetch(asset)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        for p in report.purged.iter().chain(&report.deleted) {
+            if let Some(asset) = p
+                .cover_asset
+                .as_deref()
+                .and_then(|a| uuid::Uuid::parse_str(a).ok())
+            {
+                self.assets.forget(asset).await.map_err(|e| e.to_string())?;
+            }
+        }
+        let before = self.app.clock.now() - chrono::Duration::days(i64::from(self.max_age_days));
+        let responses = self
+            .cache
+            .purge_stale_before(before)
+            .await
+            .map_err(|e| e.to_string())?;
+        let changed = report.refreshed.len()
+            + report.purged.len()
+            + report.deleted.len()
+            + report.refetched.len();
+        if changed > 0 || responses > 0 {
+            tracing::info!(
+                refreshed = report.refreshed.len(),
+                purged = report.purged.len(),
+                deleted = report.deleted.len(),
+                refetched = report.refetched.len(),
+                responses,
+                "catalog retention"
+            );
+        }
+        Ok(())
+    }
+}
+
 /// Cron entries of the admin jobs (registered when a worker starts).
 pub async fn schedule_admin_jobs(s: &Server) {
     let now = chrono::Utc::now();
@@ -214,6 +334,17 @@ pub async fn schedule_admin_jobs(s: &Server) {
             "secrets.rewrap",
             "37 3 * * *",
             crate::admin_wiring::REWRAP_JOB,
+        ),
+        ("admin.probes", "* * * * *", crate::admin_wiring::PROBES_JOB),
+        (
+            "usage.funnel_daily",
+            "47 3 * * *",
+            crate::admin_wiring::USAGE_DAILY_JOB,
+        ),
+        (
+            "catalog.retention",
+            "41 * * * *",
+            catalog_core::retention::RETENTION_JOB,
         ),
     ] {
         if let Err(e) = s
@@ -246,7 +377,15 @@ pub fn worker(s: &Server) -> Worker {
                 crate::admin_wiring::AUDIT_RETENTION_JOB,
                 Arc::new(AuditRetention(a.clone(), s.api.auth.clone())),
             )
-            .handle(crate::admin_wiring::REWRAP_JOB, Arc::new(Rewrap(a.clone())));
+            .handle(crate::admin_wiring::REWRAP_JOB, Arc::new(Rewrap(a.clone())))
+            .handle(
+                crate::admin_wiring::PROBES_JOB,
+                Arc::new(Probes(s.api.clone())),
+            )
+            .handle(
+                crate::admin_wiring::USAGE_DAILY_JOB,
+                Arc::new(UsageDaily(s.api.clone())),
+            );
     }
     w.handle(
         app::REFRESH_JOB,
@@ -255,6 +394,27 @@ pub fn worker(s: &Server) -> Worker {
             registry: s.registry.clone(),
             http: s.http.clone(),
             assets: s.assets.clone(),
+        }),
+    )
+    .handle(
+        app::EPISODES_JOB,
+        Arc::new(Episodes {
+            app: s.app.clone(),
+            registry: s.registry.clone(),
+            http: s.http.clone(),
+        }),
+    )
+    .handle(
+        catalog_core::retention::RETENTION_JOB,
+        Arc::new(Retention {
+            app: s.app.clone(),
+            registry: s.registry.clone(),
+            assets: s.assets.clone(),
+            cache: catalog_core::cache::HttpCache {
+                index: Arc::new(catalog_core::pg::PgCacheIndex::new(s.pool.clone())),
+                blobs: s.budget.clone(),
+            },
+            max_age_days: s.config.jobs.catalog_max_age_days,
         }),
     )
     .handle(assets::FETCH_JOB, Arc::new(FetchAsset(s.assets.clone())))

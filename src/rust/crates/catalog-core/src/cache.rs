@@ -41,6 +41,12 @@ impl CacheEntry {
 pub trait HttpCacheIndex: Send + Sync {
     async fn get(&self, key: &str) -> Result<Option<CacheEntry>, PortError>;
     async fn put(&self, key: &str, entry: CacheEntry) -> Result<(), PortError>;
+    /// Delete the entries that went stale before `before`; returns how many, and the body
+    /// hashes that no remaining entry uses (catalog retention, DEC-453).
+    async fn purge_stale_before(
+        &self,
+        before: DateTime<Utc>,
+    ) -> Result<(usize, Vec<String>), PortError>;
 }
 
 #[derive(Default)]
@@ -60,6 +66,26 @@ impl HttpCacheIndex for MemCacheIndex {
             .expect("lock")
             .insert(key.to_string(), entry);
         Ok(())
+    }
+
+    async fn purge_stale_before(
+        &self,
+        before: DateTime<Utc>,
+    ) -> Result<(usize, Vec<String>), PortError> {
+        let mut entries = self.entries.lock().expect("lock");
+        let mut gone: Vec<String> = Vec::new();
+        entries.retain(|_, e| {
+            let keep = e.fresh_until >= before;
+            if !keep {
+                gone.push(e.body_hash.clone());
+            }
+            keep
+        });
+        let n = gone.len();
+        gone.sort();
+        gone.dedup();
+        gone.retain(|h| !entries.values().any(|e| &e.body_hash == h));
+        Ok((n, gone))
     }
 }
 
@@ -114,6 +140,18 @@ impl HttpCache {
         entry.body_hash = hash;
         entry.size = body.len() as u64;
         self.index.put(key, entry).await
+    }
+
+    /// Delete entries stale since before `before` and the bodies only they used; returns the
+    /// number of entries deleted (catalog retention, DEC-453).
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn purge_stale_before(&self, before: DateTime<Utc>) -> Result<usize, PortError> {
+        let (n, hashes) = self.index.purge_stale_before(before).await?;
+        let keys: Vec<String> = hashes.iter().map(|h| body_key(h)).collect();
+        self.blobs.delete(&keys).await?;
+        Ok(n)
     }
 }
 

@@ -197,11 +197,18 @@ pub fn SettingsIntegrations() -> impl IntoView {
 
 #[component]
 pub fn SettingsPrivacy() -> impl IntoView {
+    // what the logging funnel counts, in one line (WP4-5)
+    let usage = if expect_context::<ClientConfig>().usage_funnel {
+        t("privacy-usage-on")
+    } else {
+        t("privacy-usage-off")
+    };
     view! {
         <SettingsLayout>
             <PageTitle text=t("privacy-title")/>
             <Lead text=t("settings-privacy-lead")/>
             <crate::sharing::Privacy/>
+            <p class="mt-6 max-w-2xl text-sm text-muted-foreground" data-testid="usage-line">{usage}</p>
         </SettingsLayout>
     }
 }
@@ -240,6 +247,7 @@ pub fn SettingsAccount() -> impl IntoView {
             <div class="mb-6 grid max-w-xl gap-4">
                 <crate::shell::ThemeChoiceControl/>
                 <crate::shell::LanguageChoice/>
+                <ShortcutsSwitch/>
             </div>
             <div class="mb-6"><crate::account::TimeZone/></div>
             <Disclosure id="set-signin" title=t("settings-signin") summary=t("settings-signin-summary")
@@ -252,6 +260,22 @@ pub fn SettingsAccount() -> impl IntoView {
                 </div>
             </Disclosure>
         </SettingsLayout>
+    }
+}
+
+/// "Keyboard shortcuts" on or off (WCAG 2.1.4 character key shortcuts; remembered in this
+/// browser, WP4-4). Ctrl/Cmd+K and keys inside a widget stay.
+#[component]
+fn ShortcutsSwitch() -> impl IntoView {
+    let on = expect_context::<crate::keyboard::ShortcutsOn>().0;
+    view! {
+        <div class="grid gap-1">
+            <div class="flex items-center gap-3">
+                <ui::Switch id="set-shortcuts" checked=on/>
+                <label for="set-shortcuts" class="text-sm font-medium">{t("settings-shortcuts")}</label>
+            </div>
+            <p class="text-sm text-muted-foreground">{t("settings-shortcuts-hint")}</p>
+        </div>
     }
 }
 

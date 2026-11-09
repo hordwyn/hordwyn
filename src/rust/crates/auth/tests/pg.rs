@@ -166,7 +166,9 @@ async fn totp_seeds_are_encrypted_migrated_rotated_and_locked_without_the_key() 
         .unwrap()
         .unwrap();
     assert!(c.totp_locked && c.totp_secret.is_none());
-    assert_eq!(old.locked_totp_count().await.unwrap(), 1);
+    // DEC-286: counted by the stored key version against the loaded ones, nothing decrypted
+    assert_eq!(old.locked_totp_count(&[1]).await.unwrap(), 1);
+    assert_eq!(pg2.locked_totp_count(&[2, 1]).await.unwrap(), 0);
     auth::AuthStore::put_credentials(&old, &c).await.unwrap();
     assert_eq!(pg2.version_counts().await.unwrap(), vec![(2, 1)], "kept");
 }

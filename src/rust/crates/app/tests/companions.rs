@@ -40,7 +40,8 @@ async fn crud_and_ownership() {
         env.app
             .update_companion(bob, anna.id, Some("x".into()), None)
             .await,
-        Err(AppError::Forbidden)
+        // someone else's person reads like an unknown id (UX4-17)
+        Err(AppError::NotFound(_))
     ));
     env.app.delete_companion(me, anna.id).await.unwrap();
     assert_eq!(env.app.companions(me).await.unwrap().len(), 1);

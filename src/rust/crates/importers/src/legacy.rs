@@ -326,4 +326,29 @@ mod tests {
         let p = super::parse(doc.to_string().as_bytes());
         assert!(p.rows[0].as_ref().unwrap_err().message.contains("podcast"));
     }
+
+    /// DEC-383 (deferred to WP4-8): Watchlist sets `planned`, Reminders and Custom are skipped
+    /// (not lists), and a completed view without a date and without a Completed or In
+    /// Progress collection to estimate from is reported as `undated_history`.
+    #[test]
+    fn watchlist_is_planned_built_in_collections_are_skipped_and_undated_views_reported() {
+        let doc = serde_json::json!({"metadata": [{
+            "lot": "movie", "source": "tmdb", "identifier": "949", "source_id": "Heat",
+            "collections": [
+                {"collection_name": "Watchlist", "created_on": "2024-01-02T00:00:00Z"},
+                {"collection_name": "Reminders"},
+                {"collection_name": "Custom"},
+                {"collection_name": "Noir"}
+            ],
+            "seen_history": [{"state": "completed"}]
+        }]});
+        let p = super::parse(doc.to_string().as_bytes());
+        let row = p.rows[0].as_ref().unwrap();
+        assert_eq!(row.status.as_deref(), Some("planned"));
+        assert_eq!(row.lists, ["Noir"]);
+        assert_eq!(row.history.len(), 0, "no date to log it on");
+        let lost = |code: &str| p.lost.iter().find(|l| l.code == code).map(|l| l.count);
+        assert_eq!(lost("skipped_collections"), Some(2));
+        assert_eq!(lost("undated_history"), Some(1));
+    }
 }

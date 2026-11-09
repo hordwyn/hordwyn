@@ -105,6 +105,11 @@ async fn run() -> anyhow::Result<()> {
     let stop = CancellationToken::new();
     tokio::spawn(shutdown_signal(stop.clone()));
     tokio::spawn(reload_on_sighup(server.clone()));
+    let stats_sync = {
+        let stop = stop.clone();
+        let server = server.clone();
+        tokio::spawn(async move { server.run_stats_sync(stop).await })
+    };
 
     let worker = role.runs_worker().then(|| {
         let stop = stop.clone();
@@ -140,5 +145,6 @@ async fn run() -> anyhow::Result<()> {
     if let Some(w) = worker {
         let _ = w.await;
     }
+    let _ = stats_sync.await;
     Ok(())
 }

@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (SELECT 1 FROM list_items li JOIN lists l ON l.id = li.list_id\n                              WHERE li.item_id = $1 AND l.visibility ->> 'type' = 'instance') AS \"everyone!\",\n                      ARRAY(\n                          SELECT user_id FROM library_entries WHERE item_id = $1\n                          UNION SELECT user_id FROM progress_events WHERE item_id = $1\n                          UNION SELECT user_id FROM reviews WHERE item_id = $1\n                          UNION SELECT l.owner_id FROM list_items li JOIN lists l ON l.id = li.list_id\n                                WHERE li.item_id = $1\n                          UNION SELECT owner_id FROM sessions WHERE item_id = $1\n                          UNION SELECT c.linked_user FROM sessions s\n                                JOIN users o ON o.id = s.owner_id AND o.share_sessions\n                                JOIN session_participants p ON p.session_id = s.id\n                                JOIN companions c ON c.id = p.companion_id\n                                WHERE s.item_id = $1 AND c.linked_user IS NOT NULL\n                          UNION SELECT user_id FROM catalog_watchers WHERE item_id = $1 AND until > $2\n                      ) AS \"users!: Vec<uuid::Uuid>\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "everyone!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "users!: Vec<uuid::Uuid>",
+        "type_info": "UuidArray",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "f560f1602efbda211e627654e827d2a359dc99fc41461c1e7dabcb8a9bb5c871"
+}

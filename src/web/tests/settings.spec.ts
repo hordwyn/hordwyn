@@ -63,6 +63,11 @@ test("the privacy switch is kept", async ({ page }) => {
   await expect(share).toBeChecked({ checked: !before });
   await visit(page, "/settings/privacy");
   await expect(page.getByLabel("Linked participants see the sessions I log")).toBeChecked({ checked: !before });
+  // the usage line names exactly the measured sections (UX4-14)
+  const usage = page.getByTestId("usage-line");
+  for (const part of ["the Library filters", "\"More\" in the log and play sheets", "\"Set a goal\" on Stats", "\"Sign-in\" in Settings > Account", "\"Usage measurement\" on Storage and jobs"]) {
+    await expect(usage).toContainText(part);
+  }
 });
 
 test("Snooze hides the admin nudge on Home for this browser", async ({ page }) => {

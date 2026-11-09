@@ -79,6 +79,7 @@ fn dto(o: &Oidc, p: &Provider) -> OidcProviderDto {
             .and_then(|v| serde_json::from_value(v).ok()),
         last_callback_at: p.last_callback_at.map(ts),
         last_callback_result: p.last_callback_result.clone(),
+        linked_accounts: 0,
     }
 }
 
@@ -91,8 +92,16 @@ pub async fn oidc_admin(s: &ApiState, actor: Actor) -> ApiResult<OidcAdminDto> {
     let o = oidc(s)?;
     let providers = o.store().providers().await.map_err(pe)?;
     let base = o.public_url();
+    let counts = s.auth.store().identity_counts().await.map_err(pe)?;
+    let linked = |id: Uuid| counts.iter().find(|(p, _)| *p == id).map_or(0, |(_, n)| *n);
     Ok(OidcAdminDto {
-        providers: providers.iter().map(|p| dto(o, p)).collect(),
+        providers: providers
+            .iter()
+            .map(|p| OidcProviderDto {
+                linked_accounts: linked(p.id),
+                ..dto(o, p)
+            })
+            .collect(),
         redirect_uri: o.redirect_uri(),
         post_logout_redirect_uri: format!("{base}/signed-out"),
         backchannel_logout_uri: format!("{base}/api/v1/auth/oidc/backchannel-logout"),
@@ -319,6 +328,7 @@ pub async fn create_provider(
         return Err(slug_taken());
     }
     o.changed(p.id).await;
+    super::probes::refresh_probe(s, "identity_provider").await;
     provider_dto(o, p.id).await
 }
 
@@ -395,6 +405,7 @@ pub async fn update_provider(
         return Err(slug_taken());
     }
     o.changed(p.id).await;
+    super::probes::refresh_probe(s, "identity_provider").await;
     provider_dto(o, p.id).await
 }
 
@@ -417,6 +428,7 @@ pub async fn set_provider_secret(
     let change = secret.map_or(SecretChange::Clear, SecretChange::Set);
     o.store().save(&p, change, &[row]).await.map_err(pe)?;
     o.changed(p.id).await;
+    super::probes::refresh_probe(s, "identity_provider").await;
     provider_dto(o, p.id).await
 }
 
@@ -462,6 +474,7 @@ pub async fn delete_provider(s: &ApiState, c: Caller<'_>, id: &str) -> ApiResult
     .await;
     o.store().delete(p.id, &[row]).await.map_err(pe)?;
     o.changed(p.id).await;
+    super::probes::refresh_probe(s, "identity_provider").await;
     Ok(())
 }
 
@@ -523,6 +536,7 @@ pub async fn test_provider(s: &ApiState, actor: Actor, id: &str) -> ApiResult<Oi
     };
     let stored = serde_json::to_value(&out).unwrap_or(Value::Null);
     o.store().record_test(p.id, &stored, at).await.map_err(pe)?;
+    super::probes::refresh_probe(s, "identity_provider").await;
     Ok(out)
 }
 
@@ -570,19 +584,35 @@ pub(crate) async fn check_auto(s: &ApiState) -> ApiResult<()> {
     if !passed {
         return Err(untested());
     }
-    for u in s.app.list_users().await? {
-        if u.role != domain::user::Role::Admin || s.auth.is_disabled(u.id).await? {
-            continue;
-        }
-        let creds = s.auth.store().credentials(u.id).await.map_err(pe)?;
-        if creds.is_some_and(|c| c.password_hash.is_some() && c.totp_enabled) {
-            return Ok(());
-        }
+    if break_glass_admins(s, None).await? > 0 {
+        return Ok(());
     }
     Err(refused(
         "auto_needs_admin_authenticator",
         "going straight to a provider needs an admin with a password and an authenticator",
     ))
+}
+
+/// Enabled admins (other than `except`) who can sign in on the page with a password and an
+/// enrolled authenticator: the break-glass accounts of mode `auto` (addendum-1 3.3).
+///
+/// # Errors
+/// Storage errors.
+pub(crate) async fn break_glass_admins(s: &ApiState, except: Option<UserId>) -> ApiResult<usize> {
+    let mut n = 0;
+    for u in s.app.list_users().await? {
+        if u.role != domain::user::Role::Admin
+            || Some(u.id) == except
+            || s.auth.is_disabled(u.id).await?
+        {
+            continue;
+        }
+        let creds = s.auth.store().credentials(u.id).await.map_err(pe)?;
+        if creds.is_some_and(|c| c.password_hash.is_some() && c.totp_enabled) {
+            n += 1;
+        }
+    }
+    Ok(n)
 }
 
 /// The Overview row (DEC-285: stored fields only, no probe): off without an enabled
@@ -668,9 +698,23 @@ pub(crate) async fn role_via_provider(s: &ApiState, user: UserId) -> ApiResult<O
         .map(|p| p.display_name))
 }
 
-/// Can `user` still sign in without the identity `id`: a password, or another identity?
+/// Can `user` still sign in without the identity `id`: a password, or another identity
+/// through a provider that exists and is enabled (UX4-10: one through a disabled or deleted
+/// provider is no way in).
 async fn other_method(s: &ApiState, user: UserId, id: Uuid) -> ApiResult<bool> {
     let store = s.auth.store();
+    let enabled: Vec<Uuid> = match s.oidc.as_deref() {
+        Some(o) => o
+            .store()
+            .providers()
+            .await
+            .map_err(pe)?
+            .into_iter()
+            .filter(|p| p.enabled)
+            .map(|p| p.id)
+            .collect(),
+        None => Vec::new(),
+    };
     let password = store
         .credentials(user)
         .await
@@ -681,7 +725,7 @@ async fn other_method(s: &ApiState, user: UserId, id: Uuid) -> ApiResult<bool> {
         .await
         .map_err(pe)?
         .iter()
-        .filter(|i| i.id != id)
+        .filter(|i| i.id != id && i.provider_id.is_some_and(|p| enabled.contains(&p)))
         .count();
     Ok(password || others > 0)
 }
@@ -740,6 +784,10 @@ pub async fn unlink_identity(s: &ApiState, c: Caller<'_>, id: &str) -> ApiResult
         ));
     }
     fresh(s, c).await?;
-    s.auth.store().unlink_identity(me, id).await.map_err(pe)?;
+    s.auth
+        .store()
+        .unlink_identity(me, id, None)
+        .await
+        .map_err(pe)?;
     Ok(())
 }

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { expectNoA11yViolations, hydrated, signUp, importDone } from "./helpers";
+import { expectNoA11yViolations, expectReflow, hydrated, signUp, importDone } from "./helpers";
 
 // UX phase 1 Library page (design.md 6.2, 3.5; addendum-1 1.3): group switcher, kind chips,
 // status tabs, the one Filters button with the tag filter, sort, grid/list, the URL as the
@@ -262,6 +262,129 @@ test("a background refresh keeps an open quick menu", async ({ page }) => {
   }
 });
 
+// WP4-3: the bulk bar of the list view (design.md 3.5, 6.2) and removing from the library
+const rowSelect = (page: Page, title: string) => page.getByRole("checkbox", { name: `Select ${title}` });
+const bar = (page: Page) => page.getByRole("toolbar", { name: "Bulk actions" });
+// one toast of the toaster (several can be up at once; each has its own Undo)
+const toast = (page: Page, text: string) => page.getByRole("status").locator(":scope > div").filter({ hasText: text });
+
+test("bulk: select three, add a tag and undo; remove with a confirm and undo", async ({ page }) => {
+  test.setTimeout(150_000);
+  await signUp(page, `bulk${Date.now()}`, "Bulk Tester");
+  await seed(page);
+  await open(page, "/library?view=list&sort=title");
+  await expect(page.getByRole("table")).toBeVisible();
+  for (const title of ["Harbour Lights", "Ninety Winters", "The Glass Ferry"]) await rowSelect(page, title).check();
+  await expect(bar(page)).toContainText("3 selected");
+
+  await bar(page).getByRole("button", { name: "Add tag" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add a tag to the selected entries" });
+  await dialog.getByLabel("New tag").fill("weekend");
+  await dialog.getByRole("button", { name: "Add tag" }).click();
+  const tagged = toast(page, "Tagged 3 entries with weekend");
+  await expect(tagged).toBeVisible();
+  const rows = page.getByRole("row");
+  for (const title of ["Harbour Lights", "Ninety Winters", "The Glass Ferry"]) {
+    await expect(rows.filter({ hasText: title })).toContainText("weekend");
+  }
+  await expect(rows.filter({ hasText: "Downstream" })).not.toContainText("weekend");
+  // the selection stays through the refresh after the change
+  await expect(bar(page)).toContainText("3 selected");
+  await tagged.getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByText("Undone")).toBeVisible();
+  await expect(rows.filter({ hasText: "weekend" })).toHaveCount(0);
+
+  // remove two with a confirm naming the count; Cancel keeps them
+  await rowSelect(page, "The Glass Ferry").uncheck();
+  await expect(bar(page)).toContainText("2 selected");
+  await bar(page).getByRole("button", { name: "Remove" }).click();
+  const confirm = page.getByRole("dialog", { name: "Remove 2 entries from your library?" });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole("button", { name: "Cancel" }).click();
+  await expect(rows.filter({ hasText: "Harbour Lights" })).toHaveCount(1);
+  await bar(page).getByRole("button", { name: "Remove" }).click();
+  await page.getByRole("dialog", { name: "Remove 2 entries from your library?" }).getByRole("button", { name: "Remove" }).click();
+  const removed = toast(page, "Removed 2 entries from your library");
+  await expect(removed).toBeVisible();
+  await expect(rows.filter({ hasText: "Harbour Lights" })).toHaveCount(0);
+  await expect(rows.filter({ hasText: "Ninety Winters" })).toHaveCount(0);
+  await expect(bar(page)).toHaveCount(0);
+  await removed.getByRole("button", { name: "Undo" }).click();
+  await expect(rows.filter({ hasText: "Harbour Lights" })).toHaveCount(1);
+  await expect(rows.filter({ hasText: "Ninety Winters" })).toHaveCount(1);
+  // Harbour Lights got its tag back
+  await expect(rows.filter({ hasText: "Harbour Lights" })).toContainText("cosy");
+
+  // "Select all on this page", Set status, and a filter change clears the selection
+  await page.getByRole("checkbox", { name: "Select all on this page" }).check();
+  await expect(bar(page)).toContainText("5 selected");
+  await bar(page).getByRole("button", { name: "Set status" }).click();
+  await page.getByRole("menuitem", { name: "Mark as Paused" }).click();
+  await expect(toast(page, "5 entries marked as Paused")).toBeVisible();
+  await page.getByRole("radio", { name: "Watch" }).click();
+  await expect(page).toHaveURL(/group=watch/);
+  await expect(bar(page)).toHaveCount(0);
+});
+
+test("bulk: the selection survives a background refresh; quick menu add to list and remove", async ({ page }) => {
+  test.setTimeout(150_000);
+  await signUp(page, `bulkkeep${Date.now()}`, "Bulk Keep");
+  await seed(page);
+  const lib = await (await page.request.get("/api/v1/library?limit=500")).json();
+  const id = (title: string) => lib.items.find((i: { item: { title: string } }) => i.item.title === title).item.id;
+  await open(page, "/library?view=list");
+  await rowSelect(page, "Harbour Lights").check();
+  await rowSelect(page, "Downstream").check();
+  await expect(bar(page)).toContainText("2 selected");
+  // a change elsewhere refetches the rows (server event); the ticks and the bar stay
+  const refetched = page.waitForResponse((res) => res.url().includes("/_fn/library_query"));
+  expect((await page.request.post(`/api/v1/library/${id("Downstream")}/tags`, { data: { tag: "rainy" } })).ok()).toBeTruthy();
+  await refetched;
+  await expect(page.getByRole("row").filter({ hasText: "Downstream" })).toContainText("rainy");
+  await expect(rowSelect(page, "Harbour Lights")).toBeChecked();
+  await expect(rowSelect(page, "Downstream")).toBeChecked();
+  await expect(bar(page)).toContainText("2 selected");
+
+  // the bar in both themes: axe, and no horizontal scroll at this width (360 px in its own test)
+  for (const theme of ["light", "dark"] as const) {
+    await page.evaluate((t) => localStorage.setItem("app-theme", t), theme);
+    await open(page, "/library?view=list");
+    await page.getByRole("checkbox", { name: "Select all on this page" }).check();
+    await expect(bar(page)).toBeVisible();
+    await expectNoA11yViolations(page, `bulk bar ${theme}`);
+  }
+  await expectReflow(page, "bulk bar");
+
+  // quick menu: add to a list, then remove with Undo
+  const made = await page.request.post("/api/v1/lists", { data: { name: "Weekend picks" } });
+  expect(made.ok()).toBeTruthy();
+  await open(page, "/library?kind=movie");
+  await page.getByRole("button", { name: "Actions for Ninety Winters" }).click();
+  await page.getByRole("menuitem", { name: "Add to list..." }).click();
+  const pick = page.getByRole("dialog", { name: "Add to which list?" });
+  await pick.getByRole("button", { name: "Weekend picks" }).click();
+  await expect(toast(page, "Added one entry to Weekend picks")).toBeVisible();
+  const lists = await (await page.request.get("/api/v1/lists")).json();
+  expect(lists.find((l: { name: string }) => l.name === "Weekend picks").item_ids).toContain(id("Ninety Winters"));
+
+  await page.getByRole("button", { name: "Actions for Ninety Winters" }).click();
+  await page.getByRole("menuitem", { name: "Remove from library" }).click();
+  const gone = toast(page, "Removed Ninety Winters from your library");
+  await expect(gone).toBeVisible();
+  await expect(cards(page).filter({ hasText: "Ninety Winters" })).toHaveCount(0);
+  await gone.getByRole("button", { name: "Undo" }).click();
+  await expect(cards(page).filter({ hasText: "Ninety Winters" })).toHaveCount(1);
+
+  // the item page overflow removes too; its history stays
+  await open(page, `/items/${id("Ninety Winters")}`);
+  await page.getByRole("button", { name: "More actions for Ninety Winters" }).click();
+  await page.getByRole("menuitem", { name: "Remove from library" }).click();
+  await expect(toast(page, "Removed Ninety Winters from your library")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add to library" })).toBeVisible();
+  const history = await (await page.request.get(`/api/v1/items/${id("Ninety Winters")}/progress`)).json();
+  expect(history.length).toBeGreaterThan(0);
+});
+
 for (const size of [
   { name: "1280", width: 1280, height: 800 },
   { name: "360", width: 360, height: 640 },
@@ -297,3 +420,66 @@ for (const size of [
     });
   });
 }
+
+test.describe("the bulk bar at 360 px", () => {
+  test.use({ viewport: { width: 360, height: 640 } });
+
+  test("a remove counts as logged; axe and reflow in both themes; the focused row and the toasts stay clear of it", async ({ page }) => {
+    // UX4-7, UX4-15, UX4-22
+    test.setTimeout(180_000);
+    const beacons: { events: Record<string, string>[] }[] = [];
+    await page.route("**/api/v1/usage/funnel", async (route) => {
+      beacons.push(route.request().postDataJSON());
+      await route.fulfill({ status: 204 });
+    });
+    await signUp(page, `bulk360${Date.now()}`, "Bulk Narrow");
+    await seed(page);
+    await open(page, "/library?view=list&sort=title");
+
+    // one remove: the bulk flow ends as logged, never as abandoned
+    await rowSelect(page, "Meeple Harbour").check();
+    await bar(page).getByRole("button", { name: "Remove" }).click();
+    await page.getByRole("dialog", { name: /^Remove/ }).getByRole("button", { name: "Remove" }).click();
+    await expect(toast(page, "Removed one entry from your library")).toBeVisible();
+    await expect(bar(page)).toHaveCount(0);
+    const bulk = () => beacons.flatMap((b) => b.events).filter((e) => e.flow === "bulk");
+    await expect.poll(() => bulk().length, { timeout: 20_000 }).toBeGreaterThan(0);
+    expect(bulk()).toEqual([expect.objectContaining({ flow: "bulk", outcome: "logged", taps: expect.any(String) })]);
+
+    for (const theme of ["light", "dark"] as const) {
+      await page.evaluate((t) => localStorage.setItem("app-theme", t), theme);
+      await open(page, "/library?view=list&sort=title");
+      await page.getByRole("checkbox", { name: "Select all on this page" }).check();
+      await expect(bar(page)).toBeVisible();
+      await expectNoA11yViolations(page, `bulk bar 360 ${theme}`);
+      await expectReflow(page, `bulk bar 360 ${theme}`);
+    }
+
+    // walking the page with Tab, the focused control is never under the sticky bar
+    await page.getByRole("checkbox", { name: "Select all on this page" }).focus();
+    for (let i = 0; i < 16; i++) {
+      await page.keyboard.press("Tab");
+      const clear = await page.evaluate(() => {
+        const f = document.activeElement as HTMLElement | null;
+        const b = document.querySelector("[data-sticky-bar]");
+        if (!f || !b || b.contains(f) || f === document.body) return "";
+        const fr = f.getBoundingClientRect();
+        const br = b.getBoundingClientRect();
+        const covered = fr.bottom > br.top + 1 && fr.top < br.bottom - 1;
+        return covered ? `${f.outerHTML.slice(0, 80)} at ${fr.top}-${fr.bottom}, bar ${br.top}-${br.bottom}` : "";
+      });
+      expect(clear, `Tab ${i}`).toBe("");
+    }
+
+    // a toast floats above the bar, not on it
+    await bar(page).getByRole("button", { name: "Add tag" }).click();
+    const dialog = page.getByRole("dialog", { name: "Add a tag to the selected entries" });
+    await dialog.getByLabel("New tag").fill("narrow");
+    await dialog.getByRole("button", { name: "Add tag" }).click();
+    const tagged = toast(page, "Tagged 4 entries with narrow");
+    await expect(tagged).toBeVisible();
+    const t = await tagged.boundingBox();
+    const b = await bar(page).boundingBox();
+    expect(t && b && t.y + t.height <= b.y + 1, `toast ${JSON.stringify(t)} bar ${JSON.stringify(b)}`).toBeTruthy();
+  });
+});

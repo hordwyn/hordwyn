@@ -23,6 +23,8 @@ pub struct NewSession {
     pub coop_outcome: Option<CoopOutcome>,
     pub incomplete: bool,
     pub client_op_id: Option<uuid::Uuid>,
+    /// Logged as this game group of the actor (design.md 6.7).
+    pub game_group: Option<domain::ids::GameGroupId>,
 }
 
 impl NewSession {
@@ -38,6 +40,7 @@ impl NewSession {
             coop_outcome: None,
             incomplete: false,
             client_op_id: None,
+            game_group: None,
         }
     }
 }
@@ -85,6 +88,9 @@ impl App {
         let item = self.catalog_item(new.item_id).await?;
         let kind = self.kind(&item.kind)?;
         self.check_participants(actor, &new.participants).await?;
+        if let Some(g) = new.game_group {
+            self.own_game_group(actor, g).await?;
+        }
         let op = new.client_op_id;
         // the client op id is the idempotency key of the whole command: a replay names the
         // same session (UX1-3); the user id keeps the ids of two users apart
@@ -103,6 +109,7 @@ impl App {
             participants: new.participants,
             coop_outcome: new.coop_outcome,
             incomplete: new.incomplete,
+            game_group_id: new.game_group,
         };
         session.validate()?;
         let plays = kind.progress_model == ProgressModel::Sessions;
@@ -283,6 +290,8 @@ impl App {
             participants: vec![participant],
             coop_outcome: s.coop_outcome,
             incomplete: s.incomplete,
+            // the group is the owner's, not the copier's
+            game_group_id: None,
         };
         copy.validate()?;
         self.repos.sessions.insert(&copy).await?;
@@ -377,7 +386,10 @@ impl App {
 
     /// Companions of other users that stand for the actor: linked to them, plus companions
     /// merged into those.
-    async fn companion_ids_representing(&self, actor: Actor) -> AppResult<HashSet<CompanionId>> {
+    pub(crate) async fn companion_ids_representing(
+        &self,
+        actor: Actor,
+    ) -> AppResult<HashSet<CompanionId>> {
         let linked = self.repos.companions.linked_to(actor.user_id).await?;
         let mut ids: HashSet<CompanionId> = HashSet::new();
         for c in linked.into_iter().filter(|c| c.owner != actor.user_id) {

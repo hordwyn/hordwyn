@@ -297,3 +297,64 @@ async fn merged_twins_in_one_session_count_the_win() {
     let s = stats.iter().find(|s| s.companion_id == bob.id).unwrap();
     assert_eq!((s.plays, s.wins, s.decided), (1, 1, 1));
 }
+
+/// DEC-383 (deferred to WP4-8): a cooperative win counts as a win for everyone at the table,
+/// also players not marked as winners; between two games with the same number of plays the
+/// one played last is "most played".
+#[tokio::test]
+async fn a_cooperative_win_counts_for_everyone_and_the_latest_game_breaks_a_tie() {
+    let env = TestEnv::new();
+    let (me_user, me) = common::user(&env, "alice").await;
+    let azul = common::item(&env.app, "board_game", "Azul").await;
+    let catan = common::item(&env.app, "board_game", "Catan").await;
+    let anna = env.app.create_companion(me, "Anna").await.unwrap();
+    let me_c = me_user.self_companion;
+    for (item, day, coop) in [
+        (catan.id, 1, Some(CoopOutcome::Won)),
+        (azul.id, 2, None),
+        (catan.id, 3, None),
+        (azul.id, 4, Some(CoopOutcome::Won)),
+    ] {
+        let mut s = NewSession::new(item, vec![player(me_c, false), player(anna.id, false)]);
+        s.started_at = Some(at(day));
+        s.coop_outcome = coop;
+        env.app.log_session(me, s).await.unwrap();
+    }
+    let stats = env.app.companion_stats(me).await.unwrap();
+    let a = stats.iter().find(|s| s.companion_id == anna.id).unwrap();
+    assert_eq!(
+        (a.plays, a.wins, a.decided),
+        (4, 2, 2),
+        "both cooperative wins are hers, the unmarked plays are undecided"
+    );
+    let most = a.most_played.as_ref().unwrap();
+    assert_eq!(
+        (most.item_id, most.plays),
+        (azul.id, 2),
+        "two plays each: Azul was played last"
+    );
+}
+
+/// DEC-383 (deferred to WP4-8): two entries with the same name linked to different accounts
+/// are two people and never suggested for a merge; one linked and one not still are.
+#[tokio::test]
+async fn suggestions_never_pair_entries_linked_to_different_accounts() {
+    let env = TestEnv::new();
+    let (_, me) = common::user(&env, "alice").await;
+    let (sam1_user, sam1) = common::user(&env, "sam").await;
+    let (sam2_user, sam2) = common::user(&env, "samuel").await;
+    let first = env.app.create_companion(me, "Sam").await.unwrap();
+    let second = env.app.create_companion(me, "sam").await.unwrap();
+    for (c, user, actor) in [(&first, &sam1_user, sam1), (&second, &sam2_user, sam2)] {
+        let req = env.app.request_link(me, c.id, user.id).await.unwrap();
+        env.app.accept_link(actor, req.id).await.unwrap();
+    }
+    assert_eq!(env.app.merge_suggestions(me).await.unwrap().len(), 0);
+    let third = env.app.create_companion(me, "SAM").await.unwrap();
+    let s = env.app.merge_suggestions(me).await.unwrap();
+    assert_eq!(s.len(), 1, "{s:?}");
+    assert_eq!(
+        s[0].remove, third.id,
+        "the unlinked entry joins the kept one"
+    );
+}

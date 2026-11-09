@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM oidc_used_jti WHERE jti_key = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "639f26c09cf2cbcbc894797e0ea7d47472e3b02a2ffde50c3a8860a143525d77"
+}

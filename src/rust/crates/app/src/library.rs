@@ -1,3 +1,4 @@
+use domain::DomainError;
 use domain::Timestamp;
 use domain::hlc::{Hlc, Lww};
 use domain::ids::{EntryId, EventId, ItemId, ReviewId};
@@ -9,7 +10,7 @@ use domain::review::{Review, validate_review_body};
 use domain::user::Actor;
 
 use crate::error::OptionExt;
-use crate::ports::AppEvent;
+use crate::ports::{AppEvent, LibraryCursor, LibrarySort, SortValue};
 use crate::{App, AppError, AppResult};
 
 /// How long after logging an event it can still be undone (hours).
@@ -71,22 +72,48 @@ impl App {
     /// Largest library page.
     pub const MAX_PAGE: u32 = 500;
 
-    /// One page of the library, most recently added first, with the total count.
-    /// `limit` is clamped to 1..=[`App::MAX_PAGE`].
+    /// One page of the library, most recently added first, with the total count and the
+    /// cursor of the next page when more follow (keyset paging, DEC-416). `after` is a
+    /// previous page's cursor; `limit` is clamped to 1..=[`App::MAX_PAGE`].
     ///
     /// # Errors
-    /// Storage errors.
+    /// A cursor of another order; storage errors.
     pub async fn library_page(
         &self,
         actor: Actor,
-        offset: u64,
+        after: Option<&LibraryCursor>,
         limit: u32,
-    ) -> AppResult<(Vec<LibraryEntry>, u64)> {
-        Ok(self
+    ) -> AppResult<(Vec<LibraryEntry>, u64, Option<LibraryCursor>)> {
+        let after = match after {
+            None => None,
+            Some(LibraryCursor {
+                sort: LibrarySort::Added,
+                descending: true,
+                key: SortValue::Time(at),
+                id,
+            }) => Some((*at, *id)),
+            Some(_) => {
+                return Err(
+                    DomainError::invalid("after", "the cursor belongs to another order").into(),
+                );
+            }
+        };
+        let page = self
             .repos
             .library
-            .page(actor.user_id, offset, limit.clamp(1, Self::MAX_PAGE))
-            .await?)
+            .page(actor.user_id, after, limit.clamp(1, Self::MAX_PAGE))
+            .await?;
+        let next = page
+            .entries
+            .last()
+            .filter(|_| page.more)
+            .map(|e| LibraryCursor {
+                sort: LibrarySort::Added,
+                descending: true,
+                key: SortValue::Time(e.added_at),
+                id: e.id,
+            });
+        Ok((page.entries, page.total, next))
     }
 
     /// Set the status (LWW). Adds the item to the library if needed.
@@ -170,6 +197,25 @@ impl App {
         occurred_at: Option<Timestamp>,
         client_op_id: Option<uuid::Uuid>,
     ) -> AppResult<ProgressEvent> {
+        self.log_progress_stamped(actor, item_id, progress, occurred_at, client_op_id, None)
+            .await
+    }
+
+    /// [`App::log_progress`] with the client's stamp for the status the log implies (an
+    /// offline log synced later counts as made when it was queued, so a status set after it,
+    /// offline or on another device, wins; DEC-455). `None` stamps it now.
+    ///
+    /// # Errors
+    /// As [`App::log_progress`].
+    pub async fn log_progress_stamped(
+        &self,
+        actor: Actor,
+        item_id: ItemId,
+        progress: Progress,
+        occurred_at: Option<Timestamp>,
+        client_op_id: Option<uuid::Uuid>,
+        status_hlc: Option<Hlc>,
+    ) -> AppResult<ProgressEvent> {
         let item = self.catalog_item(item_id).await?;
         let kind = self.kind(&item.kind)?;
         progress.validate_for(kind.progress_model)?;
@@ -184,7 +230,7 @@ impl App {
             .map(|to| StatusChange {
                 from: entry.status.value.clone(),
                 to,
-                stamp: self.stamp(None),
+                stamp: self.stamp(status_hlc),
             });
         let now = self.now();
         let event = ProgressEvent {

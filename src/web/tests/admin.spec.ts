@@ -9,8 +9,12 @@ import {
   hydrated,
   signIn,
   signUp,
+  sql,
   totp,
 } from "./helpers";
+
+// the SMTP side of tests/mail-sink.mjs
+const MAIL_SINK_SMTP = Number(process.env.MAIL_SINK_SMTP_PORT ?? 3013);
 
 // UX phase 2, admin and settings areas (addendum-1 3.3, 3.4; design.md 6.10, 6.12, 6.13):
 // the eight admin pages with axe in both themes and reflow at 360 px, re-authentication with
@@ -146,6 +150,26 @@ test("invites: the link is shown once, then the invite is revoked; the self guar
   await expectNoA11yViolations(page, "users with invites open");
 });
 
+// DEC-437 (WP4-8 item C): an admin save through the re-auth gate counts every remembered
+// disclosure open at that moment as "open at a save" (addendum-1 D16)
+test("an admin save counts the open Invites disclosure as open at a save", async ({ page }) => {
+  const events: Record<string, string>[] = [];
+  await page.route("**/api/v1/usage/funnel", async (route) => {
+    events.push(...(route.request().postDataJSON().events ?? []));
+    await route.fulfill({ status: 204 });
+  });
+  await signIn(page, ADMIN);
+  await visit(page, "/admin/users");
+  await page.getByRole("button", { name: /^Open invites/ }).click();
+  await page.getByLabel("Note (optional)").fill(`funnel ${Date.now()}`);
+  await page.getByRole("button", { name: "Create invite" }).click();
+  await expect(page.getByLabel("Invite link")).toHaveValue(/\/sign-up\?invite=/);
+  const counted = (outcome: string) =>
+    events.some((e) => e.flow === "disclosure" && e.subject === "users/invites" && e.outcome === outcome);
+  await expect.poll(() => counted("open_at_save"), { timeout: 20_000 }).toBe(true);
+  expect(counted("opened")).toBe(true);
+});
+
 test("a data source is tested against the fake TMDB server", async ({ page }) => {
   await signIn(page, ADMIN);
   await visit(page, "/admin/sources");
@@ -256,7 +280,37 @@ test("Instance > Mail: Save and send a test says what failed, and Overview follo
     await visit(page, "/admin");
     const row = page.getByTestId("health-row").filter({ hasText: "Mail" });
     await expect(row).toContainText("The last test failed");
+
+    // a server that takes the message (tests/mail-sink.mjs): the Overview names the time of
+    // the test in the admin's own zone, not in UTC (DEC-336, WP4-2)
+    sql(`UPDATE users SET time_zone = 'Pacific/Kiritimati' WHERE username = '${ADMIN}'`);
+    const put = await page.request.put("/api/v1/admin/settings", {
+      data: { values: { "mail.port": MAIL_SINK_SMTP } },
+    });
+    expect(put.ok(), `mail port ${put.status()} ${await put.text()}`).toBeTruthy();
+    const test = await page.request.post("/api/v1/admin/mail/test", { data: { to: "admin@example.test" } });
+    expect((await test.json()).ok, "the sink takes the test").toBeTruthy();
+    const at = new Date((await (await page.request.get("/api/v1/admin/mail")).json()).last_test_at);
+    const p = Object.fromEntries(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: "Pacific/Kiritimati",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      })
+        .formatToParts(at)
+        .map((x) => [x.type, x.value]),
+    );
+    await visit(page, "/admin");
+    await expect(row).toContainText(
+      `Test message sent ${p.month} ${p.day}, ${p.year}, ${p.hour}:${p.minute} ${p.dayPeriod}`,
+    );
+    await expect(row).not.toContainText("UTC");
   } finally {
+    sql(`UPDATE users SET time_zone = NULL WHERE username = '${ADMIN}'`);
     const r = await page.request.put("/api/v1/admin/settings", {
       data: { values: { "mail.host": null, "mail.port": null, "mail.security": null, "mail.from": null } },
     });
@@ -314,4 +368,53 @@ test("Data sources: a source is switched off and on again", async ({ page }) => 
     }
     await expect(again).toBeChecked();
   }
+});
+
+test("Users: the row menu resets an authenticator after a confirm; stacked rows at 360 px", async ({ page, browser }) => {
+  // a member with an authenticator (enrolled directly: the menu only needs one to exist)
+  const user = `rm${Date.now()}`;
+  const other = await browser.newContext();
+  const made = await other.request.post("/api/v1/auth/sign-up", {
+    data: { username: user, display_name: "Rhea", password: PASSWORD },
+  });
+  expect(made.ok(), `sign-up ${made.status()}`).toBeTruthy();
+  await other.close();
+  sql(`UPDATE credentials SET totp_enabled = true WHERE user_id = (SELECT id FROM users WHERE username = '${user}')`);
+
+  await signIn(page, ADMIN);
+  await visit(page, "/admin/users");
+  const row = page.getByTestId("user-row").filter({ hasText: user });
+  await expect(row).toContainText("Authenticator");
+  await row.getByRole("button", { name: "More actions for Rhea" }).click();
+  await page.getByRole("menuitem", { name: "Reset authenticator" }).click();
+  // the confirm names the consequence; Cancel changes nothing
+  const dialog = page.getByRole("dialog", { name: "Reset the authenticator of Rhea?" });
+  await expect(dialog).toContainText("Their recovery codes stop working");
+  await expectNoA11yViolations(page, "reset authenticator confirm");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(row).toContainText("Authenticator");
+  await row.getByRole("button", { name: "More actions for Rhea" }).click();
+  await page.getByRole("menuitem", { name: "Reset authenticator" }).click();
+  await dialog.getByRole("button", { name: "Reset authenticator" }).click();
+  await expect(row).not.toContainText("Authenticator");
+  // nothing left for the menu: no authenticator, no linked provider
+  await expect(row.getByRole("button", { name: "More actions for Rhea" })).toHaveCount(0);
+
+  // below 47.5rem each person is a card with labelled fields; no header row, no sideways scroll
+  for (const theme of ["light", "dark"] as const) {
+    await page.evaluate((t) => localStorage.setItem("app-theme", t), theme);
+    await page.setViewportSize({ width: 360, height: 740 });
+    await visit(page, "/admin/users");
+    await expect(page.getByRole("columnheader", { name: "Person" })).toBeHidden();
+    const card = page.getByTestId("user-row").filter({ hasText: user });
+    await expect(card.getByText("Signs in with", { exact: true })).toBeVisible();
+    await expect(card.getByText("Last seen", { exact: true })).toBeVisible();
+    await expectReflow(page, `users 360 ${theme}`);
+    await expectNoA11yViolations(page, `users 360 ${theme}`);
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await visit(page, "/admin/users");
+  await expect(page.getByRole("columnheader", { name: "Person" })).toBeVisible();
+  await expect(page.getByTestId("user-row").filter({ hasText: user }).getByText("Last seen", { exact: true })).toBeHidden();
+  await page.evaluate(() => localStorage.removeItem("app-theme"));
 });

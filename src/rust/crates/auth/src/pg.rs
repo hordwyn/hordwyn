@@ -83,26 +83,26 @@ impl PgAuthStore {
         )
     }
 
-    /// Accounts with an enrolled authenticator whose seed cannot be decrypted (overview).
+    /// Accounts with an enrolled authenticator whose seed is sealed with a key version that
+    /// is not loaded (`loaded`), counted by the stored version byte without decrypting
+    /// anything (DEC-286).
     ///
     /// # Errors
     /// Database errors.
-    pub async fn locked_totp_count(&self) -> Result<u64, PortError> {
-        let rows = sqlx::query!(
-            "SELECT user_id, totp_secret_enc FROM credentials WHERE totp_secret_enc IS NOT NULL"
+    pub async fn locked_totp_count(&self, loaded: &[u16]) -> Result<u64, PortError> {
+        let loaded: Vec<i32> = loaded.iter().map(|v| i32::from(*v)).collect();
+        let n = sqlx::query_scalar!(
+            r#"SELECT count(*) AS "n!" FROM credentials
+               WHERE totp_secret_enc IS NOT NULL
+                 AND (length(totp_secret_enc) < 3
+                      OR NOT (get_byte(totp_secret_enc, 1) * 256 + get_byte(totp_secret_enc, 2))
+                          = ANY($1::int[]))"#,
+            &loaded
         )
-        .fetch_all(&self.pool)
+        .fetch_one(&self.pool)
         .await
         .map_err(pe)?;
-        Ok(rows
-            .iter()
-            .filter(|r| {
-                let row = r.user_id.to_string();
-                r.totp_secret_enc
-                    .as_deref()
-                    .is_some_and(|b| self.cipher.open(totp_slot(&row), b).is_err())
-            })
-            .count() as u64)
+        Ok(u64::try_from(n).unwrap_or(0))
     }
 }
 
@@ -420,17 +420,71 @@ impl AuthStore for PgAuthStore {
         Ok(())
     }
 
-    async fn unlink_identity(&self, user: UserId, id: Uuid) -> Result<bool, PortError> {
-        Ok(sqlx::query!(
+    async fn unlink_identity(
+        &self,
+        user: UserId,
+        id: Uuid,
+        audit: Option<&crate::admin::AuditEntry>,
+    ) -> Result<bool, PortError> {
+        let mut tx = self.pool.begin().await.map_err(pe)?;
+        let gone = sqlx::query!(
             "DELETE FROM oidc_identities WHERE id = $1 AND user_id = $2",
             id,
             user.0
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(pe)?
         .rows_affected()
-            == 1)
+            == 1;
+        if gone {
+            audit_opt(&mut tx, audit).await?;
+        }
+        tx.commit().await.map_err(pe)?;
+        Ok(gone)
+    }
+
+    async fn identity_counts(&self) -> Result<Vec<(Uuid, u64)>, PortError> {
+        Ok(sqlx::query!(
+            r#"SELECT provider_id AS "provider!", count(*) AS "n!" FROM oidc_identities
+               WHERE provider_id IS NOT NULL GROUP BY provider_id"#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(pe)?
+        .into_iter()
+        .map(|r| (r.provider, u64::try_from(r.n).unwrap_or(0)))
+        .collect())
+    }
+
+    async fn reset_totp(
+        &self,
+        user: UserId,
+        audit: Option<&crate::admin::AuditEntry>,
+    ) -> Result<bool, PortError> {
+        let mut tx = self.pool.begin().await.map_err(pe)?;
+        let had = sqlx::query_scalar!(
+            r#"UPDATE credentials SET totp_secret = NULL, totp_secret_enc = NULL,
+                   totp_enabled = false, totp_last_step = NULL
+               WHERE user_id = $1
+               RETURNING (SELECT c.totp_enabled OR c.totp_secret IS NOT NULL
+                                 OR c.totp_secret_enc IS NOT NULL
+                          FROM credentials c WHERE c.user_id = $1) AS "had!""#,
+            user.0
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(pe)?
+        .unwrap_or(false);
+        sqlx::query!("DELETE FROM totp_recovery_codes WHERE user_id = $1", user.0)
+            .execute(&mut *tx)
+            .await
+            .map_err(pe)?;
+        if had {
+            audit_opt(&mut tx, audit).await?;
+        }
+        tx.commit().await.map_err(pe)?;
+        Ok(had)
     }
 
     async fn identities_of(&self, user: UserId) -> Result<Vec<OidcIdentity>, PortError> {
@@ -552,7 +606,7 @@ impl AuthStore for PgAuthStore {
     ) -> Result<(), PortError> {
         let mut tx = self.pool.begin().await.map_err(pe)?;
         sqlx::query!(
-            "DELETE FROM password_resets WHERE user_id = $1 AND used_at IS NULL",
+            "DELETE FROM password_resets WHERE user_id = $1 AND used_at IS NULL AND purpose = 'password'",
             r.user.0
         )
         .execute(&mut *tx)
@@ -580,7 +634,8 @@ impl AuthStore for PgAuthStore {
     ) -> Result<Option<UserId>, PortError> {
         Ok(sqlx::query_scalar!(
             "SELECT user_id FROM password_resets
-             WHERE token_hash = $1 AND used_at IS NULL AND expires_at > $2",
+             WHERE token_hash = $1 AND used_at IS NULL AND expires_at > $2
+               AND purpose = 'password'",
             token_hash,
             now
         )
@@ -600,6 +655,7 @@ impl AuthStore for PgAuthStore {
         let Some(user) = sqlx::query_scalar!(
             "UPDATE password_resets SET used_at = $2
              WHERE token_hash = $1 AND used_at IS NULL AND expires_at > $2
+               AND purpose = 'password'
              RETURNING user_id",
             token_hash,
             now
@@ -625,6 +681,58 @@ impl AuthStore for PgAuthStore {
             .map_err(pe)?;
         tx.commit().await.map_err(pe)?;
         Ok(Some(UserId(user)))
+    }
+
+    async fn insert_sign_in_link(
+        &self,
+        r: &crate::store::PasswordReset,
+        binding: &str,
+    ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(pe)?;
+        sqlx::query!(
+            "DELETE FROM password_resets
+             WHERE user_id = $1 AND used_at IS NULL AND purpose = 'oidc_link'",
+            r.user.0
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(pe)?;
+        sqlx::query!(
+            "INSERT INTO password_resets
+                 (id, user_id, token_hash, created_at, expires_at, purpose, binding)
+             VALUES ($1, $2, $3, $4, $5, 'oidc_link', $6)",
+            r.id,
+            r.user.0,
+            r.token_hash,
+            r.created_at,
+            r.expires_at,
+            binding
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(pe)?;
+        tx.commit().await.map_err(pe)
+    }
+
+    async fn claim_sign_in_link(
+        &self,
+        token_hash: &str,
+        binding: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Option<UserId>, PortError> {
+        Ok(sqlx::query_scalar!(
+            "UPDATE password_resets SET used_at = $3
+             WHERE token_hash = $1 AND binding = $2 AND purpose = 'oidc_link'
+               AND used_at IS NULL AND expires_at > $3
+             RETURNING user_id",
+            token_hash,
+            binding,
+            now
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(pe)?
+        .map(UserId))
     }
 
     async fn purge_password_resets(&self, now: DateTime<Utc>) -> Result<u64, PortError> {

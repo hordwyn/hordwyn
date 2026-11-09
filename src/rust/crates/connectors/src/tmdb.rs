@@ -6,7 +6,7 @@ use catalog_core::{
     Details, DetailsRequest, ImageKind, ImageRef, KeySlot, RateLimit, Search, SearchRequest,
     Snapshot,
 };
-use domain::catalog::ExternalId;
+use domain::catalog::{CatalogEpisode, ExternalId};
 use kinds::builtin::{MovieAttributes, SeasonInfo, ShowAttributes};
 use serde::Deserialize;
 
@@ -55,7 +55,12 @@ impl Tmdb {
             id: ID.into(),
             name: "TMDB".into(),
             kinds: vec!["movie".into(), "show".into()],
-            capabilities: vec![Capability::Search, Capability::Details, Capability::Images],
+            capabilities: vec![
+                Capability::Search,
+                Capability::Details,
+                Capability::Images,
+                Capability::Episodes,
+            ],
             rate_limit: RateLimit { per_second: 20, burst: 10, max_concurrency: 8 },
             auth: Auth::Bearer { env: API_KEY_ENV.into() },
             attribution: Attribution {
@@ -163,8 +168,25 @@ struct MovieDetails {
 
 #[derive(Deserialize)]
 struct Season {
-    season_number: u32,
+    #[serde(rename = "season_number")]
+    number: u32,
     episode_count: u32,
+    air_date: Option<String>,
+}
+
+/// `GET /3/tv/{series_id}/season/{season_number}` (TV Seasons > Details); only these fields
+/// are read (WP4-7, docs/connectors/tmdb.md).
+#[derive(Deserialize)]
+struct SeasonDetails {
+    #[serde(default)]
+    episodes: Vec<SeasonEpisode>,
+}
+
+#[derive(Deserialize)]
+struct SeasonEpisode {
+    episode_number: u32,
+    air_date: Option<String>,
+    runtime: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -290,8 +312,9 @@ impl Details for Tmdb {
                         .seasons
                         .into_iter()
                         .map(|x| SeasonInfo {
-                            number: x.season_number,
+                            number: x.number,
                             episode_count: x.episode_count,
+                            air_date: date_of(x.air_date.as_deref()),
                         })
                         .collect(),
                     episode_runtime_minutes: s.episode_run_time.first().copied(),
@@ -315,6 +338,38 @@ impl catalog_core::Images for Tmdb {
         req: &DetailsRequest,
     ) -> Result<Vec<ImageRef>, ConnectorError> {
         Ok(Details::details(self, ctx, req).await?.images)
+    }
+}
+
+#[async_trait]
+impl catalog_core::Episodes for Tmdb {
+    async fn season_episodes(
+        &self,
+        ctx: &Ctx,
+        req: &catalog_core::EpisodesRequest,
+    ) -> Result<Vec<CatalogEpisode>, ConnectorError> {
+        if req.kind != "show" {
+            return Err(ConnectorError::Unsupported(format!("kind `{}`", req.kind)));
+        }
+        // TMDB ids are numbers; anything else must not reach the path
+        let id: u64 = req
+            .id
+            .parse()
+            .map_err(|_| ConnectorError::Parse(format!("tmdb id `{}`", req.id)))?;
+        let url = self.url(
+            &format!("/3/tv/{id}/season/{}", req.season),
+            &[("language", "en-US")],
+        )?;
+        let s: SeasonDetails = get_json(ctx, ID, "season", &url, self.headers()?).await?;
+        Ok(s.episodes
+            .into_iter()
+            .map(|e| CatalogEpisode {
+                season: req.season,
+                number: e.episode_number,
+                air_date: date_of(e.air_date.as_deref()),
+                runtime_minutes: e.runtime.filter(|r| *r > 0),
+            })
+            .collect())
     }
 }
 
@@ -348,6 +403,10 @@ impl Connector for Tmdb {
     }
 
     fn as_images(&self) -> Option<&dyn catalog_core::Images> {
+        Some(self)
+    }
+
+    fn as_episodes(&self) -> Option<&dyn catalog_core::Episodes> {
         Some(self)
     }
 }

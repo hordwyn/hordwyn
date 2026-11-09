@@ -305,7 +305,7 @@ fn Log(p: NotificationPageDto) -> impl IntoView {
     let channels = p.channels;
     view! {
         <div class="mt-4 pb-[var(--tab-bar-height)]">
-            <Table attr:data-testid="nf-log">
+            <Table stacked=true attr:data-testid="nf-log">
                 <caption class="sr-only">{t("notify-log")}</caption>
                 <TableHeader>
                     <TableRow>
@@ -330,13 +330,13 @@ fn Log(p: NotificationPageDto) -> impl IntoView {
                         };
                         view! {
                             <TableRow>
-                                <TableCell class="whitespace-nowrap max-[40rem]:whitespace-normal">{when}</TableCell>
-                                <TableCell>
+                                <TableCell label=t("notify-log-when") class="whitespace-nowrap max-[40rem]:whitespace-normal">{when}</TableCell>
+                                <TableCell label=t("notify-event")>
                                     <span class="block">{event_label(&d.event)}</span>
                                     <span class="block text-xs text-muted-foreground">{d.title.clone()}</span>
                                 </TableCell>
-                                <TableCell>{channel}</TableCell>
-                                <TableCell>
+                                <TableCell label=t("notify-channel")>{channel}</TableCell>
+                                <TableCell label=t("notify-log-state")>
                                     <Badge variant=variant>{t(&format!("notify-state-{}", d.state))}</Badge>
                                     // what the channel answered, as it said it (not translated)
                                     {d.last_error.clone().map(|e| view! {
