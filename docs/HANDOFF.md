@@ -17,10 +17,10 @@ rules (section 2, verbatim), `docs/DECISIONS.md`, `docs/design/DESIGN.md`, the U
   closed (company laptop behind Cisco SSE; no code change).
 - 17 owner test findings OT-1..OT-17 and the new plan P0..P4:
   `docs/handoff/owner-test-2026-11-10.md`.
-- Fable round 2 STARTED 2026-11-10 (owner go; weekly usage at 91%, so outputs may be partial: each agent writes its file incrementally, TODO marks unfinished sections): briefs
+- Fable round 2 DONE 2026-11-10 (all four complete, no TODO): owner-review-page.md, ux-owner-test.md, bug-diagnosis.md, attribution-and-connectors.md in docs/fable/round2/. Next: build the owner review page from F1 + F2, walk through it with the owner, then fix pack ot1: briefs
   `docs/handoff/fable-briefs/` (common.md + F1 review page, F2 UX pass, F3 bug diagnosis,
   F4 attribution and connectors). All read-only, no builds; outputs to `docs/fable/round2/`.
-  Model alias `fable` = `claude-fable-5-2` (DEC-495). Rerun only the unfinished parts.
+  Model alias `fable` = `claude-fable-5-2` (DEC-495).
 
 **Open threads at the handover (2026-11-10), do these first:**
 
