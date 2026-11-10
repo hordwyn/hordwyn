@@ -1,0 +1,832 @@
+<title>Round 2 Review Decisions</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: one reading column, a sticky bar with the progress counter and the filter, decision cards stacked per section, a compact objection list at the end. Tokens follow the product's own zinc palette (docs/design/ux/design.md 2.7), as on the earlier review pages. */
+:root {
+  --bg: #ffffff; --fg: #09090b; --muted: #52525c; --soft: #f4f4f5; --card: #ffffff;
+  --line: #e4e4e7; --input: #71717b; --primary: #18181b; --on-primary: #fafafa;
+  --ok: #007a55; --ok-soft: #ecfdf5; --warn: #bb4d00; --warn-soft: #fffbeb; --info: #0069a8; --info-soft: #f0f9ff;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --r: 0.5rem;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #09090b; --fg: #fafafa; --muted: #9f9fa9; --soft: #27272a; --card: #18181b;
+  --line: #3f3f46; --input: #71717b; --primary: #fafafa; --on-primary: #18181b;
+  --ok: #00d492; --ok-soft: #022c22; --warn: #ffb900; --warn-soft: #2a1a00; --info: #00bcff; --info-soft: #062433; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #09090b; --fg: #fafafa; --muted: #9f9fa9; --soft: #27272a; --card: #18181b;
+  --line: #3f3f46; --input: #71717b; --primary: #fafafa; --on-primary: #18181b;
+  --ok: #00d492; --ok-soft: #022c22; --warn: #ffb900; --warn-soft: #2a1a00; --info: #00bcff; --info-soft: #062433; color-scheme: dark }
+
+*, *::before, *::after { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--sans); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.wrap { max-width: 54rem; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 1.5rem 4rem; }
+h1, h2, h3 { text-wrap: balance; margin: 0; line-height: 1.25; }
+h1 { font-size: 1.6rem; font-weight: 650; letter-spacing: -0.02em; }
+h2 { font-size: 1.2rem; font-weight: 600; }
+h3 { font-size: 1rem; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; border-radius: 4px; }
+code { font: 0.85em var(--mono); background: var(--soft); padding: 0.05em 0.35em; border-radius: 4px; }
+button { font: inherit; }
+
+header.top { display: grid; gap: 0.6rem; padding-bottom: 1.25rem; }
+.eyebrow { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.lead { color: var(--muted); }
+.notice { border-radius: var(--r); padding: 0.7rem 0.9rem; font-size: 0.88rem; background: var(--info-soft); color: var(--fg); border: 1px solid color-mix(in srgb, var(--info) 35%, var(--line)); }
+.notice.warn { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+.legend { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; font-size: 0.82rem; color: var(--muted); }
+.legend b { color: var(--fg); font-weight: 600; }
+
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-block: 1px solid var(--line); margin-inline: -16px; padding: 0.55rem 16px 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.45rem; }
+.bar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1rem; }
+.count { font-weight: 600; font-variant-numeric: tabular-nums; }
+.count small { font-weight: 400; color: var(--muted); font-size: 0.85rem; }
+.meter { flex: 1 1 8rem; min-width: 6rem; height: 0.4rem; border-radius: 999px; background: var(--soft); overflow: hidden; }
+.meter i { display: block; height: 100%; width: 0; background: var(--ok); border-radius: 999px; transition: width 0.2s; }
+.toggle { display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.9rem; min-height: 2rem; cursor: pointer; }
+.toggle input { width: 1.1rem; height: 1.1rem; accent-color: var(--fg); margin: 0; }
+.save-state { font-size: 0.8rem; color: var(--muted); margin-left: auto; }
+.bar nav ul { list-style: none; margin: 0; padding: 0 0 0.5rem; display: flex; gap: 0.25rem; overflow-x: auto; }
+.bar nav a { display: block; padding: 0.3rem 0.7rem; border-radius: 999px; text-decoration: none; font-size: 0.85rem; white-space: nowrap; color: var(--muted); }
+.bar nav a:hover { background: var(--soft); color: var(--fg); }
+.bar nav a span { font-variant-numeric: tabular-nums; opacity: 0.8; }
+
+section.block { display: grid; gap: 0.9rem; padding-top: 2.2rem; scroll-margin-top: 7rem; }
+.block-head { display: grid; gap: 0.3rem; }
+.block-head .h-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.75rem; }
+.sec-count { font-size: 0.82rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.items { display: grid; gap: 0.75rem; }
+.all-done { font-size: 0.88rem; color: var(--muted); }
+
+article.item { border: 1px solid var(--line); border-radius: calc(var(--r) + 4px); background: var(--card); padding: 1rem; display: grid; gap: 0.75rem; min-width: 0; scroll-margin-top: 7rem; }
+article.item[data-state="answered"] { border-color: color-mix(in srgb, var(--ok) 50%, var(--line)); }
+.item-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.6rem; }
+.item-head h3 { flex: 1 1 14rem; min-width: 0; }
+.ref { font: 600 0.78rem var(--mono); color: var(--muted); white-space: nowrap; }
+.tag { font-size: 0.72rem; font-weight: 600; padding: 0.1rem 0.5rem; border-radius: 999px; background: var(--soft); color: var(--muted); white-space: nowrap; }
+.tag.ok { background: var(--ok-soft); color: var(--ok); }
+.tag.warn { background: var(--warn-soft); color: var(--warn); }
+.question { font-size: 0.98rem; }
+.flag { font-size: 0.86rem; border-left: 3px solid var(--warn); padding: 0.1rem 0 0.1rem 0.65rem; color: var(--fg); }
+
+fieldset.opts { border: 0; margin: 0; padding: 0; display: grid; gap: 0.35rem; min-width: 0; }
+fieldset.opts legend { padding: 0; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.35rem; }
+label.opt { display: grid; grid-template-columns: auto 1fr; gap: 0.6rem; align-items: start; border: 1px solid var(--line); border-radius: var(--r); padding: 0.55rem 0.7rem; cursor: pointer; min-width: 0; }
+label.opt:hover { border-color: var(--input); }
+label.opt input { accent-color: var(--fg); width: 1.05rem; height: 1.05rem; margin: 0.2rem 0 0; }
+label.opt:has(input:checked) { border-color: var(--fg); background: var(--soft); }
+article.item[data-state="open"] label.opt:has(input:checked) { border-style: dashed; }
+.opt-text { min-width: 0; overflow-wrap: anywhere; }
+.opt-text b { font-family: var(--mono); font-size: 0.85em; margin-right: 0.3rem; }
+.def { display: inline-block; font-size: 0.7rem; font-weight: 600; padding: 0.02rem 0.45rem; border-radius: 999px; background: var(--info-soft); color: var(--info); margin-left: 0.35rem; vertical-align: 0.08em; white-space: nowrap; }
+.def.contested { background: var(--warn-soft); color: var(--warn); }
+
+dl.facts { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 0.9rem; font-size: 0.88rem; }
+dl.facts dt { color: var(--muted); font-weight: 500; }
+dl.facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 30rem) { dl.facts { grid-template-columns: 1fr; gap: 0.05rem; } dl.facts dd { margin-bottom: 0.4rem; } }
+
+.note-label { font-size: 0.8rem; color: var(--muted); display: grid; gap: 0.25rem; }
+textarea { width: 100%; min-height: 2.6rem; resize: vertical; font: 0.92rem/1.45 var(--sans); color: var(--fg); background: var(--bg); border: 1px solid var(--input); border-radius: var(--r); padding: 0.5rem 0.65rem; }
+.foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.8rem; font-size: 0.8rem; color: var(--muted); min-height: 2rem; }
+.btn { border: 1px solid var(--input); background: transparent; color: var(--fg); border-radius: var(--r); padding: 0.3rem 0.75rem; min-height: 2rem; cursor: pointer; font-size: 0.86rem; }
+.btn:hover { background: var(--soft); }
+.btn.primary { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+.btn.link { border: 0; padding: 0.3rem 0.2rem; text-decoration: underline; text-underline-offset: 3px; color: var(--muted); }
+body.readonly .btn, body.readonly input, body.readonly textarea { pointer-events: none; opacity: 0.6; }
+
+.dgroup { display: grid; gap: 0.35rem; }
+.dgroup h3 { font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-top: 0.6rem; }
+.drow { border: 1px solid var(--line); border-radius: var(--r); padding: 0.55rem 0.7rem; display: grid; gap: 0.45rem; min-width: 0; background: var(--card); }
+.drow[data-state="object"] { border-color: color-mix(in srgb, var(--warn) 60%, var(--line)); background: var(--warn-soft); }
+.drow label.obj { display: grid; grid-template-columns: auto 1fr; gap: 0.65rem; align-items: start; cursor: pointer; min-width: 0; }
+.drow label.obj input { width: 1.1rem; height: 1.1rem; margin: 0.2rem 0 0; accent-color: var(--warn); }
+.drow .d-text { min-width: 0; overflow-wrap: anywhere; font-size: 0.92rem; }
+.drow .d-text small { color: var(--muted); }
+footer { margin-top: 3rem; font-size: 0.8rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: 1rem; display: grid; gap: 0.3rem; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+@media (prefers-reduced-motion: reduce) { .meter i { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <span class="eyebrow">Owner review, round 2 - 2026-11-10</span>
+    <h1>Round 2 review decisions</h1>
+    <p class="lead">64 decisions from the eight round-1 reviews, your test of 2026-11-10 and the open items of the handoff. Each has the options, the cost and what it blocks. The reviewer's default is preselected with a dashed outline; it only counts as your answer once you tap an option or confirm it. At the end, 53 engineering items go ahead on their defaults unless you object.</p>
+    <div class="legend">
+      <span><b>Cost</b> S under a day, M one to three days, L about a week or more; ~ marks an estimate</span>
+      <span><b>Contested</b> two reviews, or a review and one of your rulings, disagree: nothing is preselected</span>
+    </div>
+    <div class="notice">Suggested order: HUB-0, HUB-7, HUB-1, HUB-2 and HUB-4 first, then SEC-1 to SEC-5, then DATA-0 because it changes the TMDB retention question (OWN-1). Operations to Tests are mostly "confirm the order of work".</div>
+    <div class="notice warn" id="store-note" hidden></div>
+  </header>
+
+  <div class="bar">
+    <div class="bar-row">
+      <span class="count" aria-live="polite"><span id="n-done">0</span> / <span id="n-total">64</span> <small>answered</small></span>
+      <span class="meter" aria-hidden="true"><i id="meter"></i></span>
+      <label class="toggle" for="f-open"><input type="checkbox" id="f-open">Unanswered only</label>
+      <span class="save-state" id="save-state" aria-live="polite">Connecting to the answer store...</span>
+    </div>
+    <nav aria-label="Sections"><ul id="nav"></ul></nav>
+  </div>
+
+  <main id="main"></main>
+
+  <footer>
+    <span>Sources: <code>docs/fable/round2/owner-review-page.md</code> (51 decisions and the defaults list), <code>docs/fable/round2/ux-owner-test.md</code> section 5 (13 UX decisions).</span>
+    <span>Nothing on this page was built or run. Legal points (HUB-2, HUB-6, HUB-11, OWN-1, SEC-3) are for a lawyer and not settled here.</span>
+    <span>Answers are stored per decision id in the page's store, collection <code>answers</code>.</span>
+  </footer>
+</div>
+
+<script>
+var SECTIONS = [
+  { k: "hub", t: "Hub", lead: "The hub is a role of the same binary, reached through one new connector. Board games are its first kind, seeded from Wikidata (CC0). Contributions are reviewed change sets; restricted provider data (TMDB, IGDB, BGG, MAL) never reaches the hub. Phases H1 to H7." },
+  { k: "sec", t: "Security", lead: "Five medium, four low, three info findings; none high or critical. For each the plain question is whether you accept the fix as proposed. Accepted fixes go into fix pack ot1." },
+  { k: "ux", t: "UX from your test", lead: "Proposals for your findings OT-4 to OT-17. Option a is the proposed design, option b the smaller alternative. Suggested cut for pack ot2: first OT-4, 5, 6, 7, 12, 15, 16 (all S), then OT-10 and OT-17 step 1, then OT-13 with OT-14; the rewatch run, the OT-11 display and per-episode runtimes as separate packages." },
+  { k: "ops", t: "Operations", lead: "Twelve findings, two high. Five need you; the rest are in the defaults list." },
+  { k: "arch", t: "Architecture", lead: "Twelve packages. None fixes a correctness defect; all are about cost: build time, build memory, latency, lines to maintain." },
+  { k: "perf", t: "Performance", lead: "Every measured endpoint is inside its budget today. The one predicted failure is the People page, which is not measured yet." },
+  { k: "test", t: "Tests", lead: "About 840 Rust tests and 121 browser tests; the weaknesses are structural. Two of the ten plan steps touch what you see or pay for." },
+  { k: "data", t: "Data sources", lead: "One finding dominates: every kind except anime has an open source for identity, so TMDB can become optional enrichment." },
+  { k: "dlog", t: "Decision log", lead: "The review read DEC-001 to DEC-494: 93 supersession rows, 12 standing contradictions, 58 open backlog items." },
+  { k: "own", t: "Open owner items", lead: "From the handoff's open list and the reviews' waiting-for-the-owner lists. Some are deliveries or actions, not choices." }
+];
+
+/* d = index of the preselected default, -1 = none. x = 1: contested, the review default is marked but not preselected. */
+var ITEMS = [
+/* ---- Hub ---- */
+{ id: "HUB-0", s: "hub", t: "Build the hub, and when",
+  q: "Do we build the hub as designed, and does H1 (read-only hub plus Wikidata seed) replace workstream W3 'board games on Wikidata' in the plan?",
+  d: 0, o: ["H1 and H2 now, reference hub open to your own instances only, third parties after H5", "H1 only now (read-only hub, no peers), decide the rest after use", "No hub: keep W3 as an instance-level Wikidata connector and shelve the design"],
+  w: "H1 alone already replaces BGG for board games; H3 is the first phase that needs a lawyer's eye, H5 completes the legal surface.",
+  cost: "L per phase ~, seven phases in total", bl: "W3 (board games), the owned flag and 'Mark owned', HUB-1 to HUB-15, WP-OD8, and whether the BGG deliveries are still needed (HUB-7)" },
+{ id: "HUB-7", s: "hub", t: "BGG connector",
+  q: "Do we drop the planned BGG connector for good and keep BGG only as an identifier plus the importers for your own collection and plays?",
+  d: 0, x: 1, o: ["Do not build it; BGG becomes 'identifier only plus importers'", "Keep the plan for operators with their own token, off by default (your wording on 2026-11-07)", "Decide when the BGG application is answered"],
+  w: "The connector was never implemented, only documented; the hub seeded from Wikidata covers the kind; BGG terms forbid modification and copying of covers.",
+  flag: "Contested: your ruling of 2026-11-07 says keep BGG for those with a token. The review's default reverses that, so it is not taken unless you pick it.",
+  cost: "S for a (docs and one decision entry); M to L ~ for b", bl: "The deliveries 'BGG token' and 'Powered by BGG logo' (unnecessary under a), the attribution page content for BGG, W3" },
+{ id: "HUB-1", s: "hub", t: "Data licence for hub facts",
+  q: "Under which licence does the hub publish its structured data?",
+  d: 0, o: ["CC0 1.0", "CC BY-SA 4.0 (blocks Wikidata push-back, adds notice duties)", "ODbL (blocks Wikidata push-back, adds notice duties)"],
+  w: "The only choice that lets the hub import from Wikidata and push back to it, avoids attribution stacking and lets mirrors keep the data without a licence string.",
+  cost: "S (a text decision); practically impossible to change after the first third-party contribution", bl: "H1 (the hub states its licence), the contributor terms (H3), WP-OD2 (licence tag per field)" },
+{ id: "HUB-2", s: "hub", t: "Image licence",
+  q: "Which licences may an uploader choose for an image, and is the revocable operator licence you asked for offered?",
+  d: 0, o: ["CC BY 4.0 preselected, CC0 and the revocable operator licence ('model B') selectable per upload", "CC BY 4.0 and CC0 only (no bespoke text, no lawyer needed for the clause)", "Model B only (no Wikimedia Commons, no mirrors for images)"],
+  w: "CC licences are irrevocable by their text and GDPR only requires that the uploader's name can be removed; model B is bespoke, uncertain in court and cannot reach copies made before a withdrawal.",
+  cost: "L ~ (H4), plus a lawyer review of the model B clause for a and c", bl: "H4; the legal texts of the default brand" },
+{ id: "HUB-4", s: "hub", t: "Movies and shows on the hub",
+  q: "Does the hub carry movies and shows?",
+  d: 0, o: ["No, not in v1", "Later a Wikidata-id bridge only (title, year, id; no descriptions, no images)", "Full kind (not recommended by the review)"],
+  w: "Highest laundering risk; this is where the TMDB terms bite. DATA-0 gives every instance a CC0 title and year without the hub.",
+  cost: "None for a; M ~ for b", bl: "Nothing now" },
+{ id: "HUB-3", s: "hub", t: "Contributor identity",
+  q: "Must a person have a hub account to contribute?",
+  d: 0, o: ["No: contributions are attributed to the instance with a pseudonymous subject hash, a personal hub account is optional", "Personal account mandatory (more accountability, more personal data, fewer contributors)"],
+  w: "GDPR by minimisation, and more contributors.",
+  cost: "Part of H3/H5; b pulls account handling from H5 forward into H3", bl: "H3 change model, H5 deletion and privacy notice" },
+{ id: "HUB-5", s: "hub", t: "Restricted identifiers on the hub",
+  q: "May the hub store BGG, IGDB and MAL ids as plain identifiers when they come from Wikidata or are typed by a contributor?",
+  d: 0, o: ["Yes for BGG now; IGDB and MAL only after the Wikidata properties are verified", "Wikidata id, GTIN and ISBN only"],
+  w: "A bare id is a fact, and Wikidata publishes these ids under CC0.",
+  cost: "S", bl: "Import matching (the BGG collection import maps by BGG id), H7" },
+{ id: "HUB-6", s: "hub", t: "Hashes of purged TMDB text",
+  q: "May an instance keep salted hashes of TMDB text it has purged, for 180 days, so it can refuse proposals that retype that text?",
+  d: 0, o: ["Yes, under the same six-month limit, and ask the lawyer whether a one-way hash is 'information obtained from TMDB'", "Compare against currently stored values only"],
+  w: "Without it the echo check only sees currently stored values.",
+  cost: "S within H3", bl: "H3 (the provenance filter). Related: OWN-1" },
+{ id: "HUB-9", s: "hub", t: "Registration at launch",
+  q: "Who can join the reference hub at launch?",
+  d: 0, o: ["Personal accounts by invite, instances by admin approval", "Open with a captcha"],
+  w: "Review capacity is one person at the start.",
+  cost: "S (config defaults in H2/H5)", bl: "H2" },
+{ id: "HUB-10", s: "hub", t: "Reviewers",
+  q: "Who reviews contributions?",
+  d: 0, o: ["You are the first moderator; an admin appoints trusted contributors after nomination", "Election, as MusicBrainz does for auto-editors"],
+  w: "Appointment needs no extra machinery while the hub is small.",
+  cost: "None in code beyond H3; it is your time", bl: "Opening H3 to third parties" },
+{ id: "HUB-11", s: "hub", t: "Notice-and-action and the lawyer",
+  q: "Do we build the full report, decision and appeal flow (DSA Art. 16/17 shape) even if you may be exempt as a micro-enterprise, and do you engage a lawyer for the hub terms?",
+  d: 0, o: ["Full flow plus lawyer", "Minimal contact address until third parties connect", "No third parties, so not needed (follows from HUB-0 b)"],
+  w: "It is also the right abuse-report design; the lawyer confirms which duties bind you.",
+  cost: "L ~ (H5) plus the lawyer's fee. Three lawyer inputs: contributor terms before H3 opens, image clause before H4, DSA scope", bl: "Opening the hub beyond your own instances" },
+{ id: "HUB-12", s: "hub", t: "First monetisation step (low priority)",
+  q: "If money is ever taken, what is sold first?",
+  d: 0, o: ["Hosted instances with TMDB and IGDB switched off (or licensed) plus donations; hub API tiers later", "Hub API tiers first", "No monetisation, donations only", "Decide later (nothing is built for it now)"],
+  w: "The data is CC0 and stays free; what is sold is delivery. TMDB forbids charging users without a written agreement.",
+  cost: "None now", bl: "Nothing. Note: VNDB's API is free for non-commercial use only, so a paid hosted instance would need VNDB off as well" },
+{ id: "HUB-13", s: "hub", t: "Staging hub",
+  q: "Is there a second small instance as a staging hub before third-party instances connect?",
+  d: 0, o: ["Yes, a second instance that you host", "A dry-run flag on the reference hub instead"],
+  w: "Protocol changes are tried against a hub whose history may be thrown away.",
+  cost: "S in code (H6); running cost of one more instance", bl: "H6" },
+{ id: "HUB-15", s: "hub", t: "Open Products Facts as a barcode source",
+  q: "Do we also query open product databases by barcode for board games?",
+  d: 0, o: ["No; revisit if contributors ask", "Yes, as an instance connector"],
+  w: "Not needed once the hub stores GTINs. Answering this also closes the barcode question from the handoff.",
+  cost: "None for a; M ~ for b", bl: "Nothing" },
+
+/* ---- Security ---- */
+{ id: "SEC-1", s: "sec", t: "No security headers, no cache directives (medium)",
+  q: "Does the app set the security headers itself, including a Content Security Policy, or do we leave them to the reverse proxy?",
+  d: 0, o: ["All headers in the app, including CSP with a nonce for the hydration and theme scripts, plus a reverse-proxy docs section", "The simple headers and cache directives now, CSP as a second step (CSP is the part that can break pages)", "Document the headers for the proxy only"],
+  w: "A self-hosted app cannot rely on every operator's proxy.",
+  cost: "M for a (the browser tests must stay green); S for b and c", bl: "Fix pack ot1; the reverse-proxy page (OPS-2); OPS-8 is decided with it (both set cache headers for the app bundle)" },
+{ id: "SEC-3", s: "sec", t: "Deleting a user leaves personal data behind (medium)",
+  q: "When an account is deleted, do audit rows lose the username at once, or are they kept for the 365-day audit retention you approved (OD-13)?",
+  d: -1, o: ["Pseudonymise audit rows on delete (the admin loses 'who did it' for deleted accounts)", "Keep them 365 days and say so in the privacy page (matches OD-13)", "Keep for a shorter fixed period, for example 30 days, then pseudonymise"],
+  w: "No default: the review leaves this choice open. Search documents and stored import files are deleted with the account either way.",
+  cost: "M (use-case change, one end-to-end test)", bl: "Fix pack ot1; any hosted offer (GDPR erasure); the hub's deletion design (H5) should use the same rule" },
+{ id: "SEC-4", s: "sec", t: "Outbound requests to admin-chosen hosts are not confined (medium)",
+  q: "May an admin point OIDC and SMTP at hosts on private networks?",
+  d: 0, x: 1, o: ["Block private targets unless a switch is on, in every hosting mode; no redirects on the governed client", "Allow private targets in home mode by default, block in hosted mode", "Redirect fix and categorised errors only, no private-range filter"],
+  w: "In hosted mode an admin who is not the operator could probe the operator's network.",
+  flag: "Contested: the default hosting mode is home, and a home identity provider or mail relay is typically on a private address (you run authentik). Under a such a setup stops working after the upgrade until the switch is set. The summary recommends b, or a with the switch on by default in home mode. Not known: where your authentik runs.",
+  cost: "M", bl: "Fix pack ot1" },
+{ id: "SEC-5", s: "sec", t: "Sign-in throttling (medium)",
+  q: "Should repeated wrong passwords slow an account down instead of locking it, and should the limits be per client address and shared between processes?",
+  d: 1, o: ["Per-address budget, concurrency cap and progressive delay; counters stay in memory and the docs say 'run one web process' (S to M)", "The same with counters in Postgres, correct for several web processes (M)", "Keep the hard lock and add only the per-address budget and the concurrency cap"],
+  w: "Today ten wrong passwords lock the break-glass admin sign-in for 15 minutes, repeatable by anyone. The review's default text allows a or b ('counters in Postgres, or per-process, documented'); b is preselected as its first-named form.",
+  flag: "Touches your ruling OD-17: the break-glass sign-in keeps 'the throttle'. A progressive delay is still a throttle, but the behaviour you approved changes.",
+  cost: "M", bl: "Fix pack ot1; running more than one web process (OPS-12)" },
+{ id: "SEC-6", s: "sec", t: "Compose defaults (low)",
+  q: "May 'compose up' refuse to start until the passwords are set, and bind to 127.0.0.1 only?",
+  d: 0, o: ["Required variables, loopback bind, a start-up warning, a 'Behind a reverse proxy' page (quick start becomes: copy the example env file, set two values, start)", "Keep the working defaults but print the warning", "Two compose files: a strict one and a dev one with defaults"],
+  w: "Default credentials and a port open on every interface are shipped today.",
+  cost: "S", bl: "The first-run docs (OPS-2)" },
+{ id: "SEC-10", s: "sec", t: "Session lifetime and session list (info)",
+  q: "Do sessions get an absolute maximum age, and do members get a list of their sessions with 'sign out everywhere'?",
+  d: 0, o: ["Both: a hard cap (for example 90 days) and a session list in Settings > Account", "Hard cap only (S)", "Neither for now"],
+  w: "Sessions slide (30 days by default) without a hard cap, and there is no device list.",
+  cost: "S for the cap, M for the list (a new settings block; the density budget applies)", bl: "Nothing. Touches OD-11: the cap would be a second editable value in the admin UI" },
+
+/* ---- UX (F2) ---- */
+{ id: "OT-4", s: "ux", t: "What 'Add to library' does",
+  q: "'Add to library' sets Planned without saying so. How should adding an item work?",
+  d: 0, o: ["Two buttons on an item not yet in the library: 'Mark as watched' and 'Want to watch' (adds as Planned); one shared toast 'Added to your library as Planned' with Undo, on the item page and in the palette", "Keep the single 'Add to library' button; add only the toast and a hint line 'Adds it as Planned'"],
+  w: "Two named actions say what will happen before the click, and every add can be undone.",
+  cost: "S", bl: "Web and translations; a small server change if the next step must be sent for an item without a library entry. First cut of pack ot2" },
+{ id: "OT-5", s: "ux", t: "Finding the Watched button; states against actions",
+  q: "After adding, the Watched button is hard to find and reads like a state. How are status and actions shown?",
+  d: 0, o: ["A header pill with the status and a fact line; action labels become imperatives ('Mark as watched', 'Log a rewatch', 'Mark S2 E5 watched'); toasts keep the past tense", "Keep the labels, add only the pill"],
+  w: "Today the action is labelled 'Watched', which reads like a state.",
+  cost: "S", bl: "Web and translations. First cut of pack ot2" },
+{ id: "OT-7", s: "ux", t: "Rewatch count wording",
+  q: "'Watched once plus N rewatches' makes people add up. How is the count shown?",
+  d: 0, o: ["'Watched 3 times, last on <date>' in the header; the 'Rewatches' row is removed; the log sheet says 'This will be watch number 3'", "Keep 'Rewatches' but show it in the header instead of behind 'More facts'"],
+  w: "Nobody has to add 1 + N.",
+  cost: "S", bl: "Web and translations; a small contract field (times). First cut of pack ot2" },
+{ id: "OT-9", s: "ux", t: "Status model and rewatches",
+  q: "What do 'completed' and 'rewatch' mean, for movies and for shows?",
+  d: 0, o: ["Model A: status is where you are now, history counts every time. Movies stay Completed. A show rewatch is an explicit run: In progress while it runs, Completed when finished or stopped. No migration", "Model B: no run; rewatched episodes are extra views and the status is untouched"],
+  w: "A stopped rewatch no longer leaves a finished item looking unfinished.",
+  flag: "Not verified by the UX pass: the effect of the rewatch run on sync clients, the offline queue and the importers.",
+  cost: "M for A, S for B", bl: "Server (app, contracts), web, translations. A separate package after your decision; OT-15 depends on it for the server part" },
+{ id: "OT-15", s: "ux", t: "Bulk marks on already watched episodes",
+  q: "'Mark to here' does nothing on episodes that are already watched. What should it do?",
+  d: 0, o: ["Ask inline 'Log these N again as a rewatch?'; mixed ranges say how many were skipped", "Disable the menu items on fully watched ranges with a hint 'All watched. Use Again on a row.'"],
+  w: "The action answers instead of silently doing nothing.",
+  cost: "S", bl: "Web and translations (server only with the run of OT-9). First cut of pack ot2" },
+{ id: "OT-6", s: "ux", t: "'With...' becomes the kind's verb",
+  q: "'With...' is confusing. How far does the rename go?",
+  d: 0, o: ["A key family per verb: 'Watched with...', 'Listened with...', 'Read with...', 'Played with...' on the button and as the people legend; the dialog title is the step", "Only rename the button to 'Watched with...'"],
+  w: "The label says what is being logged, for every kind.",
+  cost: "S", bl: "Web and translations. First cut of pack ot2" },
+{ id: "OT-10", s: "ux", t: "Centered dialog or side sheet",
+  q: "The side sheets look odd. What replaces them?",
+  d: 0, o: ["A centered dialog from 640 px (32 rem for watched, 42 rem for play, scrolls inside, fixed footer), a bottom sheet below 640 px; the stretching grid is fixed", "Keep the side sheet and fix only the spacing"],
+  w: "The odd spacing has a concrete cause (a full-height grid); a centered dialog is what you asked for.",
+  cost: "S to M", bl: "The dialog component and the browser tests that open sheets. Second cut of pack ot2" },
+{ id: "OT-16", s: "ux", t: "Play time on a game",
+  q: "Playtime cannot be logged on a game, only a score. Where does duration go?",
+  d: 0, o: ["Duration is open in row 1 of the play dialog, accepts 1:30 or 90, prefilled from the last play; scores move behind 'More' for video games", "Only move the duration field out of 'More'"],
+  w: "The approved mockup already has duration in the first row.",
+  cost: "S", bl: "Web and translations. First cut of pack ot2" },
+{ id: "OT-11", s: "ux", t: "Where score and win show up (display side)",
+  q: "A logged score and 'won' show nowhere. Where should they appear?",
+  d: 0, o: ["An activity sentence with duration, scores and winner; a 'Plays' tab on game pages; hours and win rate on the Stats Play tab", "The activity sentence only"],
+  w: "What was logged should be visible where the game and the stats are read.",
+  cost: "M", bl: "Server (contracts, API, activity), web, translations. A separate package after your decision; the bug part of OT-11 is in the fix pack" },
+{ id: "OT-12", s: "ux", t: "Button sizes on cards",
+  q: "Buttons on the person cards have different sizes. How wide is the fix?",
+  d: 0, o: ["One rule: one small size per card footer, a link-as-button component for links that look like buttons, at most one filled button per card", "Fix only the People 'History' link"],
+  w: "The History link is 36 px with 14 px text next to 32 px buttons with 12 px text; a rule stops it recurring.",
+  cost: "S", bl: "The shared button component. First cut of pack ot2" },
+{ id: "OT-13", s: "ux", t: "Colour",
+  q: "The app is very black and white. How much colour, and where does it live?",
+  d: 0, o: ["A violet accent plus four group tints as theme values in the default brand file, neutral fallbacks in the stylesheet, the start-up contrast check extended", "Accent only", "The colours as a second brand folder, the default brand stays neutral"],
+  w: "All pairs pass AA in light and dark by the pass's own calculation; brand tokens keep it white-label.",
+  flag: "Not verified: the contrast numbers were computed with a small script, not the brand crate's own check, and nothing was seen on screen.",
+  cost: "M", bl: "Stylesheet, components, brand config; no migration. Third cut of pack ot2, with OT-14" },
+{ id: "OT-14", s: "ux", t: "Wide screens",
+  q: "A 2k screen leaves much room left and right. How wide may pages get?",
+  d: 0, o: ["96 rem for grid pages and the top bar, 80 rem for record pages, forms unchanged", "Raise the cap to the design's 80 rem everywhere"],
+  w: "The design says 80 rem and the code has 72 rem; grids gain most from extra width.",
+  cost: "S", bl: "Web only. Third cut of pack ot2, with OT-13" },
+{ id: "OT-17", s: "ux", t: "Stats led by time",
+  q: "Completed and planned counts are uninteresting. What leads the stats?",
+  d: 0, o: ["A hero tile (piggy-bank icon, total hours) and four time-first tiles from per-kind totals; status counts move down; then per-episode runtimes as a second step", "Reorder only: hours first within today's group cards, no per-kind split"],
+  w: "The stats cache already stores seconds per kind, so the first step needs no migration.",
+  cost: "M for step 1, M for per-episode runtimes", bl: "Server stats, web, translations, one vendored icon; a migration only for per-episode runtimes. The runtime source is decided in WP-OD3; PERF-5 should come after this" },
+
+/* ---- Ops ---- */
+{ id: "OPS-3+4", s: "ops", t: "Where the secrets key lives, and the backup reminder (medium)",
+  q: "Do we move the secrets key out of the data directory and add a 'back up this key now' step or banner after the setup wizard?",
+  d: 0, o: ["Move it, plus a banner on the admin overview until an admin confirms the backup (no new wizard step)", "Move it, plus a wizard step 'download or copy this key now'", "Docs only"],
+  w: "The key sits inside the blob directory, so syncing or clearing that directory ships or deletes it. Losing the key is the one unrecoverable loss.",
+  flag: "Your existing home instance needs a one-time move of the blob directory or an explicit storage root setting; the review does not describe the migration.",
+  cost: "S to M", bl: "The backup runbook (OPS-9)" },
+{ id: "OPS-6", s: "ops", t: "Rollback policy (medium)",
+  q: "Is 'the only rollback is restoring the database dump taken before the upgrade' acceptable as the documented policy?",
+  d: 0, o: ["Yes: dump-restore only, documented with 'take the dump first'; log the migrations that will run; add a migration dry run", "Additionally reversible migration pairs from a new baseline (part of WP-D3)", "Nothing until there are external operators"],
+  w: "An older binary refuses a newer schema and TOTP sealing is one-way; nothing is documented today.",
+  cost: "S for a; b is part of WP-D3", bl: "The upgrade runbook; publishing images (OPS-I)" },
+{ id: "OPS-12", s: "ops", t: "More than one web process (medium)",
+  q: "Do we support several web processes now, or state 'one web process' as the supported shape?",
+  d: 0, o: ["Supported shape is one web process plus any number of workers, documented; throttles stay per process (S)", "Make several web processes correct: shared throttles (SEC-5 b), shared events, a two-process test (L ~)", "a now, b when a hosted offer exists"],
+  w: "Two full processes do not share live events and the throttles are per process; documenting the supported shape is the small step both reviews accept.",
+  cost: "S for a", bl: "The SEC-5 option choice; sizing docs; TEST-10" },
+{ id: "OPS-I", s: "ops", t: "Publish images",
+  q: "Do we publish tagged container images from CI, and where?",
+  d: -1, o: ["GitLab registry, private, for your own hosts", "Public registry on tags", "No images; operators build themselves"],
+  w: "No default among the options. The summary's condition: not before OPS-1, OPS-2, SEC-1, SEC-2 and SEC-6 are done. It is the first public distribution of the product.",
+  cost: "S to M", bl: "The attribution page must be in the image before a public image exists; the upgrade and rollback docs (OPS-6)" },
+{ id: "OPS-B", s: "ops", t: "Build profile: bundle size against build memory",
+  q: "May the browser bundle get somewhat larger so that the image builds reliably on a 16 GB host?",
+  d: 0, o: ["Adopt the new Dockerfile structure, measure thin against fat link-time optimisation (peak memory, size), then you pick with numbers", "Thin optimisation in the image build, fat only in CI", "Keep fat optimisation everywhere"],
+  w: "Both reviews name the fat link step as the largest memory peak, and neither measured it.",
+  cost: "S for the measurement, M for the Dockerfile", bl: "Builds on small hosts. The measurement needs a build, so it waits until the VM is free" },
+
+/* ---- Architecture ---- */
+{ id: "ARCH-0", s: "arch", t: "When does the restructuring happen",
+  q: "Do the three large packages (split the API crate, remove the Backend pass-through, split the web crate) run before the feature workstreams W1 to W7, between them, or not at all?",
+  d: 1, o: ["Quick wins and rules now, the three large packages as their own workstream before the hub", "Quick wins now, the large packages after the fix pack, the UX pack and W1", "Quick wins only; accept the build cost"],
+  w: "The review says do them after the quick wins and does not fix the timing; b is preselected because the summary notes it fits the plan P0 to P4. No user-visible change comes out of the large packages.",
+  cost: "L + M + L for the three large packages; S + M + S to M for the quick wins", bl: "Build memory on small hosts (OPS-B), the hub's file layout, test run time for web logic" },
+{ id: "WP-B2", s: "arch", t: "Remove the Backend pass-through (reverses DEC-162)",
+  q: "Do we reverse DEC-162 and let server functions call the operations directly?",
+  d: 0, x: 1, o: ["Reverse DEC-162: delete the pass-through layers after the API split (architecture review)", "Keep the layers and record 'reads through server functions, writes through REST' as intended (decisions review)", "Decide after the API split, when the size of the remaining forwarding code is known"],
+  w: "About 1,250 lines of forwarding code carry no logic.",
+  flag: "Contested: the architecture review says a, the decisions review says b for the same decision. DEC-162 is in force but you have not reviewed it, so either answer is open to you.",
+  cost: "M, risk M", bl: "The web crate split is simpler without the layers" },
+
+/* ---- Performance ---- */
+{ id: "PERF-T", s: "perf", t: "Targets and place in the plan",
+  q: "Are the review's targets the ones we work to (every mixed-set line at most 150 ms p95, Home 90, People 40, zone change 400), and does the performance work run before or after the fix and UX packs?",
+  d: 1, o: ["Steps 0 and 1 now (measure the People page, fix its per-row reads: both S, no migration), the rest as workstream W2 after the packs", "The whole plan as W2, as scheduled", "Steps 0 to 4 only (no migration, all S or M); stop when everything is under 150 ms"],
+  w: "The review sets targets but not the timing; b is preselected because it is the plan as it stands. Your test reported no slowness.",
+  cost: "S, S, M, S, S, M, S, M, S, M for steps 0 to 9; each step needs one release load run (about 40 minutes and 15 GB of disk)", bl: "Nothing user-visible today" },
+
+/* ---- Tests ---- */
+{ id: "TEST-8", s: "test", t: "Import job lane",
+  q: "Should each member's import run in its own lane, so that one member's large import does not delay another's?",
+  d: 0, o: ["A per-user import lane (a product change, M ~), then lower the test timeouts to 60 s", "Test-only worker concurrency or a direct seeding endpoint for tests (S, no product change)", "Leave it"],
+  w: "All imports share one strictly ordered lane; browser-test timeouts of 120 to 240 s are the symptom.",
+  flag: "The security audit states the lane already serialises per user; the code read for the summary shows one shared lane.",
+  cost: "S for b, M ~ for a", bl: "Browser-test wall time; hosted mode with several importing members" },
+{ id: "TEST-1", s: "test", t: "Flaky tests in CI",
+  q: "When a browser test fails and then passes on the retry, does the pipeline fail, or only report it?",
+  d: -1, o: ["Fail the pipeline on any flaky test (matches 'no test workarounds for app races')", "Print and count; fail above a threshold", "Print only"],
+  w: "No default: the audit says 'fail or print a prominent line' and leaves it open. The retry stays and a reporter is added either way.",
+  cost: "S (half a day)", bl: "TEST-2 should land first or together, otherwise a turns known order dependence into red pipelines" },
+
+/* ---- Data sources ---- */
+{ id: "DATA-0", s: "data", t: "Demote TMDB to optional enrichment",
+  q: "Should title, year and ids of films and shows come from Wikidata (CC0) and, for shows, TVmaze, with TMDB only an operator-enabled source of posters and overviews?",
+  d: 0, o: ["Wikidata identity above every proprietary source, for all kinds", "Wikidata identity only as a fallback when TMDB data has expired", "Leave TMDB as the identity source"],
+  w: "TMDB forbids caching beyond six months and commercial use without an agreement; with a CC0 identity layer the placeholder 'Title unavailable' disappears for every item with a Wikidata or TVmaze id.",
+  cost: "L ~ for the generalised connector, M ~ for the licence tag per field that the review wants first or alongside", bl: "OWN-1 (the strict reading stops hurting under a), the hub seed for video games, the attribution page, search ranking (OT-3)" },
+{ id: "WP-OD3", s: "data", t: "TVmaze as the default show source",
+  q: "Is TVmaze (CC BY-SA 4.0, no key) the default source for shows, episodes and air dates, with TMDB and TheTVDB behind it?",
+  d: 0, o: ["TVmaze default, TMDB as enrichment", "TVmaze as an additional source; TMDB stays first", "Not now"],
+  w: "Key-less, no retention limit, better episode data than TMDB.",
+  cost: "M ~", bl: "The 'Up to date' badge and per-episode runtimes, which OT-17 pulls forward. Share-alike data must carry a credit link and can never be proposed to the CC0 hub" },
+{ id: "WP-OD7", s: "data", t: "Wikipedia summaries as descriptions",
+  q: "May item descriptions come from Wikipedia (CC BY-SA 4.0, credited link)?",
+  d: 0, o: ["Yes, on by default", "Yes, off by default", "No"],
+  w: "Lets an instance switch TMDB off entirely; never exported to the hub.",
+  cost: "M ~", bl: "Nothing; depends on DATA-0" },
+{ id: "DATA-K", s: "data", t: "Order of the new connectors",
+  q: "In which order do books, music and visual novels get their connectors?",
+  d: 0, o: ["Open Library plus DNB (books), then MusicBrainz plus Cover Art Archive and the ListenBrainz importer, then VNDB", "Your own use first (say in the note which kinds you track)", "After hub phase H1"],
+  w: "Books have no connector at all today; DNB is CC0 and German.",
+  cost: "M each ~", bl: "W5. Note: Open Library publishes no licence text and VNDB's API is free for non-commercial use only" },
+{ id: "WP-OD8", s: "data", t: "Audiobook editions as a hub kind",
+  q: "Does the hub get a kind for audiobook editions (narrator, duration, abridged)?",
+  d: 0, x: 1, o: ["Add after H3, seeded from MusicBrainz audiobook release groups", "No hub kind; audiobooks from Open Library, DNB and MusicBrainz on the instance only", "Decide when the MusicBrainz connector exists and the gap is visible"],
+  w: "The data sources review calls it the one kind with no open home.",
+  flag: "Contested: the hub design says 'not needed' for books and audiobooks; the data sources review is the later and more detailed one on this point.",
+  cost: "M ~ once the hub exists", bl: "Nothing now" },
+{ id: "WP-OD9", s: "data", t: "Comics: licence pages (a delivery)",
+  q: "Will you open the licence pages of the Grand Comics Database, Metron and Inducks in a browser and save them to the owner inbox?",
+  d: 1, o: ["Yes, I will save them", "Not now; no comics connector until then"], added: 1,
+  w: "The build host is blocked by all three sites and the GCD licence is unverified. Until the pages arrive nothing is built; afterwards each connector sits behind a flag that is off by default.",
+  cost: "Your time; M ~ per connector afterwards", bl: "Comics only" },
+{ id: "DATA-R", s: "data", t: "Confirm the 'never build' list",
+  q: "Is it agreed that these are not built: Google Books, OMDb, IMDb datasets, Comic Vine, Giant Bomb, RAWG, MobyGames, TheGamesDB, Steam Web API, Discogs API, Last.fm, Deezer, Spotify, TheAudioDB, iTunes Search, Audnexus (plus AniList, and BGG per HUB-7)?",
+  d: 0, o: ["Confirm", "Re-check some (name them in the note)"],
+  w: "The review rejected each on its terms. Several rejections rest on pages that could not be opened: MobyGames, RAWG, Giant Bomb, TheGamesDB.",
+  cost: "None", bl: "Nothing" },
+
+/* ---- Decision log ---- */
+{ id: "DLOG-1", s: "dlog", t: "Split the decision log into three files",
+  q: "Do we restructure the log into a maintained current-state summary, the append-only history with a status prefix, and a backlog?",
+  d: 0, o: ["Three files as proposed: current state, history, backlog", "Keep one file; add only the status prefix and two new fields (follow-up, supersedes)", "Leave the log; keep the review file as the index"],
+  w: "29 entries are superseded and 43 amended without a note in the file itself; about 60 entries are records, not decisions.",
+  flag: "The proposal moves the log and adds Markdown files, which changes a KICKOFF rule (fixed path, AsciiDoc in docs), so a needs your explicit yes. A variant without a rule change: keep the log where it is and add the two new files next to it as AsciiDoc; say so in the note if you want that.",
+  cost: "M for the one-time migration, S for the repository check", bl: "OWN-2 (your review is far shorter against a current-state summary); every agent's start-up reading" },
+{ id: "C10", s: "dlog", t: "Where personal UI preferences live",
+  q: "Should the shortcuts switch, remembered disclosures, remembered group, nudge snooze and the episode 'ask once' follow you to another browser?",
+  d: -1, o: ["A server-side store for all five (M ~)", "Browser-only by design; close the five open notes (S)", "Server-side only for the shortcuts switch and the remembered group"],
+  w: "No default: the review asks for one decision instead of five open 'a server preference later' notes and does not pick.",
+  cost: "S to M", bl: "Nothing. Your ruling OD-02 'remember disclosure state' does not say where" },
+
+/* ---- Open owner items ---- */
+{ id: "OWN-1", s: "own", t: "TMDB retention: strict reading or keep title and year",
+  q: "After six months without a possible refresh, does an item lose its title and year too (strict, in force), or are title and year kept as your own record?",
+  d: 0, o: ["Strict, as now: placeholder 'Title unavailable - source data expired', refetch once TMDB is usable", "Keep title and year", "Strict for TMDB fields, but copy title and year into the library entry at purge time so no library ever shows a placeholder", "Strict, and make the question moot with DATA-0 (title and year from Wikidata)"],
+  w: "Strict is what is in force (DEC-466). Whichever stands, the other decision entry is marked superseded.",
+  flag: "Not verified: whether b or c is compatible with the TMDB terms; that is a lawyer's point.",
+  cost: "S for a to c; d is DATA-0", bl: "Nothing is waiting" },
+{ id: "OWN-2", s: "own", t: "The unreviewed decision entries",
+  q: "How do you want to review DEC-019 to 088 and 091 to 168 (and the later ones), which are in force but not approved by you?",
+  d: 0, o: ["Review the current-state summary by area and raise only what looks wrong", "Entry by entry on the open-decisions page", "Declare the range accepted as a whole, reversible per entry"],
+  w: "The 12 contradictions and the 9 owner waits from that range are already on this page.",
+  cost: "Your time only", bl: "Nothing" },
+{ id: "OWN-3", s: "own", t: "Deliveries: sample exports",
+  q: "Sample exports are still expected in the owner inbox: Goodreads, BG Stats, BGG collection and the Trakt 'Raw Export' ZIP. Will you deliver them?",
+  d: 0, o: ["Yes, I will deliver them", "Delivered (say which in the note)", "Not now; those importers wait"], added: 1,
+  w: "They block the corresponding importers. The BGG token and logo files are needed only if HUB-7 is answered b; the BGG collection export is needed either way.",
+  cost: "Your time", bl: "The Goodreads, BG Stats, BGG and Trakt importers" },
+{ id: "OWN-4", s: "own", t: "Anime and manga sources",
+  q: "Four small actions, all with safe defaults in force (everything off): read the MyAnimeList developer agreement and set the client id; save the Kitsu terms page to the owner inbox; MangaDex metadata-only yes or no; read the AniDB rules in a browser. Will you do them?",
+  d: 1, o: ["Yes, I will do them (put the MangaDex answer in the note)", "Not now; everything stays off"], added: 1,
+  w: "The safe defaults stay in force until you act.",
+  cost: "Your time", bl: "W4 (anime and manga connectors)" },
+{ id: "OWN-5", s: "own", t: "Funnel review on 2026-12-06, saved views",
+  q: "The usage-measurement review is set for 2026-12-06. Your test changes several of the measured flows (OT-4, 5, 9, 10, 17). Keep the date or move it?",
+  d: 0, o: ["Keep 2026-12-06", "Move it to four weeks after the UX pack ot2 ships"], added: 1,
+  w: "The date is what is in force. If ot2 ships before it, four weeks of data on the old flows lose value.",
+  cost: "None", bl: "The decision on saved views" },
+{ id: "OWN-6", s: "own", t: "Language for people who have not chosen one",
+  q: "Your ruling says 'per-user language with the brand default as fallback'; the code puts the browser's language before the brand default. Accept the deviation?",
+  d: 0, o: ["Accept and record it", "Follow the ruling literally"],
+  w: "The browser's language is the better signal.",
+  cost: "S either way", bl: "Nothing" },
+{ id: "OWN-7", s: "own", t: "Where sign-up lands",
+  q: "The approved design says a new account lands on Home; the code lands on the library. Which one?",
+  d: -1, o: ["Home, as designed (changes the landing page and the browser tests)", "The library; record the deviation"],
+  w: "No default: the review does not pick. A new account has an empty library, so the better landing page depends on OT-4 and OT-5.",
+  cost: "S", bl: "Nothing" },
+{ id: "OWN-8", s: "own", t: "Live checks only you can run",
+  q: "Three checks: does your authentik honour max_age=0; does compose report 'healthy within 60 s' on a real Docker host; the Tauri spike on a host with disk. Will you run them?",
+  d: -1, o: ["Yes, I will run them", "Done (results in the note)", "Not now"], added: 1,
+  w: "An action, not a choice; no default.",
+  cost: "Your time", bl: "The first check blocks the re-authentication design for admins without a password" },
+{ id: "OWN-9", s: "own", t: "Squash the migrations into one baseline",
+  q: "May your instance be re-created from an export (or its migration table be rewritten by hand) so that the 31 migrations become one baseline?",
+  d: -1, o: ["Squash now; I re-import", "Squash with a one-time script that rewrites my instance's migration table", "Never squash"],
+  w: "No default among the options; the review only says decide and record before the first external deployment. Not known: whether your home instance holds data you want to keep.",
+  cost: "S to M", bl: "OPS-I (publishing images is the first external deployment); reversible migration pairs (OPS-6 b)" },
+{ id: "OWN-10", s: "own", t: "Rotate the TMDB token",
+  q: "The read access token was posted in the chat. Has it been rotated?",
+  d: -1, o: ["I will rotate it", "Done"], added: 1,
+  w: "An action, listed so it is not lost.",
+  cost: "Minutes", bl: "Nothing" },
+{ id: "OWN-11", s: "own", t: "Merge the round-1 reviews and finalise the plan",
+  q: "After this walkthrough, are the eight review files merged into main, and is plan P0 to P4 final (fix pack ot1, then UX pack ot2, then W0 to W7)?",
+  d: 0, o: ["Merge the folder as it is on the branch", "Merge into the folders the KICKOFF layout names for such outputs (reviews and research)"],
+  w: "Proposed content of ot1 from this page: SEC-2, SEC-1, SEC-3, SEC-4, SEC-5 as answered, SEC-9, OPS-1, OPS-2.",
+  flag: "Rule 10 forbids model names in docs. The folder name on the branch is the alias of the review tool; whether a folder name counts is your reading of the rule. Not checked: whether the review files carry such names in their text.",
+  cost: "S", bl: "The start of fix pack ot1" },
+{ id: "OWN-12", s: "own", t: "More RAM for the VM (optional)",
+  q: "The VM has 4 vCPU and 16 GB and is shared with another agent. Add RAM?",
+  d: 0, o: ["No change", "Yes, add RAM (say how much in the note)"], added: 1,
+  w: "Optional. Relevant to ARCH-0 and PERF-T: every package ends with a full build, and a release load run needs about 15 GB of disk.",
+  cost: "Yours to judge", bl: "Nothing" }
+];
+
+var DEFAULTS = [
+  { g: "Hub", rows: [
+    ["HUB-8", "Review timers: 4-day period, 48 h minimum for destructive changes, 3 unanimous votes, 24 h objection window, 14 days plus 10 accepted changes to become trusted. All config values.", "S"],
+    ["HUB-14", "Postgres full-text plus trigram search for the hub; Meilisearch optional later.", "S"] ] },
+  { g: "Security", rows: [
+    ["SEC-2", "Body limit on the pages router (the REST limit, 2 MiB) plus a test expecting 413. Smallest change in the audit, first in its order.", "S"],
+    ["SEC-7", "Stream import parsing or cap concurrent import jobs.", "S to M ~"],
+    ["SEC-8", "Pin a checksum per downloaded build tool.", "S"],
+    ["SEC-9", "Generic error text for webhook senders.", "S"],
+    ["SEC-11", "SSO hint cookie: accepted as is.", "None"],
+    ["SEC-12", "CSRF guard without an Origin header: no fix required.", "None"] ] },
+  { g: "Operations", rows: [
+    ["OPS-1", "Ship the cli binary in the image (high: every documented operator procedure needs it).", "S"],
+    ["OPS-2", "Add the three first-run keys to the example env file; write a reverse-proxy page with Caddy and nginx snippets (high: you hit this yourself).", "S"],
+    ["OPS-5", "Rule for hot tables: batched backfills, concurrent index builds; log applied migration versions at start.", "S"],
+    ["OPS-7", "Compose stop grace period of 30 s (the default 10 s is shorter than the 20 s job grace).", "S"],
+    ["OPS-8", "Hashed file names for the app bundle (or no-cache), so an upgrade does not leave a stale bundle in the browser. Done with SEC-1.", "S"],
+    ["OPS-9", "Backup, restore and upgrade runbook with commands, restore order and verification.", "S"],
+    ["OPS-10", "Metrics endpoint in Prometheus text format and an optional access-log line. Lowest priority; skipped until someone asks.", "M"],
+    ["OPS-11", "Worker heartbeat on the admin overview; the health check tests the database pool and reports the search backend.", "M"],
+    ["CI", "Build cache; no duplicate release compile per pipeline.", "S to M"] ] },
+  { g: "Architecture", rows: [
+    ["WP-A1", "Cache the parsed translation bundles per locale and brand on the server. Same as PERF-4.", "S"],
+    ["WP-A2", "Batch the DTO builders (covers, users) to remove per-row queries. Contains PERF-3.", "M"],
+    ["WP-C2", "Architecture rules and leaf crates before any split; rename the config crate; the cli no longer compiles the web crate.", "S to M"],
+    ["WP-C1", "Typed contracts (enums instead of strings, wire format unchanged).", "M, risk M"],
+    ["WP-D1", "Decompose the server's build function.", "M"],
+    ["WP-D2", "One contract suite for the in-memory and the Postgres store. Same goal as TEST-6.", "M"],
+    ["WP-D3", "Migration conventions and a docs page (the baseline squash inside it is OWN-9).", "S"],
+    ["WP-C3", "Dependency hygiene, including 'evaluate replacing the Meilisearch SDK by a thin client'.", "S to M"],
+    ["WP-E1", "Measure the browser bundle's link profile (the choice that follows is OPS-B).", "S"] ] },
+  { g: "Performance", rows: [
+    ["PERF-0", "Measure: the People page in the load set, covers, a filtered query, a second zone read.", "S"],
+    ["PERF-1", "Remove the per-shared-session user read on the People page.", "S"],
+    ["PERF-2", "Total count out of the library query on the first page; Home reads.", "M"],
+    ["PERF-3", "Batched cover lookups.", "S"],
+    ["PERF-4", "Translation cache.", "S"],
+    ["PERF-5", "Zone-change rebuild (target at most 500 ms debug, 400 release).", "M"],
+    ["PERF-6", "Participant-driven shared reads, no new index.", "S"],
+    ["PERF-7", "People page aggregates in SQL.", "M"],
+    ["PERF-8", "Unlogged stats cache tables (migration).", "S"],
+    ["PERF-9", "Library indexes and a generated last-activity column (migration).", "M"],
+    ["PERF-N", "Not done, by design: per-filter total caches, a Home cache, a companion-stats cache, an asset record cache, the global sessions time index.", "None"] ] },
+  { g: "Tests", rows: [
+    ["TEST-2", "A serial browser-test project for specs that change instance-wide state; per-test admin accounts.", "1 day"],
+    ["TEST-3", "Break each never-seen-red test's code path once and confirm it goes red.", "1 day"],
+    ["TEST-4", "Replace sleeps before negative assertions.", "2 hours"],
+    ["TEST-5", "HTTP tests for the nine untested REST routes, including 'user B on A's goal'.", "1 day"],
+    ["TEST-6", "Parity harness: the app scenarios again on Postgres.", "1 to 2 days"],
+    ["TEST-7", "Template test database; merge the 25 server test binaries into about 5.", "1 day"],
+    ["TEST-9", "Nightly job (accessibility scan in both themes and widths, repeats of three specs, the load test). Needs runner time; if your runner is the shared VM, object and it becomes 'on demand'.", "Half a day"],
+    ["TEST-10", "One test each for separate web and worker processes, the file blob store (the compose default, untested), event-stream resume, cookie attributes.", "1 day"] ] },
+  { g: "Data sources", rows: [
+    ["WP-OD2", "A licence tag per field and asset; the attribution page, the retention job and the hub filter are keyed by it.", "M ~"],
+    ["WP-OD10", "LibriVox connector and a Discogs-dump hub seed: later, nice to have.", "Later"] ] },
+  { g: "Decision log", rows: [
+    ["C2", "Correct the two entries that say a hosting change is gated on the server (it is not), or gate it.", "S"],
+    ["C4", "The History year filter uses your time zone, not UTC. A real bug for people far from UTC.", "S"],
+    ["C5", "Record that the CLI is the proof for 'reopen wizard'; email update and session revocation stay deferred (see SEC-10).", "S"],
+    ["C11", "Vendor the TMDB logo with the attribution workstream.", "S"],
+    ["C12", "Unpin the cover on 'Remove from library', or build the sweep.", "S"],
+    ["DLOG-2-6", "The follow-up steps of DLOG-1: two new fields, marking of owner rulings and records, a repository check for decision references, the rule for new work, the one-time migration. None is done if DLOG-1 is answered c.", "S to M"] ] }
+];
+
+/* ---------- rendering ---------- */
+var $ = function (id) { return document.getElementById(id); };
+function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function slug(id) { return id.replace(/[^A-Za-z0-9]/g, "_"); }
+var LET = "abcdefgh";
+var state = {};      /* id -> {choice, note} as last known */
+var pending = {};    /* id -> number of writes in flight */
+var timers = {};     /* id -> debounce timer for the note */
+var nodes = {};      /* id -> {root, radios[], note, tag, meta, confirm, clear, check} */
+var isDecision = {};
+var db = null, loaded = false;
+
+function buildItem(it) {
+  var s = slug(it.id);
+  var a = el("article", "item"); a.id = "i-" + s; a.dataset.state = "open";
+  var head = el("div", "item-head");
+  head.appendChild(el("span", "ref", it.id));
+  head.appendChild(el("h3", null, it.t));
+  if (it.x) head.appendChild(el("span", "tag warn", "Contested"));
+  var tag = el("span", "tag", "Open"); head.appendChild(tag);
+  a.appendChild(head);
+  a.appendChild(el("p", "question", it.q));
+  if (it.flag) a.appendChild(el("p", "flag", it.flag));
+
+  var fs = el("fieldset", "opts");
+  fs.appendChild(el("legend", null, it.added ? "Options (added for this page)" : "Options"));
+  var radios = [];
+  var opts = it.o.concat(["Something else (see my note)"]);
+  opts.forEach(function (text, i) {
+    var other = i === it.o.length;
+    var val = other ? "other" : LET[i];
+    var lab = el("label", "opt"); lab.htmlFor = "r-" + s + "-" + val;
+    var r = el("input"); r.type = "radio"; r.name = "r-" + s; r.id = "r-" + s + "-" + val; r.value = val;
+    r.addEventListener("click", function () { choose(it.id, val); });
+    var span = el("span", "opt-text");
+    if (!other) span.appendChild(el("b", null, LET[i]));
+    span.appendChild(document.createTextNode(text));
+    if (!other && i === it.d) span.appendChild(el("span", it.x ? "def contested" : "def", it.x ? "Review default, contested" : "Default"));
+    lab.appendChild(r); lab.appendChild(span); fs.appendChild(lab); radios.push(r);
+  });
+  a.appendChild(fs);
+
+  var dl = el("dl", "facts");
+  [[it.d >= 0 ? "Why" : "Default", it.w], ["Cost", it.cost], ["Blocks", it.bl]].forEach(function (p) {
+    dl.appendChild(el("dt", null, p[0])); dl.appendChild(el("dd", null, p[1]));
+  });
+  a.appendChild(dl);
+
+  var nl = el("label", "note-label", "Note (optional)"); nl.htmlFor = "n-" + s;
+  var ta = el("textarea"); ta.id = "n-" + s; ta.rows = 2;
+  ta.addEventListener("input", function () { noteChanged(it.id); });
+  nl.appendChild(ta); a.appendChild(nl);
+
+  var foot = el("div", "foot");
+  var confirm = el("button", "btn primary", "Confirm default"); confirm.type = "button"; confirm.id = "c-" + s;
+  confirm.addEventListener("click", function () { if (it.d >= 0) choose(it.id, LET[it.d]); });
+  var meta = el("span", null, "");
+  var clear = el("button", "btn link", "Clear answer"); clear.type = "button"; clear.id = "x-" + s; clear.hidden = true;
+  clear.addEventListener("click", function () { clearAnswer(it.id); });
+  foot.appendChild(confirm); foot.appendChild(meta); foot.appendChild(clear);
+  a.appendChild(foot);
+
+  nodes[it.id] = { root: a, radios: radios, note: ta, tag: tag, meta: meta, confirm: confirm, clear: clear, item: it };
+  isDecision[it.id] = true;
+  return a;
+}
+
+function buildDefault(row) {
+  var id = row[0], s = slug(id);
+  var d = el("div", "drow"); d.id = "i-" + s; d.dataset.state = "default";
+  var lab = el("label", "obj"); lab.htmlFor = "o-" + s;
+  var cb = el("input"); cb.type = "checkbox"; cb.id = "o-" + s;
+  cb.setAttribute("aria-label", "Object to " + id);
+  cb.addEventListener("change", function () {
+    if (cb.checked) choose(id, "object"); else clearAnswer(id);
+  });
+  var t = el("span", "d-text");
+  t.appendChild(el("span", "ref", id)); t.appendChild(document.createTextNode("  " + row[1] + " "));
+  t.appendChild(el("small", null, "Cost: " + row[2] + "."));
+  lab.appendChild(cb); lab.appendChild(t); d.appendChild(lab);
+  var nl = el("label", "note-label", "What instead, or why not"); nl.htmlFor = "n-" + s; nl.hidden = true;
+  var ta = el("textarea"); ta.id = "n-" + s; ta.rows = 2;
+  ta.addEventListener("input", function () { noteChanged(id); });
+  nl.appendChild(ta); d.appendChild(nl);
+  nodes[id] = { root: d, check: cb, note: ta, noteWrap: nl };
+  return d;
+}
+
+function build() {
+  var main = $("main"), nav = $("nav");
+  SECTIONS.forEach(function (sec) {
+    var block = el("section", "block"); block.id = sec.k;
+    var head = el("div", "block-head"), hr = el("div", "h-row");
+    var h = el("h2", null, sec.t); h.id = "h-" + sec.k; block.setAttribute("aria-labelledby", h.id);
+    var cnt = el("span", "sec-count"); cnt.id = "sc-" + sec.k;
+    hr.appendChild(h); hr.appendChild(cnt); head.appendChild(hr);
+    head.appendChild(el("p", "lead", sec.lead)); block.appendChild(head);
+    var items = el("div", "items");
+    ITEMS.forEach(function (it) { if (it.s === sec.k) items.appendChild(buildItem(it)); });
+    block.appendChild(items);
+    var done = el("p", "all-done", "Everything in this section is answered."); done.id = "ad-" + sec.k; done.hidden = true;
+    block.appendChild(done);
+    main.appendChild(block);
+    var li = el("li"), a = el("a"); a.href = "#" + sec.k;
+    a.appendChild(document.createTextNode(sec.t + " ")); var sp = el("span"); sp.id = "nc-" + sec.k; a.appendChild(sp);
+    li.appendChild(a); nav.appendChild(li);
+  });
+  var block = el("section", "block"); block.id = "defaults"; block.setAttribute("aria-labelledby", "h-defaults");
+  var head = el("div", "block-head"), hr = el("div", "h-row");
+  var h = el("h2", null, "Proceed with defaults"); h.id = "h-defaults";
+  var cnt = el("span", "sec-count"); cnt.id = "sc-defaults";
+  hr.appendChild(h); hr.appendChild(cnt); head.appendChild(hr);
+  head.appendChild(el("p", "lead", "Pure engineering or hygiene. Each goes ahead as written and is logged as a decision. Tick a box only where you object; leave the rest alone."));
+  block.appendChild(head);
+  DEFAULTS.forEach(function (g) {
+    var dg = el("div", "dgroup"); dg.appendChild(el("h3", null, g.g));
+    g.rows.forEach(function (r) { dg.appendChild(buildDefault(r)); });
+    block.appendChild(dg);
+  });
+  main.appendChild(block);
+  var li = el("li"), a = el("a"); a.href = "#defaults";
+  a.appendChild(document.createTextNode("Defaults ")); var sp = el("span"); sp.id = "nc-defaults"; a.appendChild(sp);
+  li.appendChild(a); nav.appendChild(li);
+}
+
+function get(id) { return state[id] || { choice: "", note: "", updated: "" }; }
+
+function paint(id) {
+  var n = nodes[id]; if (!n) return;
+  var st = get(id);
+  var typing = document.activeElement === n.note || timers[id];
+  if (!typing && n.note.value !== (st.note || "")) n.note.value = st.note || "";
+  if (n.check) {
+    var obj = st.choice === "object";
+    n.check.checked = obj; n.root.dataset.state = obj ? "object" : "default"; n.noteWrap.hidden = !obj;
+    return;
+  }
+  var it = n.item, answered = !!st.choice;
+  var show = answered ? st.choice : (it.d >= 0 && !it.x ? LET[it.d] : "");
+  n.radios.forEach(function (r) { r.checked = r.value === show; });
+  n.root.dataset.state = answered ? "answered" : "open";
+  n.tag.className = answered ? "tag ok" : "tag";
+  n.tag.textContent = answered ? (st.choice === "other" ? "Answered: see note" : "Answered: " + st.choice) : (st.note ? "Open, note saved" : "Open");
+  n.confirm.hidden = answered || !(it.d >= 0 && !it.x);
+  n.clear.hidden = !(answered || st.note);
+  n.meta.textContent = st.updated ? "Saved " + fmt(st.updated) : "";
+}
+
+function fmt(iso) { try { var d = new Date(iso); return d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }); } catch (e) { return ""; } }
+
+function tally() {
+  var total = ITEMS.length, done = 0, per = {};
+  ITEMS.forEach(function (it) {
+    per[it.s] = per[it.s] || [0, 0]; per[it.s][1]++;
+    if (get(it.id).choice) { done++; per[it.s][0]++; }
+  });
+  $("n-done").textContent = done; $("n-total").textContent = total;
+  $("meter").style.width = (100 * done / total) + "%";
+  var only = $("f-open").checked;
+  SECTIONS.forEach(function (sec) {
+    var p = per[sec.k] || [0, 0];
+    $("sc-" + sec.k).textContent = p[0] + " of " + p[1] + " answered";
+    $("nc-" + sec.k).textContent = p[0] + "/" + p[1];
+    $("ad-" + sec.k).hidden = !(only && p[0] === p[1]);
+  });
+  ITEMS.forEach(function (it) { nodes[it.id].root.hidden = only && !!get(it.id).choice; });
+  var obj = 0, dn = 0;
+  DEFAULTS.forEach(function (g) { g.rows.forEach(function (r) { dn++; if (get(r[0]).choice === "object") obj++; }); });
+  $("sc-defaults").textContent = dn + " items, " + obj + (obj === 1 ? " objection" : " objections");
+  $("nc-defaults").textContent = obj ? obj + " obj." : "";
+}
+
+function setSave(text) { $("save-state").textContent = text; }
+function warn(text) { var n = $("store-note"); n.textContent = text; n.hidden = false; }
+
+/* ---------- writes: one at a time per document ---------- */
+var chain = {};
+function push(id) {
+  if (!db) { warn("Answers cannot be saved in this view. Open the page signed in as its owner."); return; }
+  pending[id] = (pending[id] || 0) + 1;
+  setSave("Saving...");
+  chain[id] = (chain[id] || Promise.resolve()).then(function () {
+    var st = get(id), ref = db.collection("answers").doc(id);
+    if (!st.choice && !st.note) return ref.delete();
+    return ref.set({ id: id, choice: st.choice || "", note: st.note || "", updated: st.updated });
+  }).then(function () {
+    pending[id]--; setSave("Saved " + fmt(new Date().toISOString()));
+  }, function (e) {
+    pending[id]--;
+    var code = e && e.code ? e.code : "unavailable";
+    setSave("Not saved");
+    warn("Could not save " + id + " (" + code + "). " + (code === "resource_exhausted" ? "Wait a moment and change it again." : "Reload the page and try again; your last change to this item may be missing."));
+  });
+}
+function choose(id, val) {
+  var st = get(id), n = nodes[id];
+  state[id] = { choice: val, note: n.note.value.trim(), updated: new Date().toISOString() };
+  paint(id); tally(); push(id);
+}
+function noteChanged(id) {
+  clearTimeout(timers[id]);
+  timers[id] = setTimeout(function () {
+    timers[id] = null;
+    var st = get(id), n = nodes[id], v = n.note.value.trim();
+    if (v === (st.note || "")) return;
+    if (n.check && st.choice !== "object") return;
+    state[id] = { choice: st.choice || "", note: v, updated: new Date().toISOString() };
+    paint(id); tally(); push(id);
+  }, 800);
+}
+function clearAnswer(id) {
+  clearTimeout(timers[id]); timers[id] = null;
+  state[id] = { choice: "", note: "", updated: "" };
+  nodes[id].note.value = "";
+  paint(id); tally(); push(id);
+}
+
+/* ---------- boot ---------- */
+build();
+try { $("f-open").checked = localStorage.getItem("r2-open-only") === "1"; } catch (e) {}
+$("f-open").addEventListener("change", function () {
+  try { localStorage.setItem("r2-open-only", this.checked ? "1" : "0"); } catch (e) {}
+  tally();
+});
+Object.keys(nodes).forEach(paint); tally();
+
+var loadTimer = setTimeout(function () {
+  if (!loaded) { setSave("Store not reachable"); warn("The answer store did not respond. Answers you give now may not be saved; reload the page to try again."); }
+}, 10000);
+
+function start() {
+  if (!window.claude || !window.claude.use) { clearTimeout(loadTimer); setSave("Preview only"); warn("This view has no answer store, so nothing is saved here."); return; }
+  window.claude.use("db").then(function (d) {
+    if (!d) { clearTimeout(loadTimer); loaded = true; setSave("Read-only"); warn("Answers cannot be saved in this view. Open the page signed in as its owner."); document.body.classList.add("readonly"); return; }
+    db = d;
+    d.collection("answers").onSnapshot(function (snap) {
+      clearTimeout(loadTimer);
+      var seen = {};
+      snap.docs.forEach(function (doc) {
+        var data = doc.data() || {}; seen[doc.id] = true;
+        if (pending[doc.id] || !nodes[doc.id]) return;
+        state[doc.id] = { choice: String(data.choice || ""), note: String(data.note || ""), updated: String(data.updated || "") };
+      });
+      Object.keys(state).forEach(function (id) { if (!seen[id] && !pending[id] && !timers[id]) delete state[id]; });
+      Object.keys(nodes).forEach(paint); tally();
+      if (!loaded) { loaded = true; setSave("Answers loaded"); $("store-note").hidden = true; }
+    }, function (e) {
+      clearTimeout(loadTimer); setSave("Store not reachable");
+      warn("The answer store stopped responding (" + (e && e.code ? e.code : "unavailable") + "). Reload the page before you continue.");
+    });
+  });
+}
+start();
+</script>

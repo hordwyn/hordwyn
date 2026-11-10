@@ -891,6 +891,7 @@ test by hand, commit, push, tag.
 
 ## 9. Links
 
+- Round 2 review page (2026-11-10, F1 + F2 decisions, 64 radios + 53 "object" items): https://claude.ai/artifact/7cUpvVeCKLEx7qCtE1Rars (store `answers`, doc id = decision id, `{id, choice, note, updated}`; no doc = unanswered or, for defaults, no objection). Source `docs/fable/round2/review-page.html`.
 - Review page (answered): https://claude.ai/artifact/DXNJa8yNPXcUH3nd227wKZ (store `reviews`)
 - Open decisions page (partly answered, keeps the unreviewed DECISIONS entries):
   https://claude.ai/artifact/EMtPcfBRksJoFv4LDVHfYv (store `answers`; read it back with the
