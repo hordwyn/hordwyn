@@ -17,11 +17,10 @@ rules (section 2, verbatim), `docs/DECISIONS.md`, `docs/design/DESIGN.md`, the U
   closed (company laptop behind Cisco SSE; no code change).
 - 17 owner test findings OT-1..OT-17 and the new plan P0..P4:
   `docs/handoff/owner-test-2026-11-10.md`.
-- Fable round 2 is prepared, NOT started (another agent on the VM uses the RAM): briefs
+- Fable round 2 STARTED 2026-11-10 (owner go; weekly usage at 91%, so outputs may be partial: each agent writes its file incrementally, TODO marks unfinished sections): briefs
   `docs/handoff/fable-briefs/` (common.md + F1 review page, F2 UX pass, F3 bug diagnosis,
   F4 attribution and connectors). All read-only, no builds; outputs to `docs/fable/round2/`.
-  Model alias `fable` = `claude-fable-5-2` (DEC-495). Start them only when the owner says the
-  RAM is free.
+  Model alias `fable` = `claude-fable-5-2` (DEC-495). Rerun only the unfinished parts.
 
 **Open threads at the handover (2026-11-10), do these first:**
 
