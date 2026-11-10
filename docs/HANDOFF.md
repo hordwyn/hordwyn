@@ -11,6 +11,18 @@ rules (section 2, verbatim), `docs/DECISIONS.md`, `docs/design/DESIGN.md`, the U
 
 ## 0. Resume here (2026-11-10, phase 4 done; handover before a restart)
 
+**Update 2026-11-10 (after the restart), this wins over the threads below:**
+
+- Owner tested `ux4` at home: TMDB and IGDB work. The podman and TMDB threads below are
+  closed (company laptop behind Cisco SSE; no code change).
+- 17 owner test findings OT-1..OT-17 and the new plan P0..P4:
+  `docs/handoff/owner-test-2026-11-10.md`.
+- Fable round 2 is prepared, NOT started (another agent on the VM uses the RAM): briefs
+  `docs/handoff/fable-briefs/` (common.md + F1 review page, F2 UX pass, F3 bug diagnosis,
+  F4 attribution and connectors). All read-only, no builds; outputs to `docs/fable/round2/`.
+  Model alias `fable` = `claude-fable-5-2` (DEC-495). Start them only when the owner says the
+  RAM is free.
+
 **Open threads at the handover (2026-11-10), do these first:**
 
 - **Eight read-only Fable reviews, owner has not reviewed them yet:** on branch
