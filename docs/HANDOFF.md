@@ -13,6 +13,8 @@ rules (section 2, verbatim), `docs/DECISIONS.md`, `docs/design/DESIGN.md`, the U
 
 **Update 2026-11-10 (after the restart), this wins over the threads below:**
 
+- **ot1a done** (tag `ot1a`, 8b58fa0): owner-test fix pack F5 + review fixes F8, review `docs/reviews/2026-11-10-ot1a-review.md`; ci 849 passed / 0 failed / 4 ignored, e2e 134 passed, 0 panics. Owner answers of the round 2 page: `docs/fable/round2/owner-answers-2026-11-10.md` (HANDOFF 4.7, DEC-530..552), 9 questions back to the owner in its section 13 (none blocks ot2). Next: packages in `docs/fable/round2/next-packages.md`, starting with ot2a; each package = Fable implementer, Fable reviewer, Fable fixer, orchestrator ci + e2e, commit, tag. Disk: ci needs >= 13 GB free (drop test DBs, `rm -rf src/rust/target/front`).
+
 - Owner tested `ux4` at home: TMDB and IGDB work. The podman and TMDB threads below are
   closed (company laptop behind Cisco SSE; no code change).
 - 17 owner test findings OT-1..OT-17 and the new plan P0..P4:
