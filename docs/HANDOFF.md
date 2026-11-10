@@ -27,7 +27,7 @@ rules (section 2, verbatim), `docs/DECISIONS.md`, `docs/design/DESIGN.md`, the U
 - **Eight read-only Fable reviews, owner has not reviewed them yet:** on branch
   `wip/fable-reviews` (pushed), folder `docs/fable/`: `security-audit.md` (SEC-1..12, 5
   medium), `hub-design.md` (BGG replacement as a hub role; 15 owner questions with
-  defaults), `architecture-review.md` (10 work packages incl. the `web` crate split),
+  defaults), `architecture-review.md` (12 work packages incl. the `web` crate split),
   `open-data-sources.md` (open source per kind: TVmaze, Wikidata, MusicBrainz, Open
   Library/DNB, VNDB; 10 connector packages), `decisions-current-state.md` (93 supersessions,
   12 contradictions, 58-item backlog, log restructuring proposal), `perf-proposals.md`
