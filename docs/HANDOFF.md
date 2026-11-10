@@ -776,6 +776,92 @@ Decided later the same day: **OD-12** 15 minutes, sliding, 1 hour cap, provider 
 - **Phases:** work through all open phases sequentially without waiting for a go (section 0).
 - **Build host:** the owner raises RAM (4 GB -> 6 GB now, more possible after another restart).
 
+### 4.7 Owner rulings 2026-11-10 (round 2 review page)
+
+The owner answered all 64 decision items of `docs/fable/round2/review-page.html`. Every
+answer with the option in words, the notes verbatim, the consequences and the notes that
+needed interpretation: `docs/fable/round2/owner-answers-2026-11-10.md`. DEC-530 to DEC-552
+record the rulings that change or reverse an earlier decision. The work cut into packages:
+`docs/fable/round2/next-packages.md`. "(a)" and so on are the page's option letters.
+
+**The 53 "proceed with defaults" items of the page were NOT reviewed by the owner**
+("Answered all open questions. Didn't go through decisions"). They stay in force as
+defaults under rule 2 and are not owner-approved, like the entries in 4.5; list in the
+answers file, section 12.
+
+| Id | Ruling | DEC |
+|---|---|---|
+| HUB-0 | Build the hub: H1 and H2 now, own instances only, third parties after H5; H1 replaces W3 | 531 |
+| HUB-7 | No BGG connector; BGG is an identifier plus importers. Reverses 4.6 "keep BGG for those with a token". Owner: "I may reverse it once we have a valid token." | 530 |
+| HUB-1 | Hub facts are CC0 1.0 | 531 |
+| HUB-2 | Images: CC BY 4.0 and CC0 only, no revocable operator licence (owner withdrew that wish; confirm asked back) | 532 |
+| HUB-4 | Free text: "a full feature hub. Including everything we do", may start without movies and shows; read as every kind, movies and shows last (asked back) | 532 |
+| HUB-3 | Contributions attributed to the instance, personal hub account optional | 531 |
+| HUB-5 | BGG ids on the hub now; IGDB and MAL ids after the Wikidata properties are verified | - |
+| HUB-6 | Salted hashes of purged TMDB text, at most the retention limit; ask the lawyer | 531 |
+| HUB-9 | Reference hub at launch: accounts by invite, instances by admin approval | 531 |
+| HUB-10 | The owner is the first moderator; trusted contributors are appointed | 531 |
+| HUB-11 | Full notice-and-action flow, and the owner engages a lawyer | 531 |
+| HUB-12 | Monetisation: decide later, nothing is built | 531 |
+| HUB-13 | A second instance as staging hub, hosted by the owner | 531 |
+| HUB-15 | No Open Products Facts connector (closes the barcode question of 4.6 and section 6) | 531 |
+| SEC-1 | All security headers and a CSP with nonce in the app, plus reverse-proxy docs | 536 |
+| SEC-3 | Free text: records that outlive an account carry an identifier, never a name; deleting the mapping cuts the link; "the normal flow for this globally". Review with conditions in the answers file 11.3 | 533 |
+| SEC-4 | Private OIDC and SMTP targets allowed in home mode by default, blocked in hosted mode | 534 |
+| SEC-5 | Per-address budget, concurrency cap, progressive delay instead of the hard lock, counters in Postgres (changes OD-17's throttle behaviour). Owner asked whether it is worth it with an IdM: answer in 11.4, Postgres part asked back | 535 |
+| SEC-6 | Compose requires its passwords and binds to loopback | 536 |
+| SEC-10 | Session hard cap (admin-editable, OD-11 rule) and a session list with "sign out everywhere" | 536 |
+| OT-4 | Two buttons "Mark as watched" / "Want to watch", toast with Undo | 537 |
+| OT-5 | Status pill in the header, imperative action labels | 537 |
+| OT-7 | "Watched 3 times, last on <date>"; no "Rewatches" row | 537 |
+| OT-9 | Model A: status is now, history counts every time; a show rewatch is an explicit run | 537 |
+| OT-15 | Bulk mark on watched episodes asks "Log these N again as a rewatch?" (supersedes DEC-501) | 538 |
+| OT-6 | "Watched / Listened / Read / Played with..." per kind | 539 |
+| OT-10 | Centered dialog from 640 px, bottom sheet below (changes the approved side sheet) | 539 |
+| OT-16 | Duration in row 1, accepts 1:30 or 90, prefilled; scores behind "More" for video games | 539 |
+| OT-11 | Activity sentence, a "Plays" tab on game pages, hours and win rate on the Stats Play tab | 539 |
+| OT-12 | One size per card footer, link-as-button component, one filled button per card | 539 |
+| OT-13 | Violet accent plus four group tints in the default brand (changes Q8 "neutral palette") | 540 |
+| OT-14 | 96 rem for grid pages and the top bar, 80 rem for record pages (supersedes DEC-496) | 541 |
+| OT-17 | Stats led by time: piggy-bank hero tile and four time tiles; then per-episode runtimes | 542 |
+| OPS-3+4 | "Something else" with an empty note: no ruling, asked back; nothing changes in code | - |
+| OPS-6 | Rollback is dump-restore only, documented; log pending migrations; a dry run | 543 |
+| OPS-12 | Supported shape: one web process plus any number of workers | 552 |
+| OPS-I | Publish images to a public registry on tags (which registry: asked back) | 543 |
+| OPS-B | New Dockerfile structure, measure thin against fat link-time optimisation, then the owner picks | 552 |
+| ARCH-0 | Quick wins now; the three large packages after ot1, ot2 and W1 | 544 |
+| WP-B2 | Reverse DEC-162: remove the Backend pass-through after the API split | 544 |
+| PERF-T | Targets accepted; the whole performance plan stays workstream W2 | 552 |
+| TEST-8 | A per-user import lane (product change), then 60 s test timeouts | 545 |
+| TEST-1 | A flaky browser test fails the pipeline (TEST-2 first) | 545 |
+| DATA-0 | Wikidata identity above every proprietary source, all kinds; TMDB becomes enrichment | 546 |
+| WP-OD3 | TVmaze is the default show source | 546 |
+| WP-OD7 | Wikipedia summaries as descriptions, on by default | 546 |
+| DATA-K | Connector order: Open Library plus DNB, MusicBrainz plus Cover Art Archive and ListenBrainz import, VNDB | 546 |
+| WP-OD8 | Audiobook editions become a hub kind after H3 | 532 |
+| WP-OD9 | Comics: not now, no connector | 546 |
+| DATA-R | "Never build" list confirmed except the Steam Web API (re-check); new candidates SteamDB and ProtonDB; terms first | 547 |
+| DLOG-1 | Decision log split into three files under `docs/decisions/` (approved rule change; migrate when no agent is appending) | 548 |
+| C10 | Server-side store for the five personal UI preferences | 549 |
+| OWN-1 | TMDB purge stays strict, but the person's library entry keeps its own title and year (changes DEC-466's effect). Owner: the title and year are entered by the user, not TMDB data | 550 |
+| OWN-2 | The owner reviews the unreviewed entries against the current-state summary, by area | 552 |
+| OWN-3 | The owner will deliver the sample exports (Goodreads, BG Stats, BGG collection, Trakt) | - |
+| OWN-4 | The owner will do the four anime and manga actions; MangaDex answer still missing | - |
+| OWN-5 | Funnel review stays on 2026-12-06 | 552 |
+| OWN-6 | Browser language before the brand default is accepted (amends the i18n ruling in 4.1) | 551 |
+| OWN-7 | Sign-up lands on Home, as designed | 551 |
+| OWN-8 | The owner will run the three live checks (authentik `max_age=0`, compose health, Tauri) | - |
+| OWN-9 | Squash the migrations into one baseline now; the owner re-imports | 543 |
+| OWN-10 | TMDB token rotated: done | - |
+| OWN-11 | Merge `docs/fable/` as it is on the branch; plan P0 to P4 is final | 552 |
+| OWN-12 | No more RAM for the VM | 552 |
+
+Asked back to the owner (answers file, section 13): OPS-3+4 (what instead), HUB-4 (scope
+reading, bridge or full kind, order of kinds), SEC-3 (name snapshots in other members'
+people entries), OPS-I (which registry), HUB-2 (confirm no revocable licence), SEC-5 (may
+the Postgres counters wait), OWN-4 (MangaDex), DATA-R (what is wanted from Steam), and the
+lawyer list for HUB-11. None of them blocks the next package.
+
 ## 5. Action list from the rulings
 
 1. Rulings recorded as DEC-169 onward and applied to design.md and addendum-1.md: done.
