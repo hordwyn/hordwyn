@@ -71,7 +71,7 @@ Input: `docs/fable/round2/owner-answers-2026-11-10.md` (the rulings, DEC-530 to 
 | later | h3 to h7, kinds | contributions, images, lawful, ops, further kinds | L each | yes | lawyer; Q2, Q5 |
 | later | W4, W6, W7, importers, steam | anime and manga, web push, "date unknown", sample-bound importers, Steam | - | yes | deliveries, Q7, Q8 |
 
-Why this order: the owner sees ot2 first (his own findings, all answered with the proposed
+Why this order: the owner sees ot2 first (their own findings, all answered with the proposed
 design). The security and operations fixes follow because public images (OPS-I b) and any
 hosted use wait for them. Data and hub come last because they are the largest and because
 the hub's lawyer-bound phases cannot start before the owner has engaged one. The
