@@ -363,6 +363,7 @@ mod tests {
             event_id: None,
             session_id: None,
             participants: vec![],
+            play: None,
             shared: false,
             owner_name: None,
             undoable: false,

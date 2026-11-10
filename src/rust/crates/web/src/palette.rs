@@ -285,10 +285,93 @@ fn to_item(i: &CatalogItemDto, group: &str) -> CommandItem {
     }
 }
 
+/// Which search the streamed results belong to. The server starts asking the sources before
+/// it answers the search (`api::ops::search`), so a fast source's `search.results` event can
+/// arrive before the palette knows the search's id: while an answer is on its way such
+/// results are held, and the answer takes the ones of its search.
+#[derive(Debug, Default)]
+struct Stream {
+    /// The search on screen.
+    current: Option<String>,
+    /// A search was sent and has not answered yet.
+    awaiting: bool,
+    held: Vec<SearchResultsEventDto>,
+}
+
+impl Stream {
+    /// Results held for one answer at most (a search asks a handful of sources per kind).
+    const MAX_HELD: usize = 32;
+
+    /// A search was sent: what was held for an older one is of no use any more.
+    fn asked(&mut self) {
+        self.awaiting = true;
+        self.held.clear();
+    }
+
+    /// The search answered with its id: the results that came before it, in their order.
+    fn answered(&mut self, id: String) -> Vec<SearchResultsEventDto> {
+        self.awaiting = false;
+        let early = std::mem::take(&mut self.held)
+            .into_iter()
+            .filter(|r| r.search_id == id)
+            .collect();
+        self.current = Some(id);
+        early
+    }
+
+    /// The search failed: nothing more to wait for.
+    fn failed(&mut self) {
+        self.awaiting = false;
+        self.held.clear();
+    }
+
+    /// The field was cleared: no search on screen.
+    fn cleared(&mut self) {
+        *self = Self::default();
+    }
+
+    /// A `search.results` event: `Some` when it belongs to the search on screen; one that
+    /// may belong to the search in flight is held.
+    fn arrived(&mut self, r: SearchResultsEventDto) -> Option<SearchResultsEventDto> {
+        if self.current.as_deref() == Some(r.search_id.as_str()) {
+            return Some(r);
+        }
+        if self.awaiting && self.held.len() < Self::MAX_HELD {
+            self.held.push(r);
+        }
+        None
+    }
+}
+
+/// Whether the list is filtered by the typed text. The idle list (commands, recent items)
+/// always is. Search results were matched by the server (typos, other fields) and are shown
+/// as they came, but only while they answer the text in the field (`answered`: the query of
+/// the answer on screen): rows of an earlier query are filtered as typed until the new
+/// answer is there, so Enter never takes a row the text does not name (OT1A-1).
+fn filter_as_typed(query: &str, answered: Option<&str>) -> bool {
+    query.trim().chars().count() < 2 || answered != Some(query)
+}
+
+/// One source's results join the list (an item already listed stays where it is).
+fn add_results(
+    r: &SearchResultsEventDto,
+    waiting: RwSignal<Vec<String>>,
+    items: RwSignal<Vec<CommandItem>>,
+) {
+    waiting.update(|w| w.retain(|c| c != &r.connector));
+    items.update(|list| {
+        for i in &r.items {
+            if !list.iter().any(|x| x.id == i.id) {
+                list.push(to_item(i, &r.connector));
+            }
+        }
+    });
+}
+
 /// Streamed connector results of the current search join the list as they arrive.
 fn stream_results(
     events: crate::events::LastEvent,
-    search_id: RwSignal<Option<String>>,
+    stream: StoredValue<Stream>,
     waiting: RwSignal<Vec<String>>,
     items: RwSignal<Vec<CommandItem>>,
 ) {
@@ -305,17 +388,11 @@ fn stream_results(
         let Ok(r) = serde_json::from_value::<SearchResultsEventDto>(ev["payload"].clone()) else {
             return;
         };
-        if search_id.get_untracked().as_deref() != Some(r.search_id.as_str()) {
-            return;
+        let mut shown = None;
+        stream.update_value(|s| shown = s.arrived(r));
+        if let Some(r) = shown {
+            add_results(&r, waiting, items);
         }
-        waiting.update(|w| w.retain(|c| c != &r.connector));
-        items.update(|list| {
-            for i in &r.items {
-                if !list.iter().any(|x| x.id == i.id) {
-                    list.push(to_item(i, &r.connector));
-                }
-            }
-        });
     });
 }
 
@@ -360,7 +437,7 @@ struct State {
     query: RwSignal<String>,
     scope: RwSignal<String>,
     items: RwSignal<Vec<CommandItem>>,
-    search_id: RwSignal<Option<String>>,
+    stream: StoredValue<Stream>,
     waiting: RwSignal<Vec<String>>,
     asked: RwSignal<Option<Asked>>,
 }
@@ -371,7 +448,7 @@ fn debounced_search(s: State) {
         query,
         scope,
         items,
-        search_id,
+        stream,
         waiting,
         asked,
     } = s;
@@ -383,7 +460,7 @@ fn debounced_search(s: State) {
         generation.set_value(g);
         if q.trim().chars().count() < 2 {
             items.set(vec![]);
-            search_id.set(None);
+            stream.update_value(Stream::cleared);
             waiting.set(vec![]);
             asked.set(None);
             return;
@@ -393,20 +470,30 @@ fn debounced_search(s: State) {
                 if generation.get_value() != g {
                     return;
                 }
+                stream.update_value(Stream::asked);
                 leptos::task::spawn_local(async move {
-                    if let Ok(r) = crate::api::search(q.clone(), None, group).await
-                        && generation.get_value() == g
-                    {
-                        let local = t("search-local");
-                        items.set(r.items.iter().map(|i| to_item(i, &local)).collect());
-                        waiting.set(r.pending.clone());
-                        asked.set(Some(Asked {
-                            query: q,
-                            pending: r.pending,
-                            skipped: r.skipped,
-                            groups_without_source: r.groups_without_source,
-                        }));
-                        search_id.set(Some(r.search_id));
+                    let answer = crate::api::search(q.clone(), None, group).await;
+                    if generation.get_value() != g {
+                        return;
+                    }
+                    let Ok(r) = answer else {
+                        stream.update_value(Stream::failed);
+                        return;
+                    };
+                    let local = t("search-local");
+                    items.set(r.items.iter().map(|i| to_item(i, &local)).collect());
+                    waiting.set(r.pending.clone());
+                    asked.set(Some(Asked {
+                        query: q,
+                        pending: r.pending,
+                        skipped: r.skipped,
+                        groups_without_source: r.groups_without_source,
+                    }));
+                    // results that were faster than this answer
+                    let mut early = Vec::new();
+                    stream.update_value(|s| early = s.answered(r.search_id));
+                    for e in &early {
+                        add_results(e, waiting, items);
                     }
                 });
             },
@@ -581,7 +668,7 @@ pub fn SearchPalette() -> impl IntoView {
         query: RwSignal::new(String::new()),
         scope: RwSignal::new(SCOPES[0].to_string()),
         items: RwSignal::new(Vec::<CommandItem>::new()),
-        search_id: RwSignal::new(None::<String>),
+        stream: StoredValue::new(Stream::default()),
         waiting: RwSignal::new(Vec::<String>::new()),
         asked: RwSignal::new(None::<Asked>),
     };
@@ -595,7 +682,7 @@ pub fn SearchPalette() -> impl IntoView {
     let status = footer_status(open);
     open_on_ctrl_k(open);
     debounced_search(s);
-    stream_results(use_events(), s.search_id, waiting, items);
+    stream_results(use_events(), s.stream, waiting, items);
     let recent = recent_on_open(open);
     let (busy, quick_error) = (RwSignal::new(false), RwSignal::new(None::<String>));
     Effect::new(move |_| {
@@ -633,6 +720,10 @@ pub fn SearchPalette() -> impl IntoView {
         .map(|s| SegmentedOption::new(*s, i18n.t(&format!("kind-group-{s}"))))
         .collect();
     let hints = hints(&i18n, scope);
+    let filter = Signal::derive(move || {
+        let answered = asked.with(|a| a.as_ref().map(|a| a.query.clone()));
+        query.with(|q| filter_as_typed(q, answered.as_deref()))
+    });
     view! {
         <Dialog open=open title=i18n.t("search-title") close_label=i18n.t("dialog-close") class=FULL_SCREEN_ON_PHONES initial_focus="search">
             {move || scope.get().map(|target| {
@@ -650,6 +741,7 @@ pub fn SearchPalette() -> impl IntoView {
                 on_select=on_select
                 on_secondary=on_secondary
                 hints=hints.clone()
+                filter=filter
             />
             {move || quick_error.get().map(|e| view! { <p role="alert" class="mt-2 text-sm text-destructive-text">{e}</p> })}
             // the reason card is announced when it appears (UX2-W8): the live region stays put
@@ -868,5 +960,71 @@ mod tests {
         assert_eq!(idle_items(&en, &recent[..1], true, true).len(), 4);
         // signed out: no commands and no recent items (UX4-15)
         assert_eq!(idle_items(&en, &recent, true, false).len(), 0);
+    }
+
+    /// OT1A-1: server results are shown as they came only while they answer the text in the
+    /// field; rows of an earlier query are filtered as typed until the new answer is there.
+    #[test]
+    fn results_of_another_query_are_filtered_as_typed() {
+        // the idle list (commands, recent items) is always filtered
+        assert!(filter_as_typed("", None));
+        assert!(filter_as_typed("d", Some("dune")));
+        // typed on, the search has not answered (or failed): the old rows are stale
+        assert!(filter_as_typed("dune messiah", Some("dune")));
+        assert!(filter_as_typed("du", None));
+        // the answer on screen is the one of this text: typo-tolerant hits stay
+        assert!(!filter_as_typed("dune messiah", Some("dune messiah")));
+        assert!(!filter_as_typed("fihgt clbu", Some("fihgt clbu")));
+    }
+
+    fn batch(search: &str, connector: &str) -> SearchResultsEventDto {
+        SearchResultsEventDto {
+            search_id: search.into(),
+            connector: connector.into(),
+            items: Vec::new(),
+            error: None,
+        }
+    }
+
+    /// The server starts asking the sources before it answers the search, so a fast source's
+    /// results can arrive before the palette knows the search's id: they wait for the answer.
+    #[test]
+    fn a_batch_that_beats_the_answer_waits_for_it() {
+        let mut s = Stream::default();
+        s.asked();
+        assert_eq!(s.arrived(batch("s1", "tmdb")), None, "held, not dropped");
+        assert_eq!(s.arrived(batch("s0", "igdb")), None);
+        // the answer names the search: its early batches join, the stale one is gone
+        let early = s.answered("s1".into());
+        assert_eq!(early, vec![batch("s1", "tmdb")]);
+        // from now on its batches go straight to the list
+        assert_eq!(s.arrived(batch("s1", "igdb")), Some(batch("s1", "igdb")));
+        assert_eq!(s.arrived(batch("s0", "tmdb")), None, "an older search");
+        assert_eq!(s.answered("s1".into()).len(), 0, "nothing is shown twice");
+    }
+
+    #[test]
+    fn nothing_is_held_without_a_search_in_flight_and_a_new_search_starts_clean() {
+        let mut s = Stream::default();
+        assert_eq!(s.arrived(batch("s1", "tmdb")), None);
+        assert_eq!(s.answered("s1".into()).len(), 0, "it was dropped");
+        // while the next search is on its way the shown one still takes its batches
+        s.asked();
+        assert_eq!(s.arrived(batch("s1", "igdb")), Some(batch("s1", "igdb")));
+        assert_eq!(s.arrived(batch("s2", "tmdb")), None);
+        // a newer search, or a cleared field, forgets what was held
+        s.asked();
+        assert_eq!(s.answered("s2".into()).len(), 0);
+        s.asked();
+        assert_eq!(s.arrived(batch("s3", "tmdb")), None);
+        s.cleared();
+        assert_eq!(s.arrived(batch("s3", "igdb")), None);
+        assert_eq!(s.answered("s3".into()).len(), 0);
+        // a search that cannot be held for ever: the buffer is bounded
+        s.asked();
+        for n in 0..(Stream::MAX_HELD + 5) {
+            let _ = s.arrived(batch("s4", &format!("c{n}")));
+        }
+        assert_eq!(s.answered("s4".into()).len(), Stream::MAX_HELD);
     }
 }

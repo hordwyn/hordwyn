@@ -55,6 +55,58 @@ fn what(i: &I18n, row: &ActivityRowDto) -> String {
         .map_or_else(|| i.t("history-session"), |p| progress_label(i, p))
 }
 
+/// What the row's session says beyond its people (OT-11): who won or how the co-op game
+/// ended, the scores, the duration, as "Ben won - Scores: You 31, Ben 42.5 - 45 min". `None`
+/// for a row without a session and for a session that says none of it.
+fn play_line(i: &I18n, row: &ActivityRowDto) -> Option<String> {
+    let play = row.play.as_ref()?;
+    let name = |p: &contracts::ActivityPersonDto| {
+        if p.is_me {
+            i.t("history-play-you")
+        } else {
+            p.name.clone()
+        }
+    };
+    let mut parts = Vec::new();
+    let winners: Vec<_> = row.participants.iter().filter(|p| p.winner).collect();
+    match (play.coop.as_deref(), winners.as_slice()) {
+        (Some("won"), _) => parts.push(i.t("history-play-coop-won")),
+        (Some("lost"), _) => parts.push(i.t("history-play-coop-lost")),
+        (_, []) => {}
+        (_, [one]) if one.is_me => parts.push(i.t("history-play-won-you")),
+        (_, many) => {
+            let names: Vec<String> = many.iter().map(|p| name(p)).collect();
+            parts.push(i.t_args("history-play-won", &[("names", names.join(", ").into())]));
+        }
+    }
+    let scored: Vec<_> = row
+        .participants
+        .iter()
+        .filter_map(|p| p.score.map(|s| (p, i.number(s))))
+        .collect();
+    match scored.as_slice() {
+        [] => {}
+        [(_, score)] if row.participants.len() == 1 => {
+            parts.push(i.t_args("history-play-score", &[("score", score.clone().into())]));
+        }
+        many => {
+            let listed: Vec<String> = many
+                .iter()
+                .map(|(p, score)| format!("{} {score}", name(p)))
+                .collect();
+            parts.push(i.t_args(
+                "history-play-scores",
+                &[("scores", listed.join(", ").into())],
+            ));
+        }
+    }
+    if let Some(minutes) = play.duration_minutes.filter(|m| *m > 0) {
+        let minutes = i.number(f64::from(minutes));
+        parts.push(i.t_args("history-play-duration", &[("minutes", minutes.into())]));
+    }
+    (!parts.is_empty()).then(|| parts.join(" - "))
+}
+
 /// The time of a row: the server's `local_time` in the viewer's zone (DEC-306), unmarked;
 /// without it the UTC time of `at`, marked as UTC.
 fn clock(i: &I18n, row: &ActivityRowDto) -> Option<String> {
@@ -107,6 +159,7 @@ pub fn ActivityRow(
         clock(&i18n, &row)
     };
     let kind = kind_label(&row.kind);
+    let result = play_line(&i18n, &row);
     let by = row
         .owner_name
         .clone()
@@ -158,6 +211,7 @@ pub fn ActivityRow(
                     " - " {what(&i18n, &row)}
                     {with.map(|w| view! { " " <span>{w}</span> })}
                 </span>
+                {result.map(|r| view! { <span class="block text-sm" data-testid="activity-play">{r}</span> })}
                 <span class="block text-xs text-muted-foreground">
                     <span class="sr-only">{kind.clone()} " - "</span>
                     {when}
@@ -936,5 +990,85 @@ mod tests {
         assert_eq!(clock(&i, &old).as_deref(), Some("11:30 PM UTC"));
         let de = I18n::new("de", std::collections::BTreeMap::new());
         assert_eq!(dated_text(&de, &late), "07.11.2026, 00:30");
+    }
+
+    fn play_row(people: serde_json::Value, play: serde_json::Value) -> ActivityRowDto {
+        let mut r = row("2026-11-06T10:00:00Z", "2026-11-06", "10:00");
+        r.participants = serde_json::from_value(people).unwrap();
+        r.play = serde_json::from_value(play).unwrap();
+        r
+    }
+
+    /// OT-11: a play's row says who won, the scores and how long it took (it said only
+    /// "Session logged").
+    #[test]
+    fn a_play_row_says_who_won_the_scores_and_how_long() {
+        use serde_json::json;
+        let en = I18n::new("en", std::collections::BTreeMap::new());
+        let de = I18n::new("de", std::collections::BTreeMap::new());
+        let me = |score: Option<f64>, winner: bool| json!({"companion_id": "a", "name": "Row Tester", "is_me": true, "score": score, "winner": winner});
+        let ben = |score: Option<f64>, winner: bool| json!({"companion_id": "b", "name": "Ben", "is_me": false, "score": score, "winner": winner});
+        let two = play_row(
+            json!([me(Some(31.0), false), ben(Some(42.5), true)]),
+            json!({"duration_minutes": 45, "coop": null}),
+        );
+        assert_eq!(
+            play_line(&en, &two).as_deref(),
+            Some("Ben won - Scores: You 31, Ben 42.5 - 45 min")
+        );
+        assert_eq!(
+            play_line(&de, &two).as_deref(),
+            Some("Gewonnen: Ben - Punkte: Du 31, Ben 42,5 - 45 Min.")
+        );
+        // alone: the score without a name
+        let solo = play_row(
+            json!([me(Some(12.0), true)]),
+            json!({"duration_minutes": null, "coop": null}),
+        );
+        assert_eq!(
+            play_line(&en, &solo).as_deref(),
+            Some("You won - Score: 12")
+        );
+        assert_eq!(
+            play_line(&de, &solo).as_deref(),
+            Some("Du hast gewonnen - Punkte: 12")
+        );
+        // a shared win names everyone; a co-op game has one outcome for all
+        let tie = play_row(
+            json!([me(None, true), ben(None, true)]),
+            json!({"duration_minutes": null, "coop": null}),
+        );
+        assert_eq!(play_line(&en, &tie).as_deref(), Some("You, Ben won"));
+        // German: a wording that takes the nominative "Du" (OT1A-4)
+        assert_eq!(play_line(&de, &tie).as_deref(), Some("Gewonnen: Du, Ben"));
+        let coop = |outcome: &str| {
+            play_row(
+                json!([me(None, false), ben(None, false)]),
+                json!({"duration_minutes": 90, "coop": outcome}),
+            )
+        };
+        assert_eq!(
+            play_line(&en, &coop("won")).as_deref(),
+            Some("Won together - 90 min")
+        );
+        assert_eq!(
+            play_line(&de, &coop("lost")).as_deref(),
+            Some("Gemeinsam verloren - 90 Min.")
+        );
+        // nothing known beyond the people: no second line
+        let bare = play_row(
+            json!([me(None, false), ben(None, false)]),
+            json!({"duration_minutes": null, "coop": null}),
+        );
+        assert_eq!(play_line(&en, &bare), None);
+        // a row without a session, and an answer of a server that does not send the fields
+        assert_eq!(play_line(&en, &row("2026-11-06T10:00:00Z", "", "")), None);
+        let old: ActivityRowDto = serde_json::from_value(json!({
+            "at": "2026-11-06T10:00:00Z", "row_type": "session", "item_id": "i", "title": "T",
+            "kind": "board_game", "group": "play", "shared": false, "undoable": false,
+            "participants": [{"companion_id": "b", "name": "Ben", "is_me": false}]
+        }))
+        .unwrap();
+        assert_eq!(play_line(&en, &old), None);
     }
 }

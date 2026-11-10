@@ -1331,6 +1331,49 @@ async fn phase1_library_home_history_and_stats() {
     assert_eq!(item["summary"]["episodes_watched"], 1);
 }
 
+/// OT-11: the feed row and the item page carry the play (duration, scores, winner).
+async fn play_is_read(
+    app: &axum::Router,
+    tk: Option<&str>,
+    gid: &str,
+    session: &serde_json::Value,
+) {
+    let (_, _, feed) = call(app, "GET", "/api/v1/activity", tk, None).await;
+    let row = &feed["rows"][0];
+    assert_eq!(
+        row["play"],
+        serde_json::json!({"duration_minutes": 45, "coop": null}),
+        "{row}"
+    );
+    let scores: Vec<_> = row["participants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            (
+                p["is_me"].as_bool(),
+                p["score"].as_f64(),
+                p["winner"].as_bool(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        scores,
+        vec![
+            (Some(true), Some(31.0), Some(false)),
+            (Some(false), Some(42.0), Some(true))
+        ]
+    );
+    let (_, _, page) = call(app, "GET", &format!("/api/v1/items/{gid}/page"), tk, None).await;
+    let plays = page["plays"].as_array().unwrap();
+    assert_eq!(plays.len(), 1, "{page}");
+    assert_eq!(&plays[0]["session_id"], session);
+    assert_eq!(plays[0]["play"]["duration_minutes"], 45);
+    assert_eq!(plays[0]["participants"][1]["name"], "Ben");
+    assert_eq!(plays[0]["participants"][1]["score"], 42.0);
+    assert_eq!(plays[0]["participants"][1]["winner"], true);
+}
+
 /// The item page's play sheet (design.md 5.4): a play with players, scores and a winner is
 /// one call; it answers the progress event (for Undo) and shows up in the sessions with the
 /// scores. A kind without the sessions model refuses it.
@@ -1402,6 +1445,7 @@ async fn a_play_with_players_scores_and_a_winner() {
     assert_eq!(benp["winner"], true);
     let (_, _, lib) = call(&app, "GET", "/api/v1/library", tk, None).await;
     assert_eq!(lib["items"][0]["entry"]["status"], "in_progress");
+    play_is_read(&app, tk, &gid, &ev["progress"]["session_id"]).await;
     // the play's event can be undone like any other
     let undo = format!("/api/v1/progress/{}/undo", ev["id"].as_str().unwrap());
     let (st, _, _) = call(&app, "POST", &undo, tk, None).await;

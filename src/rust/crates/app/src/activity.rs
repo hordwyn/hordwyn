@@ -8,7 +8,7 @@ use domain::catalog::CatalogItem;
 use domain::ids::{CompanionId, EventId, ItemId, SessionId};
 use domain::kind::{KindGroup, KindId, ProgressModel};
 use domain::progress::{Progress, ProgressEvent};
-use domain::session::Session;
+use domain::session::{CoopOutcome, Session};
 use domain::user::Actor;
 
 use crate::ports::HistoryWindow;
@@ -50,13 +50,36 @@ pub struct ActivityQuery {
     pub year: Option<i32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ActivityPerson {
     pub companion_id: CompanionId,
     pub name: String,
     /// Stands for the viewer.
     pub is_me: bool,
+    /// The person's score in the session, when one was logged.
+    pub score: Option<f64>,
+    pub winner: bool,
 }
+
+/// What a row's session says beyond its people (OT-11): how long it took and how a co-op
+/// game ended. Scores and winners are on the [`ActivityPerson`]s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActivityPlay {
+    pub duration_minutes: Option<u32>,
+    pub coop: Option<CoopOutcome>,
+}
+
+/// A play behind one of an item's session events, for the item page's History tab.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ItemPlay {
+    pub session_id: SessionId,
+    pub play: ActivityPlay,
+    pub participants: Vec<ActivityPerson>,
+}
+
+/// The item page reads at most this many plays (the newest); older session rows of its
+/// History tab show without their details.
+pub const MAX_ITEM_PLAYS: usize = 50;
 
 /// One row of the feed: a sentence for the UI ("Watched S2 E5 of Dark with Anna").
 #[derive(Debug, Clone, PartialEq)]
@@ -75,6 +98,8 @@ pub struct ActivityRow {
     pub event_id: Option<EventId>,
     pub session_id: Option<SessionId>,
     pub participants: Vec<ActivityPerson>,
+    /// Duration and co-op outcome of the row's session; `None` for a row without one.
+    pub play: Option<ActivityPlay>,
     /// A session another user shared with the viewer (read-only, "Copy to my log").
     pub shared: bool,
     /// Display name of the owner of a shared row.
@@ -618,18 +643,7 @@ impl App {
         row_type: ActivityType,
         session: Option<&Session>,
     ) -> ActivityRow {
-        let participants = session
-            .map(|s| {
-                s.participants
-                    .iter()
-                    .map(|p| ActivityPerson {
-                        companion_id: p.companion_id,
-                        name: ctx.names.get(&p.companion_id).cloned().unwrap_or_default(),
-                        is_me: ctx.mine.contains(&p.companion_id),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let participants = session.map(|s| people_of(ctx, s)).unwrap_or_default();
         ActivityRow {
             key,
             at: key.0,
@@ -642,10 +656,73 @@ impl App {
             event_id: None,
             session_id: session.map(|s| s.id),
             participants,
+            play: session.map(play_of),
             shared: false,
             owner_name: None,
             undoable: false,
         }
+    }
+
+    /// The plays behind an item's session events (`history`: the actor's effective history of
+    /// the item), newest first, at most [`MAX_ITEM_PLAYS`]: the item page shows who played,
+    /// the scores, the winner and the duration on its History tab (OT-11). Nothing is read
+    /// for an item without session events. Sessions of another owner are left out.
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn item_plays(
+        &self,
+        actor: Actor,
+        history: &[ProgressEvent],
+    ) -> AppResult<Vec<ItemPlay>> {
+        let ids: Vec<SessionId> = history
+            .iter()
+            .rev()
+            .filter(|e| e.user_id == actor.user_id)
+            .filter_map(|e| match e.progress {
+                Progress::Session { session_id } => Some(session_id),
+                _ => None,
+            })
+            .take(MAX_ITEM_PLAYS)
+            .collect();
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut sessions = self.repos.sessions.get_many(&ids).await?;
+        sessions.retain(|s| s.owner == actor.user_id);
+        let me = self.user(actor.user_id).await?;
+        let mut ctx = self.feed_context(actor, me.self_companion).await?;
+        self.load_names(&mut ctx, &sessions.iter().collect::<Vec<_>>())
+            .await?;
+        Ok(sessions
+            .iter()
+            .map(|s| ItemPlay {
+                session_id: s.id,
+                play: play_of(s),
+                participants: people_of(&ctx, s),
+            })
+            .collect())
+    }
+}
+
+/// The people of a session as the viewer sees them, with their scores.
+fn people_of(ctx: &Ctx, s: &Session) -> Vec<ActivityPerson> {
+    s.participants
+        .iter()
+        .map(|p| ActivityPerson {
+            companion_id: p.companion_id,
+            name: ctx.names.get(&p.companion_id).cloned().unwrap_or_default(),
+            is_me: ctx.mine.contains(&p.companion_id),
+            score: p.score,
+            winner: p.winner,
+        })
+        .collect()
+}
+
+fn play_of(s: &Session) -> ActivityPlay {
+    ActivityPlay {
+        duration_minutes: s.duration_minutes,
+        coop: s.coop_outcome,
     }
 }
 

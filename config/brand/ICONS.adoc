@@ -37,6 +37,12 @@ its semantic name.
 UX phase 4 (WP4-3) added `grip-vertical` (the drag handle of list rows) from the same
 1.69.0 tarball, unmodified.
 
+The owner test of 2026-11-10 (OT-17, stats redesign) added `piggy-bank` (the total-hours tile
+of the stats page) from the same 1.69.0 tarball, unmodified: file `icons/piggy-bank.svg` in
+the tarball, SHA-256
+`e8a20a2811fc5fa8e7ad304bc465ea69f53dd533f3f3099ae69a468649b4acd4`; licence ISC as in
+`vendor/lucide/LICENSE` (the vendored `LICENSE` is byte-identical to the tarball's).
+
 == Service logos
 
 None vendored yet. Until they are, integrations and data sources are identified by name

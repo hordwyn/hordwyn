@@ -469,6 +469,15 @@ pub trait ListRepo: Send + Sync {
 pub trait SessionRepo: Send + Sync {
     async fn insert(&self, s: &Session) -> RepoResult<()>;
     async fn get(&self, id: SessionId) -> RepoResult<Option<Session>>;
+    /// The sessions with these ids, in the order of `ids`; an id without a session is left
+    /// out. The default reads them one by one; stores answer in one read (OT1A-3).
+    async fn get_many(&self, ids: &[SessionId]) -> RepoResult<Vec<Session>> {
+        let mut out = Vec::with_capacity(ids.len());
+        for &id in ids {
+            out.extend(self.get(id).await?);
+        }
+        Ok(out)
+    }
     async fn update(&self, s: &Session) -> RepoResult<()>;
     async fn delete(&self, id: SessionId) -> RepoResult<()>;
     async fn by_owner(&self, owner: UserId) -> RepoResult<Vec<Session>>;

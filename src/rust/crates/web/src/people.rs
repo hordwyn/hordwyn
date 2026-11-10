@@ -8,8 +8,8 @@
 use contracts::{LinkRequestDto, MergeSuggestionDto, PeoplePageDto, PersonDto, PersonRefDto};
 use leptos::prelude::*;
 use ui::{
-    Avatar, Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, DropdownMenu, EmptyState,
-    IconName, MenuItem, Tabs, TabsContent, TabsList, TabsTrigger,
+    Avatar, Badge, BadgeVariant, Button, ButtonLink, ButtonSize, ButtonVariant, DropdownMenu,
+    EmptyState, IconName, MenuItem, Tabs, TabsContent, TabsList, TabsTrigger,
 };
 
 use crate::api;
@@ -384,10 +384,10 @@ fn PersonCard(p: PersonDto) -> impl IntoView {
             {last.map(|l| view! { <p class="text-sm text-muted-foreground">{l}</p> })}
             {most.map(|m| view! { <p class="text-sm text-muted-foreground">{m}</p> })}
             <div class="flex flex-wrap gap-2">
-                <a href=format!("/history?person={}", p.id) aria-label=history
-                    class="inline-flex min-h-9 items-center rounded-md border border-input px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <ButtonLink href=format!("/history?person={}", p.id) size=ButtonSize::Sm variant=ButtonVariant::Outline
+                    attr:aria-label=history>
                     {t("companions-history")}
-                </a>
+                </ButtonLink>
                 {invite}
                 {log_with}
             </div>

@@ -239,7 +239,7 @@ log-people-create = Add "{ $name }"
 log-people-none = Nobody with that name
 log-more = More
 log-more-watched = Rating and note
-log-more-play = Co-op, duration, place, notes
+log-more-play = Co-op, place, notes
 log-note = Note on this title (private)
 log-rewatch = { $count ->
     [one] Finished once before: this counts as a rewatch.
@@ -254,7 +254,7 @@ log-winner = Winner
 log-winner-auto = Highest score
 log-coop = Co-op game
 log-coop-won = We won
-log-duration = Duration in minutes
+log-duration = Duration (min)
 log-location = Place
 log-notes = Notes
 log-play-step = Play
@@ -301,6 +301,9 @@ episodes-logged = { $count ->
    *[other] { $count } episodes
 }
 episodes-none = No episodes known yet.
+episodes-nothing-up-to = Every episode up to here is already watched. Use Again on an episode to log it once more.
+episodes-nothing-season = Every episode of this season is already watched. Use Again on an episode to log it once more.
+episodes-nothing-show = Every episode of this show is already watched. Use Again on an episode to log it once more.
 
 search-title = Search
 search-label = Search the catalog
@@ -662,6 +665,14 @@ history-type-session = Sessions
 history-year-all = All years
 history-session = Session logged
 history-with = with { $names }
+history-play-you = You
+history-play-won-you = You won
+history-play-won = { $names } won
+history-play-coop-won = Won together
+history-play-coop-lost = Lost together
+history-play-score = Score: { $score }
+history-play-scores = Scores: { $scores }
+history-play-duration = { $minutes } min
 history-time-utc = { $time } UTC
 history-shared = Shared
 history-undo-named = Undo: { $title }

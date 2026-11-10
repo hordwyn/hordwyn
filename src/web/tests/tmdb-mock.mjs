@@ -58,8 +58,38 @@ byPath.set(
 
 const port = Number(process.env.TMDB_MOCK_PORT ?? 3011);
 
+// A show search for "fight club <number>" (the query of the palette test alone, OT1A-7: the
+// other specs search "fight club" and get the fixture at once) answers late and with one
+// synthetic show that exists only here (id 990002, shaped like Search > TV): the palette
+// test (OT-1) needs one batch that arrives after the first results are on screen.
+const LATE_MS = 1500;
+const lateShow = {
+  page: 1,
+  results: [
+    {
+      adult: false,
+      backdrop_path: null,
+      genre_ids: [18],
+      id: 990002,
+      origin_country: ["US"],
+      original_language: "en",
+      original_name: "Fight Club Nights",
+      overview: "Synthetic show of the e2e tests.",
+      popularity: 1.0,
+      poster_path: null,
+      first_air_date: "2024-03-01",
+      name: "Fight Club Nights",
+      vote_average: 0,
+      vote_count: 0,
+    },
+  ],
+  total_pages: 1,
+  total_results: 1,
+};
+
 createServer((req, res) => {
-  const path = new URL(req.url, "http://localhost").pathname;
+  const url = new URL(req.url, "http://localhost");
+  const path = url.pathname;
   if (path === "/health") {
     res.writeHead(200).end("ok");
     return;
@@ -70,6 +100,12 @@ createServer((req, res) => {
     res.end(JSON.stringify({ success: false, status_code: 34 }));
     return;
   }
-  res.writeHead(fx.status, { "content-type": "application/json" });
-  res.end(JSON.stringify(fx.body));
+  const late = path === "/3/search/tv" && /^fight club \d+$/.test(url.searchParams.get("query") ?? "");
+  setTimeout(
+    () => {
+      res.writeHead(fx.status, { "content-type": "application/json" });
+      res.end(JSON.stringify(late ? lateShow : fx.body));
+    },
+    late ? LATE_MS : 0,
+  );
 }).listen(port, "127.0.0.1", () => console.log(`tmdb mock on ${port}`));

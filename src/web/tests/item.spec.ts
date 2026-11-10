@@ -65,6 +65,32 @@ async function open(page: Page, path: string) {
 
 const bar = (page: Page) => page.getByTestId("action-bar");
 
+/** A second show (the mock's synthetic "Lantern Coast") with S1 E1 watched; waits for its seasons. */
+async function seedOtherShow(page: Page): Promise<string> {
+  const row = {
+    source_id: "90",
+    kind: "show",
+    title: "Lantern Coast",
+    year: 2024,
+    status: "in_progress",
+    external_ids: { tmdb: "990001" },
+    history: [{ date: "2026-02-04", progress: { type: "episode", season: 1, episode: 1 } }],
+  };
+  const file = [JSON.stringify({ format: "library-export", version: 1 }), JSON.stringify(row)].join("\n");
+  const started = await page.request.post("/api/v1/imports?format=generic-jsonl", {
+    data: file,
+    headers: { "content-type": "application/octet-stream" },
+  });
+  expect(started.status()).toBe(202);
+  await importDone(page, (await started.json()).id);
+  const lib = await (await page.request.get("/api/v1/library?limit=50")).json();
+  const id: string = lib.items.find((i: { item: { title: string } }) => i.item.title === "Lantern Coast").item.id;
+  await expect
+    .poll(async () => ((await (await page.request.get(`/api/v1/items/${id}/page`)).json()).item.attributes.seasons ?? []).length, { timeout: 90_000 })
+    .toBeGreaterThan(0);
+  return id;
+}
+
 test("the next step logs with Undo; the note and the tags are edited in place", async ({ page }) => {
   test.setTimeout(150_000);
   await signUp(page, `item${Date.now()}`, "Item Tester");
@@ -187,6 +213,190 @@ test("the play sheet logs players, scores and the winner", async ({ page }) => {
   await expect(sheet).toHaveCount(0);
   await bar(page).getByRole("button", { name: "Log a play" }).click();
   await expect(sheet.getByRole("button", { name: /^More/ })).toHaveAttribute("aria-expanded", "true");
+});
+
+test("the History tab shows its count apart from the label", async ({ page }) => {
+  // OT-8: a whitespace-only text is no flex item, so the count sat on the label
+  test.setTimeout(150_000);
+  await signUp(page, `tabgap${Date.now()}`, "Tab Tester");
+  const ids = await seed(page);
+  await open(page, `/items/${ids["The Glass Ferry"]}`);
+  const tab = page.getByRole("tab", { name: /^History/ });
+  // the space stays in the name (and in copied text)
+  await expect(tab).toHaveAccessibleName("History 1");
+  const labelRight = await tab.evaluate((el) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node && !(node.textContent ?? "").trim()) node = walker.nextNode();
+    const range = document.createRange();
+    range.selectNode(node!);
+    return range.getBoundingClientRect().right;
+  });
+  const count = await tab.locator("span").boundingBox();
+  expect(count!.x - labelRight).toBeGreaterThanOrEqual(3);
+});
+
+test("the play sheet shows the duration in its first row, without opening More", async ({ page }) => {
+  // OT-16: the field was behind the closed "More"
+  test.setTimeout(150_000);
+  await signUp(page, `playdur${Date.now()}`, "Duration Tester");
+  const ids = await seed(page);
+  await open(page, `/items/${ids["Meeple Harbour"]}`);
+  await bar(page).getByRole("button", { name: "Log a play" }).click();
+  const sheet = page.getByRole("dialog", { name: "Log a play" });
+  const more = sheet.getByRole("button", { name: /^More/ });
+  await expect(more).toHaveAttribute("aria-expanded", "false");
+  await expect(more).not.toContainText(/duration/i);
+  const duration = sheet.getByLabel("Duration (min)");
+  await expect(duration).toBeVisible();
+  // first row: beside the date, above the players
+  const box = (await duration.boundingBox())!;
+  const when = (await sheet.getByRole("radio", { name: "Today" }).boundingBox())!;
+  const players = (await sheet.getByRole("group", { name: "Players" }).boundingBox())!;
+  expect(box.y).toBeLessThan(players.y);
+  expect(box.x).toBeGreaterThan(when.x);
+  // OD-01: a play of one person opens with five inputs: the date, the duration and the score
+  // (text fields), the people finder and the winner (comboboxes)
+  await expect(sheet.getByRole("textbox")).toHaveCount(2);
+  await expect(sheet.getByRole("combobox")).toHaveCount(2);
+  await duration.fill("ninety");
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(sheet.getByRole("alert").filter({ hasText: "The duration is a whole number of minutes." })).toBeVisible();
+  await duration.fill("90");
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Logged: Play" })).toBeVisible();
+  // stored, and shown where the play is read (OT-11)
+  const feed = await (await page.request.get("/api/v1/activity")).json();
+  expect(feed.rows[0].play.duration_minutes).toBe(90);
+  await page.getByRole("tab", { name: /^History/ }).click();
+  await expect(page.getByRole("tabpanel", { name: /^History/ }).getByTestId("activity-row").first()).toContainText("90 min");
+});
+
+test("a bulk mark with nothing left to mark says so", async ({ page }) => {
+  // OT-15 minimum: "Mark up to here" and "Mark season" on watched episodes did nothing
+  test.setTimeout(240_000);
+  await signUp(page, `epnone${Date.now()}`, "None Tester");
+  const ids = await seed(page);
+  const show = ids["Game of Thrones"];
+  // a second show with its first episode watched too, for the end of the test
+  const other = await seedOtherShow(page);
+  await open(page, `/items/${show}`);
+  const tab = page.getByRole("tabpanel", { name: "Episodes" });
+  await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("1/10");
+  const note = tab.getByTestId("episodes-note");
+  await expect(note).toHaveAttribute("role", "status");
+  await expect(note).toHaveText("");
+  const events = async () => ((await (await page.request.get(`/api/v1/items/${show}/progress`)).json()) as unknown[]).length;
+  const before = await events();
+  await tab.getByRole("button", { name: "More for S1 E1", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Mark up to here" }).click();
+  await expect(note).toHaveText("Every episode up to here is already watched. Use Again on an episode to log it once more.");
+  expect(await events()).toBe(before);
+
+  // a mark that logs something takes the message away
+  await tab.getByRole("button", { name: "Mark season watched" }).click();
+  await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("10/10");
+  await expect(note).toHaveText("");
+  await expect(bar(page).getByRole("button", { name: "Watched S2 E1" })).toBeVisible();
+  await tab.getByRole("button", { name: /^Season 1/ }).click();
+  await expect(tab.getByRole("button", { name: /^Season 1/ })).toHaveAttribute("aria-pressed", "true");
+  await tab.getByRole("button", { name: "Mark season watched" }).click();
+  const seasonDone = "Every episode of this season is already watched. Use Again on an episode to log it once more.";
+  await expect(note).toHaveText(seasonDone);
+
+  // OT1A-5: the same mark again says it again (a live region reports changes only, so the
+  // text has to change for a screen reader to hear it a second time)
+  await note.evaluate((el) => {
+    const said: string[] = [];
+    (window as unknown as { saidAgain: string[] }).saidAgain = said;
+    new MutationObserver(() => said.push(el.textContent ?? "")).observe(el, { childList: true, characterData: true, subtree: true });
+  });
+  await tab.getByRole("button", { name: "Mark season watched" }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { saidAgain: string[] }).saidAgain)).toContain(seasonDone);
+  await expect(note).toHaveText(seasonDone);
+
+  // OT1A-2: the message does not outlive what it says. An episode of the season is undone
+  // on another device (this page does not hear of it); the next step logged here refetches
+  // the page, and the season is no longer watched
+  const logged = (await (await page.request.get(`/api/v1/items/${show}/progress`)).json()) as { id: string; progress: { season?: number; episode?: number } }[];
+  const last = logged.filter((e) => e.progress.season === 1 && e.progress.episode === 10).pop()!;
+  expect((await page.request.post(`/api/v1/progress/${last.id}/undo`)).ok()).toBe(true);
+  await bar(page).getByRole("button", { name: "Watched S2 E1" }).click();
+  await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("9/10");
+  await expect(note).toHaveText("");
+
+  // and it does not follow to another show: the message is up again, then the palette opens
+  // another show whose first episode is watched as well (the page component stays, only its
+  // id changes), so only a cleared message is gone there
+  await tab.getByRole("button", { name: "More for S1 E1", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Mark up to here" }).click();
+  await expect(note).toHaveText("Every episode up to here is already watched. Use Again on an episode to log it once more.");
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Search" });
+  await palette.getByRole("combobox").fill("Lantern Coast");
+  await palette.getByRole("option", { name: /^Lantern Coast/ }).first().click();
+  await expect(page).toHaveURL(new RegExp(`/items/${other}`));
+  await expect(page.getByRole("heading", { level: 1, name: "Lantern Coast" })).toBeVisible();
+  await page.getByRole("tab", { name: "Episodes" }).click();
+  await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("1/3");
+  await expect(tab.getByTestId("episodes-note")).toHaveText("");
+});
+
+test("a play shows its people, scores, winner and duration on the item History tab and on History", async ({ page }) => {
+  // OT-11 read side: the play was stored, and every row said only "Session logged"
+  test.setTimeout(150_000);
+  await signUp(page, `playrow${Date.now()}`, "Row Tester");
+  const ids = await seed(page);
+  const game = ids["Meeple Harbour"];
+  const me = (await (await page.request.get("/api/v1/auth/me")).json()).self_companion as string;
+  const made = await page.request.post("/api/v1/companions", { data: { name: "Ben" } });
+  const ben = (await made.json()).id as string;
+  const logged = await page.request.post(`/api/v1/items/${game}/plays`, {
+    data: {
+      players: [
+        { companion_id: me, score: 31, winner: false },
+        { companion_id: ben, score: 42.5, winner: true },
+      ],
+      duration_minutes: 45,
+    },
+  });
+  expect(logged.ok(), `play: ${logged.status()}`).toBeTruthy();
+  const feed = await (await page.request.get("/api/v1/activity")).json();
+  const row = feed.rows.find((r: { item_id: string }) => r.item_id === game);
+  expect(row.play).toMatchObject({ duration_minutes: 45, coop: null });
+  expect(row.participants.find((p: { name: string }) => p.name === "Ben")).toMatchObject({ score: 42.5, winner: true });
+  expect(row.participants.find((p: { is_me: boolean }) => p.is_me)).toMatchObject({ score: 31, winner: false });
+
+  await open(page, `/items/${game}`);
+  await page.getByRole("tab", { name: /^History/ }).click();
+  const panel = page.getByRole("tabpanel", { name: /^History/ });
+  const mine = panel.getByTestId("activity-row").first();
+  await expect(mine).toContainText("with Ben");
+  await expect(mine).toContainText("Ben won");
+  await expect(mine).toContainText("Scores: You 31, Ben 42.5");
+  await expect(mine).toContainText("45 min");
+
+  await open(page, "/history");
+  const feedRow = page.getByTestId("activity-row").filter({ hasText: "Meeple Harbour" }).first();
+  await expect(feedRow).toContainText("Ben won");
+  await expect(feedRow).toContainText("Scores: You 31, Ben 42.5");
+  await expect(feedRow).toContainText("45 min");
+
+  // a co-op play says how it ended; a play alone says the score
+  const coop = await page.request.post(`/api/v1/items/${game}/plays`, {
+    data: { players: [{ companion_id: me }, { companion_id: ben }], coop: "won" },
+  });
+  expect(coop.ok(), `co-op play: ${coop.status()}`).toBeTruthy();
+  const solo = await page.request.post(`/api/v1/items/${game}/plays`, {
+    data: { players: [{ companion_id: me, score: 12, winner: true }] },
+  });
+  expect(solo.ok(), `solo play: ${solo.status()}`).toBeTruthy();
+  await open(page, `/items/${game}`);
+  await page.getByRole("tab", { name: /^History/ }).click();
+  await expect(panel.getByTestId("activity-row").filter({ hasText: "Won together" })).toHaveCount(1);
+  const alone = panel.getByTestId("activity-row").filter({ hasText: "Score: 12" });
+  await expect(alone).toHaveCount(1);
+  await expect(alone).toContainText("You won");
 });
 
 test("pages: +10 and a typed page log, a bad page says why, Finished completes", async ({ page }) => {

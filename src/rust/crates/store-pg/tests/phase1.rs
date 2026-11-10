@@ -961,3 +961,42 @@ async fn window_amounts_and_the_year_comparison_on_postgres_match_the_in_memory_
     assert_eq!(expected.overall.last.plays, 1);
     assert_eq!(expected.overall.this, app::Amounts::default());
 }
+
+/// OT1A-3: the plays of an item page are read in one statement; the answer keeps the order
+/// asked for (the statement itself orders by start) and leaves out an unknown id.
+#[tokio::test]
+async fn sessions_are_read_by_ids_in_the_order_asked_on_postgres() {
+    use app::ports::SessionRepo;
+
+    let Some(env) = common::env().await else {
+        return;
+    };
+    let app = &env.app;
+    let (_, me) = common::user(app, "many").await;
+    let azul = item(app, "board_game", "Azul", Some(2017), serde_json::json!({})).await;
+    let me_user = app.user(me.user_id).await.unwrap();
+    let mut ids = Vec::new();
+    for minutes in [30, 45, 60] {
+        let mut play = NewSession::new(azul.id, vec![Participant::new(me_user.self_companion)]);
+        play.duration_minutes = Some(minutes);
+        ids.push(app.log_session(me, play).await.unwrap().id);
+    }
+    let unknown = domain::ids::SessionId(uuid::Uuid::now_v7());
+    for asked in [
+        vec![ids[0], ids[1], ids[2]],
+        vec![ids[2], unknown, ids[0]],
+        vec![ids[1]],
+    ] {
+        let got = SessionRepo::get_many(&env.store, &asked).await.unwrap();
+        let expected: Vec<_> = asked.iter().copied().filter(|id| *id != unknown).collect();
+        assert_eq!(got.iter().map(|s| s.id).collect::<Vec<_>>(), expected);
+        assert_eq!(
+            got.iter().filter(|s| s.participants.len() == 1).count(),
+            expected.len()
+        );
+    }
+    assert_eq!(
+        SessionRepo::get_many(&env.store, &[]).await.unwrap().len(),
+        0
+    );
+}

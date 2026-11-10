@@ -239,7 +239,7 @@ log-people-create = „{ $name }“ hinzufügen
 log-people-none = Niemand mit diesem Namen
 log-more = Mehr
 log-more-watched = Bewertung und Notiz
-log-more-play = Kooperativ, Dauer, Ort, Notizen
+log-more-play = Kooperativ, Ort, Notizen
 log-note = Notiz zu diesem Titel (privat)
 log-rewatch = { $count ->
     [one] Schon einmal abgeschlossen: Das zählt als Wiederholung.
@@ -254,7 +254,7 @@ log-winner = Gewonnen hat
 log-winner-auto = Höchste Punktzahl
 log-coop = Kooperatives Spiel
 log-coop-won = Wir haben gewonnen
-log-duration = Dauer in Minuten
+log-duration = Dauer (Min.)
 log-location = Ort
 log-notes = Notizen
 log-play-step = Partie
@@ -301,6 +301,9 @@ episodes-logged = { $count ->
    *[other] { $count } Folgen
 }
 episodes-none = Noch keine Folgen bekannt.
+episodes-nothing-up-to = Alle Folgen bis hierhin sind schon gesehen. Mit „Nochmal“ bei einer Folge trägst du sie noch einmal ein.
+episodes-nothing-season = Alle Folgen dieser Staffel sind schon gesehen. Mit „Nochmal“ bei einer Folge trägst du sie noch einmal ein.
+episodes-nothing-show = Alle Folgen dieser Serie sind schon gesehen. Mit „Nochmal“ bei einer Folge trägst du sie noch einmal ein.
 
 search-title = Suche
 search-label = Katalog durchsuchen
@@ -662,6 +665,14 @@ history-type-session = Sitzungen
 history-year-all = Alle Jahre
 history-session = Sitzung eingetragen
 history-with = mit { $names }
+history-play-you = Du
+history-play-won-you = Du hast gewonnen
+history-play-won = Gewonnen: { $names }
+history-play-coop-won = Gemeinsam gewonnen
+history-play-coop-lost = Gemeinsam verloren
+history-play-score = Punkte: { $score }
+history-play-scores = Punkte: { $scores }
+history-play-duration = { $minutes } Min.
 history-time-utc = { $time } UTC
 history-shared = Geteilt
 history-undo-named = Rückgängig: { $title }

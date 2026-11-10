@@ -89,3 +89,5 @@ hash = "lucide:hash"
 home = "lucide:house"
 # UX phase 4 (WP4-3, DEC-419): the drag handle of list rows
 grip-vertical = "lucide:grip-vertical"
+# Stats redesign (OT-17): the total-hours hero tile
+piggy-bank = "lucide:piggy-bank"

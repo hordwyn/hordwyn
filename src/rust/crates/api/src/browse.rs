@@ -409,6 +409,39 @@ pub fn decode_cursor(s: &str) -> ApiResult<(Timestamp, uuid::Uuid)> {
     Ok((t, uuid::Uuid::parse_str(id).map_err(|_| bad())?))
 }
 
+fn activity_person(p: &app::ActivityPerson) -> ActivityPersonDto {
+    ActivityPersonDto {
+        companion_id: p.companion_id.0.to_string(),
+        name: p.name.clone(),
+        is_me: p.is_me,
+        score: p.score,
+        winner: p.winner,
+    }
+}
+
+fn activity_play(p: app::ActivityPlay) -> contracts::ActivityPlayDto {
+    contracts::ActivityPlayDto {
+        duration_minutes: p.duration_minutes,
+        coop: p.coop.map(|c| {
+            match c {
+                domain::session::CoopOutcome::Won => "won",
+                domain::session::CoopOutcome::Lost => "lost",
+            }
+            .to_string()
+        }),
+    }
+}
+
+/// A play of the item page's History tab.
+#[must_use]
+pub fn item_play(p: &app::ItemPlay) -> contracts::ItemPlayDto {
+    contracts::ItemPlayDto {
+        session_id: p.session_id.0.to_string(),
+        play: activity_play(p.play),
+        participants: p.participants.iter().map(activity_person).collect(),
+    }
+}
+
 fn activity_row(r: &ActivityRow, zone: app::time_zone::Tz) -> ActivityRowDto {
     ActivityRowDto {
         at: r.at.to_rfc3339(),
@@ -428,15 +461,8 @@ fn activity_row(r: &ActivityRow, zone: app::time_zone::Tz) -> ActivityRowDto {
             .and_then(|p| serde_json::to_value(p).ok()),
         event_id: r.event_id.map(|e| e.0.to_string()),
         session_id: r.session_id.map(|x| x.0.to_string()),
-        participants: r
-            .participants
-            .iter()
-            .map(|p| ActivityPersonDto {
-                companion_id: p.companion_id.0.to_string(),
-                name: p.name.clone(),
-                is_me: p.is_me,
-            })
-            .collect(),
+        participants: r.participants.iter().map(activity_person).collect(),
+        play: r.play.map(activity_play),
         shared: r.shared,
         owner_name: r.owner_name.clone(),
         undoable: r.undoable,

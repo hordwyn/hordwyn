@@ -109,11 +109,12 @@ pub fn ItemPage() -> impl IntoView {
         inline: InlineDraft::new(),
         refresh: Callback::new(move |()| refetch()),
     };
-    let inline = ui.inline;
+    let (inline, episodes) = (ui.inline, ui.episodes);
     Effect::new(move |prev: Option<String>| {
         let now = id();
         if prev.is_some_and(|p| p != now) {
             inline.clear();
+            episodes.reset();
         }
         now
     });
@@ -129,7 +130,7 @@ pub fn ItemPage() -> impl IntoView {
     view! {
         // Transition: a refetch keeps the page (and focus) until the new data is there
         <Transition fallback=|| view! { <Skeleton class="h-64 w-full"/> }>
-            <For each=move || data.get().map(|r| (version.get_untracked(), r, kinds.get().and_then(Result::ok))) key=|(v, _, k)| (*v, k.is_some())
+            <For each=move || data.get().map(|r| (version.get_untracked(), r, kinds.get().and_then(Result::ok))) key=item_key
                 children=move |(_, r, kinds)| match r {
                 Err(e) if needs_sign_in(&e) => { go("/sign-in"); ().into_any() }
                 Err(e) => view! { <p role="alert">{error_text(&e)}</p> }.into_any(),
@@ -143,6 +144,21 @@ pub fn ItemPage() -> impl IntoView {
         <TagEditor target=ui.tags known=known_tags on_change=ui.refresh/>
         <crate::bulk::ListPicker target=ui.pick on_done=ui.refresh/>
     }
+}
+
+/// One render of the page: the item's kind when it is known, and the answer.
+type Loaded = (
+    u32,
+    Result<ItemPageDto, ServerFnError>,
+    Option<contracts::KindsDto>,
+);
+
+/// What makes a render of the page a new one: a refetch (`version`), the kinds arriving, and
+/// another item. Without the item a client-side navigation from one item to the next (the
+/// palette on an item page) kept showing the first one: the route only changes its id.
+fn item_key((version, answer, kinds): &Loaded) -> (u32, bool, Option<String>) {
+    let item = answer.as_ref().ok().map(|page| page.item.id.clone());
+    (*version, kinds.is_some(), item)
 }
 
 /// Follow `?log=1&with=<id>,<id>&group=<id>` into `asked`: the people (none without `with`)
@@ -812,33 +828,44 @@ fn About(page: ItemPageDto, kind: Option<KindDto>) -> impl IntoView {
     }
 }
 
-/// This item's events, newest first, as activity rows.
-#[component]
-fn ItemHistory(page: ItemPageDto, refresh: Callback<()>) -> impl IntoView {
-    let rows: Vec<ActivityRowDto> = page
-        .progress
+/// This item's events, newest first, as activity rows. A play's row carries its people, their
+/// scores and the duration from `page.plays` (OT-11), found by the event's session.
+fn history_rows(page: &ItemPageDto, title: &str) -> Vec<ActivityRowDto> {
+    page.progress
         .iter()
         .rev()
-        .map(|p| ActivityRowDto {
-            at: p.occurred_at.clone(),
-            // the local day and time are filled by the server for feed rows (WP3-4 uses them)
-            local_day: String::new(),
-            local_time: String::new(),
-            row_type: "progress".into(),
-            item_id: page.item.id.clone(),
-            title: crate::i18n::title_text(&page.item.title),
-            kind: page.item.kind.clone(),
-            group: String::new(),
-            progress: Some(p.progress.clone()),
-            event_id: Some(p.id.clone()),
-            session_id: None,
-            participants: Vec::new(),
-            shared: false,
-            owner_name: None,
-            // the item page has no recorded-at stamp; Undo stays on the toast and History
-            undoable: false,
+        .map(|p| {
+            let play = p.progress["session_id"]
+                .as_str()
+                .and_then(|id| page.plays.iter().find(|x| x.session_id == id));
+            ActivityRowDto {
+                at: p.occurred_at.clone(),
+                // the local day and time are filled by the server for feed rows (WP3-4 uses them)
+                local_day: String::new(),
+                local_time: String::new(),
+                row_type: "progress".into(),
+                item_id: page.item.id.clone(),
+                title: title.to_string(),
+                kind: page.item.kind.clone(),
+                group: String::new(),
+                progress: Some(p.progress.clone()),
+                event_id: Some(p.id.clone()),
+                session_id: play.map(|x| x.session_id.clone()),
+                participants: play.map(|x| x.participants.clone()).unwrap_or_default(),
+                play: play.map(|x| x.play.clone()),
+                shared: false,
+                owner_name: None,
+                // the item page has no recorded-at stamp; Undo stays on the toast and History
+                undoable: false,
+            }
         })
-        .collect();
+        .collect()
+}
+
+/// The History tab: this item's events.
+#[component]
+fn ItemHistory(page: ItemPageDto, refresh: Callback<()>) -> impl IntoView {
+    let rows = history_rows(&page, &crate::i18n::title_text(&page.item.title));
     if rows.is_empty() {
         return view! { <p class="py-4 text-sm text-muted-foreground">{t("item-history-empty")}</p> }.into_any();
     }
@@ -900,5 +927,57 @@ fn Attribution(page: ItemPageDto) -> impl IntoView {
                 </p>
             }).collect_view()}
         </footer>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// OT-11: the History tab built its rows without people; a play's row now carries the
+    /// people, scores and duration of its session, other rows stay as they were.
+    #[test]
+    fn the_history_rows_of_plays_carry_their_people_and_scores() {
+        let page: ItemPageDto = serde_json::from_value(serde_json::json!({
+            "item": {
+                "id": "i", "kind": "board_game", "title": "Azul", "original_title": null,
+                "year": 2017, "description": null, "cover": null, "external_ids": [],
+                "attributes": {}, "state": "full", "provenance": {}
+            },
+            "entry": null,
+            "progress": [
+                {"id": "e1", "item_id": "i", "occurred_at": "2026-03-01T20:00:00Z",
+                 "progress": {"type": "session", "session_id": "s1"}},
+                {"id": "e2", "item_id": "i", "occurred_at": "2026-03-02T20:00:00Z",
+                 "progress": {"type": "session", "session_id": "s2"}},
+                {"id": "e3", "item_id": "i", "occurred_at": "2026-03-03T20:00:00Z",
+                 "progress": {"type": "finished"}}
+            ],
+            "sources": [],
+            "plays": [{
+                "session_id": "s2",
+                "play": {"duration_minutes": 45, "coop": null},
+                "participants": [
+                    {"companion_id": "a", "name": "Me", "is_me": true, "score": 31.0, "winner": false},
+                    {"companion_id": "b", "name": "Ben", "is_me": false, "score": 42.5, "winner": true}
+                ]
+            }]
+        }))
+        .unwrap();
+        let rows = history_rows(&page, "Azul");
+        // newest first
+        let ids: Vec<_> = rows.iter().map(|r| r.event_id.as_deref()).collect();
+        assert_eq!(ids, [Some("e3"), Some("e2"), Some("e1")]);
+        assert_eq!(rows[0].play, None);
+        assert_eq!(rows[0].participants.len(), 0);
+        let play = &rows[1];
+        assert_eq!(play.session_id.as_deref(), Some("s2"));
+        assert_eq!(play.play.as_ref().unwrap().duration_minutes, Some(45));
+        assert_eq!(play.participants.len(), 2);
+        assert_eq!(play.participants[1].score, Some(42.5));
+        assert!(play.participants[1].winner);
+        // a play the page did not get (older than the newest 50): the plain row
+        assert_eq!(rows[2].play, None);
+        assert_eq!(rows[2].session_id, None);
     }
 }

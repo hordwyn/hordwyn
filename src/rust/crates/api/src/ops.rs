@@ -85,6 +85,14 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
             air_date: e.air_date.map(|d| d.format("%Y-%m-%d").to_string()),
         })
         .collect();
+    // who played, the scores, the winner and the duration of the item's plays (OT-11)
+    let plays = s
+        .app
+        .item_plays(a, &progress)
+        .await?
+        .iter()
+        .map(crate::browse::item_play)
+        .collect();
     Ok(ItemPageDto {
         item: dto::item(s, &item).await,
         entry: entry.as_ref().map(dto::entry),
@@ -94,6 +102,7 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
         summary: state.as_ref().map(|x| x.0.clone()),
         next_step: state.map(|x| x.1),
         episodes,
+        plays,
     })
 }
 

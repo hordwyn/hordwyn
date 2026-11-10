@@ -87,3 +87,34 @@ pub fn Button(
         </button>
     }
 }
+
+/// What a link shares with a button of the same variant and size: everything but the
+/// `disabled:` states, which a link does not have.
+fn link_classes(variant: ButtonVariant, size: ButtonSize) -> String {
+    cva(BASE, &[variant.classes(), size.classes()])
+        .split(' ')
+        .filter(|c| !c.starts_with("disabled:"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A link that looks like a [`Button`] of the same variant and size (navigation next to
+/// actions, for example in a card footer). Attributes added at the call site
+/// (`attr:aria-label`) are forwarded to the `<a>` element.
+#[component]
+pub fn ButtonLink(
+    #[prop(into)] href: String,
+    #[prop(optional)] variant: ButtonVariant,
+    #[prop(optional)] size: ButtonSize,
+    #[prop(into, optional)] class: MaybeProp<String>,
+    children: Children,
+) -> impl IntoView {
+    view! {
+        <a
+            href=href
+            class=move || cn(&[&link_classes(variant, size), &class.get().unwrap_or_default()])
+        >
+            {children()}
+        </a>
+    }
+}

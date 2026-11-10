@@ -10,3 +10,5 @@ Additions 2026-11-06 (UX phase 0, DEC-183): further lucide files from the same 1
 tarball, see ../icons.toml.
 Addition 2026-11-08 (UX phase 4, WP4-3): lucide grip-vertical.svg from the same 1.69.0
 tarball (the list page drag handle).
+Addition 2026-11-10 (owner test OT-17): lucide piggy-bank.svg from the same 1.69.0
+tarball (the total-hours tile of the stats page).

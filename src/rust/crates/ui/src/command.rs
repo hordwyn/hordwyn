@@ -1,6 +1,11 @@
 //! Command palette list: a combobox input filtering a listbox, arrow keys move the active
 //! option (`aria-activedescendant`), Enter selects, Ctrl/Cmd+Enter runs the secondary action
 //! (design.md 6.4: add as Planned or the next step). Used for the Ctrl-K search palette.
+//!
+//! The active option is remembered by its item, not by its position: a list that grows while
+//! results stream in keeps the row the person chose. It is marked by an outline in the ring
+//! colour (the background tint alone is below 3:1, WCAG 1.4.11) and scrolled into view when
+//! the keys move it, and when the list is replaced under it.
 
 use leptos::prelude::*;
 
@@ -49,27 +54,90 @@ fn matches(item: &CommandItem, q: &str) -> bool {
         || item.keywords.to_lowercase().contains(&q)
 }
 
-/// Arrow keys move the active option (wrapping), Enter selects it, Ctrl/Cmd+Enter runs the
-/// secondary action (Enter's when there is none).
+/// The active option: the item chosen by key or pointer (`None`: the first row) and where it
+/// is in the list on screen.
+#[derive(Clone, Copy)]
+struct Active {
+    item: RwSignal<Option<String>>,
+    index: Memo<usize>,
+}
+
+/// The element id of an item's option.
+type OptionId = Box<dyn Fn(&str) -> String + Send + Sync>;
+
+/// Bring the option into view inside whatever scrolls (the list on desktop, the dialog on
+/// phones). The first row takes its group heading with it.
+fn reveal(list_id: &str, option_id: &str, first: bool) {
+    let doc = document();
+    if first && let Some(list) = doc.get_element_by_id(list_id) {
+        list.set_scroll_top(0);
+    }
+    if let Some(option) = doc.get_element_by_id(option_id) {
+        let how = web_sys::ScrollIntoViewOptions::new();
+        how.set_block(web_sys::ScrollLogicalPosition::Nearest);
+        option.scroll_into_view_with_scroll_into_view_options(&how);
+    }
+}
+
+/// When the list changes under the chosen item (the caller replaced it: the same text in
+/// another scope) the item can land out of view: bring it back once the rows are drawn
+/// (OT1A-8). A move by key or pointer changes the item and is not followed here: the keys
+/// reveal on their own and a pointer is on its row. Rows that change elsewhere in the list
+/// leave the position alone, so nothing scrolls.
+fn follow_chosen(
+    filtered: Memo<Vec<CommandItem>>,
+    active: Active,
+    list_id: String,
+    option_id: StoredValue<OptionId>,
+) {
+    Effect::new(move |before: Option<(Option<String>, usize)>| {
+        let now = (active.item.get(), active.index.get());
+        if let Some((item, at)) = before
+            && item == now.0
+            && at != now.1
+            && let Some(id) = filtered.with_untracked(|f| f.get(now.1).map(|i| i.id.clone()))
+        {
+            let option = option_id.with_value(|o| o(&id));
+            let (list, first) = (list_id.clone(), now.1 == 0);
+            request_animation_frame(move || reveal(&list, &option, first));
+        }
+        now
+    });
+}
+
+/// Arrow keys move the active option (wrapping) and scroll it into view, Enter selects it,
+/// Ctrl/Cmd+Enter runs the secondary action (Enter's when there is none).
 fn on_key(
     ev: &leptos::ev::KeyboardEvent,
     filtered: Memo<Vec<CommandItem>>,
-    active: RwSignal<usize>,
+    active: Active,
+    (list_id, option_id): (&str, StoredValue<OptionId>),
     (on_select, on_secondary): (Callback<CommandItem>, Option<Callback<CommandItem>>),
 ) {
     let n = filtered.with_untracked(Vec::len);
+    let at = active.index.get_untracked();
+    let go = |to: usize| {
+        let Some(item) = filtered.with_untracked(|f| f.get(to).map(|i| i.id.clone())) else {
+            return;
+        };
+        let option = option_id.with_value(|o| o(&item));
+        active.item.set(Some(item));
+        reveal(list_id, &option, to == 0);
+        // and once more when the row has its hints: they can make it higher
+        let list = list_id.to_string();
+        request_animation_frame(move || reveal(&list, &option, to == 0));
+    };
     match ev.key().as_str() {
         "ArrowDown" if n > 0 => {
             ev.prevent_default();
-            active.update(|a| *a = (*a + 1) % n);
+            go((at + 1) % n);
         }
         "ArrowUp" if n > 0 => {
             ev.prevent_default();
-            active.update(|a| *a = (*a + n - 1) % n);
+            go((at + n - 1) % n);
         }
         "Enter" => {
-            if let Some(item) = filtered.with_untracked(|f| f.get(active.get_untracked()).cloned())
-            {
+            if let Some(item) = filtered.with_untracked(|f| f.get(at).cloned()) {
                 ev.prevent_default();
                 match on_secondary.filter(|_| ev.ctrl_key() || ev.meta_key()) {
                     Some(cb) => cb.run(item),
@@ -81,8 +149,8 @@ fn on_key(
     }
 }
 
-/// `query` is exposed so callers can fetch results as the user types; local filtering still
-/// applies to the given `items`.
+/// `query` is exposed so callers can fetch results as the user types; the given `items` are
+/// filtered by it again unless `filter` is off.
 #[component]
 pub fn Command(
     #[prop(into)] id: String,
@@ -100,28 +168,50 @@ pub fn Command(
     /// Key hints on the active row, also given to the input as its description.
     #[prop(optional)]
     hints: Option<CommandHints>,
+    /// Filter `items` by the typed text (label and keywords; the default). Off for items the
+    /// caller already matched, such as server results: a typo-tolerant hit does not hold the
+    /// typed text.
+    #[prop(into, optional)]
+    filter: Option<Signal<bool>>,
     #[prop(into, optional)] class: MaybeProp<String>,
 ) -> impl IntoView {
-    let active = RwSignal::new(0usize);
+    let chosen = RwSignal::new(None::<String>);
     let list_id = format!("{id}-list");
     let hints_id = format!("{id}-hints");
     let described = hints.as_ref().map(|_| hints_id.clone());
     let hints = StoredValue::new(hints);
     let filtered = Memo::new(move |_| {
         let q = query.get();
-        items
-            .get()
-            .into_iter()
+        let all = items.get();
+        if filter.is_some_and(|f| !f.get()) {
+            return all;
+        }
+        all.into_iter()
             .filter(|i| matches(i, &q))
             .collect::<Vec<_>>()
     });
+    // a new query starts at the first row; a list that only changes keeps the chosen item
     Effect::new(move |_| {
-        filtered.track();
-        active.set(0);
+        query.track();
+        chosen.set(None);
     });
+    let index = Memo::new(move |_| {
+        let item = chosen.get();
+        filtered.with(|f| {
+            item.and_then(|id| f.iter().position(|i| i.id == id))
+                .unwrap_or(0)
+        })
+    });
+    let active = Active {
+        item: chosen,
+        index,
+    };
     let prefix = id.clone();
-    let option_id =
-        StoredValue::new(move |item_id: &str| format!("{prefix}-opt-{}", slug(item_id)));
+    let option_id: StoredValue<OptionId> = StoredValue::new(Box::new(move |item_id: &str| {
+        format!("{prefix}-opt-{}", slug(item_id))
+    }));
+    let keys_list = list_id.clone();
+    follow_chosen(filtered, active, list_id.clone(), option_id);
     view! {
         <div class=move || cn(&["flex flex-col overflow-hidden rounded-md bg-popover text-popover-foreground", &class.get().unwrap_or_default()])>
             <div class="flex items-center gap-2 border-b px-3">
@@ -136,13 +226,13 @@ pub fn Command(
                     aria-autocomplete="list"
                     aria-describedby=described
                     aria-activedescendant=move || {
-                        filtered.with(|f| f.get(active.get()).map(|i| option_id.with_value(|o| o(&i.id))))
+                        filtered.with(|f| f.get(index.get()).map(|i| option_id.with_value(|o| o(&i.id))))
                     }
                     placeholder=placeholder
                     autocomplete="off"
                     prop:value=move || query.get()
                     on:input=move |ev| query.set(event_target_value(&ev))
-                    on:keydown=move |ev| on_key(&ev, filtered, active, (on_select, on_secondary))
+                    on:keydown=move |ev| on_key(&ev, filtered, active, (&keys_list, option_id), (on_select, on_secondary))
                     class="flex h-11 w-full bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
                 />
                 {hints.get_value().map(|h| view! {
@@ -177,12 +267,13 @@ fn CommandOption(
     index: usize,
     id: String,
     heading: Option<String>,
-    active: RwSignal<usize>,
+    active: Active,
     on_select: Callback<CommandItem>,
     hints: Option<CommandHints>,
 ) -> impl IntoView {
-    let selected = move || active.get() == index;
+    let selected = move || active.index.get() == index;
     let label = item.label.clone();
+    let hovered = item.id.clone();
     let hint = move || {
         let h = hints.clone().filter(|_| selected())?;
         let second = h.secondary.get();
@@ -203,11 +294,11 @@ fn CommandOption(
             id=id
             role="option"
             aria-selected=move || if selected() { "true" } else { "false" }
-            on:mousemove=move |_| active.set(index)
+            on:mousemove=move |_| active.item.set(Some(hovered.clone()))
             on:click=move |_| on_select.run(item.clone())
             class=move || cn(&[
                 "flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm max-[47.5rem]:min-h-11",
-                if selected() { "bg-accent text-accent-foreground" } else { "" },
+                if selected() { "bg-accent text-accent-foreground outline-2 -outline-offset-2 outline-ring" } else { "" },
             ])
         >
             <span class="min-w-0">{label}</span>

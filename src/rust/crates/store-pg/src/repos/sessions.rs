@@ -144,6 +144,14 @@ impl SessionRepo for PgStore {
         Ok(self.sessions_where_ids(&[id.0]).await?.pop())
     }
 
+    async fn get_many(&self, ids: &[SessionId]) -> Res<Vec<Session>> {
+        let raw: Vec<uuid::Uuid> = ids.iter().map(|id| id.0).collect();
+        let mut found = self.sessions_where_ids(&raw).await?;
+        // the statement orders by start; the port promises the order asked for
+        found.sort_by_key(|s| ids.iter().position(|id| *id == s.id));
+        Ok(found)
+    }
+
     async fn update(&self, s: &Session) -> Res<()> {
         let mut tx = self.begin().await?;
         write_session(&mut tx, s).await?;

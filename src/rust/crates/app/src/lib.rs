@@ -27,7 +27,8 @@ mod users;
 use std::sync::Arc;
 
 pub use activity::{
-    ActivityPage, ActivityPerson, ActivityQuery, ActivityRow, ActivityType, MAX_ACTIVITY_PAGE,
+    ActivityPage, ActivityPerson, ActivityPlay, ActivityQuery, ActivityRow, ActivityType, ItemPlay,
+    MAX_ACTIVITY_PAGE, MAX_ITEM_PLAYS,
 };
 pub use browse::{
     CountCell, DEFAULT_PAGE, LibraryCounts, LibraryPage, LibraryQuery, LibraryRow, TagCount,

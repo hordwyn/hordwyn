@@ -151,3 +151,63 @@ fn datagrid_headers_announce_sort_state() {
     assert!(html.contains("aria-sort=\"none\"") && html.contains("scope=\"col\""));
     assert!(html.contains("<caption"));
 }
+
+#[test]
+fn a_tab_trigger_keeps_its_children_apart() {
+    // a whitespace-only text between a label and a count is no flex item (OT-8): the gap
+    // must come from the trigger itself
+    let html = render(|| {
+        let active = RwSignal::new("a".to_string());
+        view! {
+            <Tabs id="g" active=active>
+                <TabsList label="Sections">
+                    <TabsTrigger value="a">"History" " " <span>"3"</span></TabsTrigger>
+                </TabsList>
+            </Tabs>
+        }
+    });
+    let trigger = html
+        .split("role=\"tab\"")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no tab: {html}"));
+    let class = trigger.split("class=\"").nth(1).unwrap_or_default();
+    let class = class.split('"').next().unwrap_or_default();
+    assert!(class.contains("inline-flex"), "{class}");
+    // which gap is a matter of style; its size is measured in `item.spec.ts` (OT1A-9)
+    assert!(class.split(' ').any(|c| c.starts_with("gap-")), "{class}");
+}
+
+#[test]
+fn button_link_is_a_link_that_looks_like_the_button_of_its_size() {
+    // card footers mix links and buttons (OT-12): both take their classes from one place
+    let link = render(|| {
+        view! {
+            <ButtonLink href="/history?person=1" variant=ButtonVariant::Outline size=ButtonSize::Sm class="w-full">
+                "History"
+            </ButtonLink>
+        }
+    });
+    let button = render(
+        || view! { <Button variant=ButtonVariant::Outline size=ButtonSize::Sm class="w-full">"Invite"</Button> },
+    );
+    assert!(
+        link.contains("<a ") && link.contains("href=\"/history?person=1\""),
+        "{link}"
+    );
+    assert!(!link.contains("<button"));
+    let class = |html: &str| {
+        let c = html.split("class=\"").nth(1).unwrap_or_default();
+        c.split('"').next().unwrap_or_default().to_string()
+    };
+    // the same look, minus what only a button can be (disabled)
+    for c in class(&button)
+        .split(' ')
+        .filter(|c| !c.starts_with("disabled:"))
+    {
+        assert!(
+            class(&link).split(' ').any(|l| l == c),
+            "{c} missing: {link}"
+        );
+    }
+    assert!(class(&link).contains("focus-visible:ring-2"));
+}

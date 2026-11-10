@@ -271,6 +271,8 @@ async fn the_person_filter_follows_merges() {
 struct CountingSessions {
     inner: std::sync::Arc<testkit::MemStore>,
     full_reads: std::sync::atomic::AtomicUsize,
+    /// Reads of one session by id (OT1A-3: the item page reads its plays in one batch).
+    single_reads: std::sync::atomic::AtomicUsize,
 }
 
 #[async_trait::async_trait]
@@ -282,7 +284,15 @@ impl app::ports::SessionRepo for CountingSessions {
         &self,
         id: domain::ids::SessionId,
     ) -> app::ports::RepoResult<Option<domain::session::Session>> {
+        self.single_reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         app::ports::SessionRepo::get(&*self.inner, id).await
+    }
+    async fn get_many(
+        &self,
+        ids: &[domain::ids::SessionId],
+    ) -> app::ports::RepoResult<Vec<domain::session::Session>> {
+        app::ports::SessionRepo::get_many(&*self.inner, ids).await
     }
     async fn update(&self, s: &domain::session::Session) -> app::ports::RepoResult<()> {
         app::ports::SessionRepo::update(&*self.inner, s).await
@@ -368,6 +378,7 @@ async fn windowed_pages_return_the_full_reads_rows() {
     let counting = std::sync::Arc::new(CountingSessions {
         inner: env.store.clone(),
         full_reads: std::sync::atomic::AtomicUsize::new(0),
+        single_reads: std::sync::atomic::AtomicUsize::new(0),
     });
     env.app.repos.sessions = counting.clone();
     env.clock.set(
@@ -528,6 +539,7 @@ async fn game_groups_count_their_plays_without_reading_every_session() {
     let counting = std::sync::Arc::new(CountingSessions {
         inner: env.store.clone(),
         full_reads: std::sync::atomic::AtomicUsize::new(0),
+        single_reads: std::sync::atomic::AtomicUsize::new(0),
     });
     env.app.repos.sessions = counting.clone();
     let (alice_user, alice) = common::user(&env, "alice").await;
@@ -571,4 +583,144 @@ async fn game_groups_count_their_plays_without_reading_every_session() {
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].plays, 3);
     assert_eq!(groups[0].last.as_ref().unwrap().item_id, late.id);
+}
+
+/// OT-11: a play is stored with scores, the winner, the duration and the co-op outcome; the
+/// feed row and the item's plays carry them (no row said more than "Session logged").
+#[tokio::test]
+async fn a_play_row_carries_scores_the_winner_the_duration_and_the_outcome() {
+    use domain::session::CoopOutcome;
+
+    let env = TestEnv::new();
+    let (alice_user, alice) = common::user(&env, "alice").await;
+    let ben = env.app.create_companion(alice, "Ben").await.unwrap();
+    let game = common::item(&env.app, "board_game", "Azul").await;
+    let movie = common::item(&env.app, "movie", "Heat").await;
+    env.app
+        .log_progress(alice, movie.id, Progress::Finished, None, None)
+        .await
+        .unwrap();
+    env.clock.advance(chrono::Duration::hours(1));
+    let mut me = Participant::new(alice_user.self_companion);
+    me.score = Some(31.0);
+    let mut other = Participant::new(ben.id);
+    other.score = Some(42.5);
+    other.winner = true;
+    let mut play = NewSession::new(game.id, vec![me, other]);
+    play.duration_minutes = Some(45);
+    let scored = env.app.log_session(alice, play).await.unwrap();
+    env.clock.advance(chrono::Duration::hours(1));
+    let mut coop = NewSession::new(
+        game.id,
+        vec![
+            Participant::new(alice_user.self_companion),
+            Participant::new(ben.id),
+        ],
+    );
+    coop.coop_outcome = Some(CoopOutcome::Won);
+    let together = env.app.log_session(alice, coop).await.unwrap();
+
+    let page = env
+        .app
+        .activity_feed(alice, ActivityQuery::default())
+        .await
+        .unwrap();
+    assert_eq!(page.rows.len(), 3);
+    let (won, play, watched) = (&page.rows[0], &page.rows[1], &page.rows[2]);
+    assert_eq!(
+        won.play,
+        Some(app::ActivityPlay {
+            duration_minutes: None,
+            coop: Some(CoopOutcome::Won),
+        })
+    );
+    assert_eq!(
+        play.play,
+        Some(app::ActivityPlay {
+            duration_minutes: Some(45),
+            coop: None,
+        })
+    );
+    let people: Vec<_> = play
+        .participants
+        .iter()
+        .map(|p| (p.name.as_str(), p.is_me, p.score, p.winner))
+        .collect();
+    assert_eq!(
+        people,
+        vec![
+            ("ALICE", true, Some(31.0), false),
+            ("Ben", false, Some(42.5), true)
+        ]
+    );
+    assert_eq!(watched.play, None, "an event without a session is no play");
+
+    // the item page: the plays behind the item's session events, by session
+    let history = env.app.history(alice, game.id).await.unwrap();
+    let plays = env.app.item_plays(alice, &history).await.unwrap();
+    assert_eq!(
+        plays.iter().map(|p| p.session_id).collect::<Vec<_>>(),
+        vec![together.id, scored.id],
+        "newest first"
+    );
+    let of = |id| plays.iter().find(|p| p.session_id == id).unwrap();
+    assert_eq!(of(scored.id).play.duration_minutes, Some(45));
+    assert_eq!(of(scored.id).participants[1].score, Some(42.5));
+    assert!(of(scored.id).participants[1].winner);
+    assert!(of(scored.id).participants[0].is_me);
+    assert_eq!(of(together.id).play.coop, Some(CoopOutcome::Won));
+    // nothing to read for an item without plays
+    let history = env.app.history(alice, movie.id).await.unwrap();
+    assert_eq!(env.app.item_plays(alice, &history).await.unwrap().len(), 0);
+    // another user's events never show a play of alice
+    let (_, bob) = common::user(&env, "bob").await;
+    let history = env.app.history(alice, game.id).await.unwrap();
+    assert_eq!(env.app.item_plays(bob, &history).await.unwrap().len(), 0);
+}
+
+/// OT1A-3, OT1A-10: the item page reads the plays of an item in one batch, newest first and
+/// at most `MAX_ITEM_PLAYS` of them.
+#[tokio::test]
+async fn the_plays_of_an_item_are_read_in_one_batch_newest_first_and_capped() {
+    let mut env = TestEnv::new();
+    let counting = std::sync::Arc::new(CountingSessions {
+        inner: env.store.clone(),
+        full_reads: std::sync::atomic::AtomicUsize::new(0),
+        single_reads: std::sync::atomic::AtomicUsize::new(0),
+    });
+    env.app.repos.sessions = counting.clone();
+    let (alice_user, alice) = common::user(&env, "alice").await;
+    let game = common::item(&env.app, "board_game", "Azul").await;
+    let mut logged = Vec::new();
+    for _ in 0..=app::MAX_ITEM_PLAYS {
+        env.clock.advance(chrono::Duration::minutes(1));
+        let play = NewSession::new(game.id, vec![Participant::new(alice_user.self_companion)]);
+        logged.push(env.app.log_session(alice, play).await.unwrap().id);
+    }
+    let history = env.app.history(alice, game.id).await.unwrap();
+    let reads = || {
+        (
+            counting
+                .single_reads
+                .load(std::sync::atomic::Ordering::Relaxed),
+            counting
+                .full_reads
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+    };
+    let before = reads();
+    let plays = env.app.item_plays(alice, &history).await.unwrap();
+    assert_eq!(reads(), before, "no read per play and no full read");
+    // the newest 50 of the 51, newest first: the oldest play is the one left out
+    let expected: Vec<_> = logged
+        .iter()
+        .rev()
+        .take(app::MAX_ITEM_PLAYS)
+        .copied()
+        .collect();
+    assert_eq!(expected.len(), 50);
+    assert_eq!(
+        plays.iter().map(|p| p.session_id).collect::<Vec<_>>(),
+        expected
+    );
 }

@@ -226,13 +226,38 @@ pub struct NoteDto {
     pub note: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ActivityPersonDto {
     pub companion_id: String,
     pub name: String,
     /// Stands for the viewer.
     pub is_me: bool,
+    /// The person's score in the session, when one was logged.
+    #[serde(default)]
+    pub score: Option<f64>,
+    #[serde(default)]
+    pub winner: bool,
+}
+
+/// What a row's session says beyond its people: how long it took and how a co-op game
+/// ended. Scores and winners are on the participants.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct ActivityPlayDto {
+    pub duration_minutes: Option<u32>,
+    /// Co-op games: `won` or `lost`; `null` for competitive plays.
+    pub coop: Option<String>,
+}
+
+/// A play behind one of an item's `session` events (the item page's History tab).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct ItemPlayDto {
+    /// The `session_id` of the event's progress.
+    pub session_id: String,
+    pub play: ActivityPlayDto,
+    pub participants: Vec<ActivityPersonDto>,
 }
 
 /// One activity row (a sentence in the UI).
@@ -262,6 +287,9 @@ pub struct ActivityRowDto {
     pub event_id: Option<String>,
     pub session_id: Option<String>,
     pub participants: Vec<ActivityPersonDto>,
+    /// Duration and co-op outcome of the row's session; `null` for a row without one.
+    #[serde(default)]
+    pub play: Option<ActivityPlayDto>,
     /// Shared with the viewer by a linked user ("Copy to my log").
     pub shared: bool,
     pub owner_name: Option<String>,

@@ -324,3 +324,174 @@ test("palette: Ctrl+Enter adds a provider hit as Planned and stays open, Undo re
   // recent items stay in this browser
   expect(await page.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith("app-recent-")))).toBe(true);
 });
+
+test("wide screens: the page, the top bar and the status line are 80 rem wide", async ({ page }) => {
+  // OT-14: design.md 2.9 says 80 rem (1280 px) for app pages; the shell stopped at 72 rem
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await signUp(page, `wide${Date.now()}`, "Wide Tester");
+  const width = async (selector: string) => (await page.locator(selector).first().boundingBox())!.width;
+  expect(await width("main#main")).toBe(1280);
+  expect(await width("header > div")).toBe(1280);
+  // the offline line sits in the same column (measured through its box: it is empty online)
+  expect(await page.locator("main#main").evaluate((m) => getComputedStyle(m.previousElementSibling!).maxWidth)).toBe("1280px");
+  // below the cap nothing changes: the page keeps its 1 rem gutter
+  await page.setViewportSize({ width: 1000, height: 800 });
+  expect(await width("main#main")).toBe(1000);
+});
+
+test("palette: a typo still lists what the server found", async ({ page }) => {
+  // the palette filtered server hits again by substring, so a typo-tolerant hit never showed
+  test.setTimeout(90_000);
+  await signUp(page, `typo${Date.now()}`, "Ty");
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Search" });
+  await palette.getByRole("combobox").fill("fihgt clbu");
+  await expect(palette.getByRole("option", { name: /^Fight Club \(1999\)/ }).first()).toBeVisible({ timeout: 20_000 });
+  // the idle list (commands and recent items) is still filtered as typed
+  await palette.getByRole("combobox").fill("g");
+  await expect(palette.getByRole("option", { name: "Go to Lists" })).toBeVisible();
+  await expect(palette.getByRole("option", { name: "New list" })).toHaveCount(0);
+});
+
+/** WCAG contrast ratio of two CSS colours (any syntax the browser paints). */
+async function contrast(page: Page, a: string, b: string): Promise<number> {
+  return page.evaluate(
+    ([a, b]) => {
+      const lum = (colour: string) => {
+        const c = document.createElement("canvas");
+        c.width = c.height = 1;
+        const ctx = c.getContext("2d", { willReadFrequently: true })!;
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, 1, 1);
+        ctx.fillStyle = colour;
+        ctx.fillRect(0, 0, 1, 1);
+        const [r, g, bl] = Array.from(ctx.getImageData(0, 0, 1, 1).data).map((v) => {
+          const s = v / 255;
+          return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+      };
+      const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+      return (x + 0.05) / (y + 0.05);
+    },
+    [a, b],
+  );
+}
+
+test("palette: arrow keys move through provider results; the active row is marked, scrolled into view and kept when a late batch arrives; Enter opens it", async ({ page }) => {
+  // OT-1. The TMDB mock answers the show search of "fight club <number>" late, so one
+  // batch arrives after the keys were pressed (a query of its own: the server caches a
+  // source's answer per query). Soft assertions: every cause shows in one run.
+  test.setTimeout(90_000);
+  await signUp(page, `arrow${Date.now()}`, "Ari");
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Search" });
+  const box = palette.getByRole("combobox");
+  const options = palette.getByRole("option");
+  await expect(options.first()).toBeVisible();
+  // the pointer rests where the results will appear: a list that moves under it is no hover
+  const list = (await palette.getByRole("listbox").boundingBox())!;
+  await page.mouse.move(list.x + list.width / 2, list.y + 60);
+  await box.fill(`fight club ${Date.now() % 1_000_000}`);
+  await expect(palette.getByRole("option", { name: /^Fight Club \(1999\)/ }).first()).toBeVisible({ timeout: 20_000 });
+  await expect.poll(() => options.count()).toBeGreaterThanOrEqual(12);
+  await expect.soft(options.nth(0), "the first row is active, not the one under the resting pointer").toHaveAttribute("aria-selected", "true");
+
+  await box.press("ArrowDown");
+  await box.press("ArrowDown");
+  const third = (await options.nth(2).getAttribute("id"))!;
+  await expect.soft(options.nth(2)).toHaveAttribute("aria-selected", "true");
+  await expect.soft(options.nth(0)).toHaveAttribute("aria-selected", "false");
+  await expect.soft(box).toHaveAttribute("aria-activedescendant", third);
+  await expect(box).toBeFocused();
+  // the keys were pressed before the late batch: otherwise this test proves nothing about
+  // it (OT1A-6; raise LATE_MS in tmdb-mock.mjs if a loaded host gets here too late)
+  await expect(palette.getByRole("option", { name: /^Fight Club Nights/ })).toHaveCount(0);
+
+  // the late batch (the show search) must not move the active row
+  await expect(palette.getByRole("option", { name: /^Fight Club Nights/ })).toBeVisible({ timeout: 20_000 });
+  await expect.soft(box, "a late batch keeps the active row").toHaveAttribute("aria-activedescendant", third);
+
+  // WCAG 1.4.11: the active row is marked by an outline of at least 3:1 against the row and
+  // the list, in both themes (the background tint alone is about 1.1:1)
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate((dark) => document.documentElement.classList.toggle("dark", dark), theme === "dark");
+    const look = (n: number) =>
+      options.nth(n).evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { style: s.outlineStyle, width: parseFloat(s.outlineWidth), colour: s.outlineColor, background: s.backgroundColor };
+      });
+    const active = await look((await options.evaluateAll((all) => all.findIndex((o) => o.getAttribute("aria-selected") === "true"))) || 0);
+    const idle = await look(5);
+    const popover = await palette.getByRole("listbox").evaluate((el) => getComputedStyle(el.parentElement!).backgroundColor);
+    expect.soft(active.style, `${theme}: the active row has an outline`).toBe("solid");
+    expect.soft(active.width, `${theme}: outline width`).toBeGreaterThanOrEqual(2);
+    expect.soft(idle.style, `${theme}: other rows have none`).toBe("none");
+    expect.soft(await contrast(page, active.colour, active.background), `${theme}: outline against the row`).toBeGreaterThanOrEqual(3);
+    expect.soft(await contrast(page, active.colour, popover), `${theme}: outline against the list`).toBeGreaterThanOrEqual(3);
+  }
+  await page.evaluate(() => document.documentElement.classList.remove("dark"));
+
+  // ArrowUp wraps to the last row, far below the fold of the list: it scrolls into view,
+  // and the list moving under the resting pointer does not take the active row away
+  for (let n = 0; n < 3; n++) {
+    await box.press("ArrowUp");
+  }
+  await expect.soft(options.last()).toHaveAttribute("aria-selected", "true");
+  await expect.soft(options.last(), "the active row scrolls into view").toBeInViewport({ ratio: 0.99 });
+  await page.waitForTimeout(300);
+  await expect.soft(options.last(), "still active after the list scrolled under the pointer").toHaveAttribute("aria-selected", "true");
+  await box.press("ArrowDown");
+  await expect.soft(options.first()).toHaveAttribute("aria-selected", "true");
+  await expect.soft(options.first()).toBeInViewport({ ratio: 0.99 });
+
+  // Enter opens the active row
+  const target = (await box.getAttribute("aria-activedescendant"))!.replace(/^search-opt-/, "");
+  await box.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`/items/${target}$`));
+});
+
+test("palette: rows of the previous query are filtered by the new text until its answer is there; Enter opens no stale row", async ({ page }) => {
+  // OT1A-1: server results are shown unfiltered (a typo still lists them), but only while
+  // they answer the text in the field. Typed on, the old rows stayed up with the first one
+  // active, and Enter or Ctrl+Enter took it.
+  test.setTimeout(90_000);
+  await signUp(page, `stale${Date.now()}`, "Stale Tester");
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Search" });
+  const box = palette.getByRole("combobox");
+  const options = palette.getByRole("option");
+  await box.fill("fight club");
+  await expect(palette.getByRole("option", { name: /^Fight Club \(1999\)/ }).first()).toBeVisible({ timeout: 20_000 });
+  const library = async () => (await (await page.request.get("/api/v1/library")).json()).items.length;
+  expect(await library()).toBe(0);
+
+  // the next search is held back: its answer is not there when the keys are pressed
+  let release: () => void = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  let asked = 0;
+  await page.route("**/_fn/search*", async (route) => {
+    asked += 1;
+    await held;
+    await route.abort();
+  });
+  await box.fill("fight club zq");
+  await expect.poll(() => asked).toBe(1);
+  await expect(options, "no row of the old query without the typed text").toHaveCount(0);
+  await box.press("Enter");
+  await box.press("Control+Enter");
+  await page.waitForTimeout(500);
+  await expect(page).not.toHaveURL(/\/items\//);
+  await expect(palette).toBeVisible();
+  expect(await library(), "Ctrl+Enter added nothing").toBe(0);
+
+  // the search fails: the rows of the old query do not come back as if they answered it
+  release();
+  await page.waitForTimeout(500);
+  await expect(options).toHaveCount(0);
+
+  // back to a text the old rows hold: they are filtered as typed, as before
+  await box.fill("fight clu");
+  await expect.poll(() => asked).toBe(2);
+  await expect(palette.getByRole("option", { name: /^Fight Club \(1999\)/ }).first()).toBeVisible();
+});

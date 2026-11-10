@@ -292,6 +292,10 @@ pub struct ItemPageDto {
     /// none.
     #[serde(default)]
     pub episodes: Vec<EpisodeDateDto>,
+    /// The plays behind the `session` events of `progress` (who played, scores, winner,
+    /// duration), newest first, at most 50; empty for an item without plays.
+    #[serde(default)]
+    pub plays: Vec<browse::ItemPlayDto>,
 }
 
 /// When one episode was released (`YYYY-MM-DD`, `None` when the source has no date yet).

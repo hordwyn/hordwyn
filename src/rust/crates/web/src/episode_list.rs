@@ -15,9 +15,9 @@ use ui::{
 };
 
 use crate::episode_plan::{
-    AirDates, Ep, Plan, Previous, SeasonRow, air_dates, missing_release, parse_range, plan_single,
-    previous_key, release_dates, spread_over, unwatched_in_season, unwatched_in_show,
-    unwatched_up_to,
+    AirDates, Bulk, Ep, Plan, Previous, SeasonRow, air_dates, missing_release, parse_range,
+    plan_bulk, plan_single, previous_key, release_dates, spread_over, standing_note,
+    unwatched_in_season, unwatched_up_to,
 };
 use crate::i18n::{t, use_i18n};
 use crate::log_sheet::{ItemInfo, SheetTarget};
@@ -31,6 +31,9 @@ pub struct EpisodeUi {
     pub ask: RwSignal<Option<Ep>>,
     pub busy: RwSignal<bool>,
     pub error: RwSignal<Option<String>>,
+    /// The bulk mark that logged nothing (every episode it covers is watched, OT-15); the
+    /// line shows its message while the rows still say so.
+    pub note: RwSignal<Option<Bulk>>,
     /// Dates of the bulk marks: `now`, `range` ("Spread over a date range", R-09) or `release`
     /// ("On release dates", WP4-7).
     pub when: RwSignal<String>,
@@ -45,11 +48,32 @@ impl Default for EpisodeUi {
             ask: RwSignal::new(None),
             busy: RwSignal::new(false),
             error: RwSignal::new(None),
+            note: RwSignal::new(None),
             when: RwSignal::new("now".into()),
             from: RwSignal::new(String::new()),
             to: RwSignal::new(String::new()),
         }
     }
+}
+
+impl EpisodeUi {
+    /// Another item: what was said and asked about the last one does not follow (OT1A-2),
+    /// and neither does its season. The date choice of the bulk marks stays.
+    pub fn reset(&self) {
+        self.season.set(None);
+        self.ask.set(None);
+        self.error.set(None);
+        self.note.set(None);
+    }
+}
+
+/// A bulk mark has nothing to log: say so, again when it is the same mark as before. A live
+/// region reports changes only, so the line is emptied and filled on the next frame (OT1A-5).
+fn say_nothing_to_mark(note: RwSignal<Option<Bulk>>, what: Bulk) {
+    note.set(None);
+    request_animation_frame(move || {
+        let _ = note.try_set(Some(what));
+    });
 }
 
 /// The remembered answer for a show (browser storage; nothing stored: ask).
@@ -105,6 +129,7 @@ fn log_episodes(
     ctx.funnel.intent(crate::funnel::Flow::EpisodeMark);
     ui.busy.set(true);
     ui.error.set(None);
+    ui.note.set(None);
     leptos::task::spawn_local(async move {
         let mut ids = Vec::new();
         let mut failed = None;
@@ -193,14 +218,22 @@ fn offline_log(
 
 /// A bulk mark ("Mark season", "Mark show", "Mark up to here"): now, spread over the chosen
 /// date range (design.md 5.4, R-09), or each on its release day (refused, with nothing
-/// logged, when one of them has none up to today).
+/// logged, when one of them has none up to today). When every episode it covers is watched
+/// already it says so instead of doing nothing (OT-15).
 fn bulk(
-    eps: Vec<Ep>,
+    what: Bulk,
+    rows: StoredValue<Vec<SeasonRow>>,
     info: StoredValue<ItemInfo>,
     ctx: StepCtx,
     ui: EpisodeUi,
     released: StoredValue<AirDates>,
 ) {
+    let Ok(eps) = rows.with_value(|r| plan_bulk(r, what)) else {
+        ui.error.set(None);
+        say_nothing_to_mark(ui.note, what);
+        return;
+    };
+    ui.note.set(None);
     let dates = if ui.when.get_untracked() == "release" {
         match released.with_value(|d| release_dates(&eps, d, crate::history::today())) {
             Ok(days) => Some(days),
@@ -330,14 +363,13 @@ pub fn EpisodeList(
     let ctx = StepCtx::current();
     let c2 = ctx.clone();
     let mark_season = move |_| {
-        let eps = rows.with_value(|r| unwatched_in_season(r, shown.get_untracked()));
-        bulk(eps, info, c2.clone(), ui, released);
+        let season = Bulk::Season(shown.get_untracked());
+        bulk(season, rows, info, c2.clone(), ui, released);
     };
     let c3 = ctx.clone();
     let mark = Callback::new(move |(target, up_to): (Ep, bool)| {
         if up_to {
-            let eps = rows.with_value(|r| unwatched_up_to(r, target));
-            bulk(eps, info, c3.clone(), ui, released);
+            bulk(Bulk::UpTo(target), rows, info, c3.clone(), ui, released);
             return;
         }
         let answer = info.with_value(|i| stored_answer(&i.item_id));
@@ -361,10 +393,7 @@ pub fn EpisodeList(
         }
     });
     let c4 = StepCtx::current();
-    let mark_show = move |_| {
-        let eps = rows.with_value(|r| unwatched_in_show(r));
-        bulk(eps, info, c4.clone(), ui, released);
-    };
+    let mark_show = move |_| bulk(Bulk::Show, rows, info, c4.clone(), ui, released);
     view! {
         <section class="grid gap-3 py-2">
             <div class="flex flex-wrap items-center justify-between gap-2">
@@ -381,6 +410,8 @@ pub fn EpisodeList(
             <BulkDates ui=ui offered=offered missing=missing has_dates=has_dates/>
             <AskPrevious ui=ui rows=rows answer=answer/>
             {move || ui.error.get().map(|e| view! { <p role="alert" class="text-sm text-destructive-text">{e}</p> })}
+            // always there, so the text is announced when it appears
+            <p role="status" data-testid="episodes-note" class="text-sm empty:hidden">{move || rows.with_value(|r| standing_note(r, ui.note.get())).map(t)}</p>
             {move || rows.with_value(|r| r.iter().find(|s| s.number == shown.get()).cloned()).map(|season| view! {
                 <ul class="divide-y divide-border rounded-md border border-border" aria-label=use_i18n().t_args("episodes-season", &[("season", season.number.into())])>
                     {(1..=season.count).map(|e| view! {
@@ -412,6 +443,8 @@ fn SeasonChips(rows: Vec<SeasonRow>, shown: Memo<u32>, ui: EpisodeUi) -> impl In
                         // a chip never unpresses itself: the season stays shown
                         pressed.set(true);
                         ui.season.set(Some(n));
+                        // a message about another season's mark does not follow
+                        ui.note.set(None);
                     })>
                         {use_i18n().t_args("episodes-season", &[("season", n.into())])}
                     </Chip>

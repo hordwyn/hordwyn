@@ -1,6 +1,6 @@
 //! Log sheets and inline loggers of the item page (design.md 5.4, 7.3; addendum-1 1.3 "5.4
 //! Log sheets"): `WatchedSheet` (date chips, people, rating and note behind "More"),
-//! `PlaySheet` (players, scores, winner; duration, place, notes and co-op behind "More"),
+//! `PlaySheet` (date and duration, players, scores, winner; place, notes and co-op behind "More"),
 //! `PagesInline` and `PositionInline`. Every save shows "Logged: ..." with Undo; a failure
 //! keeps the sheet open with the data and an inline error; closing a changed sheet asks
 //! first. The sheets' state lives in the page (a refetch never resets an open sheet); the
@@ -636,7 +636,13 @@ fn PlayFields(state: PlayState, save: Callback<()>, discard: Callback<()>) -> im
                 ev.prevent_default();
                 save.run(());
             }>
-            <DateChips id="play-when" chip=s.chip picked=s.picked error=no_error/>
+            // row 1 as in the mockup (log.html): the date and the duration, open (OT-16)
+            <div class="flex flex-wrap items-start gap-x-4 gap-y-4">
+                <DateChips id="play-when" chip=s.chip picked=s.picked error=no_error/>
+                <FormField id="play-duration" label=t("log-duration")>
+                    <Input id="play-duration" value=s.duration inputmode="numeric" autocomplete="off" class="max-w-24"/>
+                </FormField>
+            </div>
             <GroupChips state=s/>
             <CompanionPicker id="play-people" legend=t("log-players") companions=s.companions selected=s.players include_self=true/>
             <Scores state=s/>
@@ -754,9 +760,6 @@ fn PlayMore(state: PlayState) -> impl IntoView {
                     <Label r#for="play-coop-won">{use_i18n().t("log-coop-won")}</Label>
                 </div>
             </Show>
-            <FormField id="play-duration" label=t("log-duration")>
-                <Input id="play-duration" value=s.duration inputmode="numeric" autocomplete="off" class="max-w-32"/>
-            </FormField>
             <FormField id="play-location" label=t("log-location")>
                 <Input id="play-location" value=s.location autocomplete="off"/>
             </FormField>

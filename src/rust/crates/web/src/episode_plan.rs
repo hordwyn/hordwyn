@@ -130,6 +130,34 @@ pub fn unwatched_in_show(rows: &[SeasonRow]) -> Vec<Ep> {
         .collect()
 }
 
+/// A bulk mark: "Mark up to here" of an episode, "Mark season watched" of a season, "Mark
+/// show watched".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bulk {
+    UpTo(Ep),
+    Season(u32),
+    Show,
+}
+
+/// The episodes a bulk mark logs: the unwatched ones it covers. When every one of them is
+/// watched already it is the Fluent message that says so (OT-15: never a click that does
+/// nothing). A bulk rewatch is not offered here; "Again" on a row logs one episode again.
+///
+/// # Errors
+/// The message key, when there is nothing to log.
+pub fn plan_bulk(rows: &[SeasonRow], bulk: Bulk) -> Result<Vec<Ep>, &'static str> {
+    let (open, nothing) = match bulk {
+        Bulk::UpTo(target) => (unwatched_up_to(rows, target), "episodes-nothing-up-to"),
+        Bulk::Season(season) => (unwatched_in_season(rows, season), "episodes-nothing-season"),
+        Bulk::Show => (unwatched_in_show(rows), "episodes-nothing-show"),
+    };
+    if open.is_empty() {
+        Err(nothing)
+    } else {
+        Ok(open)
+    }
+}
+
 /// Why a backfill range cannot be used; each names its Fluent message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RangeError {
@@ -288,6 +316,13 @@ pub fn plan_single(rows: &[SeasonRow], target: Ep, answer: Previous) -> Plan {
         Previous::Only => Plan::Log(vec![target]),
         Previous::Ask => Plan::Ask { earlier },
     }
+}
+
+/// The message of the bulk mark that logged nothing (`asked`), for as long as the rows still
+/// say so: after a refetch with an open episode in its range there is none (OT1A-2).
+#[must_use]
+pub fn standing_note(rows: &[SeasonRow], asked: Option<Bulk>) -> Option<&'static str> {
+    asked.and_then(|bulk| plan_bulk(rows, bulk).err())
 }
 
 #[cfg(test)]
@@ -501,5 +536,62 @@ mod tests {
         assert_eq!(Previous::All.as_stored(), Some("all"));
         assert_eq!(Previous::Only.as_stored(), Some("only"));
         assert_eq!(Previous::Ask.as_stored(), None);
+    }
+
+    /// OT-15: a bulk mark whose episodes are all watched names its message instead of
+    /// logging nothing in silence; with open episodes it logs exactly those, as before.
+    #[test]
+    fn a_bulk_mark_with_nothing_open_says_so() {
+        // season 1: 1 and 3 of 3 watched; season 2: 2 of 4 watched
+        let r = rows();
+        assert_eq!(
+            plan_bulk(&r, Bulk::UpTo((1, 1))),
+            Err("episodes-nothing-up-to")
+        );
+        assert_eq!(plan_bulk(&r, Bulk::UpTo((1, 3))), Ok(vec![(1, 2)]));
+        assert_eq!(plan_bulk(&r, Bulk::Season(1)), Ok(vec![(1, 2)]));
+        assert_eq!(
+            plan_bulk(&r, Bulk::Show),
+            Ok(vec![(1, 2), (2, 1), (2, 3), (2, 4)])
+        );
+        let attrs = serde_json::json!({"seasons": [
+            {"number": 1, "episode_count": 2},
+            {"number": 2, "episode_count": 1},
+        ]});
+        let done = season_rows(&attrs, &[ep(1, 1, 1), ep(2, 1, 2), ep(3, 2, 1)]);
+        assert_eq!(
+            plan_bulk(&done, Bulk::UpTo((2, 1))),
+            Err("episodes-nothing-up-to")
+        );
+        assert_eq!(
+            plan_bulk(&done, Bulk::Season(1)),
+            Err("episodes-nothing-season")
+        );
+        assert_eq!(plan_bulk(&done, Bulk::Show), Err("episodes-nothing-show"));
+        // the message stands only while the rows still say so (OT1A-2): after a refetch
+        // with an open episode, or with no mark asked, there is none
+        assert_eq!(
+            standing_note(&done, Some(Bulk::Show)),
+            Some("episodes-nothing-show")
+        );
+        let undone = season_rows(&attrs, &[ep(1, 1, 1), ep(3, 2, 1)]);
+        assert_eq!(standing_note(&undone, Some(Bulk::Show)), None);
+        assert_eq!(standing_note(&undone, Some(Bulk::Season(1))), None);
+        assert_eq!(
+            standing_note(&undone, Some(Bulk::Season(2))),
+            Some("episodes-nothing-season")
+        );
+        assert_eq!(standing_note(&done, None), None);
+        // each message exists in both locales
+        for key in [
+            "episodes-nothing-up-to",
+            "episodes-nothing-season",
+            "episodes-nothing-show",
+        ] {
+            for locale in ["en", "de"] {
+                let i = crate::i18n::I18n::new(locale, std::collections::BTreeMap::new());
+                assert_ne!(i.t(key), key, "{locale}");
+            }
+        }
     }
 }

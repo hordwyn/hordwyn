@@ -355,7 +355,7 @@ pub fn AppShell(children: Children) -> impl IntoView {
         </a>
         <TopBar current=current/>
         <OfflineBanner online=online waiting=waiting/>
-        <main id="main" tabindex="-1" class="mx-auto w-full max-w-6xl px-4 pt-6 pb-[calc(1.5rem+var(--tab-bar-height))] focus:outline-none">
+        <main id="main" tabindex="-1" class="mx-auto w-full max-w-7xl px-4 pt-6 pb-[calc(1.5rem+var(--tab-bar-height))] focus:outline-none">
             {children()}
         </main>
         {cfg.signed_in.then(|| view! { <MobileTabs current=current/> <crate::reauth::ReauthDialog/> <crate::sign_out::SignOutForm/> })}
@@ -401,7 +401,7 @@ fn TopBar(current: Signal<String>) -> impl IntoView {
     let cfg = expect_context::<ClientConfig>();
     view! {
         <header class="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
-            <div class="mx-auto flex h-[var(--top-bar-height)] max-w-6xl items-center gap-2 px-4">
+            <div class="mx-auto flex h-[var(--top-bar-height)] max-w-7xl items-center gap-2 px-4">
                 <a href="/" class="mr-2 rounded-md text-lg font-semibold tracking-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     {cfg.product_name.clone()}
                 </a>
@@ -822,7 +822,7 @@ fn OfflineBanner(online: RwSignal<bool>, waiting: Option<RwSignal<usize>>) -> im
         })
     };
     view! {
-        <div role="status" class="mx-auto w-full max-w-6xl px-4 empty:hidden">
+        <div role="status" class="mx-auto w-full max-w-7xl px-4 empty:hidden">
             <Show when=move || !online.get() || has_waiting()>
                 <Alert variant=AlertVariant::Warning role=AlertRole::None class="mt-4">
                     {move || (!online.get()).then(|| view! { <span class="block">{t("shell-offline")}</span> })}

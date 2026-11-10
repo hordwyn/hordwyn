@@ -293,3 +293,32 @@ test("a game group chip fills the players and the play counts for the group (WP4
   const groups = await (await page.request.get("/api/v1/game-groups")).json();
   expect(groups.find((g: { id: string }) => g.id === group.id)).toMatchObject({ plays: 1 });
 });
+
+test("the actions of a person card share one size", async ({ page }) => {
+  // OT-12: "History" was a hand-styled link (36 px, 14 px text) beside two small buttons
+  await signUp(page, `psize${Date.now()}`, "Sia");
+  await person(page, "Anna");
+  await page.goto("/people");
+  await hydrated(page);
+  const a = card(page, "Anna");
+  const actions = [
+    a.getByRole("link", { name: "History with Anna" }),
+    a.getByRole("button", { name: "Invite Anna" }),
+    a.getByRole("button", { name: "Log with Anna" }),
+  ];
+  const looks = [];
+  for (const action of actions) {
+    await expect(action).toBeVisible();
+    looks.push(
+      await action.evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { height: el.getBoundingClientRect().height, font: s.fontSize, weight: s.fontWeight, radius: s.borderRadius, border: s.borderTopWidth };
+      }),
+    );
+  }
+  expect(looks[0]).toEqual(looks[1]);
+  expect(looks[2]).toEqual(looks[1]);
+  // the link keeps a visible keyboard focus
+  await actions[0].focus();
+  await expectNoA11yViolations(page, "people card actions");
+});

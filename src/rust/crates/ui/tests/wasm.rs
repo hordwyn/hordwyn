@@ -33,6 +33,36 @@ async fn settle() {
     leptos::task::tick().await;
 }
 
+/// The next animation frame (the command list scrolls once its rows are drawn).
+async fn next_frame() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::task::{Poll, Waker};
+
+    let state = Rc::new(RefCell::new((false, None::<Waker>)));
+    let done = state.clone();
+    request_animation_frame(move || {
+        let waker = {
+            let mut s = done.borrow_mut();
+            s.0 = true;
+            s.1.take()
+        };
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    });
+    std::future::poll_fn(move |cx| {
+        let mut s = state.borrow_mut();
+        if s.0 {
+            Poll::Ready(())
+        } else {
+            s.1 = Some(cx.waker().clone());
+            Poll::Pending
+        }
+    })
+    .await;
+}
+
 #[wasm_bindgen_test]
 async fn switch_toggles_aria_checked() {
     let checked = RwSignal::new(false);
@@ -635,4 +665,194 @@ fn roving_index_and_chord_run_in_the_browser() {
     assert_eq!(c.key("Y", 900.0), ChordStep::Done('y'));
     assert_eq!(c.key("g", 1000.0), ChordStep::Started);
     assert_eq!(c.key("y", 2600.0), ChordStep::Ignored);
+}
+
+fn command_items(titles: &[&str]) -> Vec<CommandItem> {
+    titles
+        .iter()
+        .map(|t| CommandItem {
+            id: t.to_lowercase(),
+            label: (*t).into(),
+            group: "g".into(),
+            keywords: String::new(),
+        })
+        .collect()
+}
+
+#[wasm_bindgen_test]
+async fn command_shows_items_as_given_when_filtering_is_off() {
+    // server results are matched by the server (typos, descriptions): no second filter
+    let q = RwSignal::new("xyz".to_string());
+    let filter = RwSignal::new(false);
+    let items = Signal::derive(|| command_items(&["Alien", "Arrival", "Brazil"]));
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <Command id="w-cmd3" label="S" placeholder="p" empty_label="none" items=items query=q
+                filter=filter on_select=Callback::new(|_: CommandItem| ())/>
+        }
+    });
+    settle().await;
+    let list = el("w-cmd3-list");
+    assert_eq!(
+        list.query_selector_all("[role=option]").unwrap().length(),
+        3
+    );
+    // the default filters as typed (the gallery, the palette's idle list)
+    filter.set(true);
+    settle().await;
+    assert_eq!(
+        list.query_selector_all("[role=option]").unwrap().length(),
+        0
+    );
+    q.set("ali".into());
+    settle().await;
+    assert_eq!(
+        list.query_selector_all("[role=option]").unwrap().length(),
+        1
+    );
+}
+
+#[wasm_bindgen_test]
+async fn command_keeps_the_active_option_when_items_are_appended() {
+    // results stream in per source (OT-1): a late batch must not undo the arrow keys
+    let q = RwSignal::new(String::new());
+    let chosen = RwSignal::new(String::new());
+    let items = RwSignal::new(command_items(&["Alien", "Arrival", "Brazil"]));
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <Command id="w-cmd4" label="S" placeholder="p" empty_label="none" items=items query=q
+                on_select=Callback::new(move |i: CommandItem| chosen.set(i.label))/>
+        }
+    });
+    settle().await;
+    let input = el("w-cmd4");
+    key(&input, "ArrowDown");
+    key(&input, "ArrowDown");
+    settle().await;
+    let active = || input.get_attribute("aria-activedescendant");
+    assert_eq!(active().as_deref(), Some("w-cmd4-opt-brazil"));
+    // a batch in front of and behind the active row: it stays the same item
+    items.update(|list| {
+        list.insert(0, command_items(&["Akira"]).remove(0));
+        list.extend(command_items(&["Casablanca"]));
+    });
+    settle().await;
+    assert_eq!(active().as_deref(), Some("w-cmd4-opt-brazil"));
+    assert_eq!(
+        el("w-cmd4-opt-brazil")
+            .get_attribute("aria-selected")
+            .as_deref(),
+        Some("true")
+    );
+    key(&input, "ArrowDown");
+    settle().await;
+    assert_eq!(active().as_deref(), Some("w-cmd4-opt-casablanca"));
+    // the active item leaves the list: back to the first row
+    items.set(command_items(&["Dune", "Duel"]));
+    settle().await;
+    assert_eq!(active().as_deref(), Some("w-cmd4-opt-dune"));
+    key(&input, "Enter");
+    settle().await;
+    assert_eq!(chosen.get_untracked(), "Dune");
+    // a new query starts at the first row again
+    key(&input, "ArrowDown");
+    settle().await;
+    assert_eq!(active().as_deref(), Some("w-cmd4-opt-duel"));
+    q.set("du".into());
+    settle().await;
+    assert_eq!(active().as_deref(), Some("w-cmd4-opt-dune"));
+}
+
+#[wasm_bindgen_test]
+async fn command_scrolls_the_active_option_into_view_and_marks_it() {
+    let q = RwSignal::new(String::new());
+    let titles: Vec<String> = (0..30).map(|n| format!("Title {n}")).collect();
+    let refs: Vec<&str> = titles.iter().map(String::as_str).collect();
+    let all = command_items(&refs);
+    let items = Signal::derive(move || all.clone());
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <Command id="w-cmd5" label="S" placeholder="p" empty_label="none" items=items query=q
+                on_select=Callback::new(|_: CommandItem| ())/>
+        }
+    });
+    settle().await;
+    // no stylesheet in this test page: give the list the height it has in the app
+    let list = el("w-cmd5-list");
+    list.set_attribute("style", "max-height: 100px; overflow-y: auto")
+        .unwrap();
+    assert_eq!(list.scroll_top(), 0);
+    let input = el("w-cmd5");
+    // wraps to the last row, far below the fold
+    key(&input, "ArrowUp");
+    settle().await;
+    let bottom = el("w-cmd5-opt-title-29");
+    assert_eq!(
+        bottom.get_attribute("aria-selected").as_deref(),
+        Some("true")
+    );
+    assert!(list.scroll_top() > 0, "the list did not scroll");
+    assert!(
+        list.scroll_top() + list.client_height() >= list.scroll_height() - 1,
+        "the last row is not in view"
+    );
+    key(&input, "ArrowDown");
+    settle().await;
+    assert_eq!(list.scroll_top(), 0, "back at the first row");
+    // the mark of the active row (an outline of at least 3:1, WCAG 1.4.11) is measured where
+    // the stylesheet is: `shell.spec.ts`, in both themes (OT1A-9: no class names here)
+}
+
+#[wasm_bindgen_test]
+async fn command_scrolls_the_kept_active_option_into_view_when_the_list_is_replaced() {
+    // OT1A-8: the chosen item is kept while the query text stays; when the caller replaces
+    // the list (another scope, same text) it can land far below the fold
+    let q = RwSignal::new(String::new());
+    let titles: Vec<String> = (0..30).map(|n| format!("Title {n}")).collect();
+    let refs: Vec<&str> = titles.iter().map(String::as_str).collect();
+    let items = RwSignal::new(command_items(&refs));
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <Command id="w-cmd6" label="S" placeholder="p" empty_label="none" items=items query=q
+                on_select=Callback::new(|_: CommandItem| ())/>
+        }
+    });
+    settle().await;
+    let list = el("w-cmd6-list");
+    list.set_attribute("style", "max-height: 100px; overflow-y: auto")
+        .unwrap();
+    let input = el("w-cmd6");
+    key(&input, "ArrowDown");
+    key(&input, "ArrowDown");
+    settle().await;
+    assert_eq!(
+        input.get_attribute("aria-activedescendant").as_deref(),
+        Some("w-cmd6-opt-title-2")
+    );
+    assert_eq!(list.scroll_top(), 0);
+    // rows behind the active one change nothing: no scroll
+    items.update(|all| all.extend(command_items(&["Late"])));
+    settle().await;
+    next_frame().await;
+    assert_eq!(list.scroll_top(), 0);
+    // the list in another order: the item is now the fourth from the end
+    items.update(|all| all.reverse());
+    settle().await;
+    next_frame().await;
+    assert_eq!(
+        input.get_attribute("aria-activedescendant").as_deref(),
+        Some("w-cmd6-opt-title-2")
+    );
+    assert!(
+        list.scroll_top() > 0,
+        "the list did not follow the active row"
+    );
+    // where the row is inside the list (both have the same offset parent)
+    let row = el("w-cmd6-opt-title-2");
+    let top = row.offset_top() - list.offset_top();
+    assert!(
+        top >= list.scroll_top() - 1
+            && top + row.offset_height() <= list.scroll_top() + list.client_height() + 1,
+        "the active row is not in view"
+    );
 }
