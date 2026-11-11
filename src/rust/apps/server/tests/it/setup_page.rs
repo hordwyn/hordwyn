@@ -7,7 +7,7 @@
 // One scenario on purpose: the steps share one server and database.
 #![allow(clippy::too_many_lines)]
 
-mod support;
+use crate::support;
 
 use server::{Overrides, Server};
 

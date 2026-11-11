@@ -8,7 +8,7 @@
 // names (t: server, a/m: admin/member cookie, r: answer) keep the many calls readable.
 #![allow(clippy::too_many_lines, clippy::many_single_char_names)]
 
-mod support;
+use crate::support;
 
 use serde_json::{Value, json};
 use server::{Overrides, Server};

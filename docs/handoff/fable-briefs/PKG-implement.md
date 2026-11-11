@@ -14,9 +14,10 @@ available) and `df -h /` (stop and report below 5 GB free; delete only executabl
 `src/rust/target/debug/deps` and your own test databases). Never `cargo xtask ci`/`e2e`.
 After SQL changes run `cargo xtask sqlx-prepare`.
 Any change to rendered text, labels or accessible names: also run the server SSR page tests
-(`cargo test -p server --features gallery,all-connectors --test item_page --test library_page
---test home_page --test auth_pages --test admin_pages` with the service env vars) and grep
-`apps/server/tests` for the old strings; they are not covered by Playwright or `-p web`.
+(`cargo test -p server --features gallery,all-connectors --test it -- item_page::
+library_page:: home_page:: auth_pages:: admin_pages::` with the service env vars; the server
+integration tests are modules of one test binary `it`, DEC-565) and grep
+`apps/server/tests/it` for the old strings; they are not covered by Playwright or `-p web`.
 
 Keep a progress log in `docs/fable/round2/<package>-progress.md` (item, state, tests and
 results, files, DECs) so a cut-off run can be resumed. Out of scope items you notice: list

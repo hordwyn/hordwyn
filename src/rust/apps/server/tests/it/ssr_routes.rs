@@ -3,7 +3,7 @@
 //! every resource created anywhere in the process wait forever. A page rendered by another
 //! router at that moment never finished. Routers built later must not do that again.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -4,7 +4,7 @@
 //! same library with progress events, book series, board game plays and sessions a linked
 //! user shares. Ignored by default (seeding and indexing take a while):
 //! `cargo xtask load [--release] [--clients N]`, or
-//! `cargo test -p server --test load -- --ignored --nocapture`.
+//! `cargo test -p server --test it -- --ignored --nocapture load::`.
 //!
 //! Knobs (environment): `LOAD_ITEMS` (50 000 movies), `LOAD_EVENTS` (5 000 finished events),
 //! `LOAD_SESSIONS` (500 own plays), `LOAD_SHARED` (50 sessions a linked user shares),

@@ -13,7 +13,7 @@ rules (section 2, verbatim), `docs/DECISIONS.md`, `docs/design/DESIGN.md`, the U
 
 **Update 2026-11-10 (after the restart), this wins over the threads below:**
 
-- **ot2a done** (tag `ot2a`, fc1bc15): item page actions, labels, counts; review applied (DEC-553..564). Verified with the server tests run on their own (106 passed) because the full test build no longer fits the 57 GB disk; e2e 139 passed. In flight: TBIN (one server test binary, brief `docs/handoff/fable-briefs/TBIN-one-test-binary.md`), then ot2b.
+- **ot2a done** (tag `ot2a`, fc1bc15): item page actions, labels, counts; review applied (DEC-553..564). Verified with the server tests run on their own (106 passed) because the full test build no longer fits the 57 GB disk; e2e 139 passed. TBIN done (one server test binary `it`, DEC-565): `cargo xtask ci` fits again: 877 passed, 0 failed, 4 ignored; e2e 139 passed, 0 panics. Next: ot2b.
 - **ot1a done** (tag `ot1a`, 8b58fa0): owner-test fix pack F5 + review fixes F8, review `docs/reviews/2026-11-10-ot1a-review.md`; ci 849 passed / 0 failed / 4 ignored, e2e 134 passed, 0 panics. Owner answers of the round 2 page: `docs/fable/round2/owner-answers-2026-11-10.md` (HANDOFF 4.7, DEC-530..552), 9 questions back to the owner in its section 13 (none blocks ot2). Next: packages in `docs/fable/round2/next-packages.md`, starting with ot2a; each package = Fable implementer, Fable reviewer, Fable fixer, orchestrator ci + e2e, commit, tag. Disk: ci needs >= 13 GB free (drop test DBs, `rm -rf src/rust/target/front`).
 
 - Owner tested `ux4` at home: TMDB and IGDB work. The podman and TMDB threads below are
@@ -954,6 +954,12 @@ test by hand, commit, push, tag.
   `TEST_DATABASE_URL` / `REQUIRE_SERVICES=1` / `TEST_MEILI_*` / `TEST_S3_*`; `cargo xtask ci`
   sets them, plain `cargo test` silently skips them. The M17 load test is `#[ignore]` and must
   be run by hand.
+- **Server integration tests:** one test binary `it` (`apps/server/tests/it/main.rs`, one module
+  per former file, DEC-565; 25 binaries of 8.4 GB before). One module: `cargo test -p server
+  --features gallery,all-connectors --test it -- item_page::` (several filters may follow);
+  one test: `-- item_page::<name>`; the load test: `cargo xtask load`, or `--test it --
+  --ignored --nocapture load::`. A new test file is a new `mod` line in `main.rs`. All modules
+  run as threads of one process: no `set_var`, no fixed port, file or database name.
 - **Stopping processes:** use `pkill -x <name>` (e.g. `pkill -x cargo-leptos`, `pkill -x
   server`); `pkill -f <pattern>` matches the calling shell and kills it.
 - `rtk` rewrites common commands; use `rtk proxy <cmd>` for raw output.

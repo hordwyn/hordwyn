@@ -2,7 +2,7 @@
 //! link used through `POST /auth/reset-password`, reset-totp, disable-sso-only, setup reopen
 //! and `secrets status|rotate|prune`; every one writes an audit row with actor `cli`.
 
-mod support;
+use crate::support;
 
 use serde_json::{Value, json};
 use server::escape::Escape;

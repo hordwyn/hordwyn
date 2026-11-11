@@ -72,10 +72,10 @@ user-written template; no Jellyfin polling and no Radarr/Sonarr (GPL docs, DEC-1
 * `cargo xtask e2e`: 12 Playwright tests green (8 gallery/accessibility tests with axe
   WCAG A/AA, the M07 slice test with the TMDB fixture server, 2 M15 sharing tests, 1 M13
   notifications test).
-* Latency (M05 acceptance, `apps/server/tests/latency.rs`): with a connector that takes 10 s,
+* Latency (M05 acceptance, `apps/server/tests/it/latency.rs`): with a connector that takes 10 s,
   item detail 3-5 ms, search 1-2 ms (limit 200 ms); `entity.updated` after 10.2 s,
   `search.results` after 10.0 s.
-* Load test (M17, `cargo test -p server --test load -- --ignored --nocapture`): 50 000
+* Load test (M17, `cargo test -p server --test it -- --ignored --nocapture load::`): 50 000
   catalog items, all in one library, Postgres search, debug build on the 2-vCPU VM: search
   p95 96 ms, library page p95 58 ms (first 100) and 70 ms (last 100). Seeding and indexing
   took 76 s (DEC-150).

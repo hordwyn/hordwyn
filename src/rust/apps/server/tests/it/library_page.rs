@@ -2,7 +2,7 @@
 //! kind chips and status tabs with their counts, the cards with their next step and tags,
 //! and the state from the URL (filters, status, view) for a seeded user.
 
-mod support;
+use crate::support;
 
 use server::{Overrides, Server};
 

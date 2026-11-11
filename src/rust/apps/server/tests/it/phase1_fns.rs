@@ -1,6 +1,6 @@
 //! UX phase 1 server functions over HTTP, wired through the server's `web::Backend`.
 
-mod support;
+use crate::support;
 
 use leptos::server_fn::ServerFn;
 use server::{Overrides, Server};

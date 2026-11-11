@@ -2,7 +2,7 @@
 //! the facts card, the action bar per progress model, the rating/tags/lists row, the tabs
 //! with the episode list and the private note, for seeded items of several kinds.
 
-mod support;
+use crate::support;
 
 use server::{Overrides, Server};
 

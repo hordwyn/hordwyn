@@ -2,7 +2,7 @@
 //! client address and request id behind trusted proxies, SMTP in the database, the source
 //! Disabled switch, the wizard's done flags and the per-user time zone.
 
-mod support;
+use crate::support;
 
 use std::net::SocketAddr;
 

@@ -45,7 +45,7 @@ weight = "100 900"
 style = "normal"               # normal or italic
 ----
 
-Nothing else changes: the same binary renders another brand (`apps/server/tests/brand.rs`
+Nothing else changes: the same binary renders another brand (`apps/server/tests/it/brand.rs`
 checks product name, theme tokens, locale, string overrides and cookie names).
 
 == What is derived from the brand

@@ -3,7 +3,7 @@
 //! matched by hand and imported, `GET /imports` lists the user's own imports newest first,
 //! and the export downloads as JSON Lines or CSV.
 
-mod support;
+use crate::support;
 
 use std::fmt::Write as _;
 

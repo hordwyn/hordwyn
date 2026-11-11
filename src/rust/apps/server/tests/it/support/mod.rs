@@ -1,4 +1,5 @@
-//! Shared by the server test binaries: one request through the router, with a time limit.
+//! Shared by the modules of the server test binary: one request through the router, with a
+//! time limit.
 
 use std::time::Duration;
 

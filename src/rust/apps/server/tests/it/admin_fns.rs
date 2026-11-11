@@ -4,7 +4,7 @@
 // One end-to-end scenario on purpose: the steps share one server and database.
 #![allow(clippy::too_many_lines)]
 
-mod support;
+use crate::support;
 
 use leptos::server_fn::ServerFn;
 use server::{Overrides, Server};

@@ -2,7 +2,7 @@
 //! a signed-in page never shows "Create account", and the renamed routes (`/history`,
 //! `/people`) render while the old ones fall through to the 404 page (no redirects).
 
-mod support;
+use crate::support;
 
 use server::{Overrides, Server};
 

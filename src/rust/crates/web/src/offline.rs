@@ -22,7 +22,7 @@ use crate::i18n::I18n;
 /// The client's hybrid logical clock: the same `(wall_ms, counter, node)` ordering and text
 /// form as the server's `domain::hlc::Hlc` (`{wall_ms:016x}-{counter:08x}-{node:08x}`). The
 /// `web` crate may not depend on `domain` (D-3, `xtask/src/arch.rs`), so the two dozen lines of
-/// `tick` live here; `apps/server/tests/offline.rs` checks that the server parses and orders
+/// `tick` live here; `apps/server/tests/it/offline.rs` checks that the server parses and orders
 /// what this clock makes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientClock {

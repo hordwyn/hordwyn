@@ -1,6 +1,7 @@
 //! `cargo xtask load [--release] [--clients N]` (WP4-1): runs the ignored load test
-//! (`apps/server/tests/load.rs`) against the local services. Not part of `ci`. A release run
-//! builds a second target tree, so the command refuses to start below [`MIN_FREE_BYTES`].
+//! (`apps/server/tests/it/load.rs`, a module of the one server test binary, DEC-565) against
+//! the local services. Not part of `ci`. A release run builds a second target tree, so the
+//! command refuses to start below [`MIN_FREE_BYTES`].
 
 use std::path::Path;
 use std::process::Command;
@@ -88,7 +89,8 @@ pub fn free_bytes(path: &Path) -> Result<u64> {
     available_bytes(&String::from_utf8_lossy(&out.stdout))
 }
 
-/// The cargo arguments of the load run.
+/// The cargo arguments of the load run: the ignored tests of the module `load` in the server
+/// test binary `it`.
 #[must_use]
 pub fn cargo_args(a: LoadArgs) -> Vec<&'static str> {
     let mut args = vec!["test"];
@@ -99,10 +101,11 @@ pub fn cargo_args(a: LoadArgs) -> Vec<&'static str> {
         "-p",
         "server",
         "--test",
-        "load",
+        "it",
         "--",
         "--ignored",
         "--nocapture",
+        "load::",
     ]);
     args
 }

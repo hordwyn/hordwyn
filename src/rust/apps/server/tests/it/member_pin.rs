@@ -3,7 +3,7 @@
 //! stored their own subscriber PIN under Settings > Data sources searches with it; others
 //! search with the instance key alone.
 
-mod support;
+use crate::support;
 
 use std::time::Duration;
 

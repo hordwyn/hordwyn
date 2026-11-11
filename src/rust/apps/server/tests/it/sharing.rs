@@ -4,7 +4,7 @@
 //! share choices make, keep and revoke the public link; the People page carries the stats and
 //! the person page the lists the person shares.
 
-mod support;
+use crate::support;
 
 use serde_json::{Value, json};
 use server::{Overrides, Server};

@@ -1,7 +1,7 @@
 //! M07 brand swap: the same binary renders a second brand from another brand directory, with
 //! no code changes (D-10).
 
-mod support;
+use crate::support;
 
 use server::{Overrides, Server};
 

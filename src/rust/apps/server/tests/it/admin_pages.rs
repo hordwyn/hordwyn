@@ -3,7 +3,7 @@
 //! "admins only" page for a member; the settings pages render under `/settings/*` with the
 //! side nav; the old paths are gone (no redirects, DEC-171).
 
-mod support;
+use crate::support;
 
 use server::{Overrides, Server};
 

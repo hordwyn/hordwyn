@@ -68,6 +68,6 @@ With `--role=web` and `--role=worker` in separate processes, events travel over 
 
 == Measured
 
-The acceptance test (`apps/server/tests/latency.rs`) uses a connector that needs 10 s for
+The acceptance test (`apps/server/tests/it/latency.rs`) uses a connector that needs 10 s for
 search and details. Item detail answered in 3 to 5 ms and search in 1 to 2 ms (limit
 200 ms); `entity.updated` arrived after 10.2 s and `search.results` after 10.0 s.

@@ -2,7 +2,7 @@
 //! sections, the charts with their text equivalents and the day-grouped history with its URL
 //! filters for a seeded user.
 
-mod support;
+use crate::support;
 
 use server::{Overrides, Server};
 

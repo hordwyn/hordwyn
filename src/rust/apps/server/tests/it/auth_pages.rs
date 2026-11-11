@@ -2,7 +2,7 @@
 //! pages state each rule before typing, label every field, wire hints with
 //! `aria-describedby` and use the right autofill tokens (WCAG 1.3.1, 1.3.5, 3.3.2).
 
-mod support;
+use crate::support;
 
 use server::{Overrides, Server};
 

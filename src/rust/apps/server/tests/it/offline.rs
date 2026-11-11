@@ -2,7 +2,7 @@
 //! queues while offline (built by `web::offline`, stamped by its client clock) replay
 //! through `POST /sync/commands` once: a second push of the same queue changes nothing.
 
-mod support;
+use crate::support;
 
 use serde_json::{Value, json};
 use server::{Overrides, Server};

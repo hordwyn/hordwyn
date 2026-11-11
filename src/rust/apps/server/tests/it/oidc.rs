@@ -10,7 +10,7 @@
 // (t: server, a: admin cookie, r: answer) keep the many calls readable.
 #![allow(clippy::too_many_lines, clippy::many_single_char_names)]
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 
