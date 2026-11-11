@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { expectNoA11yViolations, hydrated, signUp, importDone } from "./helpers";
+import { expectNoA11yViolations, expectReflow, hydrated, signUp, importDone } from "./helpers";
 
 // UX phase 1 Home, Stats and History (design.md 6.1, 6.6; addendum-1 1.3): Home sections and
 // the activity link, the next step with Undo, Stats tabs with the table equivalent, History
@@ -27,8 +27,8 @@ const ROWS = [
 ];
 
 /** Import the rows through the API (the worker runs the job); answers title -> item id. */
-async function seed(page: Page): Promise<Record<string, string>> {
-  const file = [JSON.stringify({ format: "library-export", version: 1 }), ...ROWS.map((r) => JSON.stringify(r))].join("\n");
+async function seed(page: Page, rows: object[] = ROWS): Promise<Record<string, string>> {
+  const file = [JSON.stringify({ format: "library-export", version: 1 }), ...rows.map((r) => JSON.stringify(r))].join("\n");
   const started = await page.request.post("/api/v1/imports?format=generic-jsonl", {
     data: file,
     headers: { "content-type": "application/octet-stream" },
@@ -71,9 +71,9 @@ test("home shows its sections, links to history and runs the next step with undo
   }
   await expect(rows(page)).toHaveCount(2);
   await expect(page.getByTestId("up-next-card")).toHaveCount(2);
-  // the charts are images with a name, the numbers are text too
-  await expect(page.getByRole("img", { name: /^Watch: 2 planned, 1 in progress/ })).toBeVisible();
-  await expect(page.getByTestId("totals-list-read")).toContainText("40 pages");
+  // OT-17: the stats block is text: the time tiles lead, the library follows as a line per group
+  await expect(page.getByTestId("banked-tile-books")).toContainText("40 pages");
+  await expect(page.getByTestId("totals-line-watch")).toHaveText("Watch: 3 entries, 1 in progress, 2 planned");
 
   // the next step logs in one click; Undo in the toast takes it back
   const card = page.getByTestId("continue-card").filter({ hasText: "Downstream" });
@@ -99,6 +99,77 @@ test("home shows its sections, links to history and runs the next step with undo
   await page.goto("/");
   await page.getByRole("link", { name: "All stats" }).click();
   await expect(page).toHaveURL(/\/stats$/);
+});
+
+// OT-17 (DEC-542): Home's stats are led by time. A hero tile with the total hours, then four
+// tiles (movies, shows, books, games) with time or pages first and the count second, then the
+// library as one line per group. Everything is text, the icon is decoration, nothing talks
+// about pace (R-04).
+test("home leads its stats with time: the hero tile, four tiles in order, all of it text", async ({ page }) => {
+  test.setTimeout(120_000);
+  await signUp(page, `time${Date.now()}`, "Tess");
+  const ids = await seed(page, [
+    ...ROWS,
+    { source_id: "5", kind: "board_game", title: "Tidewater", year: 2017, status: "in_progress" },
+    { source_id: "6", kind: "audiobook", title: "Night Ferry", year: 2022, status: "in_progress" },
+    { source_id: "7", kind: "visual_novel", title: "Lantern Route", year: 2016, status: "in_progress" },
+  ]);
+  // a play of 90 minutes and two hours of listening: 3.5 hours
+  const play = await page.request.post(`/api/v1/items/${ids["Tidewater"]}/plays`, { data: { duration_minutes: 90, players: [] } });
+  expect(play.ok(), `play: ${play.status()}`).toBeTruthy();
+  await log(page, ids["Night Ferry"], { type: "position", seconds: 7200 });
+  // a session without a length: no time and no pages, but it was logged (review OT2C-2)
+  const session = await page.request.post(`/api/v1/items/${ids["Lantern Route"]}/plays`, { data: { players: [] } });
+  expect(session.ok(), `session: ${session.status()}`).toBeTruthy();
+
+  await open(page, "/");
+  const stats = page.getByRole("region", { name: "All-time stats" });
+  const hero = stats.getByRole("region", { name: "Time banked" });
+  await expect(hero.getByRole("heading", { level: 3, name: "Time banked" })).toBeVisible();
+  await expect(hero.getByTestId("banked-total")).toHaveText("3.5 hours");
+  await expect(hero).toContainText("Movies, shows, listening and play, added up.");
+  await expect(hero.locator("svg[data-icon='piggy-bank']")).toHaveAttribute("aria-hidden", "true");
+  // four tiles in a fixed order, each a term with its two descriptions
+  const tiles = stats.locator("dl > div");
+  await expect(tiles).toHaveCount(4);
+  await expect(tiles.locator("dt")).toHaveText(["Movies", "Shows", "Books", "Games"]);
+  await expect(tiles.locator("dd:nth-of-type(1)")).toHaveText(["0 hours", "0 hours", "40 pages", "1.5 hours"]);
+  await expect(tiles.locator("dd:nth-of-type(2)")).toHaveText(["0 movies watched", "One episode", "0 books finished", "One play"]);
+  // other kinds: time or pages, or the count when there is neither, lower case with the number
+  await expect(page.getByTestId("banked-also")).toHaveText("Also: Audiobook 2 hours, Visual novel 1 play");
+  await expect(page.getByTestId("banked-notes")).toHaveText("Reading is counted in pages. Titles without a known length count as 0.");
+  // the status counts come after the tiles, as text; Home has no chart
+  await expect(stats.getByRole("heading", { level: 3, name: "Library" })).toBeVisible();
+  await expect(page.getByTestId("totals-line-watch")).toHaveText("Watch: 3 entries, 1 in progress, 2 planned");
+  await expect(page.getByTestId("totals-line-play")).toHaveText("Play: 2 entries, 2 in progress");
+  await expect(stats.getByRole("img")).toHaveCount(0);
+  const order = await stats.evaluate((el) =>
+    [...el.querySelectorAll("[data-testid]")].map((n) => n.getAttribute("data-testid") ?? "").filter((id) => /^(banked-hero|banked-tile-|totals-line-)/.test(id)),
+  );
+  expect(order).toEqual([
+    "banked-hero",
+    "banked-tile-movies",
+    "banked-tile-shows",
+    "banked-tile-books",
+    "banked-tile-games",
+    "totals-line-watch",
+    "totals-line-read",
+    "totals-line-listen",
+    "totals-line-play",
+  ]);
+  await expect(stats).not.toContainText(/per week|per day|behind|ahead|goal|pace/i);
+
+  // the hero is half as wide as the block from 768 px and as wide as the block on a phone
+  const widths = async () => {
+    const [h, s] = [await hero.boundingBox(), await stats.boundingBox()];
+    return h!.width / s!.width;
+  };
+  expect(await widths()).toBeCloseTo(0.5, 1);
+  await page.setViewportSize({ width: 360, height: 740 });
+  expect(await widths()).toBeCloseTo(1, 1);
+  await expectReflow(page, "home stats 360");
+  await expectNoA11yViolations(page, "home stats 360");
+
 });
 
 // WP4-5 logging funnel (design.md 9, R-54): the next step on Home is one flow from the click

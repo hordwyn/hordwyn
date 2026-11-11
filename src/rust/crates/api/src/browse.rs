@@ -8,10 +8,10 @@ use app::{
 };
 use contracts::{
     ActivityPageDto, ActivityPersonDto, ActivityQueryDto, ActivityRowDto, AmountsDto, CountCellDto,
-    CountDto, EpisodeRefDto, HomeDto, KindDto, KindGroupDto, KindsDto, LibraryCountsDto,
-    LibraryEntryDto, LibraryQueryDto, LibraryRowDto, LibraryRowsDto, NextStepDto, ProgressEventDto,
-    ProgressSummaryDto, SeriesPointDto, StatsSeriesDto, StatsTotalsDto, TagDto, TotalsDto,
-    UpNextDto,
+    CountDto, EpisodeRefDto, HomeDto, KindDto, KindGroupDto, KindTotalsDto, KindsDto,
+    LibraryCountsDto, LibraryEntryDto, LibraryQueryDto, LibraryRowDto, LibraryRowsDto, NextStepDto,
+    ProgressEventDto, ProgressSummaryDto, SeriesPointDto, StatsSeriesDto, StatsTotalsDto, TagDto,
+    TotalsDto, UpNextDto,
 };
 use domain::Timestamp;
 use domain::ids::{CompanionId, EventId, ItemId};
@@ -540,6 +540,14 @@ pub async fn stats_totals(s: &ApiState, a: Actor) -> ApiResult<StatsTotalsDto> {
             .groups
             .iter()
             .map(|g| totals(g.group.as_str(), &g.totals))
+            .collect(),
+        kinds: t
+            .kinds
+            .iter()
+            .map(|k| KindTotalsDto {
+                kind: k.kind.as_str().to_string(),
+                amounts: amounts(&k.amounts),
+            })
             .collect(),
     })
 }

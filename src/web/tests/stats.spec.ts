@@ -47,6 +47,18 @@ test("goals are set, edited and deleted on Stats, never on Home; the year compar
   await expect(compare.getByRole("heading", { name: `${YEAR} so far` })).toBeVisible();
   await expect(compare).toContainText(`Watch: Watched1 in ${YEAR}, 1 in ${YEAR - 1}`);
   await expect(compare).toContainText(`Read: Pages120 in ${YEAR}, 0 in ${YEAR - 1}`);
+  // no title here has a known length: the counts lead and "Hours" comes last, in the totals
+  // row, the charts and the comparison of a group's own tab (review OT2C-5)
+  const row = page.getByTestId("st-totals");
+  await expect(row.locator("dt")).toHaveText(["Activity", "Completed entries", "Hours"]);
+  await expect(row.locator("dd").last()).toHaveText("0");
+  await open(page, "/stats?group=watch");
+  await expect(row.locator("dt")).toHaveText(["Watched", "Episodes", "Hours"]);
+  await expect(page.getByRole("figure")).toHaveCount(3);
+  await expect(page.getByRole("figure").first()).toHaveAccessibleName(/^Watched/);
+  await expect(page.getByRole("figure").last()).toHaveAccessibleName(/^Hours/);
+  await expect(compare.locator("dt")).toHaveText(["Watched", "Episodes", "Hours"]);
+  await open(page, "/stats");
   await expect(page.getByTestId("st-often")).toContainText("Log something with a person");
   const goals = page.getByTestId("st-goals");
   await expect(goals.getByTestId("st-goal")).toHaveCount(0);
@@ -124,4 +136,84 @@ test("the people seen most often are listed on Stats", async ({ page }) => {
   await expect(often.getByRole("listitem").first()).toContainText("Ria2 times together");
   await expect(often.getByRole("listitem").nth(1)).toContainText("Samonce together");
   await expect(often.getByRole("link", { name: "Ria" })).toHaveAttribute("href", `/people/${ria}`);
+});
+
+// OT-17 (DEC-542): the Stats page is led by time. The hero tile and the four tiles sit above
+// the tabs; in a tab the hours come first (totals row, chart, table, year comparison), in
+// hours, never minutes; the entries by status moved behind a closed disclosure below the charts.
+test("stats lead with time: hero and tiles on top, hours in the tab, statuses behind a disclosure", async ({ page }) => {
+  test.setTimeout(150_000);
+  const stamp = Date.now();
+  await signUp(page, `hrs${stamp}`, "Hedda");
+  const rows = [
+    { source_id: "1", kind: "board_game", title: `Salt Road ${stamp}`, year: 2016, status: "in_progress" },
+    { source_id: "2", kind: "movie", title: `Quiet Pier ${stamp}`, year: 2020, status: "planned" },
+  ];
+  const file = [JSON.stringify({ format: "library-export", version: 1 }), ...rows.map((r) => JSON.stringify(r))].join("\n");
+  const started = await page.request.post("/api/v1/imports?format=generic-jsonl", { data: file, headers: { "content-type": "application/octet-stream" } });
+  expect(started.status()).toBe(202);
+  await importDone(page, (await started.json()).id);
+  const lib = await (await page.request.get("/api/v1/library?limit=50")).json();
+  const game = lib.items.find((i: { item: { kind: string } }) => i.item.kind === "board_game").item.id as string;
+  // two plays in January, 90 and 30 minutes: 2 hours
+  for (const duration_minutes of [90, 30]) {
+    const r = await page.request.post(`/api/v1/items/${game}/plays`, { data: { duration_minutes, players: [], started_at: `${YEAR}-01-02T12:00:00Z` } });
+    expect(r.ok(), `play: ${r.status()}`).toBeTruthy();
+  }
+
+  await open(page, "/stats");
+  const hero = page.getByRole("region", { name: "Time banked" });
+  await expect(hero.getByRole("heading", { level: 2, name: "Time banked" })).toBeVisible();
+  await expect(hero.getByTestId("banked-total")).toHaveText("2 hours");
+  await expect(hero.locator("svg[data-icon='piggy-bank']")).toHaveAttribute("aria-hidden", "true");
+  const tiles = page.getByTestId("banked").locator("dl > div");
+  await expect(tiles.locator("dt")).toHaveText(["Movies", "Shows", "Books", "Games"]);
+  await expect(page.getByTestId("banked-tile-games").locator("dd")).toHaveText(["2 hours", "2 plays"]);
+  await expect(page.getByTestId("banked-tile-books").locator("dd")).toHaveText(["0 pages", "0 books finished"]);
+  // no pages read: only the note about titles without a length
+  await expect(page.getByTestId("banked-notes")).toHaveText("Titles without a known length count as 0.");
+  const top = async (l: ReturnType<Page["locator"]>) => (await l.boundingBox())!.y;
+  expect(await top(hero)).toBeLessThan(await top(page.getByRole("tablist")));
+
+  // All: hours lead the totals row
+  const totals = page.getByTestId("st-totals");
+  await expect(totals.locator("dt").first()).toHaveText("Hours");
+  await expect(totals.locator("dd").first()).toHaveText("2");
+
+  // Play: hours, then plays; the chart, its sentence and its table are in hours
+  await page.getByRole("tab", { name: "Play" }).click();
+  await expect(page).toHaveURL(/\/stats\?group=play$/);
+  await expect(totals.locator("dt")).toHaveText(["Hours", "Plays"]);
+  await expect(totals.locator("dd")).toHaveText(["2", "2"]);
+  const figures = page.getByRole("figure");
+  await expect(figures).toHaveCount(2);
+  const hours = figures.first();
+  await expect(hours).toHaveAccessibleName(/^Hours/);
+  await expect(hours.getByRole("img", { name: `Hours in Play, Jan ${YEAR} to Jan ${YEAR}: 2 in total, most in Jan ${YEAR}.` })).toBeVisible();
+  await hours.getByText("Show as a table").click();
+  const table = hours.getByRole("table");
+  await expect(table.getByRole("columnheader")).toHaveText(["Month", "Hours"]);
+  await expect(table.getByRole("row").filter({ hasText: `Jan ${YEAR}` }).getByRole("cell").last()).toHaveText("2");
+  // (the goal form keeps its "Minutes" measure: goals are not part of OT-17 step 1)
+  await expect(page.getByRole("figure").filter({ hasText: "Minutes" })).toHaveCount(0);
+  await expect(totals).not.toContainText("Minutes");
+  await expect(page.getByTestId("st-compare")).toContainText(`Hours2 in ${YEAR}, 0 in ${YEAR - 1}`);
+
+  // the entries by status: below the charts, closed, bars with a sentence and the numbers as text
+  const line = page.getByTestId("st-library-line");
+  await expect(line).toBeHidden();
+  expect(await top(page.getByText("Library by status"))).toBeGreaterThan(await top(figures.last()));
+  await page.getByText("Library by status").click();
+  await expect(line).toHaveText("Play: 1 entry, 1 in progress");
+  await expect(page.getByRole("img", { name: "Play: 0 planned, 1 in progress, 0 completed, 0 paused, 0 dropped" })).toBeVisible();
+  await expectNoA11yViolations(page, "stats led by time");
+
+  // on a phone, loaded there (at the top of the page; scrolled, the fixed bottom bar covers
+  // whatever is under it)
+  await page.setViewportSize({ width: 360, height: 800 });
+  await open(page, "/stats?group=play");
+  await expect(page.getByRole("tab", { name: "Play" })).toHaveAttribute("aria-selected", "true");
+  await expect(hero.getByTestId("banked-total")).toHaveText("2 hours");
+  await expectReflow(page, "stats led by time 360");
+  await expectNoA11yViolations(page, "stats led by time 360");
 });

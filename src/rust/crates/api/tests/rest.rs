@@ -1293,6 +1293,12 @@ async fn phase1_library_home_history_and_stats() {
     assert_eq!(totals["overall"]["group"], "all");
     assert_eq!(totals["groups"][0]["group"], "watch");
     assert_eq!(totals["groups"][0]["amounts"]["episodes"], 1);
+    // OT-17: the amounts per kind for the time tiles
+    let show = totals["kinds"]
+        .as_array()
+        .and_then(|k| k.iter().find(|k| k["kind"] == "show"))
+        .unwrap_or_else(|| panic!("kinds: {totals}"));
+    assert_eq!(show["amounts"]["episodes"], 1);
     let (st, _, series) = call(
         &app,
         "GET",

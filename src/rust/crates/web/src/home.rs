@@ -1,8 +1,10 @@
 //! Home (design.md 6.1; addendum-1 1.3; owner ruling DEC-171) and the Stats page. Home shows
 //! the greeting, Continue (in-progress entries with their next step), Up next (planned),
-//! the last five activity rows with a link to History, and the all-time totals per group as
-//! SVG charts with the numbers as text. Stats shows activity over time per group (a tab
-//! each, plus All) by month or year, each chart with its table.
+//! the last five activity rows with a link to History, and the all-time stats led by time
+//! (OT-17, DEC-542: the hero tile and four tiles of `time_tiles`, then the library as one
+//! line per group). Stats shows the same block on top, then activity over time per group (a
+//! tab each, plus All) by month or year, hours first, each chart with its table, and the
+//! entries by status behind a disclosure.
 
 use contracts::{HomeDto, LibraryRowDto, StatsSeriesDto, StatsTotalsDto, TotalsDto, UpNextDto};
 use leptos::prelude::*;
@@ -17,7 +19,7 @@ use ui::{
 
 use crate::api;
 use crate::charts::{
-    Bar, BarList, Column, ColumnChart, Measure, bucket_label, fill_months, fill_years, measures_for,
+    Bar, BarList, Column, ColumnChart, Measure, bucket_label, fill_months, fill_years, measures_led,
 };
 use crate::events::use_events;
 use crate::history::ActivityRow;
@@ -222,7 +224,7 @@ fn HomeSections(home: HomeDto, refresh: Callback<()>) -> impl IntoView {
                 </Section>
             })}
             <Section id="hm-stats" title=i18n.t("home-stats") link=("/stats", i18n.t("home-all-stats"))>
-                <TotalsCharts stats=stats/>
+                <HomeStats stats=stats/>
             </Section>
         </div>
     }
@@ -371,35 +373,81 @@ fn totals_summary(i: &I18n, g: &TotalsDto) -> String {
     )
 }
 
-/// One card per group with entries: the status bars (an image named by its summary) and
-/// the group's amounts as a list.
+/// "Watch: 3 entries, 1 in progress, 2 planned": a group's library in one line, the
+/// entries first, then the statuses that have any (OT-17: the status counts are text on
+/// Home and sit below the time tiles).
+fn library_line(i: &I18n, g: &TotalsDto) -> String {
+    let mut parts = vec![i.t_args("stats-totals-part-entries", &[("count", g.entries.into())])];
+    parts.extend(
+        [
+            ("stats-totals-part-completed", g.completed),
+            ("stats-totals-part-in_progress", g.in_progress),
+            ("stats-totals-part-planned", g.planned),
+            ("stats-totals-part-paused", g.paused),
+            ("stats-totals-part-dropped", g.dropped),
+        ]
+        .into_iter()
+        .filter(|(_, v)| *v > 0)
+        .map(|(k, v)| i.t_args(k, &[("count", count(i, v).into())])),
+    );
+    i.t_args(
+        "stats-totals-summary",
+        &[
+            ("group", group_label(i, &g.group).into()),
+            ("parts", parts.join(", ").into()),
+        ],
+    )
+}
+
+/// Home's stats block (OT-17, DEC-542): the time tiles lead, the library follows as one
+/// line per group with entries. No chart here; the status bars are on the Stats page.
 #[component]
-pub fn TotalsCharts(stats: StatsTotalsDto) -> impl IntoView {
+fn HomeStats(stats: StatsTotalsDto) -> impl IntoView {
     let i18n = use_i18n();
-    let groups: Vec<TotalsDto> = stats.groups.into_iter().filter(|g| g.entries > 0).collect();
+    let lines: Vec<(String, String)> = stats
+        .groups
+        .iter()
+        .filter(|g| g.entries > 0)
+        .map(|g| (g.group.clone(), library_line(&i18n, g)))
+        .collect();
     view! {
-        <ul class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {groups.into_iter().map(|g| {
-                let summary = totals_summary(&i18n, &g);
-                let amounts: Vec<String> = measures_for(&g.group)
-                    .into_iter()
-                    .map(|m| i18n.t_args(m.count_key(), &[("count", m.value(&g.amounts).into())]))
-                    .collect();
-                let entries = i18n.t_args("library-count", &[("count", g.entries.into())]);
-                view! {
-                    <li class="flex flex-col gap-3 rounded-xl border border-border p-4">
-                        <h3 class="flex items-baseline justify-between gap-2 font-semibold">
-                            {group_label(&i18n, &g.group)}
-                            <span class="text-sm font-normal text-muted-foreground">{entries}</span>
-                        </h3>
-                        <BarList summary=summary bars=status_bars(&i18n, &g)/>
-                        <ul class="text-sm text-muted-foreground" data-testid=format!("totals-list-{}", g.group)>
-                            {amounts.into_iter().map(|a| view! { <li>{a}</li> }).collect_view()}
-                        </ul>
-                    </li>
-                }
-            }).collect_view()}
-        </ul>
+        <div class="flex flex-col gap-4">
+            <crate::time_tiles::TimeBanked stats=stats/>
+            <div class="flex flex-col gap-1">
+                <h3 class="text-sm font-semibold">{i18n.t("stats-library-heading")}</h3>
+                <ul class="text-sm text-muted-foreground">
+                    {lines.into_iter().map(|(group, line)| view! {
+                        <li data-testid=format!("totals-line-{group}")>{line}</li>
+                    }).collect_view()}
+                </ul>
+            </div>
+        </div>
+    }
+}
+
+/// The status bars of a group's library behind a closed disclosure (OT-17: the status
+/// counts moved below the time figures; addendum-1 D4), with the numbers as a line of text.
+#[component]
+fn LibraryByStatus(totals: TotalsDto) -> impl IntoView {
+    let i18n = use_i18n();
+    let summary = totals_summary(&i18n, &totals);
+    let line = library_line(&i18n, &totals);
+    view! {
+        <Disclosure id="st-library" title=i18n.t("stats-library-by-status") mode=DisclosureMode::Native>
+            <div class="flex flex-col gap-3">
+                <BarList summary=summary bars=status_bars(&i18n, &totals)/>
+                <p class="text-sm text-muted-foreground" data-testid="st-library-line">{line}</p>
+            </div>
+        </Disclosure>
+    }
+}
+
+/// The totals of the Stats tab's group (`all`: overall).
+fn tab_totals(t: StatsTotalsDto, group: &str) -> Option<TotalsDto> {
+    if group == "all" {
+        Some(t.overall)
+    } else {
+        t.groups.into_iter().find(|x| x.group == group)
     }
 }
 
@@ -422,9 +470,17 @@ fn stats_href(group: &str, bucket: &str) -> String {
 /// Months shown in the month view (DEC-229).
 const MONTHS: usize = 24;
 
-#[component]
-pub fn Stats() -> impl IntoView {
-    let i18n = use_i18n();
+/// The Stats page's state in the URL: the `group` and `bucket` of the query as memos, and
+/// the signals of the two controls, kept in step with them both ways (a control navigates
+/// without scrolling; Back and Forward set the controls).
+type UrlState = (
+    Memo<String>,
+    Memo<String>,
+    RwSignal<String>,
+    RwSignal<String>,
+);
+
+fn stats_url_state() -> UrlState {
     let query = use_query_map();
     let group_q = Memo::new(move |_| {
         query
@@ -466,6 +522,13 @@ pub fn Stats() -> impl IntoView {
             to(g, b);
         }
     });
+    (group_q, bucket_q, group, bucket)
+}
+
+#[component]
+pub fn Stats() -> impl IntoView {
+    let i18n = use_i18n();
+    let (group_q, bucket_q, group, bucket) = stats_url_state();
     let kinds = Resource::new(|| (), |()| api::kinds());
     let totals = Resource::new(|| (), |()| api::stats_totals());
     let series = Resource::new(
@@ -479,6 +542,11 @@ pub fn Stats() -> impl IntoView {
     let labelled = move || format!("st-group-{}", group_q.get());
     view! {
         <PageTitle text=i18n.t("stats-title")/>
+        <Suspense fallback=|| view! { <Skeleton class="mb-6 h-48 w-full"/> }>
+            {move || totals.get().and_then(Result::ok).map(|t| view! {
+                <div class="mb-6"><crate::time_tiles::TimeBanked stats=t level=2/></div>
+            })}
+        </Suspense>
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div class="-mx-4 max-w-[calc(100%+2rem)] overflow-x-auto px-4">
                 <Suspense fallback=|| view! { <Skeleton class="h-9 w-72"/> }>
@@ -500,11 +568,7 @@ pub fn Stats() -> impl IntoView {
                         ().into_any()
                     }
                     Err(e) => view! { <Alert variant=AlertVariant::Destructive role=AlertRole::Alert title=t("stats-error")>{error_text(&e)}</Alert> }.into_any(),
-                    Ok(t) => {
-                        let g = group_q.get();
-                        let totals = if g == "all" { Some(t.overall) } else { t.groups.into_iter().find(|x| x.group == g) };
-                        totals.map(|x| view! { <TotalsLine totals=x/> }).into_any()
-                    }
+                    Ok(t) => tab_totals(t, &group_q.get()).map(|x| view! { <TotalsLine totals=x/> }).into_any(),
                 })}
             </Suspense>
             <crate::stats_extras::StatsCompare group=group_q/>
@@ -516,34 +580,48 @@ pub fn Stats() -> impl IntoView {
                             {error_text(&e)}
                         </Alert>
                     }.into_any(),
-                    Ok(s) => view! { <SeriesCharts series=s/> }.into_any(),
+                    Ok(s) => {
+                        // the charts lead as the totals row does: hours after the counts
+                        // when the tab has no time at all (review OT2C-5)
+                        let timed = totals.get().and_then(Result::ok)
+                            .and_then(|t| tab_totals(t, &s.group))
+                            .is_none_or(|x| x.amounts.minutes > 0);
+                        view! { <SeriesCharts series=s timed=timed/> }.into_any()
+                    }
                 })}
             </Transition>
+            <Suspense>
+                {move || totals.get().and_then(Result::ok)
+                    .and_then(|t| tab_totals(t, &group_q.get()))
+                    .filter(|x| x.entries > 0)
+                    .map(|x| view! { <LibraryByStatus totals=x/> })}
+            </Suspense>
         </section>
         <div class="mt-8"><crate::stats_extras::Goals/></div>
     }
 }
 
-/// The group's all-time numbers in one row.
+/// The group's all-time amounts in one row, time first (OT-17), or the counts first when
+/// the group has no time at all (review OT2C-5). The entries by status are in
+/// [`LibraryByStatus`], below the charts.
 #[component]
 fn TotalsLine(totals: TotalsDto) -> impl IntoView {
     let i18n = use_i18n();
-    let mut items = vec![
-        (i18n.t("stats-entries"), totals.entries),
-        (i18n.t("status-completed"), totals.completed),
-        (i18n.t("status-in_progress"), totals.in_progress),
-    ];
-    items.extend(
-        measures_for(&totals.group)
-            .into_iter()
-            .map(|m| (i18n.t(m.label_key()), m.value(&totals.amounts))),
-    );
+    let items: Vec<(String, String)> = measures_led(&totals.group, totals.amounts.minutes > 0)
+        .into_iter()
+        .map(|m| {
+            (
+                i18n.t(m.label_key()),
+                m.text(&i18n, m.value(&totals.amounts)),
+            )
+        })
+        .collect();
     view! {
-        <dl class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6" aria-label=i18n.t("stats-totals")>
+        <dl class="grid grid-cols-2 gap-3 sm:grid-cols-3" aria-label=i18n.t("stats-totals") data-testid="st-totals">
             {items.into_iter().map(|(label, n)| view! {
                 <div class="rounded-xl border border-border p-3">
                     <dt class="text-xs text-muted-foreground">{label}</dt>
-                    <dd class="text-xl font-semibold tabular-nums">{count(&use_i18n(), n)}</dd>
+                    <dd class="text-xl font-semibold tabular-nums">{n}</dd>
                 </div>
             }).collect_view()}
         </dl>
@@ -551,8 +629,9 @@ fn TotalsLine(totals: TotalsDto) -> impl IntoView {
 }
 
 /// One column chart per measure of the group, each with its table behind a disclosure.
+/// `timed`: the group has time at all (else the hours chart comes last).
 #[component]
-fn SeriesCharts(series: StatsSeriesDto) -> impl IntoView {
+fn SeriesCharts(series: StatsSeriesDto, timed: bool) -> impl IntoView {
     let i18n = use_i18n();
     let points = if series.bucket == "year" {
         fill_years(&series.points)
@@ -565,7 +644,7 @@ fn SeriesCharts(series: StatsSeriesDto) -> impl IntoView {
     let group = group_label(&i18n, &series.group);
     view! {
         <div class="grid gap-6 xl:grid-cols-2">
-            {measures_for(&series.group).into_iter().map(|m| view! {
+            {measures_led(&series.group, timed).into_iter().map(|m| view! {
                 <MeasureChart measure=m points=points.clone() group=group.clone() bucket=series.bucket.clone()/>
             }).collect_view()}
         </div>
@@ -591,7 +670,7 @@ fn MeasureChart(
         .map(|p| (bucket_label(&i18n, &p.bucket), measure.value(&p.amounts)))
         .collect();
     let total: u64 = rows.iter().map(|(_, v)| v).sum();
-    let summary = chart_summary(&i18n, &name, group, &rows);
+    let summary = chart_summary(&i18n, &name, group, &rows, measure);
     let columns: Vec<Column> = rows
         .iter()
         .map(|(label, v)| Column {
@@ -601,14 +680,15 @@ fn MeasureChart(
                 "chart-value",
                 &[
                     ("label", label.clone().into()),
-                    (
-                        "value",
-                        i18n.t_args(measure.count_key(), &[("count", (*v).into())])
-                            .into(),
-                    ),
+                    ("value", measure.counted(&i18n, *v).into()),
                 ],
             ),
         })
+        .collect();
+    // the table shows what the chart shows: hours for time, the count otherwise
+    let table: Vec<(String, String)> = rows
+        .iter()
+        .map(|(label, v)| (label.clone(), measure.text(&i18n, *v)))
         .collect();
     let head = i18n.t(if bucket == "year" {
         "stats-col-year"
@@ -621,17 +701,23 @@ fn MeasureChart(
         <figure class="flex flex-col gap-3 rounded-xl border border-border p-4" aria-labelledby=fig_label>
             <figcaption id=cap_id class="flex items-baseline justify-between gap-2">
                 <span class="font-semibold">{caption_name}</span>
-                <span class="text-sm text-muted-foreground tabular-nums">{count(&i18n, total)}</span>
+                <span class="text-sm text-muted-foreground tabular-nums">{measure.text(&i18n, total)}</span>
             </figcaption>
-            <ColumnChart summary=summary columns=columns/>
-            <MeasureTable id=format!("{id}-table") name=name head=head rows=rows/>
+            <ColumnChart summary=summary columns=columns unit=measure.unit()/>
+            <MeasureTable id=format!("{id}-table") name=name head=head rows=table/>
         </figure>
     }
 }
 
 /// The chart's sentence: total, range and the peak bucket (an empty series has no peak:
 /// "none yet", not "0 in total, most in <last month>").
-fn chart_summary(i18n: &I18n, name: &str, group: String, rows: &[(String, u64)]) -> String {
+fn chart_summary(
+    i18n: &I18n,
+    name: &str,
+    group: String,
+    rows: &[(String, u64)],
+    measure: Measure,
+) -> String {
     let total: u64 = rows.iter().map(|(_, v)| v).sum();
     let peak = rows.iter().max_by_key(|(_, v)| *v).cloned();
     i18n.t_args(
@@ -643,7 +729,7 @@ fn chart_summary(i18n: &I18n, name: &str, group: String, rows: &[(String, u64)])
         &[
             ("measure", name.to_string().into()),
             ("group", group.into()),
-            ("total", total.into()),
+            ("total", measure.text(i18n, total).into()),
             (
                 "from",
                 rows.first().map(|r| r.0.clone()).unwrap_or_default().into(),
@@ -665,7 +751,12 @@ fn chart_summary(i18n: &I18n, name: &str, group: String, rows: &[(String, u64)])
 
 /// A chart's numbers as a table behind "Show as a table", newest first.
 #[component]
-fn MeasureTable(id: String, name: String, head: String, rows: Vec<(String, u64)>) -> impl IntoView {
+fn MeasureTable(
+    id: String,
+    name: String,
+    head: String,
+    rows: Vec<(String, String)>,
+) -> impl IntoView {
     let i18n = use_i18n();
     let caption = name.clone();
     view! {
@@ -682,7 +773,7 @@ fn MeasureTable(id: String, name: String, head: String, rows: Vec<(String, u64)>
                     {rows.into_iter().rev().map(|(label, v)| view! {
                         <TableRow>
                             <TableCell>{label}</TableCell>
-                            <TableCell class="text-right tabular-nums">{count(&use_i18n(), v)}</TableCell>
+                            <TableCell class="text-right tabular-nums">{v}</TableCell>
                         </TableRow>
                     }).collect_view()}
                 </TableBody>
@@ -724,6 +815,59 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_chart_sentence_gives_the_total_as_the_chart_shows_it() {
+        // hours for time; one or two minutes are "under 0.1", never "0" (review OT2C-3)
+        let en = I18n::new("en", BTreeMap::new());
+        let rows = |v: u64| vec![("Jan 2026".to_string(), v), ("Feb 2026".to_string(), 0)];
+        let say = |v, m| chart_summary(&en, "Hours", "Listen".into(), &rows(v), m);
+        assert_eq!(
+            say(90, Measure::Hours),
+            "Hours in Listen, Jan 2026 to Feb 2026: 1.5 in total, most in Jan 2026."
+        );
+        assert_eq!(
+            say(2, Measure::Hours),
+            "Hours in Listen, Jan 2026 to Feb 2026: under 0.1 in total, most in Jan 2026."
+        );
+        assert_eq!(
+            say(0, Measure::Hours),
+            "Hours in Listen, Jan 2026 to Feb 2026: none yet."
+        );
+        assert_eq!(
+            say(1_200, Measure::Pages),
+            "Hours in Listen, Jan 2026 to Feb 2026: 1,200 in total, most in Jan 2026."
+        );
+    }
+
+    #[test]
+    fn the_library_line_names_the_entries_and_the_statuses_that_have_any() {
+        // OT-17: the status counts are one line per group on Home, without a chart
+        let mut g = TotalsDto {
+            group: "watch".into(),
+            entries: 3,
+            planned: 2,
+            in_progress: 1,
+            completed: 0,
+            paused: 0,
+            dropped: 0,
+            amounts: contracts::AmountsDto::default(),
+        };
+        let en = I18n::new("en", BTreeMap::new());
+        let de = I18n::new("de", BTreeMap::new());
+        assert_eq!(
+            library_line(&en, &g),
+            "Watch: 3 entries, 1 in progress, 2 planned"
+        );
+        assert!(
+            library_line(&de, &g).ends_with(": 3 Eintr\u{e4}ge, 1 begonnen, 2 geplant"),
+            "{}",
+            library_line(&de, &g)
+        );
+        g.group = "read".into();
+        (g.entries, g.planned, g.in_progress, g.completed) = (1, 0, 0, 1);
+        assert_eq!(library_line(&en, &g), "Read: 1 entry, 1 completed");
+    }
+
     fn answer(total: u64) -> HomeDto {
         let none = TotalsDto {
             group: "all".into(),
@@ -746,6 +890,7 @@ mod tests {
             stats: contracts::StatsTotalsDto {
                 overall: none,
                 groups: Vec::new(),
+                kinds: Vec::new(),
             },
         }
     }

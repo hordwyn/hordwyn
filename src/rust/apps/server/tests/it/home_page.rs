@@ -94,11 +94,12 @@ async fn seed(
             year: Some(2020),
             description: None,
             external_ids: Vec::new(),
-            // one movie carries a genre for the facet filter
-            attributes: if title == "Harbour Lights" {
-                serde_json::json!({"genres": ["Drama"]})
-            } else {
-                serde_json::json!({})
+            // one movie carries a genre for the facet filter, the show a length per
+            // episode for the time tiles (OT-17)
+            attributes: match title {
+                "Harbour Lights" => serde_json::json!({"genres": ["Drama"]}),
+                "Downstream" => serde_json::json!({"episode_runtime_minutes": 45}),
+                _ => serde_json::json!({}),
             },
             cover_url: None,
         })
@@ -259,19 +260,45 @@ async fn home_shows_continue_up_next_activity_and_stats() {
     assert!(html.contains("href=\"/history\""), "activity link");
     assert!(html.contains("with Anna"), "participants");
     assert_eq!(count(&html, "data-testid=\"activity-row\""), 3);
-    // Stats: one chart per group with entries, an image with a name, and the numbers as text
+    // Stats (OT-17, DEC-542): time leads. The hero tile with the total hours (two episodes
+    // of 45 minutes), four tiles in a fixed order, then the library as one line per group;
+    // everything is text, no chart on Home
     assert!(html.contains("href=\"/stats\""), "stats link");
-    assert!(html.contains("<svg role=\"img\""), "native svg chart");
+    assert!(html.contains("data-testid=\"banked-hero\""), "hero tile");
+    assert!(html.contains("data-icon=\"piggy-bank\""), "hero icon");
+    assert!(html.contains(">Time banked</h3>"), "hero label");
+    assert!(html.contains(">1.5 hours<"), "hero figure and shows tile");
     assert!(
-        html.contains(
-            "aria-label=\"Watch: 1 planned, 1 in progress, 0 completed, 0 paused, 0 dropped\""
-        ),
-        "chart summary"
+        html.contains("Movies, shows, listening and play, added up."),
+        "hero sentence"
+    );
+    let at = |id: &str| {
+        html.find(&format!("data-testid=\"banked-tile-{id}\""))
+            .unwrap_or_else(|| panic!("tile {id}"))
+    };
+    assert!(
+        at("movies") < at("shows") && at("shows") < at("books") && at("books") < at("games"),
+        "tile order"
+    );
+    assert!(html.find("banked-hero") < html.find("banked-tile-movies"));
+    for text in [
+        ">Shows</dt>",
+        ">2 episodes</dd>",
+        ">40 pages</dd>",
+        ">0 movies watched</dd>",
+        "Reading is counted in pages. Titles without a known length count as 0.",
+    ] {
+        assert!(html.contains(text), "{text}");
+    }
+    assert!(
+        html.find("banked-tile-games") < html.find("data-testid=\"totals-line-watch\""),
+        "the status counts come after the time tiles"
     );
     assert!(
-        html.contains("data-testid=\"totals-list-read\""),
-        "text equivalent"
+        html.contains(">Watch: 2 entries, 1 in progress, 1 planned</li>"),
+        "library line"
     );
+    assert!(!html.contains("<svg role=\"img\""), "no chart on Home");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -295,6 +322,37 @@ async fn stats_has_a_tab_per_group_and_a_table_per_chart() {
     );
     assert!(html.contains("<table"), "table equivalent");
     assert!(html.contains("Oct 2026"), "month bucket");
+    // OT-17: the time block at the top, hours first in the tab, the statuses behind a
+    // closed disclosure below the charts
+    assert!(html.contains(">Time banked</h2>"), "hero label");
+    // (where the block sits is checked in the browser: the page streams its parts out of order)
+    assert!(html.contains("data-testid=\"banked-hero\""), "hero tile");
+    assert!(html.contains(">Hours</dt>"), "hours in the totals row");
+    assert!(html.contains("aria-label=\"Hours in All, "), "hours chart");
+    assert!(
+        html.contains(": 1.5 in total, most in "),
+        "chart summary: {:?}",
+        html.find("Hours in All").map(|i| &html[i..i + 160])
+    );
+    assert!(
+        !html.contains(">Minutes</dt>"),
+        "no minutes in the totals row"
+    );
+    assert!(
+        !html.contains("aria-label=\"Minutes in "),
+        "no minutes chart"
+    );
+    assert!(html.contains("Library by status"), "library disclosure");
+    assert!(
+        html.contains(
+            "aria-label=\"All: 1 planned, 2 in progress, 0 completed, 0 paused, 0 dropped\""
+        ),
+        "status bars summary"
+    );
+    assert!(
+        html.contains(">All: 3 entries, 2 in progress, 1 planned</p>"),
+        "status line"
+    );
 
     let (_, html) = call(
         &app,

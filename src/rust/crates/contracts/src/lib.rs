@@ -576,6 +576,35 @@ mod tests {
         assert_eq!(serde_json::from_value::<ItemPageDto>(old).unwrap().times, 0);
     }
 
+    /// OT-17 (DEC-542): the totals carry the amounts per kind for the time tiles; an
+    /// answer of an older server has none.
+    #[test]
+    fn the_stats_totals_carry_kinds_and_default_to_none() {
+        let amounts = serde_json::json!({
+            "events": 2, "completions": 1, "finished": 2, "episodes": 0, "pages": 0,
+            "plays": 0, "minutes": 170
+        });
+        let totals = serde_json::json!({
+            "group": "all", "entries": 1, "planned": 0, "in_progress": 0, "completed": 1,
+            "paused": 0, "dropped": 0, "amounts": amounts
+        });
+        let json = serde_json::json!({
+            "overall": totals, "groups": [],
+            "kinds": [{"kind": "movie", "amounts": amounts}]
+        });
+        let dto: StatsTotalsDto = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(dto.kinds.len(), 1);
+        assert_eq!(
+            (dto.kinds[0].kind.as_str(), dto.kinds[0].amounts.minutes),
+            ("movie", 170)
+        );
+        assert_eq!(serde_json::to_value(&dto).unwrap(), json);
+        let mut old = json;
+        old.as_object_mut().unwrap().remove("kinds");
+        let old: StatsTotalsDto = serde_json::from_value(old).unwrap();
+        assert_eq!(old.kinds.len(), 0);
+    }
+
     /// UX3-26: input DTOs with a password never print it (a stray `{:?}` in a log line).
     #[test]
     fn password_inputs_hide_the_password_in_debug() {

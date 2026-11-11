@@ -74,6 +74,15 @@ test("the phase 1 pages render in German", async ({ page }) => {
     await expect(page.locator("html")).toHaveAttribute("lang", "de");
     await expect(page.getByRole("heading", { level: 1, name: h1 })).toBeVisible();
   }
+  // OT-17: the time tiles in German, on Home and at the top of the Stats page
+  for (const path of ["/", "/stats"]) {
+    await page.goto(path);
+    await hydrated(page);
+    const hero = page.getByRole("region", { name: "Angesparte Zeit" });
+    await expect(hero.getByTestId("banked-total")).toHaveText("0 Stunden");
+    await expect(page.getByTestId("banked").locator("dt")).toHaveText(["Filme", "Serien", "B\u00fccher", "Spiele"]);
+    await expect(page.getByTestId("banked-tile-movies")).toContainText("0 Filme gesehen");
+  }
   await page.goto(`/items/${item}`);
   await hydrated(page);
   await expect(page.locator("html")).toHaveAttribute("lang", "de");

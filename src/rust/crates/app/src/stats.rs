@@ -64,11 +64,21 @@ pub struct GroupTotals {
     pub totals: Totals,
 }
 
+/// All-time activity of one kind (OT-17, DEC-542: the time tiles are per kind).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KindTotals {
+    pub kind: KindId,
+    pub amounts: Amounts,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatsTotals {
     pub overall: Totals,
     /// Watch, Read, Listen, Play always; Other only when it has entries.
     pub groups: Vec<GroupTotals>,
+    /// The kinds with activity, sorted by kind. Their amounts add up to those of their
+    /// group and to `overall` (minutes too: seconds become whole minutes per kind).
+    pub kinds: Vec<KindTotals>,
 }
 
 /// Time-series bucket size (calendar of the user's zone, `bucket_of`).
@@ -253,12 +263,12 @@ impl App {
     /// # Errors
     /// Storage errors.
     pub async fn stats_totals(&self, actor: Actor) -> AppResult<StatsTotals> {
-        let mut per: BTreeMap<KindGroup, (Totals, u64)> = KindGroup::ALL[..4]
+        let mut per: BTreeMap<KindGroup, Totals> = KindGroup::ALL[..4]
             .iter()
-            .map(|g| (*g, (Totals::default(), 0)))
+            .map(|g| (*g, Totals::default()))
             .collect();
         for (kind, status, n) in self.repos.library.counts(actor.user_id).await? {
-            let t = &mut per.entry(self.group_of(&kind)).or_default().0;
+            let t = per.entry(self.group_of(&kind)).or_default();
             t.entries += n;
             match status.as_str() {
                 Status::PLANNED => t.planned += n,
@@ -270,20 +280,33 @@ impl App {
             }
         }
         let zone = self.user_zone(actor.user_id).await?;
+        let mut per_kind: BTreeMap<KindId, (Amounts, u64)> = BTreeMap::new();
         for m in self
             .repos
             .progress
             .month_amounts(actor.user_id, zone.name())
             .await?
         {
-            let (t, secs) = per.entry(self.group_of(&m.kind)).or_default();
-            t.amounts.add(&m.amounts);
+            let (a, secs) = per_kind.entry(m.kind).or_default();
+            a.add(&m.amounts);
             *secs += m.seconds;
+        }
+        // seconds become whole minutes per kind, and a group is the sum of its kinds, so
+        // the tiles (per kind) add up to the group and overall figures (DEC-572)
+        let mut kinds = Vec::with_capacity(per_kind.len());
+        for (kind, (mut amounts, secs)) in per_kind {
+            amounts.minutes = secs / 60;
+            let group = self.group_of(&kind);
+            let t = per.entry(group).or_default();
+            if group == KindGroup::Other && t.entries == 0 {
+                continue;
+            }
+            t.amounts.add(&amounts);
+            kinds.push(KindTotals { kind, amounts });
         }
         let mut overall = Totals::default();
         let mut groups = Vec::new();
-        for (group, (mut t, secs)) in per {
-            t.amounts.minutes = secs / 60;
+        for (group, t) in per {
             if group == KindGroup::Other && t.entries == 0 {
                 continue;
             }
@@ -296,7 +319,11 @@ impl App {
             overall.amounts.add(&t.amounts);
             groups.push(GroupTotals { group, totals: t });
         }
-        Ok(StatsTotals { overall, groups })
+        Ok(StatsTotals {
+            overall,
+            groups,
+            kinds,
+        })
     }
 
     /// Activity per month or year, oldest first, for one group or all; buckets without

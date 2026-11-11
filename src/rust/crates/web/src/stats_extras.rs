@@ -13,7 +13,7 @@ use ui::{
 
 use crate::admin::ConfirmDialog;
 use crate::api;
-use crate::charts::{Measure, measures_for};
+use crate::charts::{Measure, measures_for, measures_led};
 use crate::home::{count, group_label};
 use crate::i18n::{I18n, t, use_i18n};
 use crate::pages::error_text;
@@ -46,12 +46,15 @@ pub fn goal_measure(metric: &str) -> Measure {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompareLine {
     pub label: String,
+    /// What the two numbers count; time is shown in hours (`Measure::text`).
+    pub measure: Measure,
     pub this: u64,
     pub last: u64,
 }
 
 /// The comparison lines of a group (`all` or a group id): its chart measures, for the group
-/// itself, or for `all` the first measure of each group that has anything in either year.
+/// itself, or for `all` each group's first measure that has anything in either year (time
+/// leads, OT-17; a group without any time shows its first count).
 #[must_use]
 pub fn compare_lines(i18n: &I18n, c: &[CompareDto], group: &str) -> Vec<CompareLine> {
     let line = |g: &CompareDto, m: Measure, prefix: bool| {
@@ -62,6 +65,7 @@ pub fn compare_lines(i18n: &I18n, c: &[CompareDto], group: &str) -> Vec<CompareL
             } else {
                 name
             },
+            measure: m,
             this: m.value(&g.this),
             last: m.value(&g.last),
         }
@@ -71,16 +75,18 @@ pub fn compare_lines(i18n: &I18n, c: &[CompareDto], group: &str) -> Vec<CompareL
             .iter()
             .filter(|g| g.group != "all")
             .filter_map(|g| {
-                let m = *measures_for(&g.group).first()?;
-                let l = line(g, m, true);
-                (l.this > 0 || l.last > 0).then_some(l)
+                measures_for(&g.group)
+                    .into_iter()
+                    .map(|m| line(g, m, true))
+                    .find(|l| l.this > 0 || l.last > 0)
             })
             .collect();
     }
     c.iter()
         .find(|g| g.group == group)
         .map(|g| {
-            measures_for(group)
+            // hours after the counts when neither year has any time (review OT2C-5)
+            measures_led(group, g.this.minutes > 0 || g.last.minutes > 0)
                 .into_iter()
                 .map(|m| line(g, m, false))
                 .collect()
@@ -126,8 +132,8 @@ pub fn CompareList(lines: Vec<CompareLine>, year: i32, last_year: i32) -> impl I
         <dl class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-sm">
             {lines.into_iter().map(|l| {
                 let value = i18n.t_args("stats-compare-value", &[
-                    ("this", count(&i18n, l.this).into()),
-                    ("last", count(&i18n, l.last).into()),
+                    ("this", l.measure.text(&i18n, l.this).into()),
+                    ("last", l.measure.text(&i18n, l.last).into()),
                     ("year", year.to_string().into()),
                     ("last_year", last_year.to_string().into()),
                 ]);
@@ -594,6 +600,62 @@ mod tests {
         let read = compare_lines(&en, &c, "read");
         assert_eq!(read[0].label, "Pages");
         assert_eq!(compare_lines(&en, &c, "play").len(), 0);
+    }
+
+    #[test]
+    fn the_comparison_leads_with_hours_when_there_are_any() {
+        // OT-17: time first; a group without any time falls back to its first count
+        let en = I18n::new("en", BTreeMap::new());
+        let timed = |finished, minutes| AmountsDto {
+            finished,
+            minutes,
+            ..AmountsDto::default()
+        };
+        let c = vec![CompareDto {
+            group: "watch".into(),
+            this: timed(3, 300),
+            last: timed(1, 0),
+        }];
+        let all = compare_lines(&en, &c, "all");
+        assert_eq!(all.len(), 1);
+        assert_eq!(
+            (all[0].label.as_str(), all[0].measure, all[0].this),
+            ("Watch: Hours", Measure::Hours, 300)
+        );
+        assert_eq!(all[0].measure.text(&en, all[0].this), "5");
+        let labels: Vec<String> = compare_lines(&en, &c, "watch")
+            .into_iter()
+            .map(|l| l.label)
+            .collect();
+        assert_eq!(labels, ["Hours", "Watched", "Episodes"]);
+        let untimed = vec![CompareDto {
+            group: "watch".into(),
+            this: timed(3, 0),
+            last: timed(1, 0),
+        }];
+        assert_eq!(
+            compare_lines(&en, &untimed, "all")[0].label,
+            "Watch: Watched"
+        );
+    }
+
+    #[test]
+    fn a_group_without_time_in_either_year_compares_its_counts_first() {
+        // review OT2C-5: no "Hours - 0 in 2026, 0 in 2025" on top of the group's own tab
+        let en = I18n::new("en", BTreeMap::new());
+        let c = vec![CompareDto {
+            group: "watch".into(),
+            this: AmountsDto {
+                finished: 3,
+                ..AmountsDto::default()
+            },
+            last: AmountsDto::default(),
+        }];
+        let labels: Vec<String> = compare_lines(&en, &c, "watch")
+            .into_iter()
+            .map(|l| l.label)
+            .collect();
+        assert_eq!(labels, ["Watched", "Episodes", "Hours"]);
     }
 
     #[test]

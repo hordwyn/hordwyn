@@ -676,7 +676,6 @@ stats-by-month = By month
 stats-by-year = By year
 stats-error = The stats could not be loaded.
 stats-totals = All-time totals
-stats-entries = Entries
 stats-empty = Nothing logged here yet
 stats-empty-body = Once you log progress, your activity over time shows up here.
 stats-chart-summary = { $measure } in { $group }, { $from } to { $to }: { $total } in total, most in { $peak }.
@@ -725,6 +724,73 @@ stats-count-plays = { $count ->
 stats-count-minutes = { $count ->
     [one] One minute
    *[other] { $count } minutes
+}
+stats-measure-hours = Hours
+stats-count-hours = { $count ->
+    [one] { $count } hour
+   *[other] { $count } hours
+}
+stats-hero-label = Time banked
+stats-hero-days = That is { $days ->
+    [one] 1 day
+   *[other] { $days } days
+} and { $hours ->
+    [one] 1 hour
+   *[other] { $hours } hours
+} of movies, shows, listening and play.
+stats-hero-under-day = Movies, shows, listening and play, added up.
+stats-hero-none = Nothing with a known length logged yet.
+stats-tile-movies = Movies
+stats-tile-shows = Shows
+stats-tile-books = Books
+stats-tile-games = Games
+stats-tile-movies-count = { $count ->
+    [one] One movie watched
+   *[other] { $count } movies watched
+}
+stats-tile-books-count = { $count ->
+    [one] One book finished
+   *[other] { $count } books finished
+}
+stats-also = Also: { $parts }
+stats-also-part = { $kind } { $amount }
+stats-time-minutes = { $count ->
+    [one] { $count } minute
+   *[other] { $count } minutes
+}
+stats-hours-under = under { $hours }
+stats-hero-days-only = That is { $days ->
+    [one] 1 day
+   *[other] { $days } days
+} of movies, shows, listening and play.
+stats-also-pages = { $count ->
+    [one] { $count } page
+   *[other] { $count } pages
+}
+stats-also-episodes = { $count ->
+    [one] { $count } episode
+   *[other] { $count } episodes
+}
+stats-also-plays = { $count ->
+    [one] { $count } play
+   *[other] { $count } plays
+}
+stats-also-finished = { $count ->
+    [one] watched once
+   *[other] watched { $count } times
+}
+stats-also-completions = { $count } completed
+stats-also-events = { $count ->
+    [one] { $count } logged step
+   *[other] { $count } logged steps
+}
+stats-reading-note = Reading is counted in pages.
+stats-untimed-note = Titles without a known length count as 0.
+stats-library-heading = Library
+stats-library-by-status = Library by status
+stats-totals-part-entries = { $count ->
+    [one] { $count } entry
+   *[other] { $count } entries
 }
 history-title = History
 history-lead = Everything you logged, newest first.

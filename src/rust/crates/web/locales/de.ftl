@@ -676,7 +676,6 @@ stats-by-month = Nach Monat
 stats-by-year = Nach Jahr
 stats-error = Die Statistik konnte nicht geladen werden.
 stats-totals = Summen insgesamt
-stats-entries = Einträge
 stats-empty = Hier ist noch nichts eingetragen
 stats-empty-body = Sobald du Fortschritt einträgst, erscheint hier deine Aktivität im Zeitverlauf.
 stats-chart-summary = { $measure } in { $group }, { $from } bis { $to }: insgesamt { $total }, am meisten im { $peak }.
@@ -725,6 +724,73 @@ stats-count-plays = { $count ->
 stats-count-minutes = { $count ->
     [one] Eine Minute
    *[other] { $count } Minuten
+}
+stats-measure-hours = Stunden
+stats-count-hours = { $count ->
+    [one] { $count } Stunde
+   *[other] { $count } Stunden
+}
+stats-hero-label = Angesparte Zeit
+stats-hero-days = { $days ->
+    [one] Das ist 1 Tag
+   *[other] Das sind { $days } Tage
+} und { $hours ->
+    [one] 1 Stunde
+   *[other] { $hours } Stunden
+} mit Filmen, Serien, Hören und Spielen.
+stats-hero-under-day = Filme, Serien, Hören und Spiele, zusammengezählt.
+stats-hero-none = Noch nichts mit bekannter Länge eingetragen.
+stats-tile-movies = Filme
+stats-tile-shows = Serien
+stats-tile-books = Bücher
+stats-tile-games = Spiele
+stats-tile-movies-count = { $count ->
+    [one] Ein Film gesehen
+   *[other] { $count } Filme gesehen
+}
+stats-tile-books-count = { $count ->
+    [one] Ein Buch abgeschlossen
+   *[other] { $count } Bücher abgeschlossen
+}
+stats-also = Außerdem: { $parts }
+stats-also-part = { $kind } { $amount }
+stats-time-minutes = { $count ->
+    [one] { $count } Minute
+   *[other] { $count } Minuten
+}
+stats-hours-under = unter { $hours }
+stats-hero-days-only = { $days ->
+    [one] Das ist 1 Tag
+   *[other] Das sind { $days } Tage
+} mit Filmen, Serien, Hören und Spielen.
+stats-also-pages = { $count ->
+    [one] { $count } Seite
+   *[other] { $count } Seiten
+}
+stats-also-episodes = { $count ->
+    [one] { $count } Folge
+   *[other] { $count } Folgen
+}
+stats-also-plays = { $count ->
+    [one] { $count } Partie
+   *[other] { $count } Partien
+}
+stats-also-finished = { $count ->
+    [one] einmal gesehen
+   *[other] { $count }-mal gesehen
+}
+stats-also-completions = { $count } abgeschlossen
+stats-also-events = { $count ->
+    [one] { $count } eingetragener Schritt
+   *[other] { $count } eingetragene Schritte
+}
+stats-reading-note = Lesen wird in Seiten gezählt.
+stats-untimed-note = Titel ohne bekannte Länge zählen als 0.
+stats-library-heading = Bibliothek
+stats-library-by-status = Bibliothek nach Status
+stats-totals-part-entries = { $count ->
+    [one] { $count } Eintrag
+   *[other] { $count } Einträge
 }
 history-title = Verlauf
 history-lead = Alles, was du eingetragen hast, das Neueste zuerst.

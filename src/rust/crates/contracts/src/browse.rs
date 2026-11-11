@@ -354,12 +354,25 @@ pub struct TotalsDto {
     pub amounts: AmountsDto,
 }
 
+/// All-time activity of one kind.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct KindTotalsDto {
+    /// Kind id (`movie`, `show`, `book`, ...).
+    pub kind: String,
+    pub amounts: AmountsDto,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct StatsTotalsDto {
     pub overall: TotalsDto,
     /// Watch, Read, Listen, Play; Other when it has entries.
     pub groups: Vec<TotalsDto>,
+    /// The kinds with activity, sorted by kind id. Their amounts add up to those of their
+    /// group and to `overall`; `minutes` is 0 for a kind without any known length.
+    #[serde(default)]
+    pub kinds: Vec<KindTotalsDto>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -47,8 +47,8 @@ pub use next_step::{NextStep, first_step, next_step, times};
 pub use people::{CompanionStats, MergeSuggestion, MostPlayed, StatItem, suggest_merges};
 pub use sessions::NewSession;
 pub use stats::{
-    Amounts, Bucket, GroupTotals, KindAmounts, MonthAmounts, SeriesPoint, StatsTotals, Totals,
-    month_amounts, window_amounts,
+    Amounts, Bucket, GroupTotals, KindAmounts, KindTotals, MonthAmounts, SeriesPoint, StatsTotals,
+    Totals, month_amounts, window_amounts,
 };
 
 use domain::Timestamp;
