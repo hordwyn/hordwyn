@@ -111,6 +111,17 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
         .iter()
         .map(crate::browse::item_play)
         .collect();
+    // every play counted (the "Plays" tab's strip), for a kind that is played
+    let played = kind
+        .as_ref()
+        .is_some_and(|k| k.progress_model == domain::kind::ProgressModel::Sessions);
+    let play_totals = if played {
+        Some(crate::browse::play_totals(
+            s.app.item_play_totals(a, item_id).await?,
+        ))
+    } else {
+        None
+    };
     Ok(ItemPageDto {
         item: dto::item(s, &item).await,
         entry: entry.as_ref().map(dto::entry),
@@ -123,6 +134,7 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
         times_at,
         episodes,
         plays,
+        play_totals,
     })
 }
 
@@ -525,9 +537,10 @@ pub async fn log_play(
     play.notes = b.notes.filter(|n| !n.trim().is_empty());
     play.coop_outcome = match b.coop.as_deref() {
         None | Some("") => None,
-        Some("won") => Some(domain::session::CoopOutcome::Won),
-        Some("lost") => Some(domain::session::CoopOutcome::Lost),
-        Some(_) => return Err(ApiError::bad_request("coop must be `won` or `lost`")),
+        Some(word) => Some(
+            domain::session::CoopOutcome::parse(word)
+                .ok_or_else(|| ApiError::bad_request("coop must be `won`, `lost` or `none`"))?,
+        ),
     };
     play.client_op_id = b.client_op_id.map(|o| parse_id(&o, |u| u)).transpose()?;
     play.game_group = b

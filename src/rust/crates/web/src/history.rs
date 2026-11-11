@@ -55,11 +55,28 @@ fn what(i: &I18n, row: &ActivityRowDto) -> String {
         .map_or_else(|| i.t("history-session"), |p| progress_label(i, p))
 }
 
-/// What the row's session says beyond its people (OT-11): who won or how the co-op game
-/// ended, the scores, the duration, as "Ben won - Scores: You 31, Ben 42.5 - 45 min". `None`
-/// for a row without a session and for a session that says none of it.
-fn play_line(i: &I18n, row: &ActivityRowDto) -> Option<String> {
-    let play = row.play.as_ref()?;
+/// The parts of what a play says beyond its people: the result, the scores, the duration.
+/// The activity row joins them into one line ([`play_line`]); the "Plays" tab of a game
+/// page puts each into its own column.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlayWords {
+    /// "Ben won", "You won", "Won together", "Played together" (a co-op play without a
+    /// result, OT-18); `None` when no result was logged.
+    pub result: Option<String>,
+    /// "Scores: You 31, Ben 42.5"; alone "Score: 12".
+    pub scores: Option<String>,
+    /// The scores without their label: "You 31, Ben 42.5"; alone "12".
+    pub scores_bare: Option<String>,
+    pub duration_minutes: Option<u32>,
+}
+
+/// The words of a play with these people.
+#[must_use]
+pub fn play_words(
+    i: &I18n,
+    people: &[contracts::ActivityPersonDto],
+    play: &contracts::ActivityPlayDto,
+) -> PlayWords {
     let name = |p: &contracts::ActivityPersonDto| {
         if p.is_me {
             i.t("history-play-you")
@@ -67,43 +84,62 @@ fn play_line(i: &I18n, row: &ActivityRowDto) -> Option<String> {
             p.name.clone()
         }
     };
-    let mut parts = Vec::new();
-    let winners: Vec<_> = row.participants.iter().filter(|p| p.winner).collect();
-    match (play.coop.as_deref(), winners.as_slice()) {
-        (Some("won"), _) => parts.push(i.t("history-play-coop-won")),
-        (Some("lost"), _) => parts.push(i.t("history-play-coop-lost")),
-        (_, []) => {}
-        (_, [one]) if one.is_me => parts.push(i.t("history-play-won-you")),
-        (_, many) => {
+    let winners: Vec<_> = people.iter().filter(|p| p.winner).collect();
+    let result = match (play.coop.as_deref(), winners.as_slice()) {
+        (Some("won"), _) => Some(i.t("history-play-coop-won")),
+        (Some("lost"), _) => Some(i.t("history-play-coop-lost")),
+        // any other co-op word is a play without a result
+        (Some(_), _) => Some(i.t("history-play-coop-none")),
+        (None, []) => None,
+        (None, [one]) if one.is_me => Some(i.t("history-play-won-you")),
+        (None, many) => {
             let names: Vec<String> = many.iter().map(|p| name(p)).collect();
-            parts.push(i.t_args("history-play-won", &[("names", names.join(", ").into())]));
+            Some(i.t_args("history-play-won", &[("names", names.join(", ").into())]))
         }
-    }
-    let scored: Vec<_> = row
-        .participants
+    };
+    let with_score: Vec<_> = people
         .iter()
         .filter_map(|p| p.score.map(|s| (p, i.number(s))))
         .collect();
-    match scored.as_slice() {
-        [] => {}
-        [(_, score)] if row.participants.len() == 1 => {
-            parts.push(i.t_args("history-play-score", &[("score", score.clone().into())]));
-        }
+    let (scores, scores_bare) = match with_score.as_slice() {
+        [] => (None, None),
+        [(_, score)] if people.len() == 1 => (
+            Some(i.t_args("history-play-score", &[("score", score.clone().into())])),
+            Some(score.clone()),
+        ),
         many => {
-            let listed: Vec<String> = many
+            let listed = many
                 .iter()
                 .map(|(p, score)| format!("{} {score}", name(p)))
-                .collect();
-            parts.push(i.t_args(
-                "history-play-scores",
-                &[("scores", listed.join(", ").into())],
-            ));
+                .collect::<Vec<_>>()
+                .join(", ");
+            (
+                Some(i.t_args("history-play-scores", &[("scores", listed.clone().into())])),
+                Some(listed),
+            )
         }
+    };
+    PlayWords {
+        result,
+        scores,
+        scores_bare,
+        duration_minutes: play.duration_minutes.filter(|m| *m > 0),
     }
-    if let Some(minutes) = play.duration_minutes.filter(|m| *m > 0) {
+}
+
+/// What the row's session says beyond its people (OT-11): who won or how the co-op game
+/// ended, the scores, the duration, as "Ben won - Scores: You 31, Ben 42.5 - 45 min". `None`
+/// for a row without a session and for a session that says none of it.
+fn play_line(i: &I18n, row: &ActivityRowDto) -> Option<String> {
+    let words = play_words(i, &row.participants, row.play.as_ref()?);
+    let duration = words.duration_minutes.map(|minutes| {
         let minutes = i.number(f64::from(minutes));
-        parts.push(i.t_args("history-play-duration", &[("minutes", minutes.into())]));
-    }
+        i.t_args("history-play-duration", &[("minutes", minutes.into())])
+    });
+    let parts: Vec<String> = [words.result, words.scores, duration]
+        .into_iter()
+        .flatten()
+        .collect();
     (!parts.is_empty()).then(|| parts.join(" - "))
 }
 
@@ -1054,6 +1090,15 @@ mod tests {
         assert_eq!(
             play_line(&de, &coop("lost")).as_deref(),
             Some("Gemeinsam verloren - 90 Min.")
+        );
+        // OT-18: a co-op play without a result is neither won nor lost
+        assert_eq!(
+            play_line(&en, &coop("none")).as_deref(),
+            Some("Played together - 90 min")
+        );
+        assert_eq!(
+            play_line(&de, &coop("none")).as_deref(),
+            Some("Gemeinsam gespielt - 90 Min.")
         );
         // nothing known beyond the people: no second line
         let bare = play_row(

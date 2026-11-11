@@ -124,6 +124,7 @@ pub async fn stats_compare(s: &ApiState, a: Actor) -> ApiResult<StatsCompareDto>
             groups,
         },
         often_with: people,
+        play: crate::browse::play_totals(s.app.play_totals(a).await?),
     })
 }
 

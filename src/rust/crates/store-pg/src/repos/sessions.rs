@@ -196,6 +196,34 @@ impl SessionRepo for PgStore {
         self.sessions_where_ids(&ids).await
     }
 
+    async fn play_totals(
+        &self,
+        owner: UserId,
+        mine: &[CompanionId],
+        item: Option<ItemId>,
+    ) -> Res<Vec<app::ports::ItemPlayTotals>> {
+        let mine: Vec<uuid::Uuid> = mine.iter().map(|c| c.0).collect();
+        // one statement per case (review of ot2f): with the item as a plain condition the
+        // planner can take the index `sessions_item`; written as `$3 IS NULL OR item_id = $3`
+        // a generic plan has to walk every session of the owner
+        let rows = match item {
+            Some(item) => play_totals_of_item(&self.pool, owner, &mine, item).await,
+            None => play_totals_of_owner(&self.pool, owner, &mine).await,
+        }
+        .map_err(be)?;
+        let count = |n: i64| u32::try_from(n).unwrap_or(u32::MAX);
+        Ok(rows
+            .into_iter()
+            .map(|r| app::ports::ItemPlayTotals {
+                item_id: ItemId(r.item_id),
+                plays: count(r.plays),
+                minutes: u64::try_from(r.minutes).unwrap_or(0),
+                decided: count(r.decided),
+                wins: count(r.wins),
+            })
+            .collect())
+    }
+
     async fn group_plays(&self, owner: UserId) -> Res<Vec<app::ports::GroupPlays>> {
         let rows = sqlx::query!(
             r#"SELECT DISTINCT ON (s.game_group_id)
@@ -352,4 +380,88 @@ pub(crate) fn span_arrays(
     Vec<chrono::DateTime<chrono::Utc>>,
 ) {
     w.spans.iter().copied().unzip()
+}
+
+/// A row of the two play totals statements.
+struct PlayTotalsRow {
+    item_id: uuid::Uuid,
+    plays: i64,
+    minutes: i64,
+    decided: i64,
+    wins: i64,
+}
+
+/// The plays of every item in an owner's log, per item. The rule of `Session::result_for`:
+/// a result needs the person at the table; a co-op outcome decides alone (`none` decides
+/// nothing), else a winner mark does. Each lateral subquery is an aggregate without GROUP
+/// BY (one row), read by the primary key of `session_participants`.
+async fn play_totals_of_owner(
+    pool: &sqlx::PgPool,
+    owner: UserId,
+    mine: &[uuid::Uuid],
+) -> Result<Vec<PlayTotalsRow>, sqlx::Error> {
+    sqlx::query_as!(
+        PlayTotalsRow,
+        r#"SELECT s.item_id,
+                  COUNT(*) AS "plays!",
+                  COALESCE(SUM(s.duration_minutes), 0) AS "minutes!",
+                  COUNT(*) FILTER (WHERE me.took AND (
+                      s.coop_outcome IN ('won', 'lost')
+                      OR (s.coop_outcome IS NULL AND won.anyone))) AS "decided!",
+                  COUNT(*) FILTER (WHERE me.took AND (
+                      s.coop_outcome = 'won'
+                      OR (s.coop_outcome IS NULL AND me.won))) AS "wins!"
+           FROM sessions s
+           CROSS JOIN LATERAL (
+               SELECT COUNT(*) > 0 AS took, COALESCE(bool_or(p.winner), false) AS won
+               FROM session_participants p
+               WHERE p.session_id = s.id AND p.companion_id = ANY($2)) me
+           CROSS JOIN LATERAL (
+               SELECT COALESCE(bool_or(p.winner), false) AS anyone
+               FROM session_participants p WHERE p.session_id = s.id) won
+           WHERE s.owner_id = $1
+           GROUP BY s.item_id
+           ORDER BY s.item_id"#,
+        owner.0,
+        mine
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// The same for one item (at most one row): the statement of [`play_totals_of_owner`] with
+/// the item as a condition, so the index `sessions_item` serves it.
+async fn play_totals_of_item(
+    pool: &sqlx::PgPool,
+    owner: UserId,
+    mine: &[uuid::Uuid],
+    item: ItemId,
+) -> Result<Vec<PlayTotalsRow>, sqlx::Error> {
+    sqlx::query_as!(
+        PlayTotalsRow,
+        r#"SELECT s.item_id,
+                  COUNT(*) AS "plays!",
+                  COALESCE(SUM(s.duration_minutes), 0) AS "minutes!",
+                  COUNT(*) FILTER (WHERE me.took AND (
+                      s.coop_outcome IN ('won', 'lost')
+                      OR (s.coop_outcome IS NULL AND won.anyone))) AS "decided!",
+                  COUNT(*) FILTER (WHERE me.took AND (
+                      s.coop_outcome = 'won'
+                      OR (s.coop_outcome IS NULL AND me.won))) AS "wins!"
+           FROM sessions s
+           CROSS JOIN LATERAL (
+               SELECT COUNT(*) > 0 AS took, COALESCE(bool_or(p.winner), false) AS won
+               FROM session_participants p
+               WHERE p.session_id = s.id AND p.companion_id = ANY($2)) me
+           CROSS JOIN LATERAL (
+               SELECT COALESCE(bool_or(p.winner), false) AS anyone
+               FROM session_participants p WHERE p.session_id = s.id) won
+           WHERE s.owner_id = $1 AND s.item_id = $3
+           GROUP BY s.item_id"#,
+        owner.0,
+        mine,
+        item.0
+    )
+    .fetch_all(pool)
+    .await
 }

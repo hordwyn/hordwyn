@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { expectNoA11yViolations, hydrated, signUp, importDone } from "./helpers";
+import { expectNoA11yViolations, expectReflow, hydrated, signUp, importDone } from "./helpers";
 
 // UX phase 1 item page (design.md 6.3, 5.4, 5.5, 3.4; addendum-1 1.3 Item row): the next step
 // with Undo, the "With..." sheet with a person and a rating, the play sheet with players and
@@ -194,7 +194,22 @@ test("the play sheet logs players, scores and the winner", async ({ page }) => {
   await people.press("Enter");
   await sheet.getByLabel("Score of Play Tester").fill("31");
   await sheet.getByLabel("Score of Ben").fill("42,5");
-  await expect(sheet.getByLabel("Winner")).toHaveValue("");
+  // ux-owner-test 2.3: the scores are one table with a "Won" column; the radio follows the
+  // highest score until one is chosen by hand, and the choice can be taken back
+  const scores = sheet.getByRole("table", { name: "Scores" });
+  await expect(scores.getByRole("columnheader")).toHaveText(["Player", "Score", "Won"]);
+  await expect(scores.getByRole("rowheader")).toHaveText(["Play Tester", "Ben"]);
+  const benWon = scores.getByRole("radio", { name: "Ben won" });
+  const iWon = scores.getByRole("radio", { name: "Play Tester won" });
+  await expect(benWon).toBeChecked();
+  await expect(iWon).not.toBeChecked();
+  await expect(sheet.getByRole("button", { name: "Use the highest score" })).toHaveCount(0);
+  await iWon.check();
+  await expect(benWon).not.toBeChecked();
+  await sheet.getByRole("button", { name: "Use the highest score" }).click();
+  await expect(benWon).toBeChecked();
+  await expect(sheet.getByRole("button", { name: "Use the highest score" })).toHaveCount(0);
+  await expectNoA11yViolations(page, "play dialog with scores");
   await sheet.getByRole("button", { name: "Save" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Logged: Play" })).toBeVisible();
   const sessions = await (await page.request.get("/api/v1/sessions")).json();
@@ -262,9 +277,11 @@ test("the play sheet shows the duration in its first row, without opening More",
   expect(box.y).toBeLessThan(players.y);
   expect(box.x).toBeGreaterThan(when.x);
   // OD-01: a play of one person opens with five inputs: the date, the duration and the score
-  // (text fields), the people finder and the winner (comboboxes)
+  // (text fields), the people finder (a combobox) and the winner (the "Won" column of the
+  // score table, ux-owner-test 2.3: the player or "No winner")
   await expect(sheet.getByRole("textbox")).toHaveCount(2);
-  await expect(sheet.getByRole("combobox")).toHaveCount(2);
+  await expect(sheet.getByRole("combobox")).toHaveCount(1);
+  await expect(sheet.getByRole("table", { name: "Scores" }).getByRole("radio")).toHaveCount(2);
   await duration.fill("ninety");
   await sheet.getByRole("button", { name: "Save" }).click();
   await expect(sheet.getByRole("alert").filter({ hasText: "Enter the duration as hours:minutes (1:30) or as minutes (90)." })).toBeVisible();
@@ -825,9 +842,13 @@ test("the log dialogs are centered from 640 px and bottom sheets below; the foot
   await page.setViewportSize({ width: 1280, height: 720 });
   await signUp(page, `dlg${Date.now()}`, "Dialog Tester");
   const ids = await seed(page);
-  /** OD-01: what the dialog asks as it opens (a radio group is one input). */
+  /** OD-01: what the dialog asks as it opens (a radio group is one input, and so is the
+   * winner: the "Won" column of the score table; review OT2F-12). */
   const inputs = async (d: ReturnType<Page["getByRole"]>) =>
-    (await d.getByRole("radiogroup").count()) + (await d.getByRole("textbox").count()) + (await d.getByRole("combobox").count());
+    (await d.getByRole("radiogroup").count()) +
+    (await d.getByRole("textbox").count()) +
+    (await d.getByRole("combobox").count()) +
+    (await d.getByRole("table").filter({ has: page.getByRole("radio") }).count());
 
   // the watched dialog: centered, at most 32 rem wide, as tall as its fields
   await open(page, `/items/${ids["Game of Thrones"]}`);
@@ -871,8 +892,10 @@ test("the log dialogs are centered from 640 px and bottom sheets below; the foot
   expect(Math.abs(box.x + box.width / 2 - 640)).toBeLessThanOrEqual(1);
   expect(box.width).toBeGreaterThan(512);
   expect(box.width).toBeLessThanOrEqual(672);
-  // a board game with one player: when, duration, the people, one score, the winner
+  // a board game with one player: when, duration, the people, one score, and the winner (the
+  // "Won" column of the score table: the player or "No winner")
   expect(await inputs(play)).toBe(5);
+  await expect(play.getByRole("table", { name: "Scores" }).getByRole("radio")).toHaveCount(2);
   const people = play.getByRole("combobox", { name: "Add a person" });
   for (let n = 2; n <= 10; n++) {
     await people.fill(`Player ${n}`);
@@ -1289,4 +1312,213 @@ test("episodes: a season marks on its release dates; the option is hidden while 
   await tab.getByRole("button", { name: "Mark show watched" }).click();
   await expect(tab.getByRole("alert")).toHaveText("One of these episodes has no release date up to today, so nothing was marked.");
   await expect(tab.getByRole("button", { name: /^Season 2/ })).toContainText("0/2");
+});
+
+// ot2f (OT-11 rest, OT-18): a game page has a "Plays" tab: a strip with plays, time played and
+// the person's own win rate, and a table of the plays. A co-op play can end without a result
+// (the choice starts there) and then reads "Played together", never "Lost together".
+test("a game has a Plays tab with time and the win rate; a co-op play can end without a result", async ({ page }) => {
+  test.setTimeout(180_000);
+  await signUp(page, `plays${Date.now()}`, "Tab Player");
+  const ids = await seed(page);
+  const game = ids["Pixel Harbour"];
+  await open(page, `/items/${game}`);
+  // no play yet: the tab is there, the page opens on About
+  const tab = page.getByRole("tab", { name: /^Plays/ });
+  await expect(tab).toHaveAccessibleName("Plays 0");
+  await expect(page.getByRole("tab", { name: "About" })).toHaveAttribute("aria-selected", "true");
+  await tab.click();
+  const panel = page.getByRole("tabpanel", { name: /^Plays/ });
+  await expect(panel).toContainText("No plays logged yet.");
+
+  // log a co-op play through the dialog: "No result" is where the choice starts
+  await bar(page).getByRole("button", { name: "Log a session" }).click();
+  const sheet = page.getByRole("dialog", { name: "Log a session" });
+  await sheet.getByLabel("Duration", { exact: true }).fill("1:30");
+  const more = sheet.getByRole("button", { name: /^More/ });
+  if ((await more.getAttribute("aria-expanded")) !== "true") {
+    await more.click();
+  }
+  await sheet.getByRole("switch", { name: "Co-op game" }).click();
+  const ended = sheet.getByRole("radiogroup", { name: "How it ended" });
+  await expect(ended.getByRole("radio")).toHaveText(["No result", "We won", "We lost"]);
+  await expect(ended.getByRole("radio", { name: "No result" })).toBeChecked();
+  // a co-op play has no "Won" column
+  await expect(sheet.getByRole("table", { name: "Scores" }).getByRole("columnheader")).toHaveText(["Player", "Score"]);
+  await expectNoA11yViolations(page, "play dialog, co-op");
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Logged: Play" })).toBeVisible();
+  const stored = await (await page.request.get(`/api/v1/items/${game}/page`)).json();
+  expect(stored.plays[0].play).toMatchObject({ duration_minutes: 90, coop: "none" });
+  expect(stored.play_totals).toMatchObject({ plays: 1, minutes: 90, decided: 0, wins: 0 });
+
+  // the tab counts it and shows it
+  await expect(tab).toHaveAccessibleName("Plays 1");
+  await tab.click();
+  const strip = page.getByTestId("ip-plays-strip");
+  await expect(strip.locator("dt")).toHaveText(["Plays", "Time played", "Win rate"]);
+  await expect(strip.locator("div > dd:nth-of-type(1)")).toHaveText(["1", "1.5 hours", "no results yet"]);
+  const table = panel.getByRole("table", { name: /^Plays of Pixel Harbour/ });
+  await expect(table.getByRole("columnheader")).toHaveText(["Date", "Players", "Scores", "Result", "Duration"]);
+  const first = table.getByRole("row").nth(1).getByRole("cell");
+  // (each cell carries its column name for the cards of a phone, hidden here)
+  await expect(first.nth(1)).toHaveText("PlayersYou");
+  await expect(first.nth(3)).toHaveText("ResultPlayed together");
+  await expect(first.nth(4)).toHaveText("Duration1 h 30 min");
+  await expect(page.getByRole("main")).not.toContainText("Lost together");
+
+  // two competitive plays: one win and one loss of mine, and one I only logged for others
+  const me = (await (await page.request.get("/api/v1/auth/me")).json()).self_companion as string;
+  const ben = (await (await page.request.post("/api/v1/companions", { data: { name: "Ben" } })).json()).id as string;
+  const cleo = (await (await page.request.post("/api/v1/companions", { data: { name: "Cleo" } })).json()).id as string;
+  for (const players of [
+    [{ companion_id: me, score: 50, winner: true }, { companion_id: ben, score: 20, winner: false }],
+    [{ companion_id: me, score: 10, winner: false }, { companion_id: ben, score: 20, winner: true }],
+    [{ companion_id: cleo, winner: true }, { companion_id: ben, winner: false }],
+  ]) {
+    const r = await page.request.post(`/api/v1/items/${game}/plays`, { data: { players, duration_minutes: 30 } });
+    expect(r.ok(), `play: ${r.status()}`).toBeTruthy();
+  }
+  await open(page, `/items/${game}`);
+  // with plays the page opens on the tab
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  await expect(tab).toHaveAccessibleName("Plays 4");
+  await expect(strip.locator("div > dd:nth-of-type(1)")).toHaveText(["4", "3 hours", "50%"]);
+  await expect(strip).toContainText("1 of 2 plays with a result in your own log");
+  await expect(table.getByRole("row")).toHaveCount(5);
+  await expect(table.getByRole("row").filter({ hasText: "You 50, Ben 20" }).getByRole("cell").nth(3)).toHaveText("ResultYou won");
+  await expect(table.getByRole("row").filter({ hasText: "You 10, Ben 20" }).getByRole("cell").nth(3)).toHaveText("ResultBen won");
+  await expect(table.getByRole("row").filter({ hasText: "Cleo, Ben" }).getByRole("cell").nth(3)).toHaveText("ResultCleo won");
+  // the line under the title ends with the time played
+  await expect(page.getByTestId("item-fact-line")).toContainText(/^Played 4 times, last on .+, 3 hours in total$/);
+  // the History tab still has every row, with the co-op one in the same words
+  await page.getByRole("tab", { name: /^History/ }).click();
+  await expect(page.getByRole("tabpanel", { name: /^History/ }).getByTestId("activity-row").filter({ hasText: "Played together" })).toHaveCount(1);
+
+  // keyboard: the tabs are one tab stop, the arrows move and select
+  await page.getByRole("tab", { name: /^History/ }).focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.getByRole("tab", { name: "About" })).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(tab).toBeFocused();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  await expect(table).toBeVisible();
+  await expectNoA11yViolations(page, "plays tab, light");
+  await expectReflow(page, "plays tab 1280");
+
+  // dark, and a phone: each play is a card that names its values
+  await page.evaluate(() => localStorage.setItem("app-theme", "dark"));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page, `/items/${game}`);
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await expect(strip).toBeVisible();
+  const card = table.getByRole("row").nth(1);
+  await expect(card).toContainText("Result");
+  await expect(card).toContainText("Duration");
+  // review OT2F-10: the last card keeps its border (a table row loses the rule under it)
+  for (const row of [card, table.getByRole("row").last()]) {
+    expect(await row.evaluate((el) => getComputedStyle(el).borderBottomWidth), "card border").toBe("1px");
+  }
+  await expectNoA11yViolations(page, "plays tab, dark, 390 px");
+  await expectReflow(page, "plays tab 390");
+});
+
+// Review of ot2f (OT2F-1, 3, 4, 5, 6, 11): the score table names each row's fields after its
+// player, one score alone is no result, "No winner" can be chosen, a choice by hand follows
+// the table, and the keyboard focus stays in the table when the choice is taken back.
+test("the score table: one id per player, the winner by score or by hand, no winner, 320 px", async ({ page }) => {
+  test.setTimeout(180_000);
+  await signUp(page, `score${Date.now()}`, "Score Tester");
+  const ids = await seed(page);
+  const game = ids["Meeple Harbour"];
+  await open(page, `/items/${game}`);
+  await bar(page).getByRole("button", { name: "Log a play" }).click();
+  const sheet = page.getByRole("dialog", { name: "Log a play" });
+  const scores = sheet.getByRole("table", { name: "Scores" });
+  const won = (name: string) => scores.getByRole("radio", { name: `${name} won` });
+  const nobody = scores.getByRole("radio", { name: "No winner" });
+  const reset = sheet.getByRole("button", { name: "Use the highest score" });
+  const live = sheet.getByTestId("play-winner-live");
+  const chip = (name: string) => sheet.getByRole("button", { name, exact: true });
+
+  // OT2F-4: a play of one person has no result by its score alone
+  await sheet.getByLabel("Score of Score Tester").fill("120");
+  await expect(nobody).toBeChecked();
+  await expect(won("Score Tester")).not.toBeChecked();
+  // OT2F-6: the table says how the mark is set
+  await expect(scores).toHaveAccessibleDescription("The highest score is marked as the winner. Choose another if needed.");
+  await expect(sheet.getByText("The highest score is marked as the winner. Choose another if needed.")).toBeVisible();
+
+  const people = sheet.getByRole("combobox", { name: "Add a person" });
+  for (const name of ["Ben", "Cleo"]) {
+    await people.fill(name);
+    await people.press("Enter");
+    await expect(sheet.getByLabel(`Score of ${name}`)).toHaveCount(1);
+  }
+  // one score of three is still no result; a second score is, and it is announced
+  await expect(nobody).toBeChecked();
+  await sheet.getByLabel("Score of Cleo").fill("20");
+  await expect(won("Score Tester")).toBeChecked();
+  await expect(live).toHaveText("Score Tester is marked as the winner (highest score).");
+
+  // OT2F-1: a player before the last one leaves and another joins: every id is there once and
+  // the whole 36 px target of the new row marks the new player
+  await chip("Ben").click();
+  await expect(sheet.getByLabel("Score of Ben")).toHaveCount(0);
+  await people.fill("Dana");
+  await people.press("Enter");
+  await expect(scores.getByRole("rowheader")).toHaveText(["Score Tester", "Cleo", "Dana"]);
+  const found = await scores.locator("[id]").evaluateAll((els) => els.map((e) => e.id));
+  expect(found.length).toBeGreaterThanOrEqual(6);
+  expect(new Set(found).size, `ids in the score table: ${found.join(" ")}`).toBe(found.length);
+  await won("Dana").locator("xpath=..").click({ position: { x: 3, y: 3 } });
+  await expect(won("Dana")).toBeChecked();
+  await expect(won("Cleo")).not.toBeChecked();
+  await expect(sheet.getByLabel("Score of Dana")).toHaveCount(1);
+  await sheet.getByLabel("Score of Dana").fill("10");
+
+  // OT2F-3: taking the choice back by keyboard leaves the focus on the mark it gave
+  await reset.focus();
+  await page.keyboard.press("Enter");
+  await expect(won("Score Tester")).toBeChecked();
+  await expect(won("Score Tester")).toBeFocused();
+  await expect(reset).toHaveCount(0);
+
+  // OT2F-5: a winner chosen by hand who leaves the table is no choice any more
+  await won("Dana").check();
+  await expect(reset).toBeVisible();
+  await chip("Dana").click();
+  await expect(sheet.getByLabel("Score of Dana")).toHaveCount(0);
+  await expect(won("Score Tester")).toBeChecked();
+  await expect(reset).toHaveCount(0);
+
+  // OT2F-4: a scored play can be saved without a winner
+  await nobody.check();
+  await expect(won("Score Tester")).not.toBeChecked();
+  await expect(reset).toBeVisible();
+  await expectNoA11yViolations(page, "play dialog, no winner");
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Logged: Play" })).toBeVisible();
+  const stored = await (await page.request.get(`/api/v1/items/${game}/page`)).json();
+  const players = stored.plays[0].participants as { name: string; score: number | null; winner: boolean }[];
+  expect(players.map((p) => p.winner)).toEqual([false, false]);
+  expect(players.map((p) => p.score).sort()).toEqual([120, 20]);
+  expect(stored.play_totals).toMatchObject({ plays: 1, decided: 0, wins: 0 });
+
+  // OT2F-11: at 320 px a long name is cut, the table stays inside the sheet
+  await page.setViewportSize({ width: 320, height: 700 });
+  await open(page, `/items/${game}`);
+  await bar(page).getByRole("button", { name: "Log a play" }).click();
+  await expect(sheet.getByLabel("Score of Cleo")).toHaveCount(1);
+  await people.fill("Maximiliane Hohenzollern");
+  await people.press("Enter");
+  const long = won("Maximiliane Hohenzollern");
+  await expect(long).toHaveCount(1);
+  await long.scrollIntoViewIfNeeded();
+  const target = (await long.locator("xpath=..").boundingBox())!;
+  expect(target.x + target.width, "the Won column at 320 px").toBeLessThanOrEqual(320);
+  const table = (await scores.boundingBox())!;
+  const body = (await sheet.boundingBox())!;
+  expect(table.x + table.width).toBeLessThanOrEqual(body.x + body.width);
+  await expectReflow(page, "play dialog 320");
 });

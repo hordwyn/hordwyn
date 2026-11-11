@@ -253,6 +253,49 @@ pub struct GroupPlays {
     pub last_item: ItemId,
 }
 
+/// The plays of one item in an owner's log, with the results of the person the entries
+/// `mine` stand for ([`SessionRepo::play_totals`]): `decided` plays have a result for that
+/// person ([`Session::result_for`]), `wins` of them are theirs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemPlayTotals {
+    pub item_id: ItemId,
+    pub plays: u32,
+    pub minutes: u64,
+    pub decided: u32,
+    pub wins: u32,
+}
+
+/// The rule of [`SessionRepo::play_totals`] over sessions already read, sorted by item id:
+/// what the in-memory store answers and what the Postgres statement is tested against.
+#[must_use]
+pub fn fold_play_totals(
+    sessions: &[Session],
+    mine: &[CompanionId],
+    item: Option<ItemId>,
+) -> Vec<ItemPlayTotals> {
+    let mut per: std::collections::BTreeMap<uuid::Uuid, ItemPlayTotals> =
+        std::collections::BTreeMap::new();
+    for s in sessions
+        .iter()
+        .filter(|s| item.is_none_or(|i| s.item_id == i))
+    {
+        let t = per.entry(s.item_id.0).or_insert(ItemPlayTotals {
+            item_id: s.item_id,
+            plays: 0,
+            minutes: 0,
+            decided: 0,
+            wins: 0,
+        });
+        t.plays += 1;
+        t.minutes += u64::from(s.duration_minutes.unwrap_or(0));
+        if let Some(won) = s.result_for(mine) {
+            t.decided += 1;
+            t.wins += u32::from(won);
+        }
+    }
+    per.into_values().collect()
+}
+
 /// Who hears about a change of a catalog item ([`CatalogRepo::audience`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ItemAudience {
@@ -509,6 +552,17 @@ pub trait SessionRepo: Send + Sync {
             }
         }
         Ok(per.into_values().collect())
+    }
+    /// Per item of the owner's sessions (`item`: only that one): plays, minutes and the
+    /// results of the person the entries `mine` stand for, sorted by item id (ot2f). The
+    /// default reads every session; stores answer with one grouped read.
+    async fn play_totals(
+        &self,
+        owner: UserId,
+        mine: &[CompanionId],
+        item: Option<ItemId>,
+    ) -> RepoResult<Vec<ItemPlayTotals>> {
+        Ok(fold_play_totals(&self.by_owner(owner).await?, mine, item))
     }
     /// Sessions in which any of `companions` participates, in the window `w` as
     /// [`Self::by_owner_window`].

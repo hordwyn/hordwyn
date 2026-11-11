@@ -18,6 +18,7 @@ mod library;
 mod lists;
 mod next_step;
 mod people;
+mod plays;
 pub mod ports;
 mod run_rules;
 mod sessions;
@@ -46,6 +47,7 @@ pub use goals::{ComparePair, GoalProgress, NewGoal, YearCompare, same_day_last_y
 pub use library::UNDO_WINDOW_HOURS;
 pub use next_step::{NextStep, Rewatch, first_step, next_step, pass_at, rewatch, times};
 pub use people::{CompanionStats, MergeSuggestion, MostPlayed, StatItem, suggest_merges};
+pub use plays::PlayTotals;
 pub use sessions::NewSession;
 pub use stats::{
     Amounts, Bucket, GroupTotals, KindAmounts, KindTotals, MonthAmounts, SeriesPoint, StatsTotals,

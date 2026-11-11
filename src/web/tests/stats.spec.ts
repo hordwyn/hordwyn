@@ -217,3 +217,131 @@ test("stats lead with time: hero and tiles on top, hours in the tab, statuses be
   await expectReflow(page, "stats led by time 360");
   await expectNoA11yViolations(page, "stats led by time 360");
 });
+
+// ot2f (OT-11 rest): the Play tab says how the person's plays ended: the win rate over the
+// plays with a result of theirs, and how many plays it leaves out (a co-op play without a
+// result, OT-18; a play they only logged). The other tabs do not show it.
+test("the Play tab shows the win rate after hours and plays", async ({ page }) => {
+  test.setTimeout(150_000);
+  const stamp = Date.now();
+  await signUp(page, `rate${stamp}`, "Rosa");
+  const rows = [
+    { source_id: "1", kind: "board_game", title: `Salt Road ${stamp}`, year: 2016, status: "in_progress" },
+    { source_id: "2", kind: "video_game", title: `Brick Wizards ${stamp}`, year: 2010, status: "in_progress" },
+  ];
+  const file = [JSON.stringify({ format: "library-export", version: 1 }), ...rows.map((r) => JSON.stringify(r))].join("\n");
+  const started = await page.request.post("/api/v1/imports?format=generic-jsonl", { data: file, headers: { "content-type": "application/octet-stream" } });
+  expect(started.status()).toBe(202);
+  await importDone(page, (await started.json()).id);
+  const lib = await (await page.request.get("/api/v1/library?limit=50")).json();
+  const id = (kind: string) => lib.items.find((i: { item: { kind: string } }) => i.item.kind === kind).item.id as string;
+  const me = (await (await page.request.get("/api/v1/auth/me")).json()).self_companion as string;
+  const ben = (await (await page.request.post("/api/v1/companions", { data: { name: "Ben" } })).json()).id as string;
+  const play = async (item: string, data: object) => {
+    const r = await page.request.post(`/api/v1/items/${item}/plays`, { data: { duration_minutes: 60, started_at: `${YEAR}-01-02T12:00:00Z`, ...data } });
+    expect(r.ok(), `play: ${r.status()}`).toBeTruthy();
+  };
+  // nothing decided yet: one co-op play without a result
+  await play(id("video_game"), { players: [{ companion_id: me }, { companion_id: ben }], coop: "none" });
+  await open(page, "/stats?group=play");
+  const results = page.getByTestId("st-results");
+  await expect(results.getByRole("heading", { level: 2, name: "Your results" })).toBeVisible();
+  await expect(page.getByTestId("st-win-rate")).toHaveText("no results yet");
+  await expect(results).toContainText("One play is not counted (no result, or without you).");
+
+  // two wins (one of them co-op) and a loss
+  await play(id("board_game"), { players: [{ companion_id: me, score: 40, winner: true }, { companion_id: ben, score: 30 }] });
+  await play(id("board_game"), { players: [{ companion_id: me, score: 10 }, { companion_id: ben, score: 30, winner: true }] });
+  await play(id("video_game"), { players: [{ companion_id: me }, { companion_id: ben }], coop: "won" });
+  await open(page, "/stats?group=play");
+  // hours and plays first (the totals row), the win rate second
+  const totals = page.getByTestId("st-totals");
+  await expect(totals.locator("dt")).toHaveText(["Hours", "Plays"]);
+  await expect(totals.locator("dd")).toHaveText(["4", "4"]);
+  await expect(page.getByTestId("st-win-rate")).toHaveText("67%");
+  await expect(results).toContainText("2 of 3 plays with a result in your own log");
+  await expect(results).toContainText("One play is not counted (no result, or without you).");
+  const top = async (l: ReturnType<Page["locator"]>) => (await l.boundingBox())!.y;
+  expect(await top(totals)).toBeLessThan(await top(results));
+  await expectNoA11yViolations(page, "stats play tab");
+  await expectReflow(page, "stats play tab");
+  // not a number of the other tabs
+  await page.getByRole("tab", { name: "Watch" }).click();
+  await expect(results).toHaveCount(0);
+  await page.getByRole("tab", { name: "All" }).click();
+  await expect(results).toHaveCount(0);
+  // the games tile on top counts the same four hours
+  await expect(page.getByTestId("banked-tile-games").locator("dd")).toHaveText(["4 hours", "4 plays"]);
+});
+
+// Review of ot2f (OT2F-2): a play is counted from its history event everywhere (the header of
+// the game, the History tab, the totals row, the tiles). A history that came without the
+// plays' details (an export file carries the events only) is still counted on the Plays tab
+// and under "Your results", and both say what is missing.
+test("plays without details are counted on the Plays tab and in the results, and named", async ({ page }) => {
+  test.setTimeout(150_000);
+  const stamp = Date.now();
+  await signUp(page, `bare${stamp}`, "Imke");
+  const history = [3, 4, 5].map((day) => ({
+    date: `${YEAR}-01-0${day}`,
+    progress: { type: "session", session_id: crypto.randomUUID() },
+  }));
+  const row = { source_id: "1", kind: "board_game", title: `Echo Harbour ${stamp}`, year: 2015, status: "in_progress", history };
+  const file = [JSON.stringify({ format: "library-export", version: 1 }), JSON.stringify(row)].join("\n");
+  const started = await page.request.post("/api/v1/imports?format=generic-jsonl", { data: file, headers: { "content-type": "application/octet-stream" } });
+  expect(started.status()).toBe(202);
+  await importDone(page, (await started.json()).id);
+  const lib = await (await page.request.get("/api/v1/library?limit=50")).json();
+  const game = lib.items[0].item.id as string;
+  const stored = await (await page.request.get(`/api/v1/items/${game}/page`)).json();
+  expect(stored.times, "three plays in the history").toBe(3);
+  expect(stored.play_totals).toMatchObject({ plays: 0 });
+  const bare = "3 plays have no details (players, result, duration). They count as plays, not in the time or the win rate.";
+
+  // the game page: header, Plays tab and History agree
+  await open(page, `/items/${game}`);
+  await expect(page.getByTestId("item-fact-line")).toContainText(/^Played 3 times, last on /);
+  const tab = page.getByRole("tab", { name: /^Plays/ });
+  await expect(tab).toHaveAccessibleName("Plays 3");
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: /^History/ })).toHaveAccessibleName("History 3");
+  const panel = page.getByRole("tabpanel", { name: /^Plays/ });
+  const strip = page.getByTestId("ip-plays-strip");
+  await expect(strip.locator("div > dd:nth-of-type(1)")).toHaveText(["3", "not logged", "no results yet"]);
+  await expect(panel.getByTestId("ip-plays-bare")).toHaveText(bare);
+  await expect(panel).not.toContainText("No plays logged yet.");
+  await expect(panel.getByRole("table")).toHaveCount(0);
+  await expectNoA11yViolations(page, "plays tab without details");
+
+  // the Stats Play tab: the totals row and the results count the same plays
+  await open(page, "/stats?group=play");
+  const totals = page.getByTestId("st-totals");
+  // (no time logged: the counts lead, review OT2C-5)
+  await expect(totals.locator("dt")).toHaveText(["Plays", "Hours"]);
+  await expect(totals.locator("dd")).toHaveText(["3", "0"]);
+  const results = page.getByTestId("st-results");
+  await expect(page.getByTestId("st-win-rate")).toHaveText("no results yet");
+  await expect(results.getByTestId("st-plays-bare")).toHaveText(bare);
+  await expect(results).not.toContainText("not counted");
+
+  // one play with its details on top
+  const me = (await (await page.request.get("/api/v1/auth/me")).json()).self_companion as string;
+  const ben = (await (await page.request.post("/api/v1/companions", { data: { name: "Ben" } })).json()).id as string;
+  const players = [{ companion_id: me, score: 40, winner: true }, { companion_id: ben, score: 30 }];
+  const r = await page.request.post(`/api/v1/items/${game}/plays`, { data: { players, duration_minutes: 120, started_at: `${YEAR}-01-06T12:00:00Z` } });
+  expect(r.ok(), `play: ${r.status()}`).toBeTruthy();
+  await open(page, "/stats?group=play");
+  await expect(totals.locator("dt")).toHaveText(["Hours", "Plays"]);
+  await expect(totals.locator("dd")).toHaveText(["2", "4"]);
+  await expect(page.getByTestId("st-win-rate")).toHaveText("100%");
+  await expect(results).toContainText("1 of 1 play with a result in your own log");
+  await expect(results.getByTestId("st-plays-bare")).toHaveText(bare);
+  await expect(results).not.toContainText("not counted");
+  await expect(page.getByTestId("banked-tile-games").locator("dd")).toHaveText(["2 hours", "4 plays"]);
+  await expectNoA11yViolations(page, "stats play tab with plays without details");
+  await open(page, `/items/${game}`);
+  await expect(tab).toHaveAccessibleName("Plays 4");
+  await expect(strip.locator("div > dd:nth-of-type(1)")).toHaveText(["4", "2 hours", "100%"]);
+  await expect(panel.getByTestId("ip-plays-bare")).toHaveText(bare);
+  await expect(panel.getByRole("table").getByRole("row")).toHaveCount(2);
+});

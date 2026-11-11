@@ -3,7 +3,7 @@
 //! opt-in yearly goals. Goals are private and live on the Stats page only (never on Home);
 //! their progress is "7 of 12 in 2026" as text and a bar, never "behind" or "ahead".
 
-use contracts::{CompareDto, GoalDto, NewGoalDto, OftenWithDto, StatsCompareDto};
+use contracts::{CompareDto, GoalDto, NewGoalDto, OftenWithDto, PlayTotalsDto, StatsCompareDto};
 use leptos::prelude::*;
 use ui::{
     Alert, AlertRole, AlertVariant, Button, ButtonSize, ButtonVariant, Dialog, Disclosure,
@@ -17,6 +17,7 @@ use crate::charts::{Measure, measures_for, measures_led};
 use crate::home::{count, group_label};
 use crate::i18n::{I18n, t, use_i18n};
 use crate::pages::error_text;
+use crate::plays_tab::win_rate;
 use crate::rest;
 
 /// The goal measures in the order the form offers them.
@@ -183,15 +184,78 @@ pub fn OftenWith(people: Vec<OftenWithDto>, #[prop(optional)] level: Option<u8>)
     }
 }
 
-/// The Stats page's comparison and people, from one load.
+/// The words of "Your results" (review OT2F-2): the rate, what it is a rate of, the plays
+/// that have their details but no result of the person (`open`), and the plays the totals
+/// row counts without any details (`bare`). Decided, open and bare plays add up to the
+/// plays of the totals row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultWords {
+    pub rate: String,
+    pub detail: Option<String>,
+    pub open: Option<String>,
+    pub bare: Option<String>,
+}
+
+/// `counted`: the plays the totals row above counts (from the history events).
+#[must_use]
+pub fn result_words(i: &I18n, totals: &PlayTotalsDto, counted: u32) -> ResultWords {
+    let count = crate::plays_tab::play_count(counted, totals);
+    let (rate, detail) = match win_rate(i, totals) {
+        Some((rate, detail)) => (rate, Some(detail)),
+        None => (i.t("plays-rate-none"), None),
+    };
+    let open = totals.plays.saturating_sub(totals.decided);
+    ResultWords {
+        rate,
+        detail,
+        open: (open > 0).then(|| i.t_args("stats-play-open", &[("count", open.into())])),
+        bare: crate::plays_tab::bare_note(i, count),
+    }
+}
+
+/// The person's own results over every game, all time (ot2f, OT-11): the win rate, what it
+/// is a rate of, and how many plays it leaves out (no result logged, a co-op play without
+/// one, a play they logged without taking part, or a play without details).
 #[component]
-pub fn StatsCompare(#[prop(into)] group: Signal<String>) -> impl IntoView {
+pub fn PlayResults(totals: PlayTotalsDto, counted: u32) -> impl IntoView {
+    let i18n = use_i18n();
+    let words = result_words(&i18n, &totals, counted);
+    let line = "text-sm text-muted-foreground";
+    view! {
+        <section aria-labelledby="st-results-h" class="grid gap-2 rounded-xl border border-border p-4" data-testid="st-results">
+            <h2 id="st-results-h" class="font-semibold">{i18n.t("stats-play-results")}</h2>
+            <dl class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-sm">
+                <dt class="text-muted-foreground">{i18n.t("plays-rate")}</dt>
+                <dd class="text-right font-semibold tabular-nums" data-testid="st-win-rate">{words.rate}</dd>
+            </dl>
+            {words.detail.map(|d| view! { <p class=line>{d}</p> })}
+            {words.open.map(|o| view! { <p class=line>{o}</p> })}
+            {words.bare.map(|b| view! { <p class=line data-testid="st-plays-bare">{b}</p> })}
+        </section>
+    }
+}
+
+/// The Stats page's comparison and people, from one load. `plays`: the plays the totals row
+/// of the Play tab counts, once it is known; "Your results" counts the same plays.
+#[component]
+pub fn StatsCompare(
+    #[prop(into)] group: Signal<String>,
+    #[prop(into)] plays: Signal<Option<u64>>,
+) -> impl IntoView {
     let data = Resource::new(|| (), |()| api::stats_compare());
     view! {
         <Suspense fallback=|| view! { <Skeleton class="h-24 w-full"/> }>
             {move || data.get().and_then(Result::ok).map(|d| {
                 let people = d.often_with.clone();
+                // the Play tab: the win rate after the hours and plays of the totals row (OT-11)
+                let play = d.play;
+                let counted = move || {
+                    let row = plays.get().map_or(0, |n| u32::try_from(n).unwrap_or(u32::MAX));
+                    row.max(play.plays)
+                };
+                let results = move || group.get() == "play" && counted() > 0;
                 view! {
+                    <Show when=results>{move || view! { <PlayResults totals=play counted=counted()/> }}</Show>
                     <div class="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
                         <YearSoFar data=d group=group/>
                         <div class="rounded-xl border border-border p-4"><OftenWith people=people/></div>
@@ -563,6 +627,48 @@ mod tests {
             pages,
             ..AmountsDto::default()
         }
+    }
+
+    /// Review OT2F-2: "Your results" counts the plays of the totals row: decided, open (with
+    /// details, without a result of the person) and bare (without details) add up to it.
+    #[test]
+    fn the_results_count_the_plays_of_the_totals_row() {
+        let en = I18n::new("en", BTreeMap::new());
+        let t = PlayTotalsDto {
+            plays: 4,
+            minutes: 240,
+            decided: 3,
+            wins: 2,
+        };
+        let all = result_words(&en, &t, 4);
+        assert_eq!(all.rate, "67%");
+        assert_eq!(
+            all.detail.as_deref(),
+            Some("2 of 3 plays with a result in your own log")
+        );
+        assert_eq!(
+            all.open.as_deref(),
+            Some("One play is not counted (no result, or without you).")
+        );
+        assert_eq!(all.bare, None);
+        // the totals row counts three plays more than were read with their details
+        let more = result_words(&en, &t, 7);
+        assert_eq!(more.open, all.open);
+        assert_eq!(
+            more.bare.as_deref(),
+            Some(
+                "3 plays have no details (players, result, duration). They count as plays, \
+                 not in the time or the win rate."
+            )
+        );
+        // an imported history alone: no rate, nothing "not counted", the plays are named
+        let bare = result_words(&en, &PlayTotalsDto::default(), 3);
+        assert_eq!(bare.rate, "no results yet");
+        assert_eq!((bare.detail, bare.open), (None, None));
+        assert!(
+            bare.bare
+                .is_some_and(|b| b.starts_with("3 plays have no details"))
+        );
     }
 
     #[test]

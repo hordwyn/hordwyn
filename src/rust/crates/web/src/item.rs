@@ -27,6 +27,7 @@ use crate::history::ActivityRow;
 use crate::i18n::{kind_label, t, use_i18n};
 use crate::item_words::{
     Facts, RewatchWords, Verb, again_count, fact_line, times_text, want_key, with_button_key,
+    with_play_time,
 };
 use crate::log_sheet::{
     InlineDraft, ItemInfo, PLAY_OPENER, PagesInline, PlaySheet, PlayState, PositionInline,
@@ -360,7 +361,9 @@ fn ItemView(
             summary: &page.summary.clone().unwrap_or_default(),
             step: &page.next_step.clone().unwrap_or_default(),
         };
-        fact_line(&i18n, &facts)
+        // a game's line ends with the time played, when any was logged (ot2f)
+        let minutes = page.play_totals.map_or(0, |t| t.minutes);
+        fact_line(&i18n, &facts).map(|line| with_play_time(&i18n, line, minutes))
     });
     remember_recent(&page, kind.as_ref());
     open_asked_sheet(&page, &model, &ui);
@@ -938,9 +941,13 @@ fn ListsCell(lists: Vec<ListDto>, item_id: String, refresh: Callback<()>) -> imp
     }
 }
 
-/// Tab values in order: the kind's own first (Episodes), then About, History, Notes.
+/// Tab values in order: the kind's own first (Episodes of a show, Plays of a game), then
+/// About, History, Notes.
 fn tab_values(page: &ItemPageDto, kind: Option<&KindDto>) -> Vec<&'static str> {
     let mut v = Vec::new();
+    if kind.is_some_and(|k| k.progress_model == "sessions") {
+        v.push("plays");
+    }
     if kind.is_some_and(|k| k.progress_model == "episodic") && page.entry.is_some() {
         v.push("episodes");
     }
@@ -951,15 +958,37 @@ fn tab_values(page: &ItemPageDto, kind: Option<&KindDto>) -> Vec<&'static str> {
     v
 }
 
+/// The plays of a game as its "Plays" tab counts them: as the header does ("Played 3
+/// times"), from the history events (review OT2F-2).
+fn play_count(page: &ItemPageDto) -> u32 {
+    crate::plays_tab::play_count(page.times, &page.play_totals.unwrap_or_default()).plays
+}
+
+/// The tab a page opens on: the first, except that a game without a play opens on About
+/// (an empty "Plays" tab says nothing about the game).
+fn default_tab(page: &ItemPageDto, values: &[&'static str]) -> &'static str {
+    let played = values.first() == Some(&"plays") && play_count(page) > 0;
+    match values.first() {
+        Some(&"plays") if !played => "about",
+        Some(first) => first,
+        None => "about",
+    }
+}
+
 #[component]
 fn ItemTabs(page: ItemPageDto, kind: Option<KindDto>, info: ItemInfo, ui: ItemUi) -> impl IntoView {
     let values = tab_values(&page, kind.as_ref());
     // the kind can arrive after a first render without it: a default chosen then is replaced
+    // (and so a game's first play brings its "Plays" tab forward, unless a tab was chosen)
     let current = ui.tab.get_untracked();
     if !values.contains(&current.as_str()) || current == ui.auto_tab.get_untracked() {
-        ui.tab.set(values[0].to_string());
-        ui.auto_tab.set(values[0].to_string());
+        let first = default_tab(&page, &values);
+        ui.tab.set(first.to_string());
+        ui.auto_tab.set(first.to_string());
     }
+    let has_plays = values.contains(&"plays");
+    let play_count = if has_plays { play_count(&page) } else { 0 };
+    let plays_page = page.clone();
     let history_count = page.progress.len();
     let next = page
         .next_step
@@ -975,6 +1004,7 @@ fn ItemTabs(page: ItemPageDto, kind: Option<KindDto>, info: ItemInfo, ui: ItemUi
         <Tabs id="item" active=ui.tab>
             <TabsList label=t("item-sections") class="max-w-full justify-start overflow-x-auto">
                 {has_eps.then(|| view! { <TabsTrigger value="episodes">{use_i18n().t("item-section-episodes")}</TabsTrigger> })}
+                {has_plays.then(|| view! { <TabsTrigger value="plays">{use_i18n().t("item-section-plays")} " " <span class="text-muted-foreground">{play_count}</span></TabsTrigger> })}
                 <TabsTrigger value="about">{t("item-section-about")}</TabsTrigger>
                 <TabsTrigger value="history">{t("item-history")} " " <span class="text-muted-foreground">{history_count}</span></TabsTrigger>
                 {has_notes.then(|| view! { <TabsTrigger value="notes">{use_i18n().t("item-section-notes")}</TabsTrigger> })}
@@ -992,6 +1022,7 @@ fn ItemTabs(page: ItemPageDto, kind: Option<KindDto>, info: ItemInfo, ui: ItemUi
                     </TabsContent>
                 }
             })}
+            {has_plays.then(|| view! { <TabsContent value="plays"><crate::plays_tab::PlaysTab page=plays_page.clone()/></TabsContent> })}
             <TabsContent value="about"><About page=about_page.clone() kind=about_kind.clone()/></TabsContent>
             <TabsContent value="history"><ItemHistory page=history_page.clone() refresh=refresh/></TabsContent>
             {has_notes.then(|| {

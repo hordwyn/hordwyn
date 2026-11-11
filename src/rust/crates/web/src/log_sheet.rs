@@ -19,7 +19,7 @@ use leptos::html;
 use leptos::prelude::*;
 use ui::{
     Button, ButtonSize, ButtonVariant, Chip, DialogWidth, Disclosure, DisclosureMode, FormDialog,
-    FormField, Input, Label, Segmented, SegmentedOption, Select, SelectOption, Switch, Textarea,
+    FormField, Input, Label, Segmented, SegmentedOption, Switch, Textarea, cn,
     disclosure_storage_key,
 };
 
@@ -29,8 +29,8 @@ use crate::api;
 use crate::history_state::Day;
 use crate::i18n::{I18n, t, use_i18n};
 use crate::log_form::{
-    DateChip, FormError, PlayForm, Player, WatchedForm, format_duration, format_position,
-    group_players, page_progress, position_progress,
+    CoopResult, DateChip, FormError, PlayForm, Player, WatchedForm, WinnerChoice, format_duration,
+    format_position, group_players, page_progress, position_progress,
 };
 use crate::next_step::{LoggedStep, StepCtx, run_step, toast_logged};
 use crate::widgets::{CompanionPicker, RatingInput, progress_label};
@@ -477,10 +477,11 @@ pub struct PlayState {
     picked: RwSignal<String>,
     players: RwSignal<Vec<String>>,
     scores: RwSignal<BTreeMap<String, String>>,
-    /// Companion id of a winner chosen by hand; empty: the highest score.
-    winner: RwSignal<String>,
+    /// The winner as chosen by hand; `Auto`: the highest score.
+    winner: RwSignal<WinnerChoice>,
     coop: RwSignal<bool>,
-    coop_won: RwSignal<bool>,
+    /// How a co-op play ended: `none` (where it starts, OT-18), `won` or `lost`.
+    coop_result: RwSignal<String>,
     duration: RwSignal<String>,
     location: RwSignal<String>,
     notes: RwSignal<String>,
@@ -510,9 +511,9 @@ impl PlayState {
             picked: RwSignal::new(String::new()),
             players: RwSignal::new(Vec::new()),
             scores: RwSignal::new(BTreeMap::new()),
-            winner: RwSignal::new(String::new()),
+            winner: RwSignal::new(WinnerChoice::Auto),
             coop: RwSignal::new(false),
-            coop_won: RwSignal::new(true),
+            coop_result: RwSignal::new(CoopResult::default().as_str().to_string()),
             duration: RwSignal::new(String::new()),
             location: RwSignal::new(String::new()),
             notes: RwSignal::new(String::new()),
@@ -552,9 +553,9 @@ impl PlayState {
                     companion_id: id,
                 })
                 .collect(),
-            winner: Some(self.winner.get_untracked()).filter(|w| !w.is_empty()),
+            winner: self.winner.get_untracked(),
             coop: self.coop.get_untracked(),
-            coop_won: self.coop_won.get_untracked(),
+            coop_result: CoopResult::parse(&self.coop_result.get_untracked()),
             duration: self.duration.get_untracked(),
             location: self.location.get_untracked(),
             notes: self.notes.get_untracked(),
@@ -594,9 +595,10 @@ impl PlayState {
         self.chip.set("today".into());
         self.picked.set(String::new());
         self.scores.set(BTreeMap::new());
-        self.winner.set(String::new());
+        self.winner.set(WinnerChoice::Auto);
         self.coop.set(false);
-        self.coop_won.set(true);
+        self.coop_result
+            .set(CoopResult::default().as_str().to_string());
         self.duration
             .set(last_duration.map(format_duration).unwrap_or_default());
         self.location.set(String::new());
@@ -856,54 +858,193 @@ fn GroupChips(state: PlayState) -> impl IntoView {
     }
 }
 
-/// One score field per player and the winner (derived from the highest score unless chosen).
+/// The id of a player's score field and of their "won" radio: from the companion id, so a
+/// row keeps its ids when players before it leave or join (review OT2F-1).
+fn score_id(companion: &str) -> String {
+    format!("play-score-{companion}")
+}
+
+fn won_id(companion: &str) -> String {
+    format!("play-won-{companion}")
+}
+
+/// The radio of the last row of the score table: "No winner".
+const WON_NONE: &str = "play-won-none";
+const WON_HINT: &str = "play-scores-hint";
+
+/// Move the keyboard focus to the radio that is marked now (review OT2F-3: "Use the highest
+/// score" leaves the page when it is used, and the focus with it).
+fn focus_mark(winner: Option<&str>) {
+    use leptos::wasm_bindgen::JsCast;
+    let id = winner.map_or_else(|| WON_NONE.to_string(), won_id);
+    if let Some(el) = document()
+        .get_element_by_id(&id)
+        .and_then(|el| el.dyn_into::<leptos::web_sys::HtmlElement>().ok())
+    {
+        let _ = el.focus();
+    }
+}
+
+/// What a screen reader hears when the mark follows the scores (review OT2F-6): the name of
+/// the player the highest score marks, or that the mark is gone. Nothing while the person
+/// chose the winner, and nothing before the first mark.
+fn winner_live(s: &PlayState, winner: Memo<Option<String>>) -> RwSignal<String> {
+    let s = *s;
+    let live = RwSignal::new(String::new());
+    let i18n = use_i18n();
+    Effect::new(move |before: Option<Option<String>>| {
+        let now = winner.get();
+        let auto = s.winner.with(|w| *w == WinnerChoice::Auto) && !s.coop.get();
+        if let Some(before) = before
+            && auto
+            && before != now
+        {
+            live.set(match &now {
+                Some(id) => i18n.t_args("log-winner-live", &[("name", s.name(id).into())]),
+                None => i18n.t("log-winner-live-none"),
+            });
+        }
+        now
+    });
+    live
+}
+
+/// The scores as one compact table (ux-owner-test.md 2.3): a row per player with the score
+/// field and a "won" radio, and a last row "No winner". The mark follows the highest score
+/// of at least two until the person chooses ("Use the highest score" takes the choice back);
+/// a co-op play has no such column.
 #[component]
 fn Scores(state: PlayState) -> impl IntoView {
-    let i18n = use_i18n();
     let s = state;
-    let auto = i18n.t("log-winner-auto");
-    let winners = Signal::derive(move || {
-        let mut o = vec![SelectOption {
-            value: String::new(),
-            label: auto.clone(),
-        }];
-        o.extend(s.players.get().into_iter().map(|id| SelectOption {
-            label: s.name(&id),
-            value: id,
-        }));
-        o
+    // the winner as a save would send it
+    let winner = Memo::new(move |_| {
+        s.players.track();
+        s.scores.track();
+        s.winner.track();
+        s.coop.track();
+        s.form().winner()
     });
-    let rows = move || s.players.get().into_iter().enumerate().collect::<Vec<_>>();
+    // a winner chosen by hand who left the table is no choice any more (review OT2F-5)
+    Effect::new(move |_| {
+        let gone = s.players.with(|players| {
+            s.winner
+                .with_untracked(|w| matches!(w, WinnerChoice::Player(id) if !players.contains(id)))
+        });
+        if gone {
+            s.winner.set(WinnerChoice::Auto);
+        }
+    });
+    let live = winner_live(&s, winner);
+    let reset = move |_| {
+        s.winner.set(WinnerChoice::Auto);
+        focus_mark(s.form().winner().as_deref());
+    };
+    let rows = move || s.players.get();
+    let head = "px-2 py-1 text-left text-xs font-medium text-muted-foreground";
+    let described = move || (!s.coop.get()).then_some(WON_HINT);
     view! {
-        <div class="grid gap-3">
-            <For each=rows key=|(_, id)| id.clone() let:row>
-                {
-                    let (n, id) = row;
-                    let field = format!("play-score-{n}");
-                    let value = RwSignal::new(s.scores.with_untracked(|m| m.get(&id).cloned().unwrap_or_default()));
-                    let key = id.clone();
-                    Effect::new(move |_| {
-                        let v = value.get();
-                        s.scores.update(|m| { m.insert(key.clone(), v); });
-                    });
-                    let label = use_i18n().t_args("log-score", &[("name", s.name(&id).into())]);
-                    let bad = Signal::derive(move || s.bad_scores.with(|b| b.contains(&id)));
-                    let described = Signal::derive(move || bad.get().then(|| PLAY_ERRORS.to_string()));
-                    view! {
-                        <FormField id=field.clone() label=label>
-                            <Input id=field.clone() value=value inputmode="decimal" autocomplete="off" class="max-w-32"
-                                invalid=bad described_by=described/>
-                        </FormField>
-                    }
-                }
-            </For>
+        <div class="grid gap-2" data-testid="play-scores">
+            // fixed columns: the name takes what the score and the mark leave and is cut
+            // there, so the table fits a 320 px sheet (review OT2F-11)
+            <table class="w-full max-w-md table-fixed border-collapse text-sm" aria-describedby=described>
+                <caption class="sr-only">{t("log-scores")}</caption>
+                <thead>
+                    <tr class="border-b border-border">
+                        <th scope="col" class=head>{t("log-scores-player")}</th>
+                        <th scope="col" class=cn(&[head, "w-28"])>{t("log-scores-score")}</th>
+                        <Show when=move || !s.coop.get()>
+                            <th scope="col" class=cn(&[head, "w-16"])>{use_i18n().t("log-scores-won")}</th>
+                        </Show>
+                    </tr>
+                </thead>
+                <tbody>
+                    <For each=rows key=Clone::clone let:id>
+                        <ScoreRow state=s id=id winner=winner/>
+                    </For>
+                </tbody>
+                <Show when=move || !s.coop.get()>
+                    <tfoot>
+                        <tr class="border-t border-border">
+                            <td id="play-won-none-label" colspan="2" class="px-2 py-1 text-muted-foreground">
+                                {use_i18n().t("log-winner-none")}
+                            </td>
+                            <td class="px-2 py-1">
+                                <label r#for=WON_NONE class="flex size-9 cursor-pointer items-center justify-center">
+                                    <input id=WON_NONE type="radio" name="play-winner" class="size-4 accent-primary"
+                                        aria-labelledby="play-won-none-label"
+                                        prop:checked=move || winner.get().is_none()
+                                        on:change=move |_| s.winner.set(WinnerChoice::Nobody)/>
+                                </label>
+                            </td>
+                        </tr>
+                    </tfoot>
+                </Show>
+            </table>
             <Show when=move || !s.coop.get()>
-                <div class="grid gap-1">
-                    <Label r#for="play-winner">{use_i18n().t("log-winner")}</Label>
-                    <Select id="play-winner" value=s.winner options=winners class="max-w-xs"/>
+                <p id=WON_HINT class="text-xs text-muted-foreground">{use_i18n().t("log-winner-hint")}</p>
+            </Show>
+            <p class="sr-only" role="status" data-testid="play-winner-live">{move || live.get()}</p>
+            <Show when=move || !s.coop.get() && s.winner.with(|w| *w != WinnerChoice::Auto)>
+                <div>
+                    <Button r#type="button" variant=ButtonVariant::Link size=ButtonSize::Sm on:click=reset>
+                        {use_i18n().t("log-winner-reset")}
+                    </Button>
                 </div>
             </Show>
         </div>
+    }
+}
+
+/// One player of the score table.
+#[component]
+fn ScoreRow(state: PlayState, id: String, winner: Memo<Option<String>>) -> impl IntoView {
+    let i18n = use_i18n();
+    let s = state;
+    let name = s.name(&id);
+    let field = score_id(&id);
+    let value = RwSignal::new(
+        s.scores
+            .with_untracked(|m| m.get(&id).cloned().unwrap_or_default()),
+    );
+    let key = id.clone();
+    Effect::new(move |_| {
+        let v = value.get();
+        s.scores.update(|m| {
+            m.insert(key.clone(), v);
+        });
+    });
+    let label = i18n.t_args("log-score", &[("name", name.clone().into())]);
+    let won_label = i18n.t_args("log-scores-won-name", &[("name", name.clone().into())]);
+    let bad_id = id.clone();
+    let bad = Signal::derive(move || s.bad_scores.with(|b| b.contains(&bad_id)));
+    let described = Signal::derive(move || bad.get().then(|| PLAY_ERRORS.to_string()));
+    let (mine, pick) = (id.clone(), id.clone());
+    let radio = won_id(&id);
+    view! {
+        <tr class="border-b border-border last:border-0">
+            <th scope="row" class="truncate px-2 py-1 text-left font-normal">{name}</th>
+            <td class="px-2 py-1">
+                <label r#for=field.clone() class="sr-only">{label}</label>
+                <Input id=field.clone() value=value inputmode="decimal" autocomplete="off" class="max-w-24"
+                    invalid=bad described_by=described/>
+            </td>
+            <Show when=move || !s.coop.get()>
+                {
+                    let (mine, pick, radio, won_label) = (mine.clone(), pick.clone(), radio.clone(), won_label.clone());
+                    view! {
+                        <td class="px-2 py-1">
+                            // 36 px around the radio: the target size of WCAG 2.5.8
+                            <label r#for=radio.clone() class="flex size-9 cursor-pointer items-center justify-center">
+                                <input id=radio.clone() type="radio" name="play-winner" class="size-4 accent-primary"
+                                    prop:checked=move || winner.get().as_deref() == Some(mine.as_str())
+                                    on:change=move |_| s.winner.set(WinnerChoice::Player(pick.clone()))/>
+                                <span class="sr-only">{won_label}</span>
+                            </label>
+                        </td>
+                    }
+                }
+            </Show>
+        </tr>
     }
 }
 
@@ -918,10 +1059,15 @@ fn PlayMore(state: PlayState) -> impl IntoView {
                 <Label r#for="play-coop">{t("log-coop")}</Label>
             </div>
             <Show when=move || s.coop.get()>
-                <div class="flex items-center gap-3">
-                    <Switch id="play-coop-won" checked=s.coop_won/>
-                    <Label r#for="play-coop-won">{use_i18n().t("log-coop-won")}</Label>
-                </div>
+                {
+                    let i = use_i18n();
+                    let options = vec![
+                        SegmentedOption::new("none", i.t("log-coop-none")),
+                        SegmentedOption::new("won", i.t("log-coop-won")),
+                        SegmentedOption::new("lost", i.t("log-coop-lost")),
+                    ];
+                    view! { <Segmented id="play-coop-result" label=i.t("log-coop-result") value=s.coop_result options=options/> }
+                }
             </Show>
             <FormField id="play-location" label=t("log-location")>
                 <Input id="play-location" value=s.location autocomplete="off"/>

@@ -25,11 +25,13 @@ macro_rules! roled {
 
 /// Below 47.5rem a `stacked` table shows each row as a card: the header row is hidden and
 /// every cell shows its column name (the `label` of [`TableCell`]) above the value
-/// (addendum-1 3.4 "Mobile", DEC-388).
+/// (addendum-1 3.4 "Mobile", DEC-388). The last card keeps its border (the body takes the
+/// rule under the last row of a table away, which is a card's edge here).
 const STACKED: &str = "max-[47.5rem]:block max-[47.5rem]:[&_thead]:hidden \
     max-[47.5rem]:[&_tbody]:grid max-[47.5rem]:[&_tbody]:gap-3 \
     max-[47.5rem]:[&_tr]:grid max-[47.5rem]:[&_tr]:gap-2 max-[47.5rem]:[&_tr]:rounded-xl \
-    max-[47.5rem]:[&_tr]:border max-[47.5rem]:[&_tr]:p-3 max-[47.5rem]:[&_td]:block \
+    max-[47.5rem]:[&_tr]:border max-[47.5rem]:[&_tbody_tr:last-child]:border \
+    max-[47.5rem]:[&_tr]:p-3 max-[47.5rem]:[&_td]:block \
     max-[47.5rem]:[&_td]:p-0 max-[47.5rem]:[&_[data-cell-label]]:block";
 
 /// Inside a `stacked` table (UX4-22): `display:block` and `grid` below 47.5rem drop the

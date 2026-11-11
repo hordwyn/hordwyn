@@ -59,6 +59,7 @@ mod pages;
 mod palette;
 mod people;
 mod people_dialogs;
+mod plays_tab;
 mod reauth;
 pub mod recent;
 mod rest;

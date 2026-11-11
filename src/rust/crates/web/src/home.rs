@@ -543,6 +543,14 @@ pub fn Stats() -> impl IntoView {
         SegmentedOption::new("year", i18n.t("stats-by-year")),
     ];
     let labelled = move || format!("st-group-{}", group_q.get());
+    // the plays of the Play tab's totals row: "Your results" counts the same (review OT2F-2)
+    let row_plays = Signal::derive(move || {
+        totals
+            .get()
+            .and_then(Result::ok)
+            .and_then(|t| tab_totals(t, "play"))
+            .map(|x| x.amounts.plays)
+    });
     view! {
         <PageTitle text=i18n.t("stats-title")/>
         <Suspense fallback=|| view! { <Skeleton class="mb-6 h-48 w-full"/> }>
@@ -574,7 +582,7 @@ pub fn Stats() -> impl IntoView {
                     Ok(t) => tab_totals(t, &group_q.get()).map(|x| view! { <TotalsLine totals=x/> }).into_any(),
                 })}
             </Suspense>
-            <crate::stats_extras::StatsCompare group=group_q/>
+            <crate::stats_extras::StatsCompare group=group_q plays=row_plays/>
             <Transition fallback=|| view! { <Skeleton class="h-48 w-full"/> }>
                 {move || series.get().map(|r| match r {
                     Err(e) => view! {

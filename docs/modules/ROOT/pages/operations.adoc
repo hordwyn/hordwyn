@@ -17,6 +17,27 @@ indexer. Run as many as you like; jobs are claimed with `FOR UPDATE SKIP LOCKED`
 Every process applies pending database migrations at start-up (`cli migrate` does the same
 on demand).
 
+== Upgrade notes
+
+Going back to an older build is done by restoring the database dump taken before the
+upgrade (see Backup), not by starting the older binary on the migrated database.
+
+[cols="1,4"]
+|===
+|Migration |What to know
+
+|`0032_coop_no_result`
+|One-way for the data written after it. The migration only widens a check: a co-op play can
+be stored without a result (`sessions.coop_outcome = 'none'`); no existing row is changed.
+Once such a play has been logged, a build from before this migration cannot read that
+account's plays any more (History, People and the game's page fail with a corrupt-row
+error). To go back without a restore, first set those rows to no outcome and put the old
+check back: `UPDATE sessions SET coop_outcome = NULL WHERE coop_outcome = 'none';`, then
+`ALTER TABLE sessions DROP CONSTRAINT sessions_coop_outcome_check, ADD CONSTRAINT
+sessions_coop_outcome_check CHECK (coop_outcome IN ('won', 'lost'));`. Those plays then read
+as competitive plays without a winner.
+|===
+
 == Backup
 
 Postgres is the source of truth. Back up:

@@ -1380,6 +1380,41 @@ async fn play_is_read(
     assert_eq!(plays[0]["participants"][1]["winner"], true);
 }
 
+/// ot2f: the item page and the Stats page carry the play totals (plays, minutes, the
+/// caller's results); a co-op play without a result (OT-18, `coop: "none"`) is a play that
+/// decides nothing, and an unknown outcome word is refused.
+async fn play_totals_are_read(app: &axum::Router, tk: Option<&str>, gid: &str) {
+    let page_uri = format!("/api/v1/items/{gid}/page");
+    let (_, _, page) = call(app, "GET", &page_uri, tk, None).await;
+    assert_eq!(
+        page["play_totals"],
+        serde_json::json!({"plays": 1, "minutes": 45, "decided": 1, "wins": 0}),
+        "{page}"
+    );
+    let uri = format!("/api/v1/items/{gid}/plays");
+    let coop = |word: &str| serde_json::json!({"duration_minutes": 30, "coop": word});
+    let (st, _, err) = call(app, "POST", &uri, tk, Some(coop("draw"))).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "{err}");
+    let (st, _, ev) = call(app, "POST", &uri, tk, Some(coop("none"))).await;
+    assert_eq!(st, StatusCode::OK, "{ev}");
+    let (_, _, page) = call(app, "GET", &page_uri, tk, None).await;
+    assert_eq!(page["plays"][0]["play"]["coop"], "none", "{page}");
+    assert_eq!(
+        page["play_totals"],
+        serde_json::json!({"plays": 2, "minutes": 75, "decided": 1, "wins": 0})
+    );
+    let (st, _, compare) = call(app, "GET", "/api/v1/stats/compare", tk, None).await;
+    assert_eq!(st, StatusCode::OK, "{compare}");
+    assert_eq!(
+        compare["play"],
+        serde_json::json!({"plays": 2, "minutes": 75, "decided": 1, "wins": 0}),
+        "{compare}"
+    );
+    let undo = format!("/api/v1/progress/{}/undo", ev["id"].as_str().unwrap());
+    let (st, _, _) = call(app, "POST", &undo, tk, None).await;
+    assert_eq!(st, StatusCode::OK);
+}
+
 /// The item page's play sheet (design.md 5.4): a play with players, scores and a winner is
 /// one call; it answers the progress event (for Undo) and shows up in the sessions with the
 /// scores. A kind without the sessions model refuses it.
@@ -1452,6 +1487,7 @@ async fn a_play_with_players_scores_and_a_winner() {
     let (_, _, lib) = call(&app, "GET", "/api/v1/library", tk, None).await;
     assert_eq!(lib["items"][0]["entry"]["status"], "in_progress");
     play_is_read(&app, tk, &gid, &ev["progress"]["session_id"]).await;
+    play_totals_are_read(&app, tk, &gid).await;
     // the play's event can be undone like any other
     let undo = format!("/api/v1/progress/{}/undo", ev["id"].as_str().unwrap());
     let (st, _, _) = call(&app, "POST", &undo, tk, None).await;

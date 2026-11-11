@@ -316,6 +316,10 @@ pub struct ItemPageDto {
     /// duration), newest first, at most 50; empty for an item without plays.
     #[serde(default)]
     pub plays: Vec<browse::ItemPlayDto>,
+    /// Every play of the item in the viewer's log, counted (the "Plays" tab: plays, time,
+    /// win rate); absent for a kind that is not played.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub play_totals: Option<browse::PlayTotalsDto>,
 }
 
 /// When one episode was released (`YYYY-MM-DD`, `None` when the source has no date yet).

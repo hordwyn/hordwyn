@@ -480,15 +480,20 @@ fn SignedInBar(current: Signal<String>) -> impl IntoView {
             }).collect_view()}
         </nav>
         <span class="flex-1 min-[47.5rem]:hidden"></span>
+        // 10 rem wide below 52 rem, and narrower when the bar is full: the label is cut then
+        // (review OT2F-10: with the German labels the bar was 11 px wider than a window of
+        // 760 px)
         <button
             type="button"
             on:click=move |_| palette.set(true)
             class="inline-flex size-11 items-center justify-center gap-2 rounded-md text-sm text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer \
-                   min-[47.5rem]:h-9 min-[47.5rem]:w-auto min-[47.5rem]:min-w-52 min-[47.5rem]:justify-start min-[47.5rem]:border min-[47.5rem]:border-input min-[47.5rem]:px-3"
+                   min-[47.5rem]:h-9 min-[47.5rem]:w-40 min-[47.5rem]:min-w-28 min-[52rem]:w-auto min-[52rem]:min-w-52 min-[47.5rem]:justify-start min-[47.5rem]:border min-[47.5rem]:border-input min-[47.5rem]:px-3"
         >
             <Icon name=IconName::Search/>
-            <span class="sr-only min-[47.5rem]:not-sr-only">{t("shell-search")}</span>
-            <span class="ml-auto hidden min-[47.5rem]:inline"><KeyHint keys=vec![t("shell-ctrl"), "K".to_string()]/></span>
+            <span class="min-w-0 truncate max-[47.5rem]:sr-only">{t("shell-search")}</span>
+            // the key hint from 52 rem: with it the bar was wider than a window of 760 to
+            // 790 px (OT-19: the page scrolled sideways there)
+            <span class="ml-auto hidden min-[52rem]:inline"><KeyHint keys=vec![t("shell-ctrl"), "K".to_string()]/></span>
         </button>
         <button
             type="button"

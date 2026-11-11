@@ -354,8 +354,6 @@ log-discard-question = Änderungen verwerfen?
 log-discard = Verwerfen
 log-keep = Weiter bearbeiten
 log-score = Punkte von { $name }
-log-winner = Gewonnen hat
-log-winner-auto = Höchste Punktzahl
 log-coop = Kooperatives Spiel
 log-coop-won = Wir haben gewonnen
 log-duration = Dauer
@@ -2305,3 +2303,55 @@ admin-health-mail-result-connection = der Mailserver war nicht erreichbar
 admin-health-mail-result-auth = der Mailserver hat die Anmeldung abgelehnt
 admin-health-mail-result-rejected = der Mailserver hat die Nachricht abgelehnt
 admin-health-mail-result-send_failed = das Senden ist fehlgeschlagen
+log-coop-result = Ausgang
+log-coop-none = Kein Ergebnis
+log-coop-lost = Wir haben verloren
+log-scores = Punkte
+log-scores-player = Person
+log-scores-score = Punkte
+log-scores-won = Gewonnen
+log-scores-won-name = Gewonnen: { $name }
+log-winner-reset = Höchste Punktzahl verwenden
+log-winner-none = Niemand hat gewonnen
+log-winner-hint = Die höchste Punktzahl wird als Sieg markiert. Bei Bedarf anders wählen.
+log-winner-live = Gewonnen: { $name } (höchste Punktzahl).
+log-winner-live-none = Niemand ist als Sieger markiert.
+history-play-coop-none = Gemeinsam gespielt
+item-section-plays = Partien
+item-times-total = { $line }, insgesamt { $time }
+plays-empty = Noch keine Partie eingetragen.
+plays-caption = Partien von { $title }, neueste zuerst
+plays-col-date = Datum
+plays-col-players = Mitspielende
+plays-col-scores = Punkte
+plays-col-result = Ergebnis
+plays-col-duration = Dauer
+plays-newest = Aufgelistet sind die neuesten { $shown } von { $count } Partien.
+plays-total = Partien
+plays-time = Spielzeit
+plays-time-none = nicht eingetragen
+plays-rate = Gewinnquote
+plays-rate-none = noch keine Ergebnisse
+plays-rate-value = { $percent } %
+plays-rate-detail = { $wins } von { $decided } { $decided ->
+    [one] Partie
+   *[other] Partien
+} mit Ergebnis in deinem Protokoll
+plays-bare = { $count ->
+    [one] Eine Partie hat keine Details (Mitspielende, Ergebnis, Dauer). Sie zählt als Partie, nicht in der Spielzeit oder der Gewinnquote.
+   *[other] { $count } Partien haben keine Details (Mitspielende, Ergebnis, Dauer). Sie zählen als Partien, nicht in der Spielzeit oder der Gewinnquote.
+}
+plays-duration-h = { $hours } Std.
+plays-duration-hm = { $hours } Std. { $minutes } Min.
+stats-play-results = Deine Ergebnisse
+stats-play-open = { $count ->
+    [one] Eine Partie zählt nicht mit (ohne Ergebnis oder ohne dich).
+   *[other] { $count } Partien zählen nicht mit (ohne Ergebnis oder ohne dich).
+}
+stats-tile-untimed-movies = { $count ->
+    [one] Länge noch nicht bekannt
+   *[other] Längen noch nicht bekannt
+}
+stats-tile-untimed-shows = Laufzeiten noch nicht bekannt
+stats-tile-untimed-books = noch keine Seiten eingetragen
+stats-tile-untimed-games = noch keine Spieldauer eingetragen

@@ -1035,3 +1035,150 @@ async fn sessions_are_read_by_ids_in_the_order_asked_on_postgres() {
         0
     );
 }
+
+type TallyPlay = (
+    domain::ids::ItemId,
+    Option<u32>,
+    Vec<Participant>,
+    Option<domain::session::CoopOutcome>,
+);
+
+/// The plays of the play totals test: wins, a tie, a play without a winner, one the person
+/// did not take part in, and the three co-op outcomes; `[me_c, anna, ben]` are the entries.
+fn tally_plays(
+    [azul, lego]: [domain::ids::ItemId; 2],
+    [me_c, anna, ben]: [domain::ids::CompanionId; 3],
+) -> Vec<TallyPlay> {
+    use domain::session::CoopOutcome;
+
+    let player = |id, winner| Participant {
+        winner,
+        ..Participant::new(id)
+    };
+    vec![
+        (
+            azul,
+            Some(45),
+            vec![player(me_c, true), player(anna, false)],
+            None,
+        ),
+        (
+            azul,
+            None,
+            vec![player(me_c, false), player(anna, true)],
+            None,
+        ),
+        (
+            azul,
+            Some(30),
+            vec![player(me_c, true), player(anna, true)],
+            None,
+        ),
+        (
+            azul,
+            Some(20),
+            vec![player(me_c, false), player(anna, false)],
+            None,
+        ),
+        (
+            azul,
+            Some(60),
+            vec![player(anna, true), player(ben, false)],
+            None,
+        ),
+        (
+            lego,
+            Some(90),
+            vec![player(me_c, false)],
+            Some(CoopOutcome::Won),
+        ),
+        (
+            lego,
+            Some(90),
+            vec![player(me_c, false)],
+            Some(CoopOutcome::Lost),
+        ),
+        (
+            lego,
+            Some(120),
+            vec![player(me_c, false)],
+            Some(CoopOutcome::NoResult),
+        ),
+        (
+            lego,
+            None,
+            vec![player(anna, false)],
+            Some(CoopOutcome::Won),
+        ),
+    ]
+}
+
+/// ot2f: the grouped read behind the "Plays" tab and the Stats Play tab answers what the
+/// rule in Rust answers ([`app::ports::fold_play_totals`]) for every kind of play: wins,
+/// ties, plays without a winner, a play the person did not take part in, the three co-op
+/// outcomes (OT-18: `none` is stored, migration 0032), and a second item.
+#[tokio::test]
+async fn play_totals_on_postgres_match_the_rule_in_rust() {
+    use app::ports::{ItemPlayTotals, SessionRepo, fold_play_totals};
+
+    let Some(env) = common::env().await else {
+        return;
+    };
+    let app = &env.app;
+    let (_, me) = common::user(app, "tally").await;
+    let me_c = app.user(me.user_id).await.unwrap().self_companion;
+    let anna = app.create_companion(me, "Anna").await.unwrap().id;
+    let ben = app.create_companion(me, "Ben").await.unwrap().id;
+    let azul = item(app, "board_game", "Azul", Some(2017), serde_json::json!({})).await;
+    let lego = item(
+        app,
+        "video_game",
+        "Bricks",
+        Some(2010),
+        serde_json::json!({}),
+    )
+    .await;
+    for (item_id, minutes, parts, coop) in tally_plays([azul.id, lego.id], [me_c, anna, ben]) {
+        let mut play = NewSession::new(item_id, parts);
+        play.duration_minutes = minutes;
+        play.coop_outcome = coop;
+        let stored = app.log_session(me, play).await.unwrap();
+        assert_eq!(
+            SessionRepo::get(&env.store, stored.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .coop_outcome,
+            coop
+        );
+    }
+    let all = SessionRepo::by_owner(&env.store, me.user_id).await.unwrap();
+    for mine in [vec![me_c], vec![anna], vec![me_c, ben], vec![]] {
+        for only in [None, Some(azul.id), Some(lego.id)] {
+            let got = SessionRepo::play_totals(&env.store, me.user_id, &mine, only)
+                .await
+                .unwrap();
+            assert_eq!(
+                got,
+                fold_play_totals(&all, &mine, only),
+                "{mine:?} {only:?}"
+            );
+        }
+    }
+    let of = |rows: &[ItemPlayTotals], id| *rows.iter().find(|r| r.item_id == id).unwrap();
+    let rows = SessionRepo::play_totals(&env.store, me.user_id, &[me_c], None)
+        .await
+        .unwrap();
+    let (a, l) = (of(&rows, azul.id), of(&rows, lego.id));
+    assert_eq!((a.plays, a.minutes, a.decided, a.wins), (5, 155, 3, 2));
+    assert_eq!((l.plays, l.minutes, l.decided, l.wins), (4, 300, 2, 1));
+    // another owner's log is not read
+    let (_, other) = common::user(app, "other").await;
+    assert_eq!(
+        SessionRepo::play_totals(&env.store, other.user_id, &[me_c], None)
+            .await
+            .unwrap()
+            .len(),
+        0
+    );
+}

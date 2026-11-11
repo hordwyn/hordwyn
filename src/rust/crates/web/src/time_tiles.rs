@@ -168,38 +168,68 @@ pub fn banked(i: &I18n, stats: &StatsTotalsDto) -> Banked {
             _ => Tint::Play,
         },
     };
+    // OT-20: a tile leads with time (books: pages). With counts but no known time it
+    // leads with the count and says what is missing, so "0 hours" never stands beside
+    // "13 episodes"; an empty tile keeps its zero.
+    let led = |id, label: &str, lead: Measure, amount: u64, count: u64, counted: String| {
+        if amount == 0 && count > 0 {
+            let missing = match id {
+                "movies" => "stats-tile-untimed-movies",
+                "shows" => "stats-tile-untimed-shows",
+                "books" => "stats-tile-untimed-books",
+                _ => "stats-tile-untimed-games",
+            };
+            tile(
+                id,
+                label,
+                counted,
+                i.t_args(missing, &[("count", count.into())]),
+            )
+        } else {
+            tile(id, label, lead.counted(i, amount), counted)
+        }
+    };
     let tiles = vec![
-        tile(
+        led(
             "movies",
             "stats-tile-movies",
-            Measure::Hours.counted(i, movies.minutes),
+            Measure::Hours,
+            movies.minutes,
+            movies.finished,
             i.t_args(
                 "stats-tile-movies-count",
                 &[("count", movies.finished.into())],
             ),
         ),
-        tile(
+        led(
             "shows",
             "stats-tile-shows",
-            Measure::Hours.counted(i, shows.minutes),
+            Measure::Hours,
+            shows.minutes,
+            shows.episodes,
             Measure::Episodes.counted(i, shows.episodes),
         ),
-        tile(
+        led(
             "books",
             "stats-tile-books",
-            Measure::Pages.counted(i, books.pages),
+            Measure::Pages,
+            books.pages,
+            books.completions,
             i.t_args(
                 "stats-tile-books-count",
                 &[("count", books.completions.into())],
             ),
         ),
-        tile(
+        led(
             "games",
             "stats-tile-games",
-            Measure::Hours.counted(i, games.minutes),
+            Measure::Hours,
+            games.minutes,
+            games.plays,
             Measure::Plays.counted(i, games.plays),
         ),
     ];
+
     let total = stats.overall.amounts.minutes;
     let mut notes = Vec::new();
     if stats.overall.amounts.pages > 0 {
@@ -217,8 +247,14 @@ pub fn banked(i: &I18n, stats: &StatsTotalsDto) -> Banked {
 
 const LABEL: &str = "text-sm font-medium text-muted-foreground";
 
+/// The grid of the hero and of the tiles: the same tracks, so their edges line up.
+const GRID: &str = "grid grid-cols-2 gap-3 @2xl:grid-cols-4";
+
 /// The block: the hero tile (a section named by its label), the four tiles as a
-/// description list, then the "Also" line and the footnotes. `level` is the heading level
+/// description list, then the "Also" line and the footnotes. The hero and the tiles sit on
+/// one grid that counts its columns by the width of the block itself (a container query,
+/// OT-19): four from 42 rem of space, else two, the hero over two of them, so its edges
+/// are the tiles' edges and no tile depends on the width of the window. `level` is the heading level
 /// of the hero label (3 under Home's "All-time stats", 2 at the top of the Stats page).
 #[component]
 pub fn TimeBanked(stats: StatsTotalsDto, #[prop(default = 3)] level: u8) -> impl IntoView {
@@ -231,9 +267,10 @@ pub fn TimeBanked(stats: StatsTotalsDto, #[prop(default = 3)] level: u8) -> impl
         view! { <h3 id="st-hero-title" class=LABEL>{label}</h3> }.into_any()
     };
     view! {
-        <div class="flex flex-col gap-3" data-testid="banked">
+        <div class="@container flex flex-col gap-3" data-testid="banked">
+            <div class=GRID>
             <section aria-labelledby="st-hero-title" data-testid="banked-hero"
-                class="flex items-center gap-4 rounded-xl border border-border bg-primary-soft p-4 md:w-1/2">
+                class="col-span-2 flex min-w-0 items-center gap-4 rounded-xl border border-border bg-primary-soft p-4">
                 <span class="flex size-16 shrink-0 items-center justify-center rounded-full bg-background text-primary">
                     <Icon name=IconName::PiggyBank class="size-10"/>
                 </span>
@@ -243,9 +280,10 @@ pub fn TimeBanked(stats: StatsTotalsDto, #[prop(default = 3)] level: u8) -> impl
                     <p class="text-sm text-muted-foreground">{b.sentence}</p>
                 </div>
             </section>
-            <dl class="grid grid-cols-2 gap-3 md:grid-cols-4">
+            </div>
+            <dl class=GRID>
                 {b.tiles.into_iter().map(|t| view! {
-                    <div class=cn(&["rounded-xl border border-border p-4", t.tint.soft()]) data-testid=format!("banked-tile-{}", t.id)>
+                    <div class=cn(&["min-w-0 rounded-xl border border-border p-4", t.tint.soft()]) data-testid=format!("banked-tile-{}", t.id)>
                         <dt class="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
                             <Icon name=t.icon class=t.tint.text()/>
                             {t.label}
@@ -406,6 +444,71 @@ mod tests {
                 "Titles without a known length count as 0."
             ]
         );
+    }
+
+    /// OT-20: a tile with counts but no known time (or pages) leads with the count and
+    /// says what is missing; "0 hours" beside "13 episodes" read as wrong.
+    #[test]
+    fn a_tile_with_counts_but_no_known_time_says_so() {
+        let en = I18n::new("en", BTreeMap::new());
+        let a = AmountsDto::default;
+        let s = stats(vec![
+            kind("board_game", AmountsDto { plays: 2, ..a() }),
+            kind(
+                "book",
+                AmountsDto {
+                    completions: 3,
+                    ..a()
+                },
+            ),
+            kind("movie", AmountsDto { finished: 1, ..a() }),
+            kind(
+                "show",
+                AmountsDto {
+                    episodes: 13,
+                    ..a()
+                },
+            ),
+        ]);
+        let b = banked(&en, &s);
+        assert_eq!(
+            column(&b, |t| &t.big),
+            [
+                "One movie watched",
+                "13 episodes",
+                "3 books finished",
+                "2 plays"
+            ]
+        );
+        assert_eq!(
+            column(&b, |t| &t.small),
+            [
+                "length not known yet",
+                "runtimes not known yet",
+                "no pages logged yet",
+                "no play time logged yet"
+            ]
+        );
+        let de = I18n::new("de", BTreeMap::new());
+        let b = banked(&de, &s);
+        assert_eq!(b.tiles[1].big, "13 Folgen");
+        assert_eq!(b.tiles[1].small, "Laufzeiten noch nicht bekannt");
+        // with any time the tile is as before, and an empty one keeps its zero
+        let timed = banked(
+            &en,
+            &stats(vec![kind(
+                "show",
+                AmountsDto {
+                    episodes: 13,
+                    minutes: 45,
+                    ..a()
+                },
+            )]),
+        );
+        assert_eq!(timed.tiles[1].big, "45 minutes");
+        assert_eq!(timed.tiles[1].small, "13 episodes");
+        assert_eq!(timed.tiles[0].big, "0 hours");
+        assert_eq!(timed.tiles[0].small, "0 movies watched");
     }
 
     #[test]

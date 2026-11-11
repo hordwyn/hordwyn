@@ -133,8 +133,43 @@ test("home leads its stats with time: the hero tile, four tiles in order, all of
   const tiles = stats.locator("dl > div");
   await expect(tiles).toHaveCount(4);
   await expect(tiles.locator("dt")).toHaveText(["Movies", "Shows", "Books", "Games"]);
-  await expect(tiles.locator("dd:nth-of-type(1)")).toHaveText(["0 hours", "0 hours", "40 pages", "1.5 hours"]);
-  await expect(tiles.locator("dd:nth-of-type(2)")).toHaveText(["0 movies watched", "One episode", "0 books finished", "One play"]);
+  // OT-20: the show has an episode but no known runtime: the tile leads with the count and
+  // says what is missing, never "0 hours" beside "One episode"
+  await expect(tiles.locator("dd:nth-of-type(1)")).toHaveText(["0 hours", "One episode", "40 pages", "1.5 hours"]);
+  await expect(tiles.locator("dd:nth-of-type(2)")).toHaveText(["0 movies watched", "runtimes not known yet", "0 books finished", "One play"]);
+
+  // OT-19: the hero and the tiles share one grid that counts its columns by the space of the
+  // block, not of the window: four tiles in a row here, the hero over two of them with the
+  // same edges; in a narrow column of a wide window two per row
+  const edge = async (id: string) => {
+    const b = (await page.getByTestId(id).boundingBox())!;
+    return { left: Math.round(b.x), right: Math.round(b.x + b.width), top: Math.round(b.y) };
+  };
+  const [heroBox, movies, shows, books, games] = [await edge("banked-hero"), await edge("banked-tile-movies"), await edge("banked-tile-shows"), await edge("banked-tile-books"), await edge("banked-tile-games")];
+  expect(new Set([movies.top, shows.top, books.top, games.top]).size, "one row of four").toBe(1);
+  expect(heroBox.left).toBe(movies.left);
+  expect(heroBox.right, "the hero ends where the second tile ends").toBe(shows.right);
+  const block = (await page.getByTestId("banked").boundingBox())!;
+  expect(games.right).toBe(Math.round(block.x + block.width));
+  await page.getByTestId("banked").evaluate((el) => ((el.parentElement as HTMLElement).style.width = "30rem"));
+  const narrow = [await edge("banked-hero"), await edge("banked-tile-movies"), await edge("banked-tile-shows"), await edge("banked-tile-books"), await edge("banked-tile-games")];
+  expect(narrow[1].top).toBe(narrow[2].top);
+  expect(narrow[3].top, "two rows of two").toBeGreaterThan(narrow[1].top);
+  expect(narrow[3].top).toBe(narrow[4].top);
+  expect(narrow[0].right).toBe(narrow[2].right);
+  expect(narrow[4].right).toBe(narrow[2].right);
+  expect(narrow[4].right, "no tile leaves the block").toBeLessThanOrEqual(narrow[0].left + 480);
+  await page.getByTestId("banked").evaluate((el) => ((el.parentElement as HTMLElement).style.width = ""));
+  // at the width the owner named nothing runs off to the right: between 760 px, where the
+  // top bar shows its links, and about 790 px the bar was 10 px wider than the window
+  // (review OT2F-10: up to 832 px, where the search button shows its key hint)
+  for (const width of [760, 770, 790, 810, 831, 832]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectReflow(page, `home ${width}`);
+    const last = (await page.getByTestId("banked-tile-games").boundingBox())!;
+    expect(last.x + last.width, `tiles at ${width}`).toBeLessThanOrEqual(width - 16 + 0.5);
+  }
+  await page.setViewportSize({ width: 1280, height: 720 });
   // other kinds: time or pages, or the count when there is neither, lower case with the number
   await expect(page.getByTestId("banked-also")).toHaveText("Also: Audiobook 2 hours, Visual novel 1 play");
   await expect(page.getByTestId("banked-notes")).toHaveText("Reading is counted in pages. Titles without a known length count as 0.");

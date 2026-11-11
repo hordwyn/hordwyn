@@ -354,8 +354,6 @@ log-discard-question = Discard your changes?
 log-discard = Discard
 log-keep = Keep editing
 log-score = Score of { $name }
-log-winner = Winner
-log-winner-auto = Highest score
 log-coop = Co-op game
 log-coop-won = We won
 log-duration = Duration
@@ -2314,3 +2312,55 @@ admin-health-mail-result-connection = the mail server could not be reached
 admin-health-mail-result-auth = the mail server refused the sign-in
 admin-health-mail-result-rejected = the mail server refused the message
 admin-health-mail-result-send_failed = sending failed
+log-coop-result = How it ended
+log-coop-none = No result
+log-coop-lost = We lost
+log-scores = Scores
+log-scores-player = Player
+log-scores-score = Score
+log-scores-won = Won
+log-scores-won-name = { $name } won
+log-winner-reset = Use the highest score
+log-winner-none = No winner
+log-winner-hint = The highest score is marked as the winner. Choose another if needed.
+log-winner-live = { $name } is marked as the winner (highest score).
+log-winner-live-none = No winner is marked.
+history-play-coop-none = Played together
+item-section-plays = Plays
+item-times-total = { $line }, { $time } in total
+plays-empty = No plays logged yet.
+plays-caption = Plays of { $title }, newest first
+plays-col-date = Date
+plays-col-players = Players
+plays-col-scores = Scores
+plays-col-result = Result
+plays-col-duration = Duration
+plays-newest = The newest { $shown } of { $count } plays are listed.
+plays-total = Plays
+plays-time = Time played
+plays-time-none = not logged
+plays-rate = Win rate
+plays-rate-none = no results yet
+plays-rate-value = { $percent }%
+plays-rate-detail = { $wins } of { $decided } { $decided ->
+    [one] play
+   *[other] plays
+} with a result in your own log
+plays-bare = { $count ->
+    [one] One play has no details (players, result, duration). It counts as a play, not in the time or the win rate.
+   *[other] { $count } plays have no details (players, result, duration). They count as plays, not in the time or the win rate.
+}
+plays-duration-h = { $hours } h
+plays-duration-hm = { $hours } h { $minutes } min
+stats-play-results = Your results
+stats-play-open = { $count ->
+    [one] One play is not counted (no result, or without you).
+   *[other] { $count } plays are not counted (no result, or without you).
+}
+stats-tile-untimed-movies = { $count ->
+    [one] length not known yet
+   *[other] lengths not known yet
+}
+stats-tile-untimed-shows = runtimes not known yet
+stats-tile-untimed-books = no pages logged yet
+stats-tile-untimed-games = no play time logged yet

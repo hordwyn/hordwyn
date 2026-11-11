@@ -215,6 +215,21 @@ pub fn fact_line(i: &I18n, f: &Facts<'_>) -> Option<String> {
     })
 }
 
+/// A game's fact line with the time played after it: "Played 14 times, last on Nov 2, 2026,
+/// 31 hours in total" (ot2f; ux-owner-test.md 2.4). Without any logged time the line stays
+/// as it is.
+#[must_use]
+pub fn with_play_time(i: &I18n, line: String, minutes: u64) -> String {
+    if minutes == 0 {
+        return line;
+    }
+    let time = crate::charts::Measure::Hours.counted(i, minutes);
+    i.t_args(
+        "item-times-total",
+        &[("line", line.into()), ("time", time.into())],
+    )
+}
+
 /// "Rewatch: 5 of 24 episodes. Watched once before." (a run starts on a Completed entry, so
 /// there is at least one time before it).
 fn running_line(i: &I18n, f: &Facts<'_>, done: u32) -> String {
@@ -728,6 +743,23 @@ mod tests {
         assert_eq!(
             fact_line(&en, &game).as_deref(),
             Some("Played 2 times, last on Nov 2, 2026")
+        );
+        // with logged time the line ends with the total (ot2f)
+        let line = fact_line(&en, &game).unwrap();
+        assert_eq!(
+            with_play_time(&en, line.clone(), 1_860),
+            "Played 2 times, last on Nov 2, 2026, 31 hours in total"
+        );
+        assert_eq!(
+            with_play_time(&en, line.clone(), 45).rsplit(", ").next(),
+            Some("45 minutes in total")
+        );
+        assert_eq!(with_play_time(&en, line.clone(), 0), line);
+        let de = both().1;
+        let de_line = fact_line(&de, &game).unwrap();
+        assert!(
+            with_play_time(&de, de_line, 1_860).ends_with(", insgesamt 31 Stunden"),
+            "de"
         );
 
         // a book on its way: the page

@@ -30,8 +30,9 @@ pub struct MostPlayed {
 
 /// One person's numbers, from the actor's log and the sessions their linked account shared
 /// with the actor. A play is a session of a kind with the `Sessions` progress model; it is
-/// decided when someone won (or a cooperative outcome was set). A tie names several
-/// winners, and each of them counts the play as a win.
+/// decided when someone won, or a co-op game was won or lost (a co-op play without a result
+/// decides nothing, OT-18). A tie names several winners, and each of them counts the play
+/// as a win.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompanionStats {
     pub companion_id: CompanionId,
@@ -83,21 +84,17 @@ impl Acc {
         let game = self.per_game.entry(s.item_id).or_insert((0, s.started_at));
         game.0 += 1;
         game.1 = game.1.max(s.started_at);
-        if decided(s) {
+        if s.decided() {
             self.decided += 1;
             self.wins += u32::from(won);
         }
     }
 }
 
-fn decided(s: &Session) -> bool {
-    s.coop_outcome.is_some() || s.participants.iter().any(|p| p.winner)
-}
-
 fn won(s: &Session, p: Option<&Participant>) -> bool {
     match s.coop_outcome {
         Some(CoopOutcome::Won) => true,
-        Some(CoopOutcome::Lost) => false,
+        Some(CoopOutcome::Lost | CoopOutcome::NoResult) => false,
         None => p.is_some_and(|p| p.winner),
     }
 }

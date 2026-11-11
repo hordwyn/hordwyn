@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.item_id,\n                  COUNT(*) AS \"plays!\",\n                  COALESCE(SUM(s.duration_minutes), 0) AS \"minutes!\",\n                  COUNT(*) FILTER (WHERE me.took AND (\n                      s.coop_outcome IN ('won', 'lost')\n                      OR (s.coop_outcome IS NULL AND won.anyone))) AS \"decided!\",\n                  COUNT(*) FILTER (WHERE me.took AND (\n                      s.coop_outcome = 'won'\n                      OR (s.coop_outcome IS NULL AND me.won))) AS \"wins!\"\n           FROM sessions s\n           CROSS JOIN LATERAL (\n               SELECT COUNT(*) > 0 AS took, COALESCE(bool_or(p.winner), false) AS won\n               FROM session_participants p\n               WHERE p.session_id = s.id AND p.companion_id = ANY($2)) me\n           CROSS JOIN LATERAL (\n               SELECT COALESCE(bool_or(p.winner), false) AS anyone\n               FROM session_participants p WHERE p.session_id = s.id) won\n           WHERE s.owner_id = $1 AND s.item_id = $3\n           GROUP BY s.item_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "item_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "item_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "plays!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "minutes!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "decided!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "wins!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "b040fe117907c93a6c29718c5b68ef5e022ffc90851f7a8ab0cde9125daa261b"
+}

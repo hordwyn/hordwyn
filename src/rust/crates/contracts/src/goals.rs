@@ -76,6 +76,9 @@ pub struct OftenWithDto {
 pub struct StatsCompareDto {
     pub compare: YearCompareDto,
     pub often_with: Vec<OftenWithDto>,
+    /// The caller's plays of every game, all time (the Stats Play tab's win rate).
+    #[serde(default)]
+    pub play: crate::browse::PlayTotalsDto,
 }
 
 /// A member of a game group.

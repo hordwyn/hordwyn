@@ -145,6 +145,18 @@ pub struct Player {
     pub score: String,
 }
 
+/// Who won a competitive play, as the play dialog holds it (review OT2F-4).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum WinnerChoice {
+    /// Not chosen by hand: the one highest score of at least two scores.
+    #[default]
+    Auto,
+    /// Chosen by hand: the play has no winner.
+    Nobody,
+    /// Chosen by hand: this player (a companion id).
+    Player(String),
+}
+
 /// The play sheet (`PlaySheet`): players with scores, the winner, and the rarer fields
 /// behind "More".
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -152,17 +164,50 @@ pub struct PlayForm {
     pub date: DateChip,
     pub picked: String,
     pub players: Vec<Player>,
-    /// A winner chosen by hand (overrides the highest score).
-    pub winner: Option<String>,
-    /// Co-op game: everyone wins or loses together.
+    /// Who won, as the dialog holds it.
+    pub winner: WinnerChoice,
+    /// Co-op game: everyone wins or loses together, or the play has no such end (OT-18).
     pub coop: bool,
-    pub coop_won: bool,
+    /// How a co-op play ended; only read when `coop` is set.
+    pub coop_result: CoopResult,
     /// As typed: minutes or `h:mm` ([`parse_duration`]).
     pub duration: String,
     pub location: String,
     pub notes: String,
     /// The game group chosen with a chip (its id); empty: none.
     pub group: String,
+}
+
+/// How a co-op play ended. Many co-op games are played without winning or losing, so that
+/// is where the choice starts (OT-18).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CoopResult {
+    #[default]
+    NoResult,
+    Won,
+    Lost,
+}
+
+impl CoopResult {
+    /// The word the API takes (`NewPlayDto::coop`) and the value of the form's choice.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NoResult => "none",
+            Self::Won => "won",
+            Self::Lost => "lost",
+        }
+    }
+
+    /// The result of a choice value; anything unknown is no result.
+    #[must_use]
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "won" => Self::Won,
+            "lost" => Self::Lost,
+            _ => Self::NoResult,
+        }
+    }
 }
 
 /// The players a group chip sets: you first, then the members (each once).
@@ -239,21 +284,31 @@ fn trimmed(s: &str) -> Option<String> {
 }
 
 impl PlayForm {
-    /// The winner: chosen by hand, else the one player with the highest score (a tie has
-    /// no winner); a co-op play has none.
+    /// The winner as a save sends it: the player chosen by hand while they are at the table
+    /// (review OT2F-5), nobody when that was chosen, else the one player with the highest
+    /// score. A tie has no winner, and neither has one score alone: a solo play, or the only
+    /// score typed, is no result unless the person marks it (review OT2F-4). A co-op play
+    /// has none.
     #[must_use]
     pub fn winner(&self) -> Option<String> {
         if self.coop {
             return None;
         }
-        if let Some(w) = &self.winner {
-            return Some(w.clone());
+        match &self.winner {
+            WinnerChoice::Player(w) if self.players.iter().any(|p| p.companion_id == *w) => {
+                return Some(w.clone());
+            }
+            WinnerChoice::Nobody => return None,
+            WinnerChoice::Player(_) | WinnerChoice::Auto => {}
         }
         let scored: Vec<(f64, &str)> = self
             .players
             .iter()
             .filter_map(|p| Some((parse_score(&p.score).ok()??, p.companion_id.as_str())))
             .collect();
+        if scored.len() < 2 {
+            return None;
+        }
         let best = scored
             .iter()
             .map(|(s, _)| *s)
@@ -275,8 +330,8 @@ impl PlayForm {
             .position(|p| p.companion_id == companion_id)
         {
             self.players.remove(at);
-            if self.winner.as_deref() == Some(companion_id) {
-                self.winner = None;
+            if self.winner == WinnerChoice::Player(companion_id.into()) {
+                self.winner = WinnerChoice::Auto;
             }
         } else {
             self.players.push(Player {
@@ -320,9 +375,7 @@ impl PlayForm {
             location: trimmed(&self.location),
             notes: trimmed(&self.notes),
             players,
-            coop: self
-                .coop
-                .then(|| if self.coop_won { "won" } else { "lost" }.to_string()),
+            coop: self.coop.then(|| self.coop_result.as_str().to_string()),
             client_op_id: Some(op),
             game_group_id: trimmed(&self.group),
         })
@@ -541,7 +594,7 @@ mod tests {
         assert_eq!(form.winner().as_deref(), Some("ben"));
         form.players[0].score = "42".into();
         assert_eq!(form.winner(), None, "a tie has no derived winner");
-        form.winner = Some("cleo".into());
+        form.winner = WinnerChoice::Player("cleo".into());
         assert_eq!(form.winner().as_deref(), Some("cleo"), "chosen by hand");
         form.coop = true;
         assert_eq!(form.winner(), None, "co-op: nobody wins alone");
@@ -550,6 +603,57 @@ mod tests {
             ..PlayForm::default()
         };
         assert_eq!(none.winner(), None);
+    }
+
+    /// Review OT2F-4: one score alone is no result (a solo play, or the only score typed),
+    /// unless the person marks the winner; and a scored play can be saved without one.
+    #[test]
+    fn a_single_score_names_no_winner_and_nobody_can_be_chosen() {
+        let day = || Day::parse("2026-03-07").unwrap();
+        let mut solo = PlayForm {
+            players: vec![player("me", "120")],
+            ..PlayForm::default()
+        };
+        assert_eq!(solo.winner(), None, "a solo play has no result by itself");
+        let sent = solo.payload(day(), "op".into()).unwrap();
+        assert!(sent.players.iter().all(|p| !p.winner));
+        assert_eq!(sent.players[0].score, Some(120.0));
+        solo.winner = WinnerChoice::Player("me".into());
+        assert_eq!(solo.winner().as_deref(), Some("me"), "marked won by hand");
+        let one_typed = PlayForm {
+            players: vec![player("me", "50"), player("ben", "")],
+            ..PlayForm::default()
+        };
+        assert_eq!(one_typed.winner(), None, "one score of two players");
+        let mut scored = PlayForm {
+            players: vec![player("me", "31"), player("ben", "42")],
+            ..PlayForm::default()
+        };
+        assert_eq!(scored.winner().as_deref(), Some("ben"));
+        scored.winner = WinnerChoice::Nobody;
+        assert_eq!(scored.winner(), None, "no winner, chosen by hand");
+        let sent = scored.payload(day(), "op".into()).unwrap();
+        assert!(sent.players.iter().all(|p| !p.winner));
+        assert_eq!(sent.players[1].score, Some(42.0));
+    }
+
+    /// Review OT2F-5: a winner chosen by hand who is no longer at the table is no choice;
+    /// the highest score decides again.
+    #[test]
+    fn a_chosen_winner_who_left_the_table_is_no_choice() {
+        let form = PlayForm {
+            players: vec![player("me", "50"), player("cleo", "20")],
+            winner: WinnerChoice::Player("ben".into()),
+            ..PlayForm::default()
+        };
+        assert_eq!(form.winner().as_deref(), Some("me"));
+        let sent = form
+            .payload(Day::parse("2026-03-07").unwrap(), "op".into())
+            .unwrap();
+        assert_eq!(
+            sent.players.iter().map(|p| p.winner).collect::<Vec<_>>(),
+            [true, false]
+        );
     }
 
     #[test]
@@ -616,14 +720,33 @@ mod tests {
                 },
             ]
         );
+        // co-op: one outcome for everyone and no winner; it starts as "no result" (OT-18)
         let coop = PlayForm {
             coop: true,
-            coop_won: true,
             ..form.clone()
         };
         let p = coop.payload(today(), "op".into()).unwrap();
-        assert_eq!(p.coop.as_deref(), Some("won"));
+        assert_eq!(p.coop.as_deref(), Some("none"));
         assert!(p.players.iter().all(|p| !p.winner));
+        for (result, word) in [(CoopResult::Won, "won"), (CoopResult::Lost, "lost")] {
+            let p = PlayForm {
+                coop_result: result,
+                ..coop.clone()
+            }
+            .payload(today(), "op".into())
+            .unwrap();
+            assert_eq!(p.coop.as_deref(), Some(word));
+            assert_eq!(CoopResult::parse(word), result);
+        }
+        assert_eq!(CoopResult::parse(""), CoopResult::NoResult);
+        // the result of a play that is not co-op is not sent
+        let p = PlayForm {
+            coop_result: CoopResult::Won,
+            ..form.clone()
+        }
+        .payload(today(), "op".into())
+        .unwrap();
+        assert_eq!(p.coop, None);
         let bad = PlayForm {
             date: DateChip::Pick,
             picked: "2026-04-01".into(),

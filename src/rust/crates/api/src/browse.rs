@@ -427,13 +427,18 @@ fn activity_person(p: &app::ActivityPerson) -> ActivityPersonDto {
 fn activity_play(p: app::ActivityPlay) -> contracts::ActivityPlayDto {
     contracts::ActivityPlayDto {
         duration_minutes: p.duration_minutes,
-        coop: p.coop.map(|c| {
-            match c {
-                domain::session::CoopOutcome::Won => "won",
-                domain::session::CoopOutcome::Lost => "lost",
-            }
-            .to_string()
-        }),
+        coop: p.coop.map(|c| c.as_str().to_string()),
+    }
+}
+
+/// Plays counted, with the caller's results.
+#[must_use]
+pub fn play_totals(t: app::PlayTotals) -> contracts::PlayTotalsDto {
+    contracts::PlayTotalsDto {
+        plays: t.plays,
+        minutes: t.minutes,
+        decided: t.decided,
+        wins: t.wins,
     }
 }
 

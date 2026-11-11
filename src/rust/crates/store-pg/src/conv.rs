@@ -80,18 +80,11 @@ pub(crate) fn entity_state(s: &str) -> Result<EntityState, RepoError> {
 }
 
 pub(crate) const fn coop_str(c: CoopOutcome) -> &'static str {
-    match c {
-        CoopOutcome::Won => "won",
-        CoopOutcome::Lost => "lost",
-    }
+    c.as_str()
 }
 
 pub(crate) fn coop(s: &str) -> Result<CoopOutcome, RepoError> {
-    match s {
-        "won" => Ok(CoopOutcome::Won),
-        "lost" => Ok(CoopOutcome::Lost),
-        _ => Err(corrupt("coop outcome", s)),
-    }
+    CoopOutcome::parse(s).ok_or_else(|| corrupt("coop outcome", s))
 }
 
 /// Postgres integer columns are signed; domain counts are unsigned.

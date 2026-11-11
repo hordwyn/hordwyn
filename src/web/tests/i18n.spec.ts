@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { importDone } from "./helpers";
+import { expectReflow, importDone } from "./helpers";
 
 // Per-user language (owner ruling DEC-171, DEC-201): the account menu switches the language,
 // the server renders the page in it and sets `<html lang>`; "Automatic" goes back.
@@ -74,6 +74,15 @@ test("the phase 1 pages render in German", async ({ page }) => {
     await expect(page.locator("html")).toHaveAttribute("lang", "de");
     await expect(page.getByRole("heading", { level: 1, name: h1 })).toBeVisible();
   }
+  // review OT2F-10: the top bar with its German labels fits between 760 px, where its links
+  // appear, and 832 px, where the search button shows its key hint (DEC-599)
+  await page.goto("/");
+  await hydrated(page);
+  for (const width of [760, 770, 790, 810, 831, 832]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectReflow(page, `home, German, ${width}`);
+  }
+  await page.setViewportSize({ width: 1280, height: 720 });
   // OT-17: the time tiles in German, on Home and at the top of the Stats page
   for (const path of ["/", "/stats"]) {
     await page.goto(path);

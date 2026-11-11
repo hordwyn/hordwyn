@@ -488,3 +488,112 @@ async fn an_item_outside_the_library_offers_to_add_it() {
         "no note without an entry"
     );
 }
+
+/// ot2f (OT-11, OT-18): a game's rendered page has the "Plays" tab with its strip (plays,
+/// time played, win rate) and a row per play; a co-op play without a result reads "Played
+/// together" (never "Lost together"), and the line under the title ends with the time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_game_page_has_the_plays_tab_with_time_and_the_win_rate() {
+    if !services() {
+        return;
+    }
+    let srv = server().await;
+    let app = router(&srv);
+    let cookie = sign_up(&app, "playa").await;
+    let none = serde_json::json!({});
+    let game = seed(
+        &srv,
+        &app,
+        &cookie,
+        ("video_game", "Brick Wizards", "in_progress", none),
+    )
+    .await;
+    let page = format!("/items/{game}");
+    // no play yet: the tab is there with its count, and it says so
+    let (status, html) = call(&app, "GET", &page, Some(&cookie), None).await;
+    assert_eq!(status, 200);
+    assert!(html.contains(">No plays logged yet.<"), "empty tab");
+    assert!(!html.contains("data-testid=\"ip-plays-strip\""));
+
+    let uri = format!("/api/v1/items/{game}/plays");
+    let (_, me) = call(&app, "GET", "/api/v1/auth/me", Some(&cookie), None).await;
+    let me: serde_json::Value = serde_json::from_str(&me).unwrap();
+    let me = me["self_companion"].clone();
+    for body in [
+        serde_json::json!({"duration_minutes": 90, "coop": "none"}),
+        serde_json::json!({"duration_minutes": 30,
+            "players": [{"companion_id": me, "score": 12, "winner": true}]}),
+    ] {
+        let (code, text) = call(&app, "POST", &uri, Some(&cookie), Some(body)).await;
+        assert_eq!(code, 200, "{text}");
+    }
+    let (_, html) = call(&app, "GET", &page, Some(&cookie), None).await;
+    let strip = part(&html, "ip-plays-strip");
+    for text in [
+        ">Plays<",
+        ">2<",
+        ">Time played<",
+        ">2 hours<",
+        ">Win rate<",
+        ">100%<",
+        ">1 of 1 play with a result in your own log<",
+    ] {
+        assert!(strip.contains(text), "{text}");
+    }
+    let plays = part(&html, "ip-plays");
+    assert!(plays.contains(">Played together<"), "the co-op play");
+    assert!(plays.contains(">1 h 30 min<"));
+    assert!(plays.contains(">You won<"));
+    assert!(!html.contains("Lost together"), "OT-18");
+    let fact = part(&html, "item-fact-line");
+    assert!(fact.contains(", 2 hours in total<"), "the fact line");
+}
+
+/// Review OT2F-2: the "Plays" tab counts a play as the line under the title does, from its
+/// history event. A history that came without the plays themselves (an export file carries
+/// the events only) is counted, and the tab says what is missing instead of "No plays logged
+/// yet.".
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn plays_without_details_are_counted_on_the_plays_tab() {
+    if !services() {
+        return;
+    }
+    let srv = server().await;
+    let app = router(&srv);
+    let cookie = sign_up(&app, "bareplays").await;
+    let none = serde_json::json!({});
+    let game = seed(
+        &srv,
+        &app,
+        &cookie,
+        ("board_game", "Echo Harbour", "in_progress", none),
+    )
+    .await;
+    for _ in 0..3 {
+        let id = uuid::Uuid::now_v7();
+        log(
+            &app,
+            &cookie,
+            &game,
+            serde_json::json!({"type": "session", "session_id": id}),
+        )
+        .await;
+    }
+    let (status, html) = call(&app, "GET", &format!("/items/{game}"), Some(&cookie), None).await;
+    assert_eq!(status, 200);
+    let fact = part(&html, "item-fact-line");
+    assert!(fact.contains("Played 3 times"), "the line under the title");
+    let strip = part(&html, "ip-plays-strip");
+    for text in [">3<", ">not logged<", ">no results yet<"] {
+        assert!(strip.contains(text), "{text}");
+    }
+    let bare = part(&html, "ip-plays-bare");
+    assert!(
+        bare.contains(
+            ">3 plays have no details (players, result, duration). They count as plays, not in \
+             the time or the win rate.<"
+        ),
+        "{bare}"
+    );
+    assert!(!html.contains("No plays logged yet."));
+}

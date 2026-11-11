@@ -269,8 +269,21 @@ pub struct ActivityPersonDto {
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ActivityPlayDto {
     pub duration_minutes: Option<u32>,
-    /// Co-op games: `won` or `lost`; `null` for competitive plays.
+    /// Co-op games: `won`, `lost`, or `none` for a play without a result (OT-18); `null`
+    /// for competitive plays.
     pub coop: Option<String>,
+}
+
+/// Plays, their logged minutes and the caller's own results (ot2f): `decided` plays had a
+/// result for the caller (a co-op game won or lost, or a winner named in a play they took
+/// part in), `wins` of those were theirs; the win rate is `wins / decided`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct PlayTotalsDto {
+    pub plays: u32,
+    pub minutes: u64,
+    pub decided: u32,
+    pub wins: u32,
 }
 
 /// A play behind one of an item's `session` events (the item page's History tab).
@@ -464,7 +477,8 @@ pub struct NewPlayDto {
     pub notes: Option<String>,
     /// Players (companion ids, your own companion included); empty: only you.
     pub players: Vec<PlayerDto>,
-    /// Co-op games: `won` or `lost`; absent for competitive plays.
+    /// Co-op games: `won`, `lost`, or `none` for a play without a result; absent for
+    /// competitive plays.
     pub coop: Option<String>,
     /// Idempotency key (UUID) of the play's progress event.
     pub client_op_id: Option<String>,

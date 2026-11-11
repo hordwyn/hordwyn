@@ -42,7 +42,8 @@ pub struct PersonDto {
     pub together: u32,
     pub plays: u32,
     pub wins: u32,
-    /// Plays with a winner or a cooperative outcome; the win rate is `wins / decided`.
+    /// Plays with a winner, or a co-op game won or lost (a co-op play without a result
+    /// decides nothing); the win rate is `wins / decided`.
     pub decided: u32,
     pub last: Option<StatItemDto>,
     pub most_played: Option<MostPlayedDto>,
