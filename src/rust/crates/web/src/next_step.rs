@@ -11,7 +11,7 @@ use ui::{
 
 use crate::api;
 use crate::i18n::{I18n, use_i18n};
-use crate::item_words::entry_untouched;
+use crate::item_words::{AddUndo, add_undo, entry_untouched};
 
 /// The button label: the server names the Fluent key (`next-step-*`), the episode steps take
 /// `$season` and `$episode`.
@@ -191,25 +191,29 @@ pub fn run_step(
     error: RwSignal<Option<String>>,
     on_done: Option<Callback<()>>,
 ) {
-    log_step(ctx, step, false, busy, error, on_done);
+    log_step(ctx, step, None, busy, error, on_done);
 }
 
 /// [`run_step`] for an item that is not in the library (OT-4): the first log adds it. The
 /// toast says so, and its Undo takes the log and the add back ([`toast_logged_added`]).
+/// `done` turns true once the log went through (not for one queued offline): the bar that
+/// offered the first step waits for the refetched page from then on (review OT2B-4).
 pub fn run_first_step(
     ctx: StepCtx,
     step: LoggedStep,
     busy: RwSignal<bool>,
     error: RwSignal<Option<String>>,
+    done: RwSignal<bool>,
     on_done: Option<Callback<()>>,
 ) {
-    log_step(ctx, step, true, busy, error, on_done);
+    log_step(ctx, step, Some(done), busy, error, on_done);
 }
 
+/// `added`: the log is the first of an item outside the library; see [`run_first_step`].
 fn log_step(
     ctx: StepCtx,
     step: LoggedStep,
-    added: bool,
+    added: Option<RwSignal<bool>>,
     busy: RwSignal<bool>,
     error: RwSignal<Option<String>>,
     on_done: Option<Callback<()>>,
@@ -234,7 +238,9 @@ fn log_step(
         match api::log_progress(item_id.clone(), p).await {
             Ok(event) => {
                 ctx.funnel.logged();
-                if added {
+                if let Some(done) = added {
+                    // the bar may be gone already (another page): nothing to tell then
+                    let _ = done.try_set(true);
                     toast_logged_added(&ctx, &label, (item_id, title), event.id, on_done);
                 } else {
                     toast_logged(&ctx, &label, title, vec![event.id], on_done);
@@ -378,8 +384,24 @@ pub fn toast_logged_added(
     ctx.toasts.push_action(logged, Some(said), undo);
 }
 
+/// Take an add back: remove the entry of `item_id` while it is as the add left it
+/// ([`add_undo`]). `Ok(false)`: it was changed meanwhile and stays (review OT2A-8: the Undo
+/// removed an entry with the watch logged and the rating given since).
+async fn undo_add(item_id: String) -> Result<bool, ServerFnError> {
+    let page = api::item_page(item_id.clone()).await?;
+    match add_undo(page.entry.as_ref(), page.progress.len(), page.tags.len()) {
+        AddUndo::Gone => Ok(true),
+        AddUndo::Keep => Ok(false),
+        AddUndo::Remove => {
+            let req = crate::bulk::request(vec![item_id], "remove");
+            api::library_bulk(req).await.map(|_| true)
+        }
+    }
+}
+
 /// "Added to your library as Planned" with the title and Undo, which removes the entry again
-/// (WP4-3). One toast for every add: the item page's "Want to watch" and the palette's quick
+/// (WP4-3) unless it was changed since; then the answer is "Kept in your library: ..." (review
+/// OT2A-8). One toast for every add: the item page's "Want to watch" and the palette's quick
 /// path (OT-4). `on_done` runs after an undo (to refetch).
 pub fn toast_added(ctx: &StepCtx, item_id: String, title: String, on_done: Option<Callback<()>>) {
     let undo_ctx = ctx.clone();
@@ -388,18 +410,12 @@ pub fn toast_added(ctx: &StepCtx, item_id: String, title: String, on_done: Optio
         Callback::new(move |()| {
             let (ctx, id) = (undo_ctx.clone(), item_id.clone());
             leptos::task::spawn_local(async move {
-                let req = crate::bulk::request(vec![id], "remove");
-                match api::library_bulk(req).await {
-                    Ok(_) => {
-                        ctx.toasts
-                            .push(ctx.i18n.t("library-undone"), None, ToastVariant::Default);
-                    }
-                    Err(_) => ctx.toasts.push(
-                        ctx.i18n.t("error-generic"),
-                        None,
-                        ToastVariant::Destructive,
-                    ),
-                }
+                let (key, variant) = match undo_add(id).await {
+                    Ok(true) => ("library-undone", ToastVariant::Default),
+                    Ok(false) => ("item-added-kept", ToastVariant::Default),
+                    Err(_) => ("error-generic", ToastVariant::Destructive),
+                };
+                ctx.toasts.push(ctx.i18n.t(key), None, variant);
                 if let Some(cb) = on_done {
                     cb.run(());
                 }

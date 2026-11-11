@@ -52,7 +52,7 @@ pub use combobox::Combobox;
 pub use command::{Command, CommandHints, CommandItem};
 pub use copy::{CopyField, KeyHint};
 pub use datagrid::{Column, DataGrid};
-pub use dialog::{Dialog, Sheet, SheetSide};
+pub use dialog::{Dialog, DialogWidth, FormDialog, Sheet, SheetSide};
 pub use disclosure::{
     Disclosure, DisclosureEvent, DisclosureGroup, DisclosureMode, DisclosureWatch,
     disclosure_storage_key,

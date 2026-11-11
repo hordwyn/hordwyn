@@ -6,14 +6,14 @@ use leptos_meta::Title;
 use ui::{
     Alert, AlertRole, AlertVariant, Avatar, Badge, BadgeVariant, Button, ButtonSize, ButtonVariant,
     Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle, Checkbox, Chip, Column,
-    Combobox, Command, CommandItem, CopyField, DataGrid, Dialog, Disclosure, DisclosureGroup,
-    DisclosureMode, DropdownMenu, EmptyState, ErrorLink, ErrorSummary, FormField, Icon, IconName,
-    Input, KeyHint, Label, MenuItem, NavGroup, NavItem, ProgressBar, ProgressSize, Rating,
-    RuleState, Segmented, SegmentedMode, SegmentedOption, Select, SelectOption, Sheet, SideNav,
-    Skeleton, StatusDot, StatusState, Steps, Switch, TabBar, TabBarAction, Table, TableBody,
-    TableCaption, TableCell, TableHead, TableHeader, TableRow, Tabs, TabsContent, TabsList,
-    TabsTrigger, TaskItem, TaskList, Textarea, ThemeToggle, ToastVariant, Tooltip,
-    disclosure_storage_key, field_described_by, slug, use_toasts,
+    Combobox, Command, CommandItem, CopyField, DataGrid, Dialog, DialogWidth, Disclosure,
+    DisclosureGroup, DisclosureMode, DropdownMenu, EmptyState, ErrorLink, ErrorSummary, FormDialog,
+    FormField, Icon, IconName, Input, KeyHint, Label, MenuItem, NavGroup, NavItem, ProgressBar,
+    ProgressSize, Rating, RuleState, Segmented, SegmentedMode, SegmentedOption, Select,
+    SelectOption, Sheet, SideNav, Skeleton, StatusDot, StatusState, Steps, Switch, TabBar,
+    TabBarAction, Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow,
+    Tabs, TabsContent, TabsList, TabsTrigger, TaskItem, TaskList, Textarea, ThemeToggle,
+    ToastVariant, Tooltip, disclosure_storage_key, field_described_by, slug, use_toasts,
 };
 
 #[component]
@@ -36,6 +36,7 @@ pub fn Gallery() -> impl IntoView {
     let toasts = use_toasts();
     let dialog = RwSignal::new(false);
     let sheet = RwSignal::new(false);
+    let form_dialog = RwSignal::new(false);
     let tab = RwSignal::new("overview".to_string());
     let name = RwSignal::new(String::new());
     let notes = RwSignal::new(String::new());
@@ -244,6 +245,27 @@ pub fn Gallery() -> impl IntoView {
                 <Sheet open=sheet title="Filters" close_label="Close">
                     <p class="text-sm">"Sheet body"</p>
                 </Sheet>
+                // OT-10: centered from 640 px, a bottom sheet below; the rows scroll, the footer stays
+                <Button variant=ButtonVariant::Outline on:click=move |_| form_dialog.set(true)>"Open form dialog"</Button>
+                <FormDialog open=form_dialog title="Score sheet" close_label="Close" width=DialogWidth::Wide
+                    description="A form that is taller than the window."
+                    footer=move || view! {
+                        <div class="flex justify-end gap-2">
+                            <Button variant=ButtonVariant::Outline on:click=move |_| form_dialog.set(false)>"Cancel"</Button>
+                            <Button on:click=move |_| form_dialog.set(false)>"Save"</Button>
+                        </div>
+                    }>
+                    <div class="grid gap-3">
+                        {(1..=12).map(|n| {
+                            let (id, value) = (format!("gallery-score-{n}"), RwSignal::new(String::new()));
+                            view! {
+                                <FormField id=id.clone() label=format!("Score of player {n}")>
+                                    <Input id=id value=value inputmode="decimal" autocomplete="off" class="max-w-32"/>
+                                </FormField>
+                            }
+                        }).collect_view()}
+                    </div>
+                </FormDialog>
                 <DropdownMenu label="Actions" items=menu/>
                 <span class="text-sm text-muted-foreground" data-testid="menu-choice">{move || menu_choice.get()}</span>
                 <Tooltip text="Adds the item to your library">

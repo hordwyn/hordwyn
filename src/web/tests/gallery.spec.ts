@@ -46,6 +46,37 @@ test("dialog: focus moves in, Escape and close button close it", async ({ page }
   await expect(opener).toBeFocused();
 });
 
+test("form dialog: centered, the rows scroll between the title and the footer", async ({ page }) => {
+  // OT-10: the presentation of the log dialogs
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await openGallery(page);
+  const opener = page.getByRole("button", { name: "Open form dialog" });
+  await opener.click();
+  const dialog = page.getByRole("dialog", { name: "Score sheet" });
+  await expect(dialog).toBeFocused();
+  const box = (await dialog.boundingBox())!;
+  expect(Math.abs(box.x + box.width / 2 - 640)).toBeLessThanOrEqual(1);
+  expect(Math.abs(box.y + box.height / 2 - 300)).toBeLessThanOrEqual(1);
+  expect(box.width).toBe(672);
+  expect(box.height).toBeLessThanOrEqual(600 - 32);
+  expect(await dialog.locator("[data-dialog-body]").evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  await dialog.getByLabel("Score of player 12").focus();
+  await expect(dialog.getByLabel("Score of player 12")).toBeInViewport({ ratio: 1 });
+  await expect(dialog.getByRole("button", { name: "Save" })).toBeInViewport({ ratio: 1 });
+  await expect(dialog.getByRole("heading", { name: "Score sheet" })).toBeInViewport({ ratio: 1 });
+  await expectNoA11yViolations(page);
+  // below 640 px it is a bottom sheet
+  await page.setViewportSize({ width: 390, height: 700 });
+  const sheet = (await dialog.boundingBox())!;
+  expect(sheet.x).toBe(0);
+  expect(sheet.width).toBe(390);
+  expect(Math.abs(sheet.y + sheet.height - 700)).toBeLessThanOrEqual(1);
+  await expectNoA11yViolations(page);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
+});
+
 test("tabs: arrow keys move selection and focus", async ({ page }) => {
   await openGallery(page);
   const overview = page.getByRole("tab", { name: "Overview" });

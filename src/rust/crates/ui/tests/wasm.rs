@@ -492,6 +492,105 @@ async fn dialog_returns_focus_to_the_fallback_when_the_opener_is_gone() {
     assert_eq!(active_id(), "w-f-trigger");
 }
 
+/// OT-10: the form dialog keeps the APG behaviour of [`Dialog`]. Its footer is part of the
+/// Tab cycle (the last stop before the close button), Escape asks `can_close`, and focus
+/// goes back to the opener.
+#[wasm_bindgen_test]
+async fn form_dialog_traps_focus_over_body_and_footer_and_returns_it() {
+    let open = RwSignal::new(false);
+    let may_close = RwSignal::new(false);
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <button id="w-fd-opener" on:click=move |_| open.set(true)>"Open"</button>
+            <FormDialog open=open title="W form" close_label="Close FD" class="w-fd-panel"
+                can_close=Callback::new(move |()| may_close.get_untracked())
+                footer=|| view! { <button id="w-fd-save">"Save"</button> }>
+                <input id="w-fd-first"/>
+            </FormDialog>
+        }
+    });
+    let opener = el("w-fd-opener");
+    opener.focus().unwrap();
+    opener.click();
+    settle().await;
+    let panel: HtmlElement = document()
+        .query_selector(".w-fd-panel")
+        .unwrap()
+        .expect("form dialog rendered")
+        .dyn_into()
+        .unwrap();
+    assert!(
+        document()
+            .active_element()
+            .is_some_and(|a| a.is_same_node(Some(panel.as_ref()))),
+        "focus moves into the dialog"
+    );
+    assert!(panel.contains(Some(el("w-fd-save").as_ref())));
+    let close: HtmlElement = panel
+        .query_selector("[aria-label='Close FD']")
+        .unwrap()
+        .unwrap()
+        .dyn_into()
+        .unwrap();
+    // the Tab order: field, footer button, close button, and round again. The trap looks at
+    // the focused element, not at the event's target: the focus is put there first (review
+    // OT2B-6: with the focus still on the panel this step never reached the first control)
+    el("w-fd-first").focus().unwrap();
+    assert_eq!(active_id(), "w-fd-first");
+    key_with_shift(&el("w-fd-first"), "Tab");
+    assert!(
+        document()
+            .active_element()
+            .is_some_and(|a| a.is_same_node(Some(close.as_ref()))),
+        "Shift+Tab from the first control wraps to the last"
+    );
+    key(&close, "Tab");
+    assert_eq!(
+        active_id(),
+        "w-fd-first",
+        "Tab from the last wraps to the first"
+    );
+    // a stop in the middle is left to the browser: no wrap past the close button, forwards
+    // or backwards (a made-up key event moves no focus by itself, so it stays where it is)
+    let save = el("w-fd-save");
+    save.focus().unwrap();
+    for shift in [false, true] {
+        let init = KeyboardEventInit::new();
+        init.set_key("Tab");
+        init.set_shift_key(shift);
+        init.set_bubbles(true);
+        init.set_cancelable(true);
+        let ev = KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap();
+        save.dispatch_event(&ev).unwrap();
+        assert!(
+            !ev.default_prevented(),
+            "Tab from a middle stop is the browser's (shift: {shift})"
+        );
+        assert_eq!(active_id(), "w-fd-save", "no wrap from a middle stop");
+    }
+    let order: Vec<String> = {
+        let list = panel.query_selector_all("input, button").unwrap();
+        (0..list.length())
+            .filter_map(|i| list.item(i))
+            .filter_map(|n| n.dyn_into::<HtmlElement>().ok())
+            .map(|e| e.id())
+            .collect()
+    };
+    assert_eq!(
+        order,
+        ["w-fd-first", "w-fd-save", ""],
+        "the close button is the last stop"
+    );
+    key(&el("w-fd-save"), "Escape");
+    settle().await;
+    assert!(open.get_untracked(), "kept open while it may not close");
+    may_close.set(true);
+    key(&el("w-fd-save"), "Escape");
+    settle().await;
+    assert!(!open.get_untracked());
+    assert_eq!(active_id(), "w-fd-opener", "focus returns to the opener");
+}
+
 fn type_into(input: &HtmlElement, text: &str) {
     let i: web_sys::HtmlInputElement = input.clone().dyn_into().unwrap();
     i.set_value(text);

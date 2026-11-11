@@ -4,8 +4,9 @@
 //! OT-7), the action bar per progress model with the next step first (two actions for an item
 //! that is not in the library: "Mark as watched" and "Want to watch", OT-4), the rating /
 //! tags / lists row, and tabs (Episodes where the kind has them, About, History, Notes).
-//! The sheets, the open tab and the episode question live here, outside the view that a
-//! refetch rebuilds.
+//! The state of the log dialogs, the open tab and the episode question live here, outside
+//! the view that a refetch rebuilds; the two log dialogs themselves are mounted here once,
+//! next to the tag editor and the list picker (review OT2B-1).
 
 use contracts::{
     ActivityRowDto, CompanionDto, ItemPageDto, KindDto, LibraryRowDto, ListDto, NextStepDto,
@@ -28,8 +29,8 @@ use crate::item_words::{
     Facts, Verb, again_count, fact_line, times_text, want_key, with_button_key,
 };
 use crate::log_sheet::{
-    InlineDraft, ItemInfo, PagesInline, PlaySheet, PlayState, PositionInline, SheetTarget,
-    WatchedSheet, WatchedState,
+    InlineDraft, ItemInfo, PLAY_OPENER, PagesInline, PlaySheet, PlayState, PositionInline,
+    SheetTarget, WITH_OPENER, WatchedSheet, WatchedState,
 };
 use crate::next_step::{
     LoggedStep, StepCtx, logged_step_label, next_step_label, progress_text, run_first_step,
@@ -49,6 +50,11 @@ struct ItemUi {
     episodes: EpisodeUi,
     watched: WatchedState,
     play: PlayState,
+    /// What the log dialogs know about the item: each render of the view writes it, the
+    /// dialogs read it when they open and when they save (never while they are open).
+    info: RwSignal<Option<ItemInfo>>,
+    /// The play dialog's title, the step it logs ("Log a play", "Log a session").
+    play_title: RwSignal<String>,
     companions: RwSignal<Vec<CompanionDto>>,
     tags: RwSignal<Option<LibraryRowDto>>,
     /// The list picker (`L`): the item to add.
@@ -108,6 +114,8 @@ pub fn ItemPage() -> impl IntoView {
         episodes: EpisodeUi::default(),
         watched: WatchedState::new(),
         play: PlayState::new(companions),
+        info: RwSignal::new(None),
+        play_title: RwSignal::new(String::new()),
         companions,
         tags: RwSignal::new(None),
         pick: RwSignal::new(None),
@@ -121,8 +129,18 @@ pub fn ItemPage() -> impl IntoView {
         if prev.is_some_and(|p| p != now) {
             inline.clear();
             episodes.reset();
+            // a log dialog left open belongs to the item that is gone
+            ui.watched.dismiss();
+            ui.play.dismiss();
         }
         now
+    });
+    // before the first item is there (and for the ids of the panel) the plain name
+    let plain = use_i18n().t("next-step-log-play");
+    let play_title = Signal::derive(move || {
+        Some(ui.play_title.get())
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| plain.clone())
     });
     item_keys(&ui, data);
     follow_log_query(ui.auto_log);
@@ -149,6 +167,10 @@ pub fn ItemPage() -> impl IntoView {
         </Transition>
         <TagEditor target=ui.tags known=known_tags on_change=ui.refresh/>
         <crate::bulk::ListPicker target=ui.pick on_done=ui.refresh/>
+        // mounted once, outside the keyed view: a refetch renders the page afresh under an
+        // open dialog and leaves its focus, its scroll position and its fields alone
+        <WatchedSheet state=ui.watched info=ui.info companions=ui.companions/>
+        <PlaySheet state=ui.play info=ui.info title=play_title/>
     }
 }
 
@@ -306,7 +328,17 @@ fn ItemView(
         .unwrap_or_default();
     let loading = item.state == "stub";
     let square = crate::library_state::square_art(&item.kind);
-    let play_title = page.next_step.as_ref().map(|s| next_step_label(&i18n, s));
+    let play_title = page
+        .next_step
+        .as_ref()
+        .filter(|s| model == "sessions" || s.action == "session")
+        .map(|s| next_step_label(&i18n, s))
+        .unwrap_or_default();
+    // for the log dialogs, which outlive this render
+    ui.info.set(Some(info.clone()));
+    if ui.play_title.with_untracked(|t| *t != play_title) {
+        ui.play_title.set(play_title);
+    }
     // the status as a pill, and where the person stands in one line (OT-5, OT-7)
     let pill = page
         .entry
@@ -353,12 +385,6 @@ fn ItemView(
                 <Attribution page=page.clone()/>
             </div>
         </article>
-        {matches!(model.as_str(), "single" | "episodic").then(|| view! {
-            <WatchedSheet state=ui.watched info=info.clone() companions=ui.companions/>
-        })}
-        {(model == "sessions").then(|| view! {
-            <PlaySheet state=ui.play info=info.clone() title=play_title.unwrap_or_default()/>
-        })}
     }
 }
 
@@ -523,7 +549,11 @@ const BAR_CARD: &str = "grid gap-3 rounded-lg border border-border bg-card p-4 s
 /// item, the toast says so and its Undo takes the log and the add back) or "Log a play" (its
 /// dialog); the second, "Want to watch", adds it as Planned and says so in the shared toast
 /// with Undo. A kind whose first step needs a field (a page, a
-/// position) has the second button only, as the primary one.
+/// position) has the second button only, as the primary one. One of the two runs at a time:
+/// while a log or an add is on its way both buttons wait (review OT2A-8: two clicks said
+/// "Added as Planned" for an entry that was Completed), and once one went through they keep
+/// waiting (`done`) until the refetched page puts the bar of an item in the library in their
+/// place (review OT2B-4: a click in between added or logged a second time).
 #[component]
 fn AddBar(page: ItemPageDto, info: ItemInfo, ui: ItemUi) -> impl IntoView {
     let i18n = use_i18n();
@@ -535,26 +565,37 @@ fn AddBar(page: ItemPageDto, info: ItemInfo, ui: ItemUi) -> impl IntoView {
         RwSignal::new(None::<String>),
     );
     let refresh = info.refresh;
+    // never cleared: the refetch replaces this bar
+    let done = RwSignal::new(false);
+    let either = Signal::derive(move || busy.get() || adding.get() || done.get());
     let first = match (step_progress(&step), step.action.as_str()) {
         (Some(progress), _) => {
-            let logged = LoggedStep {
-                item_id: info.item_id.clone(),
-                title: info.title.clone(),
-                label: logged_step_label(&i18n, &step),
-                progress,
-            };
+            let (step, label) = (
+                LoggedStep {
+                    item_id: info.item_id.clone(),
+                    title: info.title.clone(),
+                    label: logged_step_label(&i18n, &step),
+                    progress,
+                },
+                next_step_label(&i18n, &step),
+            );
             let ctx = ctx.clone();
-            Some(view! {
-                <Button size=ButtonSize::Lg loading=busy attr:data-next-step=""
-                    on:click=move |_| run_first_step(ctx.clone(), logged.clone(), busy, error, Some(refresh))>
-                    <Icon name=IconName::Check/> {next_step_label(&i18n, &step)}
-                </Button>
-            }.into_any())
+            Some(
+                view! {
+                    <Button size=ButtonSize::Lg loading=busy disabled=either attr:data-next-step=""
+                        on:click=move |_| if !either.get_untracked() {
+                            run_first_step(ctx.clone(), step.clone(), busy, error, done, Some(refresh));
+                        }>
+                        <Icon name=IconName::Check/> {label}
+                    </Button>
+                }
+                .into_any(),
+            )
         }
         (None, "session") => {
             let open = ui.play.open;
             Some(view! {
-                <Button size=ButtonSize::Lg attr:data-next-step="" on:click=move |_| open.set(true)>
+                <Button size=ButtonSize::Lg disabled=adding attr:id=PLAY_OPENER attr:data-next-step="" on:click=move |_| open.set(true)>
                     <Icon name=IconName::Meeple/> {next_step_label(&i18n, &step)}
                 </Button>
             }.into_any())
@@ -563,12 +604,18 @@ fn AddBar(page: ItemPageDto, info: ItemInfo, ui: ItemUi) -> impl IntoView {
     };
     let (id, title) = (info.item_id.clone(), info.title.clone());
     let add = move |_| {
+        if either.get_untracked() {
+            return;
+        }
         let (id, title, ctx) = (id.clone(), title.clone(), ctx.clone());
         adding.set(true);
         error.set(None);
         leptos::task::spawn_local(async move {
             match api::add_to_library(id.clone()).await {
-                Ok(_) => toast_added(&ctx, id, title, Some(refresh)),
+                Ok(_) => {
+                    done.set(true);
+                    toast_added(&ctx, id, title, Some(refresh));
+                }
                 Err(e) => error.set(Some(
                     ctx.i18n
                         .t_args("library-step-failed", &[("error", error_text(&e).into())]),
@@ -589,7 +636,7 @@ fn AddBar(page: ItemPageDto, info: ItemInfo, ui: ItemUi) -> impl IntoView {
         <section class=BAR_CARD data-testid="action-bar" data-action-bar="" aria-label=t("item-action-bar")>
             <div class="flex flex-wrap items-end gap-2">
                 {first}
-                <Button size=ButtonSize::Lg variant=variant loading=adding attr:data-want=""
+                <Button size=ButtonSize::Lg variant=variant loading=adding disabled=either attr:data-want=""
                     attr:data-next-step=alone.then_some("") on:click=add>
                     {t(want_key(info.verb))}
                 </Button>
@@ -634,7 +681,7 @@ fn ActionBar(
         "session" => {
             let open = ui.play.open;
             view! {
-                <Button size=ButtonSize::Lg attr:data-next-step="" on:click=move |_| open.set(true)>
+                <Button size=ButtonSize::Lg attr:id=PLAY_OPENER attr:data-next-step="" on:click=move |_| open.set(true)>
                     <Icon name=IconName::Meeple/> {next_step_label(&i18n, &step)}
                 </Button>
             }
@@ -695,7 +742,7 @@ fn StepButtons(step: NextStepDto, info: ItemInfo, ui: ItemUi) -> impl IntoView {
         <Button size=ButtonSize::Lg loading=busy attr:data-next-step="" on:click=move |_| run_step(ctx.clone(), logged.clone(), busy, error, Some(refresh))>
             <Icon name=IconName::Check/> {label.clone()}
         </Button>
-        <Button size=ButtonSize::Lg variant=ButtonVariant::Outline attr:aria-label=with
+        <Button size=ButtonSize::Lg variant=ButtonVariant::Outline attr:id=WITH_OPENER attr:aria-label=with
             on:click=move |_| sheet.set(Some(target.clone()))>
             <Icon name=IconName::Users/> {with_text}
         </Button>

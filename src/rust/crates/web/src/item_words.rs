@@ -156,6 +156,29 @@ pub fn entry_untouched(entry: &LibraryEntryDto, events: usize, tags: usize) -> b
         && entry.notes.as_deref().is_none_or(str::is_empty)
 }
 
+/// What the Undo of the add toast does with the entry as it is by then (review OT2A-8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddUndo {
+    /// Still as the add left it: remove it.
+    Remove,
+    /// Changed meanwhile (a watch, a status, a rating, a note, a tag): it stays, and the
+    /// toast says so.
+    Keep,
+    /// Already removed: nothing to take back.
+    Gone,
+}
+
+/// The Undo of "Added to your library as Planned" for the entry as it is now: `events` logged
+/// and `tags` given since count as changes ([`entry_untouched`]).
+#[must_use]
+pub fn add_undo(entry: Option<&LibraryEntryDto>, events: usize, tags: usize) -> AddUndo {
+    match entry {
+        None => AddUndo::Gone,
+        Some(e) if entry_untouched(e, events, tags) => AddUndo::Remove,
+        Some(_) => AddUndo::Keep,
+    }
+}
+
 /// The bulk question "These N episodes are already watched. Log them again as a rewatch?"
 /// (OT-15); a podcast says "listened to" (OT2A-9).
 #[must_use]
@@ -578,6 +601,49 @@ mod tests {
             ..entry
         };
         assert!(!entry_untouched(&completed, 0, 0));
+    }
+
+    /// OT2A-8: the Undo of "Added to your library as Planned" removes the entry only while
+    /// it is as the add left it; a watch logged or a rating given meanwhile keeps it, and
+    /// the toast says so in both languages.
+    #[test]
+    fn the_undo_of_an_add_keeps_a_changed_entry() {
+        let entry = LibraryEntryDto {
+            id: "e".into(),
+            item_id: "i".into(),
+            kind: "movie".into(),
+            status: "planned".into(),
+            rating: None,
+            notes: None,
+            added_at: "2026-11-10T09:00:00Z".into(),
+        };
+        assert_eq!(add_undo(Some(&entry), 0, 0), AddUndo::Remove);
+        assert_eq!(add_undo(Some(&entry), 1, 0), AddUndo::Keep);
+        let completed = LibraryEntryDto {
+            status: "completed".into(),
+            ..entry.clone()
+        };
+        assert_eq!(add_undo(Some(&completed), 1, 0), AddUndo::Keep);
+        let rated = LibraryEntryDto {
+            rating: Some(80),
+            ..entry
+        };
+        assert_eq!(add_undo(Some(&rated), 0, 0), AddUndo::Keep);
+        // removed by hand meanwhile: nothing is left to take back
+        assert_eq!(add_undo(None, 0, 0), AddUndo::Gone);
+        let (en, de) = both();
+        assert_eq!(
+            en.t("item-added-kept"),
+            "Kept in your library: it has changed since you added it."
+        );
+        assert_eq!(
+            de.t("item-added-kept"),
+            "Bleibt in der Bibliothek: Der Eintrag wurde seit dem Hinzuf\u{fc}gen ge\u{e4}ndert."
+        );
+        assert_eq!(
+            (en.t("log-cancel"), de.t("log-cancel")),
+            ("Cancel".into(), "Abbrechen".into())
+        );
     }
 
     /// OT2A-3: the first log of an item outside the library says that it was added.

@@ -193,6 +193,7 @@ item-want-listen = Möchte ich hören
 item-want-play = Möchte ich spielen
 item-added-planned = Als „Geplant“ in die Bibliothek aufgenommen
 item-logged-added = { $title }, in die Bibliothek aufgenommen
+item-added-kept = Bleibt in der Bibliothek: Der Eintrag wurde seit dem Hinzufügen geändert.
 item-added-on = Hinzugefügt am { $date }
 item-times-watch = { $count ->
     [one] Einmal gesehen
@@ -309,6 +310,7 @@ log-rewatch-play = { $count ->
    *[other] Schon { $count }-mal gespielt. Das wird Nummer { $next }.
 }
 log-save = Speichern
+log-cancel = Abbrechen
 log-discard-question = Änderungen verwerfen?
 log-discard = Verwerfen
 log-keep = Weiter bearbeiten

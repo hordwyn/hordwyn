@@ -13,6 +13,7 @@ rules (section 2, verbatim), `docs/DECISIONS.md`, `docs/design/DESIGN.md`, the U
 
 **Update 2026-11-10 (after the restart), this wins over the threads below:**
 
+- **ot2b done** (tag `ot2b`): centered log dialog, mounted outside the refetched view (DEC-566..571); ci 886 passed / 0 failed / 4 ignored, e2e 145 passed, 0 panics. Noticed, not built: the item page does not refetch on entry changes from another tab or device (DEC-569). Next: ot2c.
 - **ot2a done** (tag `ot2a`, fc1bc15): item page actions, labels, counts; review applied (DEC-553..564). Verified with the server tests run on their own (106 passed) because the full test build no longer fits the 57 GB disk; e2e 139 passed. TBIN done (one server test binary `it`, DEC-565): `cargo xtask ci` fits again: 877 passed, 0 failed, 4 ignored; e2e 139 passed, 0 panics. Next: ot2b.
 - **ot1a done** (tag `ot1a`, 8b58fa0): owner-test fix pack F5 + review fixes F8, review `docs/reviews/2026-11-10-ot1a-review.md`; ci 849 passed / 0 failed / 4 ignored, e2e 134 passed, 0 panics. Owner answers of the round 2 page: `docs/fable/round2/owner-answers-2026-11-10.md` (HANDOFF 4.7, DEC-530..552), 9 questions back to the owner in its section 13 (none blocks ot2). Next: packages in `docs/fable/round2/next-packages.md`, starting with ot2a; each package = Fable implementer, Fable reviewer, Fable fixer, orchestrator ci + e2e, commit, tag. Disk: ci needs >= 13 GB free (drop test DBs, `rm -rf src/rust/target/front`).
 

@@ -1,11 +1,16 @@
-//! Log sheets and inline loggers of the item page (design.md 5.4, 7.3; addendum-1 1.3 "5.4
+//! Log dialogs and inline loggers of the item page (design.md 5.4, 7.3; addendum-1 1.3 "5.4
 //! Log sheets"): `WatchedSheet` (titled with the step; date chips, "Watched with" people,
 //! rating and note behind "More"), `PlaySheet` (date and duration, players, scores, winner;
 //! place, notes and co-op behind "More"; for a video game the scores wait behind "More" too),
-//! `PagesInline` and `PositionInline`. Every save shows "Logged: ..." with Undo; a failure
-//! keeps the sheet open with the data and an inline error; closing a changed sheet asks
-//! first. The sheets' state lives in the page (a refetch never resets an open sheet); the
-//! form rules are in [`crate::log_form`].
+//! `PagesInline` and `PositionInline`. The two "sheets" are [`ui::FormDialog`]s (OT-10,
+//! DEC-539): centered from 640 px (32 rem for watched, 42 rem for a play), a bottom sheet
+//! below, the fields scroll between the title and a footer with Cancel and Save. Every save
+//! shows "Logged: ..." with Undo; a failure keeps the dialog open with the data and an error
+//! above its buttons; closing a changed dialog asks first. Their state lives in the page and
+//! the page mounts them once, outside the view that a refetch renders afresh (review OT2B-1:
+//! a refetch under an open dialog took the focus, the place in the form and what was typed);
+//! what they know about the item ([`ItemInfo`]) they read when they open and when they save.
+//! The form rules are in [`crate::log_form`].
 
 use std::collections::BTreeMap;
 
@@ -13,8 +18,8 @@ use contracts::{CompanionDto, GameGroupDto, NextStepDto};
 use leptos::html;
 use leptos::prelude::*;
 use ui::{
-    Button, ButtonSize, ButtonVariant, Chip, Disclosure, DisclosureMode, FormField, Input, Label,
-    Segmented, SegmentedOption, Select, SelectOption, Sheet, SheetSide, Switch, Textarea,
+    Button, ButtonSize, ButtonVariant, Chip, DialogWidth, Disclosure, DisclosureMode, FormDialog,
+    FormField, Input, Label, Segmented, SegmentedOption, Select, SelectOption, Switch, Textarea,
     disclosure_storage_key,
 };
 
@@ -29,6 +34,13 @@ use crate::log_form::{
 };
 use crate::next_step::{LoggedStep, StepCtx, run_step, toast_logged};
 use crate::widgets::{CompanionPicker, RatingInput, progress_label};
+
+/// Id of the action bar's button that opens the watched dialog: it gets the focus back when
+/// the button that opened the dialog is gone (a refetch rendered the bar anew, or the dialog
+/// was opened from a menu).
+pub const WITH_OPENER: &str = "ip-log-with";
+/// The same for the play dialog.
+pub const PLAY_OPENER: &str = "ip-log-play";
 
 /// What the sheets need to know about the item.
 #[derive(Clone)]
@@ -117,8 +129,8 @@ fn DateChips(
     }
 }
 
-/// "Discard your changes?" inside a sheet that was asked to close while changed (D15: no
-/// second dialog). Focus moves to "Keep editing".
+/// "Discard your changes?" in the footer of a dialog that was asked to close while changed
+/// (D15: no second dialog). Focus moves to "Keep editing".
 #[component]
 fn DiscardPrompt(confirm: RwSignal<bool>, discard: Callback<()>) -> impl IntoView {
     // the first button ("Keep editing") takes the focus
@@ -229,6 +241,14 @@ impl WatchedState {
     fn dirty(&self) -> bool {
         self.form() != self.initial.get_untracked()
     }
+
+    /// Close without asking (the page shows another item now).
+    pub fn dismiss(&self) {
+        if self.open.get_untracked() {
+            self.confirm.set(false);
+            self.open.set(false);
+        }
+    }
 }
 
 /// Load the viewer's people once a sheet opens (not on every page view).
@@ -259,16 +279,16 @@ fn close_guard(
 }
 
 /// The "Watched with..." sheet of single and episodic items (design.md 5.4). Its title is the
-/// step it logs ("Watched S2 E5"), its description the item (OT-6).
+/// step it logs ("Watched S2 E5"), its description the item (OT-6). Mounted once per page;
+/// `info` is the item the page shows, read when the dialog opens and when it saves.
 #[component]
 pub fn WatchedSheet(
     state: WatchedState,
-    info: ItemInfo,
+    info: RwSignal<Option<ItemInfo>>,
     companions: RwSignal<Vec<CompanionDto>>,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let s = state;
-    let info = StoredValue::new(info);
     // before the first opening (and for the ids of the panel) the plain name
     let plain = i18n.t("log-sheet-title");
     let title = Signal::derive(move || {
@@ -279,9 +299,10 @@ pub fn WatchedSheet(
     Effect::new(move |_| {
         if let Some(label) = s.target.with(|t| t.as_ref().map(|t| t.label.clone()))
             && !s.open.get_untracked()
+            && let Some(i) = info.get_untracked()
         {
             s.title.set(label);
-            info.with_value(|i| s.reset(i));
+            s.reset(&i);
             load_companions(companions);
             s.open.set(true);
         }
@@ -297,8 +318,10 @@ pub fn WatchedSheet(
     // sheets stay online-only (WP4-5): offline the save waits
     let offline = crate::offline::is_offline();
     let save = Callback::new(move |()| {
-        if !offline.get_untracked() {
-            save_watched(s, info.get_value(), ctx.clone(), i2.clone());
+        if !offline.get_untracked()
+            && let Some(i) = info.get_untracked()
+        {
+            save_watched(s, i, ctx.clone(), i2.clone());
         }
     });
     let can_close = close_guard(move || s.dirty(), s.confirm);
@@ -306,29 +329,50 @@ pub fn WatchedSheet(
         s.initial.set(s.form());
         s.open.set(false);
     });
-    let (rewatch, verb) = info.with_value(|i| (i.finished, i.verb));
+    let errors = Signal::derive(move || s.error.get().into_iter().collect::<Vec<_>>());
+    let footer = move || {
+        view! {
+            <LogFooter form=WATCHED_FORM open=s.open busy=s.busy confirm=s.confirm
+                discard=discard can_close=can_close errors=errors errors_id=WATCHED_ERRORS/>
+        }
+    };
     view! {
-        <Sheet open=s.open title=title close_label=t("dialog-close")
-            description=info.with_value(|i| i.title.clone()) side=SheetSide::Adaptive can_close=can_close>
-            <WatchedFields state=s companions=companions rewatch=rewatch verb=verb save=save discard=discard/>
-        </Sheet>
+        <FormDialog open=s.open title=title close_label=t("dialog-close") return_to=WITH_OPENER
+            description=item_title(info) can_close=can_close footer=footer>
+            <WatchedFields state=s companions=companions info=info save=save/>
+        </FormDialog>
     }
 }
 
+/// The item's title as the line under a dialog's title. A memo: a refetch that brings the
+/// same title changes nothing in an open dialog.
+fn item_title(info: RwSignal<Option<ItemInfo>>) -> MaybeProp<String> {
+    let title = Memo::new(move |_| info.with(|i| i.as_ref().map(|i| i.title.clone())));
+    MaybeProp::derive(move || title.get())
+}
+
+/// Ids of the two forms: the Save button in the dialog's footer names its form with them.
+const WATCHED_FORM: &str = "watched-form";
+const PLAY_FORM: &str = "play-form";
+/// Ids of their error lists: a field that is wrong is described by its list.
+const WATCHED_ERRORS: &str = "watched-errors";
+const PLAY_ERRORS: &str = "play-errors";
+
+/// The fields; built at each opening, for the item the page shows then.
 #[component]
 fn WatchedFields(
     state: WatchedState,
     companions: RwSignal<Vec<CompanionDto>>,
-    rewatch: u32,
-    verb: Option<Verb>,
+    info: RwSignal<Option<ItemInfo>>,
     save: Callback<()>,
-    discard: Callback<()>,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let s = state;
+    let (rewatch, verb) =
+        info.with_untracked(|i| i.as_ref().map_or((0, None), |i| (i.finished, i.verb)));
     let again = again_line(&i18n, verb, rewatch);
     view! {
-        <form class="grid gap-4" novalidate
+        <form id=WATCHED_FORM class="grid gap-4" novalidate
             on:submit=move |ev| { ev.prevent_default(); save.run(()); }
             on:keydown=move |ev: leptos::ev::KeyboardEvent| if ev.key() == "Enter" && (ev.ctrl_key() || ev.meta_key()) {
                 ev.prevent_default();
@@ -353,11 +397,6 @@ fn WatchedFields(
                     </FormField>
                 </div>
             </Disclosure>
-            <DiscardPrompt confirm=s.confirm discard=discard/>
-            {move || s.error.get().map(|e| view! { <p role="alert" class="text-sm text-destructive-text">{e}</p> })}
-            <div class="flex justify-end gap-2">
-                <OfflineSave busy=s.busy/>
-            </div>
         </form>
     }
 }
@@ -437,6 +476,10 @@ pub struct PlayState {
     initial: RwSignal<PlayForm>,
     confirm: RwSignal<bool>,
     errors: RwSignal<Vec<String>>,
+    /// What the last save found wrong, for the marks on the fields: the companions whose
+    /// score is not a number, and the duration.
+    bad_scores: RwSignal<Vec<String>>,
+    bad_duration: RwSignal<bool>,
     busy: RwSignal<bool>,
     companions: RwSignal<Vec<CompanionDto>>,
     /// The chosen group chip (its id); empty: none.
@@ -465,6 +508,8 @@ impl PlayState {
             initial: RwSignal::new(PlayForm::default()),
             confirm: RwSignal::new(false),
             errors: RwSignal::new(Vec::new()),
+            bad_scores: RwSignal::new(Vec::new()),
+            bad_duration: RwSignal::new(false),
             busy: RwSignal::new(false),
             companions,
             group: RwSignal::new(String::new()),
@@ -572,12 +617,49 @@ impl PlayState {
         self.players.set(players);
         self.initial.set(self.form());
         self.confirm.set(false);
-        self.errors.set(Vec::new());
+        self.show_errors(&[], &[]);
+    }
+
+    /// The errors of a save: one line per kind above the buttons, a mark on each field.
+    fn show_errors(&self, lines: &[String], errors: &[FormError]) {
+        self.errors.set(lines.to_vec());
+        self.bad_scores.set(
+            errors
+                .iter()
+                .filter_map(|e| match e {
+                    FormError::Score(id) => Some(id.clone()),
+                    _ => None,
+                })
+                .collect(),
+        );
+        self.bad_duration.set(errors.contains(&FormError::Duration));
     }
 
     fn dirty(&self) -> bool {
         self.form() != self.initial.get_untracked()
     }
+
+    /// Close without asking (the page shows another item now).
+    pub fn dismiss(&self) {
+        if self.open.get_untracked() {
+            self.confirm.set(false);
+            self.open.set(false);
+        }
+    }
+}
+
+/// One line per kind of error, in the order of the form: ten scores that are not numbers
+/// are one line, not ten (review OT2B-3: the list scrolled and no key reached its end).
+#[must_use]
+pub fn error_lines(i: &I18n, errors: &[FormError]) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for e in errors {
+        let line = error_message(i, e);
+        if !lines.contains(&line) {
+            lines.push(line);
+        }
+    }
+    lines
 }
 
 /// The game groups for the chips.
@@ -600,19 +682,29 @@ async fn last_group(item_id: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The "Log a play" sheet of board and video games (design.md 5.4).
+/// The "Log a play" sheet of board and video games (design.md 5.4). Mounted once per page;
+/// `info` is the item the page shows, read when the dialog opens and when it saves, `title`
+/// the step it logs ("Log a play", "Log a session").
 #[component]
-pub fn PlaySheet(state: PlayState, info: ItemInfo, #[prop(into)] title: String) -> impl IntoView {
+pub fn PlaySheet(
+    state: PlayState,
+    info: RwSignal<Option<ItemInfo>>,
+    #[prop(into)] title: Signal<String>,
+) -> impl IntoView {
     let i18n = use_i18n();
     let s = state;
-    let info = StoredValue::new(info);
     Effect::new(move |_| {
         let open = s.open.get();
         if open && !s.opened.get_untracked() {
+            let Some((item_id, last_duration)) =
+                info.with_untracked(|i| i.as_ref().map(|i| (i.item_id.clone(), i.last_duration)))
+            else {
+                // asked for before the page knows its item: open once it does
+                info.track();
+                return;
+            };
             s.opened.set(true);
             s.busy.set(true);
-            let (item_id, last_duration) =
-                info.with_value(|i| (i.item_id.clone(), i.last_duration));
             leptos::task::spawn_local(async move {
                 if s.companions.with_untracked(Vec::is_empty)
                     && let Ok(cs) = api::companions().await
@@ -640,8 +732,10 @@ pub fn PlaySheet(state: PlayState, info: ItemInfo, #[prop(into)] title: String) 
     let i2 = i18n.clone();
     let offline = crate::offline::is_offline();
     let save = Callback::new(move |()| {
-        if !offline.get_untracked() {
-            save_play(&s, info.get_value(), ctx.clone(), i2.clone());
+        if !offline.get_untracked()
+            && let Some(i) = info.get_untracked()
+        {
+            save_play(&s, i, ctx.clone(), i2.clone());
         }
     });
     let can_close = close_guard(move || s.dirty(), s.confirm);
@@ -649,26 +743,40 @@ pub fn PlaySheet(state: PlayState, info: ItemInfo, #[prop(into)] title: String) 
         s.initial.set(s.form());
         s.open.set(false);
     });
-    let board = info.with_value(|i| i.board_game);
+    let footer = move || {
+        view! {
+            <LogFooter form=PLAY_FORM open=s.open busy=s.busy confirm=s.confirm
+                discard=discard can_close=can_close errors=s.errors errors_id=PLAY_ERRORS/>
+        }
+    };
     view! {
-        <Sheet open=s.open title=title close_label=t("dialog-close")
-            description=info.with_value(|i| i.title.clone()) side=SheetSide::Adaptive can_close=can_close>
-            <PlayFields state=s board=board save=save discard=discard/>
-        </Sheet>
+        <FormDialog open=s.open title=title close_label=t("dialog-close") width=DialogWidth::Wide
+            return_to=PLAY_OPENER description=item_title(info) can_close=can_close footer=footer>
+            <PlayFields state=s info=info save=save/>
+        </FormDialog>
     }
 }
 
 /// The fields of the play dialog. A board game (`board`) has "Players" with their scores and
 /// the winner open; any other game has "Played with" and keeps the scores behind "More", so
-/// it opens with three inputs: when, duration, played with (OT-6, OT-16; OD-01).
+/// it opens with three inputs: when, duration, played with (OT-6, OT-16; OD-01). Built at
+/// each opening, for the item the page shows then.
 #[component]
 fn PlayFields(
     state: PlayState,
-    board: bool,
+    info: RwSignal<Option<ItemInfo>>,
     save: Callback<()>,
-    discard: Callback<()>,
 ) -> impl IntoView {
     let s = state;
+    let board = info.with_untracked(|i| i.as_ref().is_some_and(|i| i.board_game));
+    // a wrong duration is marked and points at the line that says why
+    let duration_described = Signal::derive(move || {
+        if s.bad_duration.get() {
+            format!("play-duration-description {PLAY_ERRORS}")
+        } else {
+            "play-duration-description".to_string()
+        }
+    });
     let no_error = Signal::derive(|| None::<String>);
     let (legend, more) = if board {
         ("log-players", "log-more-play")
@@ -676,7 +784,7 @@ fn PlayFields(
         (with_legend_key(Some(Verb::Play)), "log-more-session")
     };
     view! {
-        <form class="grid gap-4" novalidate
+        <form id=PLAY_FORM class="grid gap-4" novalidate
             on:submit=move |ev| { ev.prevent_default(); save.run(()); }
             on:keydown=move |ev: leptos::ev::KeyboardEvent| if ev.key() == "Enter" && (ev.ctrl_key() || ev.meta_key()) {
                 ev.prevent_default();
@@ -686,11 +794,12 @@ fn PlayFields(
             <div class="flex flex-wrap items-start gap-x-4 gap-y-4">
                 <DateChips id="play-when" chip=s.chip picked=s.picked error=no_error/>
                 // "1:30" or "90" (OT-16): a text field, the colon is not on a numeric keypad
-                // (the fixed width keeps it beside the date in the 398 px of the desktop sheet;
+                // (the fixed width keeps it beside the date in the 342 px of a 390 px phone;
                 // the hint wraps inside it)
                 <div class="w-[7.5rem]">
                     <FormField id="play-duration" label=t("log-duration") description=t("log-duration-hint")>
-                        <Input id="play-duration" value=s.duration autocomplete="off" class="max-w-24" described_by="play-duration-description"/>
+                        <Input id="play-duration" value=s.duration autocomplete="off" class="max-w-24"
+                            invalid=s.bad_duration described_by=duration_described/>
                     </FormField>
                 </div>
             </div>
@@ -702,18 +811,6 @@ fn PlayFields(
                 {(!board).then(|| view! { <Scores state=s/> })}
                 <PlayMore state=s/>
             </Disclosure>
-            <DiscardPrompt confirm=s.confirm discard=discard/>
-            {move || {
-                let errors = s.errors.get();
-                (!errors.is_empty()).then(|| view! {
-                    <ul role="alert" class="grid gap-1 text-sm text-destructive-text">
-                        {errors.into_iter().map(|e| view! { <li>{e}</li> }).collect_view()}
-                    </ul>
-                })
-            }}
-            <div class="flex justify-end gap-2">
-                <OfflineSave busy=s.busy/>
-            </div>
         </form>
     }
 }
@@ -779,9 +876,12 @@ fn Scores(state: PlayState) -> impl IntoView {
                         s.scores.update(|m| { m.insert(key.clone(), v); });
                     });
                     let label = use_i18n().t_args("log-score", &[("name", s.name(&id).into())]);
+                    let bad = Signal::derive(move || s.bad_scores.with(|b| b.contains(&id)));
+                    let described = Signal::derive(move || bad.get().then(|| PLAY_ERRORS.to_string()));
                     view! {
                         <FormField id=field.clone() label=label>
-                            <Input id=field.clone() value=value inputmode="decimal" autocomplete="off" class="max-w-32"/>
+                            <Input id=field.clone() value=value inputmode="decimal" autocomplete="off" class="max-w-32"
+                                invalid=bad described_by=described/>
                         </FormField>
                     }
                 }
@@ -828,12 +928,11 @@ fn save_play(s: &PlayState, info: ItemInfo, ctx: StepCtx, i18n: std::sync::Arc<I
     let payload = match s.form().payload(today(), op) {
         Ok(p) => p,
         Err(errors) => {
-            s.errors
-                .set(errors.iter().map(|e| error_message(&i18n, e)).collect());
+            s.show_errors(&error_lines(&i18n, &errors), &errors);
             return;
         }
     };
-    s.errors.set(Vec::new());
+    s.show_errors(&[], &[]);
     s.busy.set(true);
     leptos::task::spawn_local(async move {
         let ItemInfo {
@@ -1065,15 +1164,85 @@ pub fn PositionInline(info: ItemInfo, step: NextStepDto, draft: InlineDraft) -> 
     }
 }
 
-/// The save button of a sheet: disabled with "You are offline" next to it while the browser
-/// is offline (sheets are not queued, WP4-5).
+/// The footer of a log dialog (OT-10): the discard question and what went wrong (a line per
+/// kind of error, so the list needs no scroller of its own, review OT2B-3), above the
+/// buttons, then Cancel and Save. Save submits the form named `form` and is
+/// disabled with "You are offline" next to it while the browser is offline (the dialogs are
+/// not queued, WP4-5). Cancel asks `can_close` like Escape and the close button do. Below
+/// 640 px (the bottom sheet) Save is 44 px high and as wide as the sheet, and Cancel is left
+/// to the close button (addendum-1 D10).
 #[component]
-fn OfflineSave(busy: RwSignal<bool>) -> impl IntoView {
+fn LogFooter(
+    form: &'static str,
+    open: RwSignal<bool>,
+    busy: RwSignal<bool>,
+    confirm: RwSignal<bool>,
+    discard: Callback<()>,
+    can_close: Callback<(), bool>,
+    #[prop(into)] errors: Signal<Vec<String>>,
+    /// Id of the error list; the fields that are wrong name it in `aria-describedby`.
+    errors_id: &'static str,
+) -> impl IntoView {
     let offline = crate::offline::is_offline();
+    let cancel = move |_| {
+        if can_close.run(()) {
+            open.set(false);
+        }
+    };
     view! {
-        <Show when=move || offline.get()>
-            <p class="self-center text-small text-muted-foreground">{t("offline-sheet")}</p>
-        </Show>
-        <Button r#type="submit" loading=busy disabled=offline>{t("log-save")}</Button>
+        <div class="grid gap-3">
+            <DiscardPrompt confirm=confirm discard=discard/>
+            {move || {
+                let errors = errors.get();
+                // the alert is around the list: a `ul` with that role is no list any more
+                (!errors.is_empty()).then(|| view! {
+                    <div id=errors_id role="alert">
+                        <ul class="grid gap-1 text-sm text-destructive-text">
+                            {errors.into_iter().map(|e| view! { <li>{e}</li> }).collect_view()}
+                        </ul>
+                    </div>
+                })
+            }}
+            <div class="flex flex-wrap items-center justify-end gap-2">
+                <Show when=move || offline.get()>
+                    <p class="mr-auto text-small text-muted-foreground">{t("offline-sheet")}</p>
+                </Show>
+                <Button variant=ButtonVariant::Outline class="max-sm:hidden" on:click=cancel>{t("log-cancel")}</Button>
+                <Button r#type="submit" attr:form=form loading=busy disabled=offline class="max-sm:h-11 max-sm:w-full">
+                    {t("log-save")}
+                </Button>
+            </div>
+        </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    /// Review OT2B-3: ten players with "42 pts" were ten equal lines in a list that scrolled.
+    #[test]
+    fn errors_are_one_line_per_kind_in_the_order_of_the_form() {
+        let en = I18n::new("en", BTreeMap::new());
+        let errors = [
+            FormError::DateInFuture,
+            FormError::Score("a".into()),
+            FormError::Score("b".into()),
+            FormError::Score("c".into()),
+            FormError::Duration,
+        ];
+        assert_eq!(
+            error_lines(&en, &errors),
+            [
+                "The date is in the future.",
+                "Scores are numbers, for example 42 or 12.5.",
+                "Enter the duration as hours:minutes (1:30) or as minutes (90).",
+            ]
+        );
+        assert_eq!(error_lines(&en, &[]).len(), 0);
+        let de = I18n::new("de", BTreeMap::new());
+        assert_eq!(error_lines(&de, &errors[1..4]).len(), 1);
     }
 }
