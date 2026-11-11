@@ -291,6 +291,11 @@ fn summary(r: &LibraryRow) -> ProgressSummaryDto {
         first_at: s.first_at.map(|t| t.to_rfc3339()),
         last_at: s.last_at.map(|t| t.to_rfc3339()),
         fraction: r.fraction(),
+        rewatch: r.rewatch.as_ref().map(|w| contracts::browse::RewatchDto {
+            start: w.start.0.to_string(),
+            done: w.done,
+            running: w.running,
+        }),
     }
 }
 

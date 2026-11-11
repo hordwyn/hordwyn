@@ -302,3 +302,154 @@ async fn a_queued_change_loses_to_a_later_change_from_another_device() {
         "the log is kept: {events}"
     );
 }
+
+/// A show of two episodes, both watched last year, Completed by hand: its item id.
+async fn a_completed_show(app: &axum::Router, srv: &Server, cookie: &str) -> String {
+    let item = srv
+        .app
+        .find_or_create_catalog_item(app::NewCatalogItem {
+            kind: domain::kind::KindId::new("show").unwrap(),
+            title: "Tideline".into(),
+            original_title: None,
+            year: Some(2021),
+            description: None,
+            external_ids: Vec::new(),
+            attributes: json!({"seasons": [{"number": 1, "episode_count": 2}]}),
+            cover_url: None,
+        })
+        .await
+        .unwrap()
+        .id
+        .0
+        .to_string();
+    let before = chrono::Utc::now() - chrono::Duration::days(365);
+    for e in 1..=2 {
+        let body = json!({
+            "progress": {"type": "episode", "season": 1, "episode": e},
+            "occurred_at": before.to_rfc3339(),
+        });
+        let uri = format!("/items/{item}/progress");
+        let (s, r) = call(app, "POST", &uri, cookie, Some(body)).await;
+        assert_eq!(s, 200, "{r}");
+    }
+    let uri = format!("/library/{item}/status");
+    let (s, r) = call(
+        app,
+        "PUT",
+        &uri,
+        cookie,
+        Some(json!({"status": "completed"})),
+    )
+    .await;
+    assert_eq!(s, 200, "{r}");
+    item
+}
+
+/// Flush a queue: one push, every command taken.
+async fn flush(app: &axum::Router, cookie: &str, queue: &[Queued]) {
+    let batch = json!(web::offline::flush_batch(queue));
+    let (s, r) = call(app, "POST", "/sync/commands", cookie, Some(batch)).await;
+    assert_eq!(s, 200);
+    assert!(r.as_array().unwrap().iter().all(|r| r["ok"] == true), "{r}");
+}
+
+/// ot2e (DEC-587): a rewatch run started offline. The start is a queued log with the
+/// queue's stamp, its episodes follow in queue order; the flush replays once. A stop queued
+/// after them (the marker, DEC-590) ends the run, the last episode of a whole run gives
+/// Completed back, and a start whose stamp is older than the entry's status moves nothing.
+#[tokio::test]
+async fn a_rewatch_run_started_offline_replays_once() {
+    if std::env::var_os("TEST_DATABASE_URL").is_none() {
+        assert!(std::env::var_os("REQUIRE_SERVICES").is_none());
+        eprintln!("skipping: TEST_DATABASE_URL not set");
+        return;
+    }
+    let (app, srv, cookie, _) = signed_in_with_a_show().await;
+    let item = a_completed_show(&app, &srv, &cookie).await;
+    let ep = |e: u32| json!({"type": "episode", "season": 1, "episode": e});
+    let start = || json!({"type": "rewatch"});
+    let page = || {
+        let (app, cookie, uri) = (app.clone(), cookie.clone(), format!("/items/{item}/page"));
+        async move { call(&app, "GET", &uri, &cookie, None).await.1 }
+    };
+    // the phone, offline: start a rewatch, one episode, stop
+    let mut phone = ClientClock::new(42);
+    let now = chrono::Utc::now();
+    let ms = u64::try_from(now.timestamp_millis()).unwrap() + 50;
+    let mut nth = 0;
+    let mut log = |p: Value, ms: u64, clock: &mut ClientClock| {
+        nth += 1;
+        let at = now + chrono::Duration::milliseconds(nth * 10);
+        let command = log_command(&item, p, Some(at.to_rfc3339()), Some(&clock.stamp(ms)));
+        Queued::new(command, "Tideline", ms)
+    };
+    let (started, first) = (log(start(), ms, &mut phone), log(ep(1), ms, &mut phone));
+    // queued after them: the stop marker, as the web queues it
+    let stop = log(json!({"type": "rewatch_stop"}), ms, &mut phone);
+    let queue = [started, first, stop];
+    flush(&app, &cookie, &queue).await;
+    let p = page().await;
+    assert_eq!(p["entry"]["status"], "completed", "{p}");
+    assert_eq!(p["summary"]["rewatch"]["done"], 1, "{p}");
+    assert_eq!(p["summary"]["rewatch"]["running"], false);
+    assert_eq!(p["times"], 1);
+    let events = p["progress"].as_array().unwrap();
+    assert_eq!(events.len(), 5);
+    assert_eq!(events[4]["progress"]["type"], "rewatch_stop", "{p}");
+    assert_eq!(events[4]["status"], "completed", "the stop gives it back");
+    // a status write without the marker (an older client) still stops a run: In progress
+    // by hand does not bring the stopped one back, a new start is a new run
+    let again = [
+        Queued::new(
+            status_command(&item, "in_progress", &phone.stamp(ms)),
+            "Tideline",
+            ms,
+        ),
+        Queued::new(
+            status_command(&item, "completed", &phone.stamp(ms)),
+            "Tideline",
+            ms,
+        ),
+    ];
+    flush(&app, &cookie, &again[..1]).await;
+    let between = page().await;
+    assert!(between["summary"]["rewatch"].is_null(), "{between}");
+    flush(&app, &cookie, &again[1..]).await;
+    let p = page().await;
+    assert_eq!(p["summary"]["rewatch"]["done"], 1, "{p}");
+    let (_, changes) = call(&app, "GET", "/sync/changes?cursor=0", &cookie, None).await;
+    // the answers were lost: the same queue again changes nothing
+    flush(&app, &cookie, &queue).await;
+    let again = page().await;
+    assert_eq!(again["progress"], p["progress"]);
+    assert_eq!(again["summary"], p["summary"]);
+    let (_, after) = call(&app, "GET", "/sync/changes?cursor=0", &cookie, None).await;
+    assert_eq!(after, changes, "no new change rows");
+
+    // offline again: a whole run. Its last episode gives Completed back
+    let later = ms + 1_000;
+    let queue = [
+        log(start(), later, &mut phone),
+        log(ep(1), later, &mut phone),
+        log(ep(2), later, &mut phone),
+    ];
+    flush(&app, &cookie, &queue).await;
+    flush(&app, &cookie, &queue).await;
+    let p = page().await;
+    assert_eq!(p["entry"]["status"], "completed", "{p}");
+    assert!(p["summary"]["rewatch"].is_null(), "{p}");
+    assert_eq!(p["times"], 2);
+    let events = p["progress"].as_array().unwrap();
+    assert_eq!(events.len(), 8);
+    assert_eq!(events[5]["status"], "in_progress", "the start: {p}");
+    assert_eq!(events[7]["status"], "completed", "the last episode: {p}");
+
+    // a start queued long ago (its stamp is older than the status): the later Completed
+    // stays, nothing runs
+    let old = log(start(), 1, &mut ClientClock::new(1));
+    flush(&app, &cookie, &[old]).await;
+    let p = page().await;
+    assert_eq!(p["entry"]["status"], "completed", "{p}");
+    assert!(p["summary"]["rewatch"].is_null(), "{p}");
+    assert_eq!(p["times"], 2);
+}

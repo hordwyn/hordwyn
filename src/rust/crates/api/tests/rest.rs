@@ -1724,3 +1724,324 @@ async fn the_item_page_of_a_switched_off_kind_still_answers() {
     assert!(p["next_step"].is_null(), "{p}");
     assert_eq!(p["times"], 0);
 }
+
+/// ot2e (DEC-587): the item page of a show carries its rewatch run (running, then stopped)
+/// and the day of the pass the count names; the run is started with a plain progress log
+/// and stopped with the status write.
+#[tokio::test]
+async fn the_item_page_carries_the_rewatch_run() {
+    let (s, t) = state();
+    let mut item = a_movie(&t, "Harbour Watch").await;
+    item.kind = domain::kind::KindId::new("show").unwrap();
+    item.attributes = serde_json::json!({"seasons": [{"number": 1, "episode_count": 3}]});
+    t.app.repos.catalog.upsert(&item).await.unwrap();
+    let app = api::router(s);
+    let token = signed_up(&app).await;
+    let page = format!("/api/v1/items/{}/page", item.id.0);
+    let progress = format!("/api/v1/items/{}/progress", item.id.0);
+    let ep =
+        |e: u32| serde_json::json!({"progress": {"type": "episode", "season": 1, "episode": e}});
+    for e in 1..=3 {
+        t.clock.advance(chrono::Duration::days(1));
+        let (status, _, _) = call(&app, "POST", &progress, Some(&token), Some(ep(e))).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let status_url = format!("/api/v1/library/{}/status", item.id.0);
+    let completed = serde_json::json!({"status": "completed"});
+    let (status, _, b) = call(
+        &app,
+        "PUT",
+        &status_url,
+        Some(&token),
+        Some(completed.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{b}");
+    let (_, _, p) = call(&app, "GET", &page, Some(&token), None).await;
+    assert_eq!(p["times"], 1);
+    assert!(p["summary"]["rewatch"].is_null(), "{p}");
+    let third_day = p["progress"][2]["occurred_at"].clone();
+    assert_eq!(p["times_at"], third_day);
+
+    // one favourite episode again two days later: the day of the pass stays (OT2A-7)
+    t.clock.advance(chrono::Duration::days(2));
+    call(&app, "POST", &progress, Some(&token), Some(ep(1))).await;
+    let (_, _, p) = call(&app, "GET", &page, Some(&token), None).await;
+    assert_eq!(p["times_at"], third_day);
+    assert_ne!(p["summary"]["last_at"], third_day);
+
+    t.clock.advance(chrono::Duration::days(1));
+    let start = serde_json::json!({"progress": {"type": "rewatch"}});
+    let (status, _, started) = call(&app, "POST", &progress, Some(&token), Some(start)).await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    // the answer of a log names the status it moved the entry to
+    assert_eq!(started["status"], "in_progress");
+    t.clock.advance(chrono::Duration::minutes(1));
+    let (_, _, first) = call(&app, "POST", &progress, Some(&token), Some(ep(1))).await;
+    assert!(first.get("status").is_none(), "{first}");
+    let (_, _, p) = call(&app, "GET", &page, Some(&token), None).await;
+    assert_eq!(p["entry"]["status"], "in_progress");
+    assert_eq!(
+        p["summary"]["rewatch"],
+        serde_json::json!({"start": started["id"], "done": 1, "running": true})
+    );
+    assert_eq!(p["summary"]["episodes_total"], 3);
+    assert_eq!(p["summary"]["episodes_watched"], 3);
+    assert_eq!(p["times"], 1);
+    assert_eq!(p["next_step"]["action"], "episode");
+    assert_eq!(p["next_step"]["episode"], 2);
+    let third = p["summary"]["fraction"].as_f64().unwrap();
+    assert!((third - 1.0 / 3.0).abs() < 0.01, "{third}");
+
+    let (status, _, _) = call(&app, "PUT", &status_url, Some(&token), Some(completed)).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, _, p) = call(&app, "GET", &page, Some(&token), None).await;
+    assert_eq!(p["entry"]["status"], "completed");
+    assert_eq!(p["summary"]["rewatch"]["running"], false);
+    assert_eq!(p["summary"]["rewatch"]["done"], 1);
+    assert_eq!(p["times"], 1);
+    assert_eq!(p["next_step"]["action"], "caught_up");
+}
+
+/// A show with one season of `episodes` episodes and a TMDB id.
+async fn a_show(t: &testkit::TestEnv, title: &str, tmdb: &str, episodes: u32) -> String {
+    let item = t
+        .app
+        .upsert_catalog_item(app::NewCatalogItem {
+            kind: domain::kind::KindId::new("show").unwrap(),
+            title: title.into(),
+            original_title: None,
+            year: Some(2019),
+            description: None,
+            external_ids: vec![domain::catalog::ExternalId::new("tmdb", tmdb)],
+            attributes: serde_json::json!({"seasons": [{"number": 1, "episode_count": episodes}]}),
+            cover_url: None,
+        })
+        .await
+        .unwrap();
+    item.id.0.to_string()
+}
+
+/// Log `steps` on an item one minute apart: a number is that episode of season 1, a word is
+/// a marker (`rewatch`, `rewatch_stop`) or `completed` (the status set by hand). Answers
+/// the events.
+async fn logged(
+    app: &axum::Router,
+    t: &testkit::TestEnv,
+    token: &str,
+    item: &str,
+    steps: &[&str],
+) -> Vec<serde_json::Value> {
+    let mut events = Vec::new();
+    for step in steps {
+        t.clock.advance(chrono::Duration::minutes(1));
+        if *step == "completed" {
+            let uri = format!("/api/v1/library/{item}/status");
+            let body = serde_json::json!({"status": "completed"});
+            let (status, _, b) = call(app, "PUT", &uri, Some(token), Some(body)).await;
+            assert_eq!(status, StatusCode::OK, "{b}");
+            continue;
+        }
+        let progress = match step.parse::<u32>() {
+            Ok(e) => serde_json::json!({"type": "episode", "season": 1, "episode": e}),
+            Err(_) => serde_json::json!({"type": step}),
+        };
+        let uri = format!("/api/v1/items/{item}/progress");
+        let body = serde_json::json!({"progress": progress});
+        let (status, _, event) = call(app, "POST", &uri, Some(token), Some(body)).await;
+        assert_eq!(status, StatusCode::OK, "{step}: {event}");
+        events.push(event);
+    }
+    events
+}
+
+/// Review OT2E-7 a, OT2E-8, OT2E-2 c: the export of a library with rewatch runs (two stopped
+/// ones in a row, a finished one, one that is running) and with undone logs is a file the
+/// import takes, and the other account reads the same runs.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn export_then_import_keeps_rewatch_runs_and_leaves_undone_logs_out() {
+    let t = testkit::TestEnv::with_kinds(Arc::new(kinds::Registry::with_builtins()));
+    let importer = Arc::new(importers::Importer::new(
+        t.app.clone(),
+        Arc::new(importers::MemImportStore::default()),
+        Arc::new(testkit::fakes::MemBlobs::default()),
+        t.jobs.clone(),
+    ));
+    let (mut s, _) = state();
+    s.app = t.app.clone();
+    s.auth = auth::Auth::new(
+        t.app.clone(),
+        Arc::new(auth::MemAuthStore::default()),
+        auth::AuthSettings {
+            signup: auth::SignupMode::Open,
+            ..auth::AuthSettings::default()
+        },
+    );
+    s.importer = Some(importer.clone());
+    let stopped = a_show(&t, "Harbour Watch", "101", 3).await;
+    let finished = a_show(&t, "Tideline", "102", 2).await;
+    let running = a_show(&t, "Saltmarsh", "103", 2).await;
+    let app = api::router(s);
+    let anna = signed_up(&app).await;
+    // two runs stopped in a row, one episode each
+    let story = [
+        "1",
+        "2",
+        "3",
+        "completed",
+        "rewatch",
+        "1",
+        "rewatch_stop",
+        "rewatch",
+        "2",
+        "rewatch_stop",
+    ];
+    logged(&app, &t, &anna, &stopped, &story).await;
+    // a whole run, then one more view that is taken back (an undo event is stored)
+    let story = ["1", "2", "completed", "rewatch", "1", "2", "1"];
+    let events = logged(&app, &t, &anna, &finished, &story).await;
+    let undo = format!(
+        "/api/v1/progress/{}/undo",
+        events.last().unwrap()["id"].as_str().unwrap()
+    );
+    let (status, _, b) = call(&app, "POST", &undo, Some(&anna), None).await;
+    assert_eq!(status, StatusCode::OK, "{b}");
+    // a run that is running when the file is written
+    logged(
+        &app,
+        &t,
+        &anna,
+        &running,
+        &["1", "2", "completed", "rewatch", "1"],
+    )
+    .await;
+
+    let read = async |token: &str| {
+        let mut out = Vec::new();
+        for item in [&stopped, &finished, &running] {
+            let uri = format!("/api/v1/items/{item}/page");
+            let (_, _, p) = call(&app, "GET", &uri, Some(token), None).await;
+            let run = &p["summary"]["rewatch"];
+            out.push(serde_json::json!({
+                "status": p["entry"]["status"], "times": p["times"],
+                "done": run["done"], "running": run["running"],
+                "views": p["summary"]["episode_views"], "events": p["progress"].as_array().unwrap().len(),
+            }));
+        }
+        out
+    };
+    let before = read(&anna).await;
+    assert_eq!(
+        before,
+        [
+            serde_json::json!({"status": "completed", "times": 1, "done": 1, "running": false, "views": 5, "events": 9}),
+            serde_json::json!({"status": "completed", "times": 2, "done": null, "running": null, "views": 4, "events": 5}),
+            serde_json::json!({"status": "in_progress", "times": 1, "done": 1, "running": true, "views": 3, "events": 4}),
+        ]
+    );
+
+    let req = Request::builder()
+        .uri("/api/v1/export")
+        .header(header::AUTHORIZATION, format!("Bearer {anna}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let file = resp.into_body().collect().await.unwrap().to_bytes();
+    let text = String::from_utf8(file.to_vec()).unwrap();
+    assert!(!text.contains("\"undo\""), "no undo events in the file");
+    assert!(text.contains("\"rewatch_stop\""));
+
+    t.clock.advance(chrono::Duration::days(3));
+    let (_, _, ben) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/sign-up",
+        None,
+        Some(serde_json::json!({"username": "ben", "display_name": "Ben", "password": "correct horse battery"})),
+    )
+    .await;
+    let ben = ben["token"].as_str().unwrap().to_string();
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/imports?format=generic-jsonl")
+        .header(header::AUTHORIZATION, format!("Bearer {ben}"))
+        .body(Body::from(text))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    let started: serde_json::Value =
+        serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let id = uuid::Uuid::parse_str(started["id"].as_str().unwrap()).unwrap();
+    importer.run(id).await.unwrap();
+    let uri = format!("/api/v1/imports/{id}");
+    let (_, _, report) = call(&app, "GET", &uri, Some(&ben), None).await;
+    assert_eq!(report["state"], "done", "{report}");
+    assert_eq!(report["matched"], 3, "{report}");
+    assert_eq!(read(&ben).await, before, "{report}");
+}
+
+/// Review OT2E-1 and OT2E-12 over REST: a start that starts nothing is a conflict, dates a
+/// run cannot take are `invalid`, and "watched with" logs no session for a refused view.
+#[tokio::test]
+async fn a_rewatch_run_refuses_what_it_could_not_count() {
+    let (s, t) = state();
+    let show = a_show(&t, "Harbour Watch", "101", 3).await;
+    let app = api::router(s);
+    let token = signed_up(&app).await;
+    let tk = Some(token.as_str());
+    let uri = format!("/api/v1/items/{show}/progress");
+    let post = async |body: serde_json::Value| {
+        let (status, _, b) = call(&app, "POST", &uri, tk, Some(body)).await;
+        (status, b["code"].as_str().unwrap_or("").to_string())
+    };
+    let start = serde_json::json!({"progress": {"type": "rewatch"}});
+    // not in the library, then In progress: nothing to start, and nothing is added
+    assert_eq!(post(start.clone()).await.0, StatusCode::CONFLICT);
+    let (_, _, lib) = call(&app, "GET", "/api/v1/library", tk, None).await;
+    assert_eq!(lib["items"].as_array().unwrap().len(), 0);
+    logged(&app, &t, &token, &show, &["1", "2", "3"]).await;
+    assert_eq!(post(start.clone()).await.0, StatusCode::CONFLICT);
+    assert_eq!(
+        post(serde_json::json!({"progress": {"type": "rewatch_stop"}}))
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+    logged(&app, &t, &token, &show, &["completed"]).await;
+    t.clock.advance(chrono::Duration::days(2));
+    let now = t.clock.now_for_tests();
+    let earlier = (now - chrono::Duration::days(30)).to_rfc3339();
+    // a start dated before the first run's views
+    let dated = serde_json::json!({"progress": {"type": "rewatch"}, "occurred_at": earlier});
+    assert_eq!(
+        post(dated).await,
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid".to_string())
+    );
+    assert_eq!(post(start).await.0, StatusCode::OK);
+    // a view of yesterday while the run runs, alone and "watched with"
+    let (_, _, ben) = call(
+        &app,
+        "POST",
+        "/api/v1/companions",
+        tk,
+        Some(serde_json::json!({"name": "Ben"})),
+    )
+    .await;
+    let yesterday = (now - chrono::Duration::days(1)).to_rfc3339();
+    let view = serde_json::json!({
+        "progress": {"type": "episode", "season": 1, "episode": 1}, "occurred_at": yesterday,
+    });
+    assert_eq!(
+        post(view.clone()).await,
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid".to_string())
+    );
+    let mut with = view;
+    with["with"] = serde_json::json!([ben["id"]]);
+    assert_eq!(post(with).await.0, StatusCode::UNPROCESSABLE_ENTITY);
+    let (_, _, sessions) = call(&app, "GET", "/api/v1/sessions", tk, None).await;
+    assert_eq!(sessions.as_array().unwrap().len(), 0, "{sessions}");
+    let (_, _, p) = call(&app, "GET", &format!("/api/v1/items/{show}/page"), tk, None).await;
+    assert_eq!(p["summary"]["rewatch"]["done"], 0);
+    assert_eq!(p["progress"].as_array().unwrap().len(), 4);
+}

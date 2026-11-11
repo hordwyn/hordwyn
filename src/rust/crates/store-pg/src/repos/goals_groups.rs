@@ -232,7 +232,8 @@ impl PgStore {
                )
                SELECT kind AS "kind!",
                       COUNT(*) AS "events?",
-                      COUNT(*) FILTER (WHERE status_change ->> 'to' = 'completed') AS "completions?",
+                      COUNT(*) FILTER (WHERE status_change ->> 'to' = 'completed'
+                                        AND t <> 'rewatch_stop') AS "completions?",
                       COUNT(*) FILTER (WHERE t = 'finished') AS "finished?",
                       COUNT(*) FILTER (WHERE t = 'episode') AS "episodes?",
                       COALESCE(SUM(GREATEST(page - prev_page, 0)), 0)::bigint AS "pages?",

@@ -6,7 +6,10 @@
 //! are open asks once, inline, whether to mark those too; "Remember for this show" keeps the
 //! answer in this browser (DEC-231). A bulk mark on a range that is watched already asks,
 //! inline as well, "Log these N again as a rewatch?"; a mixed range says in its toast how
-//! many it skipped (OT-15, DEC-538). The ranges come from [`crate::episode_plan`].
+//! many it skipped (OT-15, DEC-538). On a Completed show that answer starts a rewatch run;
+//! while one is running the rows show the run (what it has reached is watched, the rest is
+//! open again) and every mark is logged now (ot2e, DEC-587). The ranges come from
+//! [`crate::episode_plan`].
 //!
 //! A refetch of the page rebuilds this list. What must outlive that sits in [`EpisodeUi`]:
 //! the open question, the open row menu (it stays open under the pointer) and where the
@@ -21,9 +24,9 @@ use ui::{
 };
 
 use crate::episode_plan::{
-    AirDates, Bulk, BulkPlan, Ep, Plan, Previous, SeasonRow, air_dates, missing_release,
-    parse_range, plan_bulk, plan_single, previous_key, release_dates, spread_over, standing_again,
-    unwatched_in_season, unwatched_up_to,
+    AirDates, Bulk, BulkPlan, Ep, Plan, Previous, SeasonRow, again_starts_run, air_dates,
+    date_choice_shown, missing_release, parse_range, plan_bulk, plan_single, previous_key,
+    release_dates, spread_over, standing_again, unwatched_in_season, unwatched_up_to,
 };
 use crate::i18n::{t, use_i18n};
 use crate::item_words::{Verb, again_ask_key, skipped_key, with_button_key};
@@ -147,74 +150,120 @@ fn remember_answer(item_id: &str, answer: Previous) {
     let _ = (item_id, answer);
 }
 
-/// Log `eps` one after the other (at `dates`, one per episode, else now), then one toast
-/// with Undo for all of them; it also says how many episodes of a bulk mark were `skipped`
-/// as already watched.
-fn log_episodes(
-    eps: Vec<Ep>,
+/// What became of one log of a mark.
+enum Sent {
+    Logged(ProgressEventDto),
+    /// The network failed: it is in the offline queue now (WP4-5).
+    Queued(crate::offline::Queued),
+    Failed(String),
+}
+
+/// Send one log of a mark; `queue` (an earlier one met a network failure) puts it straight
+/// into the offline queue.
+async fn send_log(
+    (item_id, title): (&str, &str),
+    progress: serde_json::Value,
+    occurred_at: Option<String>,
+    queue: bool,
+    offline: Option<crate::offline::Offline>,
+) -> Sent {
+    let op = uuid::Uuid::now_v7().to_string();
+    if queue {
+        return Sent::Queued(crate::offline::queued_log(
+            item_id,
+            title,
+            op,
+            progress,
+            occurred_at,
+            offline,
+        ));
+    }
+    let p = contracts::NewProgressDto {
+        progress: progress.clone(),
+        occurred_at: occurred_at.clone(),
+        client_op_id: Some(op.clone()),
+        with: Vec::new(),
+    };
+    match crate::api::log_progress(item_id.to_string(), p).await {
+        Ok(ev) => Sent::Logged(ev),
+        Err(e) if crate::offline::network_error(&e) && offline.is_some() => Sent::Queued(
+            crate::offline::queued_log(item_id, title, op, progress, occurred_at, offline),
+        ),
+        Err(e) => Sent::Failed(crate::pages::error_text(&e)),
+    }
+}
+
+/// How the episodes of a mark are logged: when, and what the toast says besides.
+#[derive(Default)]
+struct MarkOptions {
+    /// One date per episode; `None`: now.
     dates: Option<Vec<String>>,
+    /// Episodes of a bulk mark left alone as already watched (the toast says how many).
     skipped: usize,
-    info: &ItemInfo,
-    ctx: StepCtx,
-    ui: EpisodeUi,
-) {
+    /// "Log N again" on a Completed entry: the start of a rewatch run is logged first
+    /// (DEC-538, DEC-587), so the entry is In progress and the episodes are the run's.
+    start_run: bool,
+}
+
+/// Log `eps` one after the other (see [`MarkOptions`]), then one toast with Undo for all of
+/// them (a run started with them is taken back too); the toast says when the last of them
+/// finished a rewatch run.
+fn log_episodes(eps: Vec<Ep>, how: MarkOptions, info: &ItemInfo, ctx: StepCtx, ui: EpisodeUi) {
+    let MarkOptions {
+        dates,
+        skipped,
+        start_run,
+    } = how;
     if eps.is_empty() {
         return;
     }
     let (label, said) = mark_words(&eps, skipped, info, &ctx.i18n);
     let (item_id, title, refresh) = (info.item_id.clone(), info.title.clone(), info.refresh);
+    let verb = info.verb;
     ctx.funnel.intent(crate::funnel::Flow::EpisodeMark);
     ui.busy.set(true);
     ui.error.set(None);
     ui.again.set(None);
     leptos::task::spawn_local(async move {
-        let mut ids = Vec::new();
+        let mut logged = Vec::new();
         let mut failed = None;
         let mut queued = Vec::new();
         let mut dates = dates.unwrap_or_default().into_iter();
-        for (season, episode) in eps {
-            let progress =
-                serde_json::json!({"type": "episode", "season": season, "episode": episode});
-            let occurred_at = dates.next();
-            let op = uuid::Uuid::now_v7().to_string();
+        // the start of the run first (now), then the episodes
+        let start = start_run.then(|| (crate::next_step::rewatch_start(), None));
+        let episodes: Vec<_> = eps
+            .into_iter()
+            .map(|(season, episode)| {
+                let progress =
+                    serde_json::json!({"type": "episode", "season": season, "episode": episode});
+                (progress, dates.next())
+            })
+            .collect();
+        for (progress, occurred_at) in start.into_iter().chain(episodes) {
             // after one network failure the rest goes straight into the queue (WP4-5)
-            if !queued.is_empty() {
-                queued.push(offline_log(
-                    &item_id,
-                    &title,
-                    op,
-                    progress,
-                    occurred_at,
-                    ctx.offline,
-                ));
-                continue;
-            }
-            let p = contracts::NewProgressDto {
-                progress: progress.clone(),
-                occurred_at: occurred_at.clone(),
-                client_op_id: Some(op.clone()),
-                with: Vec::new(),
-            };
-            match crate::api::log_progress(item_id.clone(), p).await {
-                Ok(ev) => ids.push(ev.id),
-                Err(e) if crate::offline::network_error(&e) && ctx.offline.is_some() => {
-                    queued.push(offline_log(
-                        &item_id,
-                        &title,
-                        op,
-                        progress,
-                        occurred_at,
-                        ctx.offline,
-                    ));
-                }
-                Err(e) => {
-                    failed = Some(crate::pages::error_text(&e));
+            let queue = !queued.is_empty();
+            match send_log(
+                (&item_id, &title),
+                progress,
+                occurred_at,
+                queue,
+                ctx.offline,
+            )
+            .await
+            {
+                Sent::Logged(ev) => logged.push(ev),
+                Sent::Queued(q) => queued.push(q),
+                Sent::Failed(text) => {
+                    failed = Some(text);
                     break;
                 }
             }
         }
-        if !ids.is_empty() {
-            toast_logged(&ctx, &label, said.clone(), ids, Some(refresh));
+        if !logged.is_empty() {
+            let events: Vec<&ProgressEventDto> = logged.iter().collect();
+            let line = crate::next_step::said_title(&ctx.i18n, verb, said.clone(), &events);
+            let ids = logged.iter().map(|e| e.id.clone()).collect();
+            toast_logged(&ctx, &label, line, ids, Some(refresh));
         }
         // offline the toast says what a mixed range skipped as well (OT2A-11)
         if !queued.is_empty() {
@@ -234,26 +283,6 @@ fn log_episodes(
     });
 }
 
-/// An episode log for the offline queue, with its op id, time (now when not backfilled) and
-/// the queue's stamp for the status it implies (DEC-455).
-fn offline_log(
-    item_id: &str,
-    title: &str,
-    op: String,
-    progress: serde_json::Value,
-    occurred_at: Option<String>,
-    offline: Option<crate::offline::Offline>,
-) -> crate::offline::Queued {
-    let at = occurred_at.or_else(crate::offline::now_rfc3339);
-    let hlc = offline.map(crate::offline::Offline::stamp);
-    crate::offline::Queued::with_op_id(
-        op,
-        crate::offline::log_command(item_id, progress, at, hlc.as_deref()),
-        title,
-        crate::offline::now_ms(),
-    )
-}
-
 /// What a bulk mark needs besides its range: the rows, the item, the contexts and the
 /// episodes' release days.
 #[derive(Clone)]
@@ -263,6 +292,11 @@ struct BulkCtx {
     ctx: StepCtx,
     ui: EpisodeUi,
     released: StoredValue<AirDates>,
+    /// A rewatch run is running: the rows show the run, and its marks are logged now (a
+    /// backfilled date would sort before the run's start and not count in it; DEC-587).
+    in_run: bool,
+    /// The entry is Completed: "Log N again" starts a rewatch run.
+    start_on_again: bool,
 }
 
 /// When the episodes of a bulk mark happened, as the date choice says: now (`None`), spread
@@ -272,6 +306,9 @@ struct BulkCtx {
 /// The message for the person: a bad range, or episodes without a release day up to today.
 fn bulk_dates(eps: &[Ep], b: &BulkCtx) -> Result<Option<Vec<String>>, String> {
     let today = crate::history::today();
+    if b.in_run {
+        return Ok(None);
+    }
     match b.ui.when.get_untracked().as_str() {
         "release" => b
             .released
@@ -293,9 +330,15 @@ fn bulk_dates(eps: &[Ep], b: &BulkCtx) -> Result<Option<Vec<String>>, String> {
 /// cannot be used; the reason shows inline).
 fn log_bulk(eps: Vec<Ep>, skipped: usize, b: &BulkCtx) {
     match bulk_dates(&eps, b) {
-        Ok(dates) => b
-            .info
-            .with_value(|i| log_episodes(eps, dates, skipped, i, b.ctx.clone(), b.ui)),
+        Ok(dates) => {
+            let how = MarkOptions {
+                dates,
+                skipped,
+                start_run: false,
+            };
+            b.info
+                .with_value(|i| log_episodes(eps, how, i, b.ctx.clone(), b.ui));
+        }
         Err(text) => b.ui.error.set(Some(text)),
     }
 }
@@ -397,8 +440,13 @@ pub fn EpisodeList(
     ui: EpisodeUi,
     /// Opens the watched sheet for one episode.
     open_sheet: Callback<SheetTarget>,
+    /// The start event of the rewatch run that is running, if one is (DEC-587): then the
+    /// rows show the run, not every view.
+    run: Option<String>,
+    /// The entry's status: on a Completed one "Log N again" starts a rewatch run.
+    status: String,
 ) -> impl IntoView {
-    let rows = crate::episode_plan::season_rows(&attributes, &progress);
+    let rows = crate::episode_plan::season_rows_in(&attributes, &progress, run.as_deref());
     if rows.is_empty() {
         return view! { <p class="py-4 text-sm text-muted-foreground">{t("episodes-none")}</p> }
             .into_any();
@@ -406,69 +454,22 @@ pub fn EpisodeList(
     let default = next.map_or(rows[0].number, |(s, _)| s);
     let shown = Memo::new(move |_| ui.season.get().unwrap_or(default));
     let rows = StoredValue::new(rows);
-    let info = StoredValue::new(info);
-    let released = StoredValue::new(air_dates(&dates));
-    let has_dates = !dates.is_empty();
-    let today = crate::history::today();
-    let missing = Memo::new(move |_| {
-        let open = rows.with_value(|r| unwatched_in_season(r, shown.get()));
-        released.with_value(|d| missing_release(&open, d, today))
-    });
-    let offered = Memo::new(move |_| has_dates && missing.get() == 0);
-    let ctx = StepCtx::current();
     let b = BulkCtx {
         rows,
-        info,
-        ctx: ctx.clone(),
+        info: StoredValue::new(info),
+        ctx: StepCtx::current(),
         ui,
-        released,
+        released: StoredValue::new(air_dates(&dates)),
+        in_run: run.is_some(),
+        start_on_again: again_starts_run(&status),
     };
-    let b2 = b.clone();
-    let mark_season = move |_| bulk(Bulk::Season(shown.get_untracked()), &b2);
-    let (b3, c3) = (b.clone(), ctx.clone());
-    let mark = Callback::new(move |(target, up_to): (Ep, bool)| {
-        if up_to {
-            bulk(Bulk::UpTo(target), &b3);
-            return;
-        }
-        let answer = info.with_value(|i| stored_answer(&i.item_id));
-        match rows.with_value(|r| plan_single(r, target, answer)) {
-            Plan::Log(eps) => info.with_value(|i| log_episodes(eps, None, 0, i, c3.clone(), ui)),
-            Plan::Ask { .. } => ui.ask.set(Some(target)),
-        }
-    });
-    let answer = Callback::new(move |(all, remember): (bool, bool)| {
-        let Some(target) = ui.ask.get_untracked() else {
-            return;
-        };
-        ui.ask.set(None);
-        let choice = if all { Previous::All } else { Previous::Only };
-        if remember {
-            info.with_value(|i| remember_answer(&i.item_id, choice));
-        }
-        let eps = rows.with_value(|r| plan_single(r, target, choice));
-        if let Plan::Log(eps) = eps {
-            info.with_value(|i| log_episodes(eps, None, 0, i, ctx.clone(), ui));
-        }
-    });
-    let b4 = b.clone();
-    let mark_show = move |_| bulk(Bulk::Show, &b4);
+    let (mark, answer) = single_marks(&b);
     focus_after_log(ui);
-    let verb = info.with_value(|i| i.verb);
+    let verb = b.info.with_value(|i| i.verb);
     view! {
         <section class="grid gap-3 py-2">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-                <SeasonChips rows=rows.get_value() shown=shown ui=ui/>
-                <div class="flex flex-wrap gap-2">
-                    <Button variant=ButtonVariant::Outline size=ButtonSize::Sm disabled=ui.busy attr:data-ep-bulk="season" on:click=mark_season>
-                        {t("episodes-mark-season")}
-                    </Button>
-                    <Button variant=ButtonVariant::Outline size=ButtonSize::Sm disabled=ui.busy attr:data-ep-bulk="show" on:click=mark_show>
-                        {t("episodes-mark-show")}
-                    </Button>
-                </div>
-            </div>
-            <BulkDates ui=ui offered=offered missing=missing has_dates=has_dates/>
+            <BulkBar bulk=b.clone() shown=shown/>
+            <DateChoice bulk=b.clone() shown=shown has_dates=!dates.is_empty()/>
             <AskPrevious ui=ui rows=rows answer=answer/>
             <AskAgain bulk=b/>
             {move || ui.error.get().map(|e| view! { <p role="alert" class="text-sm text-destructive-text">{e}</p> })}
@@ -483,6 +484,96 @@ pub fn EpisodeList(
         </section>
     }
     .into_any()
+}
+
+/// Marks one episode, or (the flag) every open one up to it.
+type MarkOne = Callback<(Ep, bool)>;
+
+/// The marks of one episode: the row's button and "Mark up to here" (`mark`; the flag says
+/// which), and the answer to "Also mark the earlier ones?" (`answer`: all of them, and
+/// whether to remember it for this show).
+fn single_marks(b: &BulkCtx) -> (MarkOne, Callback<(bool, bool)>) {
+    let (rows, info, ui) = (b.rows, b.info, b.ui);
+    let (up_to, ctx) = (b.clone(), b.ctx.clone());
+    let mark = Callback::new(move |(target, all_before): (Ep, bool)| {
+        if all_before {
+            bulk(Bulk::UpTo(target), &up_to);
+            return;
+        }
+        let answer = info.with_value(|i| stored_answer(&i.item_id));
+        match rows.with_value(|r| plan_single(r, target, answer)) {
+            Plan::Log(eps) => {
+                info.with_value(|i| log_episodes(eps, MarkOptions::default(), i, ctx.clone(), ui));
+            }
+            Plan::Ask { .. } => ui.ask.set(Some(target)),
+        }
+    });
+    let ctx = b.ctx.clone();
+    let answer = Callback::new(move |(all, remember): (bool, bool)| {
+        let Some(target) = ui.ask.get_untracked() else {
+            return;
+        };
+        ui.ask.set(None);
+        let choice = if all { Previous::All } else { Previous::Only };
+        if remember {
+            info.with_value(|i| remember_answer(&i.item_id, choice));
+        }
+        let eps = rows.with_value(|r| plan_single(r, target, choice));
+        if let Plan::Log(eps) = eps {
+            info.with_value(|i| log_episodes(eps, MarkOptions::default(), i, ctx.clone(), ui));
+        }
+    });
+    (mark, answer)
+}
+
+/// The head of the tab: the season chips, "Mark season watched" (the season shown) and
+/// "Mark show watched".
+#[component]
+fn BulkBar(bulk: BulkCtx, shown: Memo<u32>) -> impl IntoView {
+    let ui = bulk.ui;
+    let (season, show) = (bulk.clone(), bulk.clone());
+    let mark_season = move |_| self::bulk(Bulk::Season(shown.get_untracked()), &season);
+    let mark_show = move |_| self::bulk(Bulk::Show, &show);
+    view! {
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <SeasonChips rows=bulk.rows.get_value() shown=shown ui=ui/>
+            <div class="flex flex-wrap gap-2">
+                <Button variant=ButtonVariant::Outline size=ButtonSize::Sm disabled=ui.busy attr:data-ep-bulk="season" on:click=mark_season>
+                    {t("episodes-mark-season")}
+                </Button>
+                <Button variant=ButtonVariant::Outline size=ButtonSize::Sm disabled=ui.busy attr:data-ep-bulk="show" on:click=mark_show>
+                    {t("episodes-mark-show")}
+                </Button>
+            </div>
+        </div>
+    }
+}
+
+/// The date choice of the bulk marks ([`BulkDates`]), where it has a say
+/// ([`date_choice_shown`]): not while a rewatch run is running, and not while "Log N again"
+/// is asked on a Completed entry (that answer starts a run, dated now; review OT2E-11).
+#[component]
+fn DateChoice(bulk: BulkCtx, shown: Memo<u32>, has_dates: bool) -> impl IntoView {
+    let BulkCtx {
+        rows,
+        released,
+        ui,
+        in_run,
+        start_on_again,
+        ..
+    } = bulk;
+    let today = crate::history::today();
+    let missing = Memo::new(move |_| {
+        let open = rows.with_value(|r| unwatched_in_season(r, shown.get()));
+        released.with_value(|d| missing_release(&open, d, today))
+    });
+    let offered = Memo::new(move |_| has_dates && missing.get() == 0);
+    let visible = move || date_choice_shown(in_run, start_on_again, ui.again.get().is_some());
+    view! {
+        <Show when=visible>
+            <BulkDates ui=ui offered=offered missing=missing has_dates=has_dates/>
+        </Show>
+    }
 }
 
 /// Once the list is back after "Log N again" (the refetch rebuilt it), the focus goes to the
@@ -586,8 +677,9 @@ fn AskPrevious(
 /// when the question is asked, so it is announced (once: a refetch that rebuilds the list
 /// under a standing question does not pull the focus back to it, review OT2A-4). "Cancel"
 /// gives the focus back to the control that asked; after "Log N again" it goes there once
-/// the list is back. Until the rewatch run exists (ot2e) the answer logs plain extra views,
-/// which is what "Again" on a row does.
+/// the list is back. On a Completed entry the answer starts a rewatch run (the start, then
+/// the episodes, all now; DEC-587); on any other status it logs extra views, which is what
+/// "Again" on a row does, and while a run is running those are the run's.
 #[component]
 fn AskAgain(bulk: BulkCtx) -> impl IntoView {
     let ui = bulk.ui;
@@ -613,19 +705,37 @@ fn AskAgain(bulk: BulkCtx) -> impl IntoView {
         let i = use_i18n();
         let count = eps.len();
         let question = i.t_args(again_ask_key(verb), &[("count", count.into())]);
+        // the run this answer starts is dated now: say so, the date choice is hidden
+        let dated_now = bulk
+            .start_on_again
+            .then(|| i.t_args("episodes-again-now", &[("count", count.into())]));
         let (all, cancel) = (
             i.t_args("episodes-again-all", &[("count", count.into())]),
             i.t("episodes-again-cancel"),
         );
         let bulk = bulk.clone();
-        // the question stays while the date choice cannot be used (its reason shows inline)
-        let log = move |_| match bulk_dates(&eps, &bulk) {
-            Ok(dates) => {
-                ui.focus_back.set(Some(asked.asker()));
-                bulk.info
-                    .with_value(|i| log_episodes(eps.clone(), dates, 0, i, bulk.ctx.clone(), ui));
+        // on a Completed entry the answer starts a rewatch run, which has its own dates:
+        // now, whatever the date choice says (review OT2A-10). Else the question stays while
+        // the date choice cannot be used (its reason shows inline)
+        let log = move |_| {
+            let dates = if bulk.start_on_again {
+                Ok(None)
+            } else {
+                bulk_dates(&eps, &bulk)
+            };
+            match dates {
+                Ok(dates) => {
+                    ui.focus_back.set(Some(asked.asker()));
+                    let how = MarkOptions {
+                        dates,
+                        skipped: 0,
+                        start_run: bulk.start_on_again,
+                    };
+                    bulk.info
+                        .with_value(|i| log_episodes(eps.clone(), how, i, bulk.ctx.clone(), ui));
+                }
+                Err(text) => ui.error.set(Some(text)),
             }
-            Err(text) => ui.error.set(Some(text)),
         };
         let cancel_it = move |_| {
             // first the focus, then the group goes (with the button that had it)
@@ -636,6 +746,7 @@ fn AskAgain(bulk: BulkCtx) -> impl IntoView {
             <div node_ref=first role="group" aria-label=question.clone() data-testid="episodes-again"
                 class="grid gap-3 rounded-md border border-info/40 bg-info-soft p-3">
                 <p class="text-sm font-medium">{question.clone()}</p>
+                {dated_now.map(|d| view! { <p data-testid="episodes-again-now" class="text-sm text-muted-foreground">{d}</p> })}
                 <div class="flex flex-wrap items-center gap-2">
                     <Button size=ButtonSize::Sm disabled=ui.busy on:click=log>
                         {all}

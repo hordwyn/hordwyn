@@ -74,6 +74,10 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
     let times = kind
         .as_ref()
         .map_or(0, |k| app::times(completed, k, &item, &progress));
+    let times_at = kind
+        .as_ref()
+        .and_then(|k| app::pass_at(k, &item, &progress))
+        .map(|t| t.to_rfc3339());
     let first = kind.as_ref().filter(|_| entry.is_none()).map(|k| {
         let step = app::first_step(k, &item, &progress);
         crate::browse::next_step(&step, k.group, &item.kind)
@@ -116,6 +120,7 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
         summary: state.as_ref().map(|x| x.0.clone()),
         next_step: state.map(|x| x.1).or(first),
         times,
+        times_at,
         episodes,
         plays,
     })
@@ -452,6 +457,11 @@ pub async fn log_progress(
     let occurred_at = client_time(s, "occurred_at", b.occurred_at.as_deref())?;
     let op = b.client_op_id.map(|o| parse_id(&o, |u| u)).transpose()?;
     if !b.with.is_empty() {
+        // the session is logged first: not for a view the log would refuse (a date before
+        // the start of a running rewatch run, DEC-591)
+        s.app
+            .check_progress(a, item_id, &progress, occurred_at, op)
+            .await?;
         let me = s.app.user(a.user_id).await?;
         let mut participants = vec![Participant::new(me.self_companion)];
         for c in &b.with {
@@ -606,7 +616,9 @@ pub async fn add_to_list(
     Ok(list_dto(&l))
 }
 
-/// The user's library as rows of the generic format, with the lists each entry is on.
+/// The user's library as rows of the generic format, with the lists each entry is on. The
+/// history is the effective one: an undone log and its undo event are not in the file (the
+/// import refuses the undo type, review OT2E-8, DEC-593).
 async fn export_rows(s: &ApiState, a: Actor) -> ApiResult<Vec<importers::ImportRow>> {
     let lists = s.app.lists(a).await?;
     let mut rows = Vec::new();
@@ -614,7 +626,7 @@ async fn export_rows(s: &ApiState, a: Actor) -> ApiResult<Vec<importers::ImportR
         let item = s.app.catalog_item(e.item_id).await?;
         let history = s
             .app
-            .progress(a, e.item_id)
+            .history(a, e.item_id)
             .await?
             .into_iter()
             .map(|p| importers::row::HistoryEntry {

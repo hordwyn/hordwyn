@@ -579,15 +579,28 @@ impl Importer {
                 // "finished" without details only fits single-step kinds; the status covers it
                 None => continue,
             };
-            self.app
-                .log_progress(
-                    actor,
-                    item_id,
-                    progress,
-                    at,
-                    Some(op_id(actor.user_id.0, &r.format, &row.source_id, h, i)),
-                )
-                .await?;
+            let op = Some(op_id(actor.user_id.0, &r.format, &row.source_id, h, i));
+            let marker = matches!(progress, Progress::Rewatch | Progress::RewatchStop);
+            // a start was logged on a Completed entry (it is refused on any other): give the
+            // start that status back, whatever the file's own status says at the end. A run
+            // that was running when the file was written runs again this way (DEC-593)
+            if matches!(progress, Progress::Rewatch) {
+                self.app
+                    .set_status(actor, item_id, Status::completed(), None)
+                    .await?;
+            }
+            match self
+                .app
+                .import_progress(actor, item_id, progress, at, op)
+                .await
+            {
+                // a marker that fits no run here (the account already has newer views, or the
+                // file is not in order) is left out; the views of the row are still logged
+                Err(AppError::Conflict(_) | AppError::Domain(_)) if marker => {}
+                other => {
+                    other?;
+                }
+            }
         }
         Ok(())
     }

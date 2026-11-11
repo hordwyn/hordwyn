@@ -506,6 +506,143 @@ test("a bulk mark on watched episodes asks to log them again; a mixed range says
   await expect(tab.getByTestId("episodes-again")).toHaveCount(0);
 });
 
+test("a rewatch of a completed show is a run: start it, mark two episodes, stop; a whole one counts", async ({ page }) => {
+  // ot2e (OT-9 model A, DEC-537, DEC-587): In progress while it runs, Completed when it is
+  // stopped or whole; the header, the next step and the episode list count within the run
+  test.setTimeout(240_000);
+  await signUp(page, `rerun${Date.now()}`, "Rerun Tester");
+  const show = await seedOtherShow(page);
+  // the rest of the show (S1 E2, E3, S2 E1, E2), a year ago, then Completed by hand
+  for (const [season, episode] of [[1, 2], [1, 3], [2, 1], [2, 2]]) {
+    const r = await page.request.post(`/api/v1/items/${show}/progress`, {
+      data: { progress: { type: "episode", season, episode }, occurred_at: "2025-03-09T12:00:00Z" },
+    });
+    expect(r.ok()).toBe(true);
+  }
+  expect((await page.request.put(`/api/v1/library/${show}/status`, { data: { status: "completed" } })).ok()).toBe(true);
+  const events = async () => ((await (await page.request.get(`/api/v1/items/${show}/progress`)).json()) as unknown[]).length;
+  expect(await events()).toBe(5);
+  await open(page, `/items/${show}`);
+  const pill = page.getByTestId("ip-status");
+  const fact = page.getByTestId("item-fact-line");
+  const tab = page.getByRole("tabpanel", { name: "Episodes" });
+  const season1 = tab.getByRole("button", { name: /^Season 1/ });
+  const toast = (text: string) => page.locator("[role=status][aria-live] > div").filter({ hasText: text }).first();
+  await expect(pill).toHaveText("Completed");
+  // OT2A-7: the day of the pass (S1 E1 was the last of it, 4 Feb 2026), not of a later view
+  await expect(fact).toHaveText("Watched once, finished on Feb 4, 2026");
+  await expect(season1).toContainText("3/3");
+
+  // start: In progress, the run at zero, the next step is the first episode again
+  const more = bar(page).getByRole("button", { name: "More actions for Lantern Coast" });
+  await more.click();
+  await expect(page.getByRole("menuitem", { name: "Stop the rewatch" })).toHaveCount(0);
+  await page.getByRole("menuitem", { name: "Start a rewatch" }).click();
+  await expect(toast("Rewatch started")).toBeVisible();
+  await expect(pill).toHaveText("In progress");
+  await expect(fact).toHaveText("Rewatch: 0 of 5 episodes. Watched once before.");
+  await expect(season1).toContainText("0/3");
+  await expect(page.getByLabel("Status")).toHaveValue("in_progress");
+  expect(await events()).toBe(6);
+
+  // review OT2E-1: a view dated before the start would be logged and not counted in the
+  // run. The dialog refuses the day and says when the run started; nothing is logged
+  await page.getByRole("button", { name: "Watched with...: Lantern Coast" }).click();
+  const sheet = page.getByRole("dialog", { name: "Watched S1 E1", exact: true });
+  await sheet.getByRole("radio", { name: "Yesterday" }).click();
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(sheet.getByRole("alert").filter({ hasText: "You started again on" })).toContainText(
+    "Pick that day or a later one.",
+  );
+  expect(await events()).toBe(6);
+  // the server refuses it too
+  const early = await page.request.post(`/api/v1/items/${show}/progress`, {
+    data: { progress: { type: "episode", season: 1, episode: 1 }, occurred_at: "2025-03-09T12:00:00Z" },
+  });
+  expect(early.status()).toBe(422);
+  await sheet.getByRole("radio", { name: "Today" }).click();
+  await sheet.getByRole("button", { name: "Cancel" }).click();
+  await expect(sheet).toHaveCount(0);
+  await expect(fact).toHaveText("Rewatch: 0 of 5 episodes. Watched once before.");
+
+  // two episodes: the button, then the row of the list
+  await bar(page).getByRole("button", { name: "Mark S1 E1 watched" }).click();
+  await expect(fact).toHaveText("Rewatch: 1 of 5 episodes. Watched once before.");
+  await expect(bar(page).getByRole("button", { name: "Mark S1 E2 watched" })).toBeVisible();
+  await tab.getByRole("button", { name: "Mark S1 E2 watched" }).click();
+  await expect(fact).toHaveText("Rewatch: 2 of 5 episodes. Watched once before.");
+  await expect(season1).toContainText("2/3");
+  await expect(bar(page)).toContainText("2 of 5 episodes");
+  // a run is logged now: no backfill dates while it runs
+  await expect(tab.getByRole("radio", { name: "Spread over a date range" })).toHaveCount(0);
+  for (const theme of ["light", "dark"] as const) {
+    await page.evaluate((t) => localStorage.setItem("app-theme", t), theme);
+    await open(page, `/items/${show}`);
+    await expect(fact).toHaveText("Rewatch: 2 of 5 episodes. Watched once before.");
+    await expectNoA11yViolations(page, `rewatch running ${theme}`);
+  }
+  // the History tab has the start as a row
+  await page.getByRole("tab", { name: /^History/ }).click();
+  await expect(page.getByRole("tabpanel", { name: /^History/ })).toContainText("Started again from the beginning");
+  await page.getByRole("tab", { name: "Episodes" }).click();
+
+  // stop: Completed again, the views stay, the count is still once. The stop is a marker
+  // in the history (DEC-590), with its own toast and Undo
+  await more.click();
+  await expect(page.getByRole("menuitem", { name: "Start a rewatch" })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "Mark as Completed" })).toHaveCount(0);
+  await page.getByRole("menuitem", { name: "Stop the rewatch" }).click();
+  await expect(toast("Rewatch stopped")).toBeVisible();
+  await expect(pill).toHaveText("Completed");
+  await expect(fact).toHaveText("Watched once; rewatch stopped after 2 of 5 episodes");
+  await expect(season1).toContainText("3/3");
+  expect(await events()).toBe(9);
+  // Undo brings the run back, stopping again ends it
+  await toast("Rewatch stopped").getByRole("button", { name: "Undo" }).click();
+  await expect(fact).toHaveText("Rewatch: 2 of 5 episodes. Watched once before.");
+  await expect(pill).toHaveText("In progress");
+  await more.click();
+  await page.getByRole("menuitem", { name: "Stop the rewatch" }).click();
+  await expect(fact).toHaveText("Watched once; rewatch stopped after 2 of 5 episodes");
+  expect(await events()).toBe(11);
+  // review OT2E-2: a stopped run does not come back when the status is set to In progress
+  // by hand later (a new season), and "Again" on an episode is not the run's
+  await page.getByLabel("Status").selectOption("in_progress");
+  await expect(pill).toHaveText("In progress");
+  await expect(fact).toHaveText("Up to date: 5 of 5 episodes");
+  await expect(season1).toContainText("3/3");
+  await page.getByLabel("Status").selectOption("completed");
+  await expect(pill).toHaveText("Completed");
+  await expect(fact).toHaveText("Watched once; rewatch stopped after 2 of 5 episodes");
+
+  // DEC-538: the bulk question on a Completed show starts a run with its answer, dated now
+  // (OT2A-10). Review OT2E-11: the date choice has no say there, so it is hidden while the
+  // question stands and the question says so; a whole run gives Completed back, counts once
+  await tab.getByRole("radio", { name: "Spread over a date range" }).click();
+  await tab.locator("#ep-from").fill("2024-01-01");
+  await tab.locator("#ep-to").fill("2024-01-31");
+  await tab.getByRole("button", { name: "Mark show watched" }).click();
+  const ask = tab.getByTestId("episodes-again");
+  await expect(ask).toContainText("These 5 episodes are already watched. Log them again as a rewatch?");
+  await expect(ask).toContainText("They are logged with today's date.");
+  await expect(tab.getByRole("radio", { name: "Spread over a date range" })).toHaveCount(0);
+  await expect(tab.locator("#ep-from")).toHaveCount(0);
+  await ask.getByRole("button", { name: "Log 5 again" }).click();
+  await expect(toast("Logged: 5 episodes")).toContainText("Rewatch finished: Lantern Coast");
+  await expect.poll(events).toBe(17);
+  await expect(pill).toHaveText("Completed");
+  await expect(fact).toContainText("Watched 2 times, last on ");
+  await expect(fact).not.toContainText("2024");
+  // Undo takes the episodes and the start back: once, Completed, the stopped run again
+  await toast("Logged: 5 episodes").getByRole("button", { name: "Undo" }).click();
+  // the effective history (the stored one keeps the six events and their undos)
+  const effective = async () => ((await (await page.request.get(`/api/v1/items/${show}/page`)).json()).progress as unknown[]).length;
+  await expect.poll(effective).toBe(9);
+  expect(await events()).toBe(23);
+  await expect(pill).toHaveText("Completed");
+  await expect(fact).toHaveText("Watched once; rewatch stopped after 2 of 5 episodes");
+});
+
 test("offline, a mixed bulk mark still says what it skipped", async ({ page, context }) => {
   // OT2A-11: the queued toast named the title only
   test.setTimeout(150_000);

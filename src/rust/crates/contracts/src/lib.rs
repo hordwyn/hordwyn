@@ -136,6 +136,11 @@ pub struct ProgressEventDto {
     /// Progress as a tagged object, see `NewProgressDto`.
     #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub progress: serde_json::Value,
+    /// The status this event moved the entry to (`in_progress` for the first log of a
+    /// Planned entry and for a rewatch start, `completed` for a finish and for the episode
+    /// that finished a rewatch run); absent when it moved nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
 }
 
 /// Body of `POST /items/{id}/progress`.
@@ -144,6 +149,9 @@ pub struct ProgressEventDto {
 pub struct NewProgressDto {
     /// Progress in the domain's tagged form, e.g. `{"type": "finished"}` or
     /// `{"type": "episode", "season": 1, "episode": 3}`.
+    /// `{"type": "rewatch"}` starts a rewatch run of a show that is Completed (the status
+    /// becomes In progress, see `RewatchDto`); `{"type": "rewatch_stop"}` ends the run that
+    /// is open, unfinished (the status goes back to Completed).
     #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub progress: serde_json::Value,
     /// RFC 3339; defaults to now.
@@ -295,6 +303,11 @@ pub struct ItemPageDto {
     /// for a completed entry.
     #[serde(default)]
     pub times: u32,
+    /// RFC 3339: the day of the pass `times` names (the last finish, the last play, the day
+    /// the last whole pass or rewatch run of a show was done), not the newest view; absent
+    /// when no pass has a day (a completion set by hand).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub times_at: Option<String>,
     /// Release dates of the episodes, for "On release dates" (WP4-7); empty when the item has
     /// none.
     #[serde(default)]

@@ -59,6 +59,9 @@ pub struct ItemInfo {
     pub board_game: bool,
     /// Minutes of the newest play, the prefill of the next one (OT-16).
     pub last_duration: Option<u32>,
+    /// When the rewatch run that is running started (the timestamp of its start event);
+    /// `None` without one. A view cannot be dated before it (review OT2E-1).
+    pub run_start: Option<String>,
     /// Refetch the page.
     pub refresh: Callback<()>,
 }
@@ -75,6 +78,7 @@ pub struct SheetTarget {
 pub fn error_message(i: &I18n, e: &FormError) -> String {
     match e {
         FormError::PageBeyond(n) => i.t_args(e.key(), &[("pages", (*n).into())]),
+        FormError::BeforeRun(start) => i.t_args(e.key(), &[("date", i.date(start).into())]),
         _ => i.t(e.key()),
     }
 }
@@ -407,7 +411,12 @@ fn save_watched(s: WatchedState, info: ItemInfo, ctx: StepCtx, i18n: std::sync::
     };
     let form = s.form();
     let op = uuid::Uuid::now_v7().to_string();
-    let payload = match form.payload(target.progress.clone(), today(), op) {
+    let payload = match form.payload(
+        target.progress.clone(),
+        today(),
+        op,
+        info.run_start.as_deref(),
+    ) {
         Ok(p) => p,
         Err(e) => {
             s.date_error.set(Some(error_message(&i18n, &e)));
@@ -424,6 +433,7 @@ fn save_watched(s: WatchedState, info: ItemInfo, ctx: StepCtx, i18n: std::sync::
             rating,
             note,
             refresh,
+            verb,
             ..
         } = info;
         match api::log_progress(item_id.clone(), payload).await {
@@ -437,7 +447,8 @@ fn save_watched(s: WatchedState, info: ItemInfo, ctx: StepCtx, i18n: std::sync::
                 }
                 ctx.funnel.saved();
                 ctx.funnel.logged();
-                toast_logged(&ctx, &target.label, title, vec![event.id], Some(refresh));
+                let said = crate::next_step::said_title(&ctx.i18n, verb, title, &[&event]);
+                toast_logged(&ctx, &target.label, said, vec![event.id], Some(refresh));
                 s.initial.set(s.form());
                 s.open.set(false);
                 refresh.run(());
@@ -1057,6 +1068,7 @@ pub fn PagesInline(info: ItemInfo, step: NextStepDto, draft: InlineDraft) -> imp
                 title,
                 label,
                 progress,
+                verb: None,
             };
             run_step(ctx.clone(), step, busy, error, Some(draft.done(refresh)));
         }
@@ -1124,6 +1136,7 @@ pub fn PositionInline(info: ItemInfo, step: NextStepDto, draft: InlineDraft) -> 
                 title,
                 label,
                 progress,
+                verb: None,
             };
             run_step(ctx.clone(), step, busy, error, Some(draft.done(refresh)));
         }
@@ -1244,5 +1257,21 @@ mod tests {
         assert_eq!(error_lines(&en, &[]).len(), 0);
         let de = I18n::new("de", BTreeMap::new());
         assert_eq!(error_lines(&de, &errors[1..4]).len(), 1);
+    }
+
+    /// Review OT2E-1: the message names the day the run started.
+    #[test]
+    fn a_day_before_a_rewatch_names_the_day_it_started() {
+        let en = I18n::new("en", BTreeMap::new());
+        let de = I18n::new("de", BTreeMap::new());
+        let e = FormError::BeforeRun("2026-03-09T15:30:00+00:00".into());
+        assert_eq!(
+            error_message(&en, &e),
+            "You started again on Mar 9, 2026. Pick that day or a later one."
+        );
+        assert_eq!(
+            error_message(&de, &e),
+            "Du hast am 09.03.2026 nochmal von vorn begonnen. W\u{e4}hle diesen Tag oder einen sp\u{e4}teren."
+        );
     }
 }

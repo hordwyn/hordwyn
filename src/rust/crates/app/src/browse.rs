@@ -14,7 +14,7 @@ use domain::tag::{MAX_TAGS_PER_ENTRY, normalize_tag, tag_key};
 use domain::user::Actor;
 
 use crate::error::OptionExt;
-use crate::next_step::{NextStep, step_for};
+use crate::next_step::{NextStep, Rewatch, rewatch, step_in};
 use crate::ports::{LibraryCursor, LibraryFilter, LibraryHit, LibrarySort};
 use crate::{App, AppResult};
 
@@ -50,6 +50,8 @@ pub struct LibraryRow {
     pub tags: Vec<String>,
     pub summary: ProgressSummary,
     pub next_step: NextStep,
+    /// The rewatch run to show: running, or stopped with something watched (DEC-587).
+    pub rewatch: Option<Rewatch>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -285,8 +287,11 @@ impl App {
             .map(|(_, t)| t)
             .collect();
         let summary = ProgressSummary::of(events);
-        let next_step = step_for(&kind, &item, &summary);
+        let status = &entry.status.value;
+        let next_step = step_in(status, &kind, &item, events, &summary);
+        let rewatch = rewatch(status, &kind, &item, events);
         Ok(LibraryRow {
+            rewatch,
             tags,
             group: kind.group,
             entry,
@@ -330,9 +335,12 @@ impl App {
         for h in hits {
             let item = items.get(&h.entry.item_id).cloned().found("catalog item")?;
             let kind = self.kind(&item.kind)?;
-            let summary = ProgressSummary::of(events.get(&item.id).map_or(&[][..], Vec::as_slice));
-            let next_step = step_for(&kind, &item, &summary);
+            let events = events.get(&item.id).map_or(&[][..], Vec::as_slice);
+            let summary = ProgressSummary::of(events);
+            let status = &h.entry.status.value;
+            let next_step = step_in(status, &kind, &item, events, &summary);
             out.push(LibraryRow {
+                rewatch: rewatch(status, &kind, &item, events),
                 tags: tags.remove(&h.entry.id).unwrap_or_default(),
                 group: kind.group,
                 entry: h.entry,
@@ -576,6 +584,18 @@ impl LibraryRow {
     /// Share done, 0..=1, for the progress bar on a card.
     #[must_use]
     pub fn fraction(&self) -> Option<f32> {
+        // a running rewatch counts within itself
+        if let Some(Rewatch {
+            done,
+            total: Some(total),
+            running: true,
+            ..
+        }) = self.rewatch
+            && total > 0
+        {
+            #[allow(clippy::cast_precision_loss)]
+            return Some((done as f32 / total as f32).min(1.0));
+        }
         crate::next_step::fraction(&self.next_step, &self.summary, &self.item)
     }
 }

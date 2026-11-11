@@ -550,9 +550,11 @@ impl Integrations {
             when
         );
         let op = Uuid::new_v5(&integration.id, key.as_bytes());
+        // a play is dated by its source: one that lies before the start of a running rewatch
+        // run is stored and not counted in the run, like an imported view (DEC-591 (6))
         let event = self
             .app
-            .log_progress(actor, item.id, progress, Some(at), Some(op))
+            .import_progress(actor, item.id, progress, Some(at), Some(op))
             .await?;
         let label = shown(e, &item.title);
         self.app

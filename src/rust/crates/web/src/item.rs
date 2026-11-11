@@ -26,15 +26,15 @@ use crate::events::{mentions, use_events};
 use crate::history::ActivityRow;
 use crate::i18n::{kind_label, t, use_i18n};
 use crate::item_words::{
-    Facts, Verb, again_count, fact_line, times_text, want_key, with_button_key,
+    Facts, RewatchWords, Verb, again_count, fact_line, times_text, want_key, with_button_key,
 };
 use crate::log_sheet::{
     InlineDraft, ItemInfo, PLAY_OPENER, PagesInline, PlaySheet, PlayState, PositionInline,
     SheetTarget, WITH_OPENER, WatchedSheet, WatchedState,
 };
 use crate::next_step::{
-    LoggedStep, StepCtx, logged_step_label, next_step_label, progress_text, run_first_step,
-    run_step, step_progress, toast_added,
+    LoggedStep, StepCtx, log_run_marker, logged_step_label, next_step_label, progress_text,
+    rewatch_start, rewatch_stop, run_first_step, run_step, step_progress, toast_added,
 };
 use crate::pages::{error_text, go, needs_sign_in};
 use crate::widgets::{Cover, RatingInput, TagBadges, TagEditor};
@@ -291,6 +291,7 @@ fn open_asked_sheet(page: &ItemPageDto, model: &str, ui: &ItemUi) {
 
 fn info_of(page: &ItemPageDto, kind: Option<&KindDto>, refresh: Callback<()>) -> ItemInfo {
     ItemInfo {
+        run_start: crate::item_words::run_start(page),
         verb: kind.and_then(|k| Verb::of_group(&k.group)),
         board_game: page.item.kind == "board_game",
         // the newest play comes first
@@ -353,6 +354,7 @@ fn ItemView(
             verb: info.verb,
             model: &model,
             times: page.times,
+            times_at: page.times_at.as_deref(),
             completed: e.status == "completed",
             added_at: &e.added_at,
             summary: &page.summary.clone().unwrap_or_default(),
@@ -489,8 +491,48 @@ fn set_status(
     });
 }
 
-/// The overflow menu of the action bar: every other status of the kind, and "Remove from
-/// library" (toast with Undo; history stays).
+/// What the two rewatch items of the overflow menu share.
+#[derive(Clone)]
+struct RunMenu {
+    ctx: StepCtx,
+    /// The item's id and title.
+    item: (String, String),
+    words: RewatchWords,
+    error: RwSignal<Option<String>>,
+    refresh: Callback<()>,
+}
+
+impl RunMenu {
+    /// "Start a rewatch" (`start`) or "Stop the rewatch": the marker is logged, and its
+    /// toast has Undo ([`log_run_marker`]).
+    fn item(&self, start: bool) -> MenuItem {
+        let (label, marker, said) = if start {
+            (self.words.start, rewatch_start(), self.words.started)
+        } else {
+            (self.words.stop, rewatch_stop(), self.words.stopped_toast)
+        };
+        let said = self.ctx.i18n.t(said);
+        let me = self.clone();
+        MenuItem {
+            label: self.ctx.i18n.t(label),
+            on_select: Callback::new(move |()| {
+                log_run_marker(
+                    me.ctx.clone(),
+                    me.item.clone(),
+                    (marker.clone(), said.clone()),
+                    me.error,
+                    Some(me.refresh),
+                );
+            }),
+            destructive: false,
+        }
+    }
+}
+
+/// The overflow menu of the action bar: "Start a rewatch" for a Completed show, every other
+/// status of the kind, and "Remove from library" (toast with Undo; history stays). While a
+/// rewatch runs, Completed reads "Stop the rewatch" and logs the stop marker instead of the
+/// plain status write: the run ends there for good (ot2e, DEC-587, DEC-590).
 fn overflow(
     page: &ItemPageDto,
     kind: Option<&KindDto>,
@@ -500,20 +542,34 @@ fn overflow(
     let i18n = use_i18n();
     let ctx = StepCtx::current();
     let refresh = ui.refresh;
+    let error = RwSignal::new(None::<String>);
+    let (id, title) = (
+        page.item.id.clone(),
+        crate::i18n::title_text(&page.item.title),
+    );
+    let run = RunMenu {
+        ctx: ctx.clone(),
+        item: (id.clone(), title.clone()),
+        words: RewatchWords::of(kind.and_then(|k| Verb::of_group(&k.group))),
+        error,
+        refresh,
+    };
+    let running = page
+        .summary
+        .as_ref()
+        .and_then(|s| s.rewatch.as_ref())
+        .is_some_and(|r| r.running);
     let mut items: Vec<MenuItem> = kind
         .map(|k| k.statuses.clone())
         .unwrap_or_default()
         .into_iter()
         .filter(|s| *s != entry.status)
         .map(|s| {
+            if running && s == "completed" {
+                return run.item(false);
+            }
             let word = i18n.t(&format!("status-{s}"));
-            let (ctx, item) = (
-                ctx.clone(),
-                (
-                    page.item.id.clone(),
-                    crate::i18n::title_text(&page.item.title),
-                ),
-            );
+            let (ctx, item) = (ctx.clone(), (id.clone(), title.clone()));
             MenuItem {
                 label: i18n.t_args("library-mark", &[("status", word.into())]),
                 on_select: Callback::new(move |()| {
@@ -523,11 +579,10 @@ fn overflow(
             }
         })
         .collect();
-    let error = RwSignal::new(None::<String>);
-    let (id, title) = (
-        page.item.id.clone(),
-        crate::i18n::title_text(&page.item.title),
-    );
+    // a Completed show can be gone through again as a run: In progress while it runs
+    if entry.status == "completed" && kind.is_some_and(|k| k.progress_model == "episodic") {
+        items.insert(0, run.item(true));
+    }
     items.push(MenuItem {
         label: i18n.t("item-remove"),
         on_select: Callback::new(move |()| {
@@ -580,6 +635,7 @@ fn AddBar(page: ItemPageDto, info: ItemInfo, ui: ItemUi) -> impl IntoView {
                     title: info.title.clone(),
                     label: logged_step_label(&i18n, &step),
                     progress,
+                    verb: info.verb,
                 },
                 next_step_label(&i18n, &step),
             );
@@ -726,6 +782,7 @@ fn StepButtons(step: NextStepDto, info: ItemInfo, ui: ItemUi) -> impl IntoView {
         title: info.title.clone(),
         label: done.clone(),
         progress: progress.clone(),
+        verb: info.verb,
     };
     let ctx = StepCtx::current();
     let refresh = info.refresh;
@@ -924,9 +981,14 @@ fn ItemTabs(page: ItemPageDto, kind: Option<KindDto>, info: ItemInfo, ui: ItemUi
             </TabsList>
             {has_eps.then(|| {
                 let (info, attributes, progress, dates) = (info.clone(), page.item.attributes.clone(), page.progress.clone(), page.episodes.clone());
+                // while a rewatch runs the list shows the run; a Completed entry starts one
+                // with the answer "Log N again" (DEC-587)
+                let run = page.summary.as_ref().and_then(|s| s.rewatch.as_ref()).filter(|r| r.running).map(|r| r.start.clone());
+                let status = page.entry.as_ref().map(|e| e.status.clone()).unwrap_or_default();
                 view! {
                     <TabsContent value="episodes">
-                        <EpisodeList info=info.clone() attributes=attributes.clone() progress=progress.clone() dates=dates.clone() next=next ui=ui.episodes open_sheet=open_sheet/>
+                        <EpisodeList info=info.clone() attributes=attributes.clone() progress=progress.clone() dates=dates.clone() next=next ui=ui.episodes open_sheet=open_sheet
+                            run=run.clone() status=status.clone()/>
                     </TabsContent>
                 }
             })}

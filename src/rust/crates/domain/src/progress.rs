@@ -30,6 +30,13 @@ pub enum Progress {
     Position { seconds: u64 },
     /// `Sessions`: a session was logged.
     Session { session_id: SessionId },
+    /// `Episodic`: a rewatch run starts here (DEC-587). A marker, not a view: it counts no
+    /// episode. Logged on a Completed entry it moves the status to In progress.
+    Rewatch,
+    /// `Episodic`: the open rewatch run ends here, unfinished (DEC-590). A marker like the
+    /// start: it counts no episode. Logged while the run is running it moves the status
+    /// back to Completed; views logged after it are not the run's.
+    RewatchStop,
     /// Compensating event: takes back `event_id` (any model). Written only by the undo
     /// use-case, never accepted from clients as progress.
     Undo { event_id: EventId },
@@ -41,7 +48,9 @@ impl Progress {
     pub const fn model(&self) -> Option<ProgressModel> {
         match self {
             Self::Finished => Some(ProgressModel::Single),
-            Self::Episode { .. } => Some(ProgressModel::Episodic),
+            Self::Episode { .. } | Self::Rewatch | Self::RewatchStop => {
+                Some(ProgressModel::Episodic)
+            }
             Self::Paged { .. } => Some(ProgressModel::Paged),
             Self::Position { .. } => Some(ProgressModel::Timed),
             Self::Session { .. } => Some(ProgressModel::Sessions),
@@ -89,6 +98,43 @@ pub struct StatusChange {
     pub from: Status,
     pub to: Status,
     pub stamp: Hlc,
+    /// The stamp of the write this one replaced (the write that set `from`); absent on
+    /// events stored before it was recorded. Undo restores `from` with a new stamp and
+    /// stores that move on the undo event, with the replaced write here: so the event that
+    /// wrote `from` can still be undone afterwards (a whole rewatch run taken back, DEC-588).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_stamp: Option<Hlc>,
+}
+
+impl StatusChange {
+    /// Does an entry whose status carries `stamp` still carry the write stamped `write`:
+    /// that very write, or `from` of a later event as an undo of that event restored it
+    /// (through any number of such undos)? `history` is the item's stored events, undo
+    /// events included.
+    #[must_use]
+    pub fn carried(stamp: Hlc, write: Hlc, history: &[ProgressEvent]) -> bool {
+        let mut at = stamp;
+        // every step goes to an older write: it ends
+        for _ in 0..=history.len() {
+            if at == write {
+                return true;
+            }
+            // the undo that wrote `at` restored the write its target had replaced
+            let restored = history.iter().find_map(|u| {
+                let Progress::Undo { event_id } = u.progress else {
+                    return None;
+                };
+                u.status_change.as_ref().filter(|c| c.stamp == at)?;
+                let target = history.iter().find(|e| e.id == event_id)?;
+                target.status_change.as_ref()?.from_stamp
+            });
+            match restored {
+                Some(older) => at = older,
+                None => return false,
+            }
+        }
+        false
+    }
 }
 
 /// One immutable progress event.
@@ -198,7 +244,7 @@ impl ProgressSummary {
                 self.position = Some(seconds);
             }
             Progress::Session { .. } => self.sessions += 1,
-            Progress::Undo { .. } => {}
+            Progress::Rewatch | Progress::RewatchStop | Progress::Undo { .. } => {}
         }
     }
 
@@ -269,6 +315,84 @@ mod tests {
             chapter: None,
             volume: None,
         }
+    }
+
+    fn stamp(n: u64) -> Hlc {
+        Hlc::new(n, 0, 0)
+    }
+
+    /// An event `n` that wrote the status with stamp `at` over the write stamped `over`.
+    fn wrote(n: u128, progress: Progress, at: u64, over: Option<u64>) -> ProgressEvent {
+        let mut e = ev(n, 1, progress);
+        e.status_change = Some(StatusChange {
+            from: Status::completed(),
+            to: Status::in_progress(),
+            stamp: stamp(at),
+            from_stamp: over.map(stamp),
+        });
+        e
+    }
+
+    fn undo_of(n: u128) -> Progress {
+        Progress::Undo {
+            event_id: EventId(uuid::Uuid::from_u128(n)),
+        }
+    }
+
+    /// The history of the tests of `carried`: event 2 replaced the write 10 with 20, its
+    /// undo (3) wrote 30; event 4 replaced 30 with 40, its undo (5) wrote 50.
+    fn undone_twice(recorded: bool) -> Vec<ProgressEvent> {
+        vec![
+            wrote(1, Progress::Rewatch, 10, Some(5)),
+            wrote(2, page(1), 20, Some(10)),
+            wrote(3, undo_of(2), 30, Some(20)),
+            wrote(4, page(2), 40, recorded.then_some(30)),
+            wrote(5, undo_of(4), 50, Some(40)),
+        ]
+    }
+
+    #[test]
+    fn an_entry_carries_the_very_write() {
+        assert!(StatusChange::carried(stamp(10), stamp(10), &[]));
+        assert!(StatusChange::carried(
+            stamp(10),
+            stamp(10),
+            &undone_twice(true)
+        ));
+    }
+
+    #[test]
+    fn a_write_restored_through_two_undos_is_carried() {
+        let history = undone_twice(true);
+        // the undo of 4 restored 30, which the undo of 2 wrote when it restored 10
+        assert!(StatusChange::carried(stamp(50), stamp(30), &history));
+        assert!(StatusChange::carried(stamp(50), stamp(10), &history));
+        // one undo only
+        assert!(StatusChange::carried(stamp(30), stamp(10), &history));
+        // never a newer write, and not the one an undo took back
+        assert!(!StatusChange::carried(stamp(30), stamp(50), &history));
+        assert!(!StatusChange::carried(stamp(50), stamp(20), &history));
+        assert!(!StatusChange::carried(stamp(50), stamp(5), &history));
+    }
+
+    /// An event stored before `from_stamp` was recorded ends the chain: the old rule holds
+    /// (exactly that write).
+    #[test]
+    fn an_event_without_the_replaced_stamp_ends_the_chain() {
+        let history = undone_twice(false);
+        assert!(!StatusChange::carried(stamp(50), stamp(30), &history));
+        assert!(!StatusChange::carried(stamp(50), stamp(10), &history));
+        assert!(StatusChange::carried(stamp(50), stamp(50), &history));
+        assert!(StatusChange::carried(stamp(30), stamp(10), &history));
+    }
+
+    /// A status chosen by hand has a stamp no undo wrote: nothing older is carried.
+    #[test]
+    fn a_stamp_no_undo_wrote_carries_nothing_older() {
+        let history = undone_twice(true);
+        assert!(!StatusChange::carried(stamp(99), stamp(10), &history));
+        assert!(!StatusChange::carried(stamp(40), stamp(10), &history));
+        assert!(!StatusChange::carried(stamp(20), stamp(10), &history));
     }
 
     #[test]

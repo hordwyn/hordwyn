@@ -1,10 +1,13 @@
 //! The computed next step of a library entry (design.md 3.4): what the primary button on a
 //! card, on Home and on the item page does.
 
+use domain::Timestamp;
 use domain::catalog::CatalogItem;
-use domain::kind::{KindDescriptor, ProgressModel};
+use domain::ids::EventId;
+use domain::kind::{KindDescriptor, ProgressModel, Status};
 use domain::library::LibraryEntry;
-use domain::progress::{ProgressEvent, ProgressSummary};
+use domain::progress::{Progress, ProgressEvent, ProgressSummary, effective};
+use domain::rewatch::{Phase, Run, runs};
 use serde_json::Value;
 
 /// What logging progress means next for an entry. Labels are the UI's business (Fluent keys
@@ -97,16 +100,134 @@ fn next_episode(item: &CatalogItem, summary: &ProgressSummary) -> NextStep {
 }
 
 /// The next step of an entry (an item of `kind`) given its progress history (undo events
-/// included; they are applied here). The entry's status does not decide it (OT2A-1): the
-/// history does.
+/// included; they are applied here). The history decides it, not the status (OT2A-1), with
+/// one exception: while a rewatch run is running (the entry is In progress, DEC-587) the
+/// step counts within the run.
 #[must_use]
 pub fn next_step(
-    _entry: &LibraryEntry,
+    entry: &LibraryEntry,
     kind: &KindDescriptor,
     item: &CatalogItem,
     progress: &[ProgressEvent],
 ) -> NextStep {
-    step_for(kind, item, &ProgressSummary::of(progress))
+    let summary = ProgressSummary::of(progress);
+    step_in(&entry.status.value, kind, item, progress, &summary)
+}
+
+/// [`next_step`] for a caller that holds the summary already.
+pub(crate) fn step_in(
+    status: &Status,
+    kind: &KindDescriptor,
+    item: &CatalogItem,
+    progress: &[ProgressEvent],
+    summary: &ProgressSummary,
+) -> NextStep {
+    if kind.progress_model == ProgressModel::Episodic
+        && let Some(run) = Run::newest(progress)
+        && running(&run, status, item)
+    {
+        return next_in_run(item, &run);
+    }
+    step_for(kind, item, summary)
+}
+
+/// Every known regular episode `(season, episode)`, in order.
+pub(crate) fn known_episodes(item: &CatalogItem) -> Vec<(u32, u32)> {
+    seasons(item)
+        .into_iter()
+        .flat_map(|(season, count)| (1..=count).map(move |episode| (season, episode)))
+        .collect()
+}
+
+/// Is the run over: its last episode gave Completed back, or (two logs at once, a status
+/// set by hand in between) it covers every known episode without an event saying so.
+fn over(run: &Run<'_>, item: &CatalogItem) -> bool {
+    run.finished.is_some() || run.covers(&known_episodes(item))
+}
+
+pub(crate) fn running(run: &Run<'_>, status: &Status, item: &CatalogItem) -> bool {
+    run.phase(status) == Some(Phase::Running) && !over(run, item)
+}
+
+/// The next episode of a running run: the one after the highest it has, as in a first run;
+/// when that was the last known one, the first episode the run skipped.
+fn next_in_run(item: &CatalogItem, run: &Run<'_>) -> NextStep {
+    let within = ProgressSummary {
+        episodes: run.episodes.clone(),
+        ..ProgressSummary::default()
+    };
+    match next_episode(item, &within) {
+        NextStep::CaughtUp => known_episodes(item)
+            .into_iter()
+            .find(|ep| !run.episodes.contains(ep))
+            .map_or(NextStep::CaughtUp, |(season, episode)| NextStep::Episode {
+                season,
+                episode,
+            }),
+        step => step,
+    }
+}
+
+/// The rewatch run of an entry as the pages show it (DEC-537 model A, DEC-587): running
+/// ("Rewatch: 5 of 24 episodes") or stopped with something watched ("rewatch stopped after 5
+/// of 24 episodes"). A finished run is not shown; [`times`] counts it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rewatch {
+    /// The event that started the run; the history after it is the run's.
+    pub start: EventId,
+    /// Distinct regular episodes watched in the run.
+    pub done: u32,
+    /// Regular episodes the item knows.
+    pub total: Option<u32>,
+    /// The entry is In progress; `false`: stopped (Completed again).
+    pub running: bool,
+}
+
+/// The run to show for an entry with `status`; `None` for a kind without episodes, without
+/// a run, for a finished run, a stopped one without an episode, a stopped one once the
+/// entry is no longer Completed (a stop marker ended it for good, DEC-590), and while the
+/// entry is neither In progress nor Completed.
+#[must_use]
+pub fn rewatch(
+    status: &Status,
+    kind: &KindDescriptor,
+    item: &CatalogItem,
+    progress: &[ProgressEvent],
+) -> Option<Rewatch> {
+    if kind.progress_model != ProgressModel::Episodic {
+        return None;
+    }
+    let run = Run::newest(progress)?;
+    if over(&run, item) {
+        return None;
+    }
+    let running = match run.phase(status)? {
+        Phase::Running => true,
+        Phase::Stopped if !run.episodes.is_empty() && status.as_str() == Status::COMPLETED => false,
+        Phase::Stopped | Phase::Finished => return None,
+    };
+    Some(Rewatch {
+        start: run.start.id,
+        done: u32::try_from(run.episodes.len()).unwrap_or(u32::MAX),
+        total: episode_total(item),
+        running,
+    })
+}
+
+/// Does logging `event` complete the rewatch run of an entry that is In progress (`history`
+/// is what is stored, without `event`)? Then the event gives Completed back.
+#[must_use]
+pub(crate) fn completes_run(
+    item: &CatalogItem,
+    history: &[ProgressEvent],
+    event: &ProgressEvent,
+) -> bool {
+    if Run::newest(history).is_none_or(|run| over(&run, item)) {
+        return false;
+    }
+    let mut with: Vec<ProgressEvent> = history.to_vec();
+    with.push(event.clone());
+    Run::newest(&with).is_some_and(|run| over(&run, item))
 }
 
 /// The step of an item that is not in the viewer's library (OT-4): what its first log would
@@ -135,7 +256,7 @@ pub fn times(
 ) -> u32 {
     let counted = match kind.progress_model {
         ProgressModel::Sessions => return ProgressSummary::of(progress).sessions,
-        ProgressModel::Episodic => passes(item, progress),
+        ProgressModel::Episodic => passes(item, progress).max(run_passes(item, progress)),
         ProgressModel::Single | ProgressModel::Paged | ProgressModel::Timed => {
             ProgressSummary::of(progress).finished
         }
@@ -143,20 +264,94 @@ pub fn times(
     counted.max(u32::from(completed))
 }
 
-/// Whole passes over the known regular episodes: how often the least watched one was watched.
-fn passes(item: &CatalogItem, progress: &[ProgressEvent]) -> u32 {
-    let mut views = std::collections::BTreeMap::<(u32, u32), u32>::new();
-    for e in domain::progress::effective(progress) {
-        if let domain::progress::Progress::Episode { season, episode } = e.progress {
-            *views.entry((season, episode)).or_default() += 1;
+/// What the rewatch runs prove (DEC-587): a run starts on a Completed entry, so the item was
+/// gone through once before the first one, and every run that is over is one more time. The
+/// views alone do not say that for a show completed by hand with part of it logged.
+fn run_passes(item: &CatalogItem, progress: &[ProgressEvent]) -> u32 {
+    let all = runs(progress);
+    if all.is_empty() {
+        return 0;
+    }
+    let done = all.iter().filter(|r| over(r, item)).count();
+    u32::try_from(done).unwrap_or(u32::MAX).saturating_add(1)
+}
+
+/// The day of the pass that [`times`] names (review OT2A-7: not the newest view): the last
+/// finish for the single, paged and timed models, the last play for sessions; for an
+/// episodic item the day its last whole pass was done (the day the last of its episodes got
+/// that view), or the day its last rewatch run finished when that is later. `None` when no
+/// pass has a day (a completion set by hand).
+#[must_use]
+pub fn pass_at(
+    kind: &KindDescriptor,
+    item: &CatalogItem,
+    progress: &[ProgressEvent],
+) -> Option<Timestamp> {
+    let live = effective(progress);
+    let last = |wanted: fn(&Progress) -> bool| {
+        live.iter()
+            .filter(|e| wanted(&e.progress))
+            .map(|e| e.occurred_at)
+            .max()
+    };
+    match kind.progress_model {
+        ProgressModel::Sessions => last(|p| matches!(p, Progress::Session { .. })),
+        ProgressModel::Single | ProgressModel::Paged | ProgressModel::Timed => {
+            last(|p| matches!(p, Progress::Finished))
+        }
+        ProgressModel::Episodic => {
+            let run_end = runs(progress)
+                .iter()
+                .filter_map(|r| r.finished.map(|e| e.occurred_at))
+                .max();
+            whole_pass_at(item, &live).max(run_end)
         }
     }
-    seasons(item)
-        .into_iter()
-        .flat_map(|(season, count)| (1..=count).map(move |episode| (season, episode)))
-        .map(|ep| views.get(&ep).copied().unwrap_or(0))
+}
+
+/// Views of each episode, by when they happened.
+fn episode_views(
+    live: &[&ProgressEvent],
+) -> std::collections::BTreeMap<(u32, u32), Vec<Timestamp>> {
+    let mut views = std::collections::BTreeMap::<(u32, u32), Vec<Timestamp>>::new();
+    for e in live {
+        if let Progress::Episode { season, episode } = e.progress {
+            views
+                .entry((season, episode))
+                .or_default()
+                .push(e.occurred_at);
+        }
+    }
+    for at in views.values_mut() {
+        at.sort_unstable();
+    }
+    views
+}
+
+/// When the last whole pass over the known regular episodes was done.
+fn whole_pass_at(item: &CatalogItem, live: &[&ProgressEvent]) -> Option<Timestamp> {
+    let views = episode_views(live);
+    let known = known_episodes(item);
+    let passes = known
+        .iter()
+        .map(|ep| views.get(ep).map_or(0, Vec::len))
         .min()
-        .unwrap_or(0)
+        .filter(|n| *n > 0)?;
+    known
+        .iter()
+        .filter_map(|ep| views.get(ep)?.get(passes - 1).copied())
+        .max()
+}
+
+/// Whole passes over the known regular episodes: how often the least watched one was watched.
+fn passes(item: &CatalogItem, progress: &[ProgressEvent]) -> u32 {
+    let views = episode_views(&effective(progress));
+    let least = known_episodes(item)
+        .iter()
+        .map(|ep| views.get(ep).map_or(0, Vec::len))
+        .min()
+        .unwrap_or(0);
+    u32::try_from(least).unwrap_or(u32::MAX)
 }
 
 pub(crate) fn step_for(

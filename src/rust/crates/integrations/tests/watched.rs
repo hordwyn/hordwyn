@@ -150,3 +150,49 @@ async fn retries_without_a_time_are_one_play() {
     assert_ne!(i.receive(&token, &with_id("p2")).await.unwrap(), p1);
     assert_eq!(t.app.progress(actor, first.item_id).await.unwrap().len(), 3);
 }
+
+/// Review ot2e, OT2E-1 (DEC-591 (6)): while a rewatch run is running a person cannot date a
+/// view before its start, but a media server dates its plays itself. A late play is
+/// recorded (not counted in the run) instead of answered with an error; one dated now is
+/// the run's.
+#[tokio::test]
+async fn a_late_play_during_a_rewatch_run_is_recorded() {
+    let (t, i, actor, token) = env().await;
+    let ep = |n: u32, at: DateTime<Utc>| {
+        event(serde_json::json!({
+            "kind": "episode", "title": "Good News About Hell",
+            "series": {"title": "Severance", "year": 2022, "ids": {"tmdb": "95396"}},
+            "season": 1, "episode": n, "watched_at": at.to_rfc3339(),
+        }))
+    };
+    let now = t.clock.now_for_tests();
+    let first = i
+        .receive(&token, &ep(1, now - chrono::Duration::days(30)))
+        .await
+        .unwrap();
+    let show = first.item_id;
+    let mut item = t.app.catalog_item(show).await.unwrap();
+    item.attributes = serde_json::json!({"seasons": [{"number": 1, "episode_count": 2}]});
+    t.store.state().catalog.insert(item.id, item);
+    t.app
+        .set_status(actor, show, domain::kind::Status::completed(), None)
+        .await
+        .unwrap();
+    t.app
+        .log_progress(actor, show, Progress::Rewatch, None, None)
+        .await
+        .unwrap();
+    // watched last night, delivered now
+    i.receive(&token, &ep(1, now - chrono::Duration::hours(12)))
+        .await
+        .unwrap();
+    let row = t.app.library_row(actor, show).await.unwrap();
+    assert_eq!(row.rewatch.as_ref().map(|r| r.done), Some(0));
+    assert_eq!(row.summary.episode_views, 2);
+    t.clock.advance(chrono::Duration::minutes(5));
+    i.receive(&token, &ep(2, t.clock.now_for_tests()))
+        .await
+        .unwrap();
+    let row = t.app.library_row(actor, show).await.unwrap();
+    assert_eq!(row.rewatch.as_ref().map(|r| r.done), Some(1));
+}

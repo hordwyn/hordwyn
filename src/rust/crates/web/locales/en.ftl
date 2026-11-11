@@ -219,6 +219,45 @@ item-times-on = { $times }, on { $date }
 item-times-last-on = { $times }, last on { $date }
 item-times-finished-on = { $times }, finished on { $date }
 item-fact-up-to-date = Up to date: { $progress }
+item-rewatch-start = Start a rewatch
+item-rewatch-start-listen = Start listening again
+item-rewatch-stop = Stop the rewatch
+item-rewatch-stop-listen = Stop this listen-through
+item-rewatch-started = Rewatch started
+item-rewatch-started-listen = Started listening again
+item-rewatch-stopped-toast = Rewatch stopped
+item-rewatch-stopped-toast-listen = Stopped listening again
+item-rewatch-finished = Rewatch finished: { $title }
+item-rewatch-finished-listen = Finished listening again: { $title }
+item-rewatch-before = { $count ->
+    [one] Watched once before.
+   *[other] Watched { $count } times before.
+}
+item-rewatch-before-listen = { $count ->
+    [one] Listened once before.
+   *[other] Listened { $count } times before.
+}
+item-rewatch-line = Rewatch: { $done } of { $total } episodes. { $before }
+item-rewatch-line-listen = Listening again: { $done } of { $total } episodes. { $before }
+item-rewatch-line-open = { $done ->
+    [one] Rewatch: one episode. { $before }
+   *[other] Rewatch: { $done } episodes. { $before }
+}
+item-rewatch-line-open-listen = { $done ->
+    [one] Listening again: one episode. { $before }
+   *[other] Listening again: { $done } episodes. { $before }
+}
+item-rewatch-stopped = { $times }; rewatch stopped after { $done } of { $total } episodes
+item-rewatch-stopped-listen = { $times }; stopped listening again after { $done } of { $total } episodes
+item-rewatch-stopped-open = { $done ->
+    [one] { $times }; rewatch stopped after one episode
+   *[other] { $times }; rewatch stopped after { $done } episodes
+}
+item-rewatch-stopped-open-listen = { $done ->
+    [one] { $times }; stopped listening again after one episode
+   *[other] { $times }; stopped listening again after { $done } episodes
+}
+
 item-rating = Your rating
 item-rate = Rate { $stars } of 5
 item-history = History
@@ -335,6 +374,7 @@ log-of-time = of { $time }
 log-plus-minutes = +{ $count } min
 log-error-date-missing = Pick a date.
 log-error-date-future = The date is in the future.
+log-error-date-before-run = You started again on { $date }. Pick that day or a later one.
 log-error-score = Scores are numbers, for example 42 or 12.5.
 log-error-duration = Enter the duration as hours:minutes (1:30) or as minutes (90).
 log-error-page = Enter a page number from 1 on.
@@ -373,6 +413,10 @@ episodes-again-ask = { $count ->
 episodes-again-ask-listen = { $count ->
     [one] This episode is already listened to. Log it again?
    *[other] These { $count } episodes are already listened to. Log them again?
+}
+episodes-again-now = { $count ->
+    [one] It is logged with today's date.
+   *[other] They are logged with today's date.
 }
 episodes-again-all = { $count ->
     [one] Log it again
@@ -601,6 +645,8 @@ progress-chapter = Chapter { $chapter }
 progress-volume = Volume { $volume }
 progress-position = At { $time }
 progress-session = Session logged
+progress-rewatch = Started again from the beginning
+progress-rewatch-stop = Stopped before the end
 notify-mark-read-named = Mark as read: { $title }
 notify-test-named = Send test to { $name }
 notify-delete-named = Delete { $name }

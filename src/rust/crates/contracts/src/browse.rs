@@ -168,8 +168,31 @@ pub struct ProgressSummaryDto {
     /// RFC 3339.
     pub first_at: Option<String>,
     pub last_at: Option<String>,
-    /// 0..=1 for a progress bar, when it can be derived.
+    /// 0..=1 for a progress bar, when it can be derived; within the run while a rewatch is
+    /// running.
     pub fraction: Option<f32>,
+    /// The rewatch run of a show, while it is running or stopped with something watched
+    /// (model A, DEC-537, DEC-587); `episodes_total` is its total.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewatch: Option<RewatchDto>,
+}
+
+/// A rewatch run: an explicit second (third, ...) pass over a show. It starts with a
+/// `{"type": "rewatch"}` progress event on a Completed entry (the status becomes In
+/// progress), ends with the episode that makes it whole or with a `{"type": "rewatch_stop"}`
+/// event; a status set to Completed by hand shows it as stopped until the entry is In
+/// progress again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct RewatchDto {
+    /// Id of the event that started the run; the events after it in the history are the
+    /// run's.
+    pub start: String,
+    /// Distinct regular episodes watched in the run.
+    pub done: u32,
+    /// `true` while the run is running (the entry is In progress); `false`: stopped, shown
+    /// while the entry is Completed.
+    pub running: bool,
 }
 
 /// A library card or table row.

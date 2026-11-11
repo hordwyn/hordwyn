@@ -219,6 +219,45 @@ item-times-on = { $times }, am { $date }
 item-times-last-on = { $times }, zuletzt am { $date }
 item-times-finished-on = { $times }, beendet am { $date }
 item-fact-up-to-date = Auf dem neuesten Stand: { $progress }
+item-rewatch-start = Nochmal von vorn schauen
+item-rewatch-start-listen = Nochmal von vorn hören
+item-rewatch-stop = Wiederholung abbrechen
+item-rewatch-stop-listen = Erneutes Hören abbrechen
+item-rewatch-started = Wiederholung begonnen
+item-rewatch-started-listen = Erneutes Hören begonnen
+item-rewatch-stopped-toast = Wiederholung abgebrochen
+item-rewatch-stopped-toast-listen = Erneutes Hören abgebrochen
+item-rewatch-finished = Wiederholung beendet: { $title }
+item-rewatch-finished-listen = Erneutes Hören beendet: { $title }
+item-rewatch-before = { $count ->
+    [one] Davor einmal gesehen.
+   *[other] Davor { $count }-mal gesehen.
+}
+item-rewatch-before-listen = { $count ->
+    [one] Davor einmal gehört.
+   *[other] Davor { $count }-mal gehört.
+}
+item-rewatch-line = Wiederholung: { $done } von { $total } Folgen. { $before }
+item-rewatch-line-listen = Erneutes Hören: { $done } von { $total } Folgen. { $before }
+item-rewatch-line-open = { $done ->
+    [one] Wiederholung: eine Folge. { $before }
+   *[other] Wiederholung: { $done } Folgen. { $before }
+}
+item-rewatch-line-open-listen = { $done ->
+    [one] Erneutes Hören: eine Folge. { $before }
+   *[other] Erneutes Hören: { $done } Folgen. { $before }
+}
+item-rewatch-stopped = { $times }; Wiederholung nach { $done } von { $total } Folgen abgebrochen
+item-rewatch-stopped-listen = { $times }; erneutes Hören nach { $done } von { $total } Folgen abgebrochen
+item-rewatch-stopped-open = { $done ->
+    [one] { $times }; Wiederholung nach einer Folge abgebrochen
+   *[other] { $times }; Wiederholung nach { $done } Folgen abgebrochen
+}
+item-rewatch-stopped-open-listen = { $done ->
+    [one] { $times }; erneutes Hören nach einer Folge abgebrochen
+   *[other] { $times }; erneutes Hören nach { $done } Folgen abgebrochen
+}
+
 item-rating = Deine Bewertung
 item-rate = Mit { $stars } von 5 bewerten
 item-history = Verlauf
@@ -335,6 +374,7 @@ log-of-time = von { $time }
 log-plus-minutes = +{ $count } Min.
 log-error-date-missing = Wähle ein Datum.
 log-error-date-future = Das Datum liegt in der Zukunft.
+log-error-date-before-run = Du hast am { $date } nochmal von vorn begonnen. Wähle diesen Tag oder einen späteren.
 log-error-score = Punkte sind Zahlen, zum Beispiel 42 oder 12,5.
 log-error-duration = Gib die Dauer als Stunden:Minuten (1:30) oder in Minuten (90) ein.
 log-error-page = Gib eine Seitenzahl ab 1 ein.
@@ -373,6 +413,10 @@ episodes-again-ask = { $count ->
 episodes-again-ask-listen = { $count ->
     [one] Diese Folge ist schon gehört. Nochmal eintragen?
    *[other] Diese { $count } Folgen sind schon gehört. Nochmal eintragen?
+}
+episodes-again-now = { $count ->
+    [one] Sie wird mit dem heutigen Datum eingetragen.
+   *[other] Sie werden mit dem heutigen Datum eingetragen.
 }
 episodes-again-all = { $count ->
     [one] Nochmal eintragen
@@ -601,6 +645,8 @@ progress-chapter = Kapitel { $chapter }
 progress-volume = Band { $volume }
 progress-position = Bei { $time }
 progress-session = Sitzung eingetragen
+progress-rewatch = Nochmal von vorn begonnen
+progress-rewatch-stop = Vorzeitig abgebrochen
 notify-mark-read-named = Als gelesen markieren: { $title }
 notify-test-named = Test senden an { $name }
 notify-delete-named = { $name } löschen

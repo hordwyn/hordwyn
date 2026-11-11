@@ -21,6 +21,9 @@ pub enum DateChip {
 pub enum FormError {
     DateMissing,
     DateInFuture,
+    /// A day before the start of the rewatch run that is running (the start's timestamp):
+    /// the view would be logged and not counted in the run (review OT2E-1, DEC-591).
+    BeforeRun(String),
     /// The score of this companion is not a number.
     Score(String),
     Duration,
@@ -36,6 +39,7 @@ impl FormError {
         match self {
             Self::DateMissing => "log-error-date-missing",
             Self::DateInFuture => "log-error-date-future",
+            Self::BeforeRun(_) => "log-error-date-before-run",
             Self::Score(_) => "log-error-score",
             Self::Duration => "log-error-duration",
             Self::Page => "log-error-page",
@@ -69,6 +73,34 @@ pub fn occurred_at(chip: DateChip, picked: &str, today: Day) -> Result<Option<St
     }
 }
 
+/// A chosen moment (`at`, see [`occurred_at`]) for a view logged while a rewatch run is
+/// running since `run_start` (an RFC 3339 timestamp in UTC, as the server sends it). The
+/// run counts what was logged after its start, so a day before the start is refused (the
+/// server refuses it too, DEC-591). On the day of the start noon may lie before the start:
+/// then the view gets the start's own moment, which is the earliest one the run takes.
+///
+/// # Errors
+/// [`FormError::BeforeRun`] for a day before the start.
+pub fn within_run(
+    at: Option<String>,
+    run_start: Option<&str>,
+) -> Result<Option<String>, FormError> {
+    let (Some(at), Some(start)) = (at.as_deref(), run_start) else {
+        return Ok(at);
+    };
+    let (Some(day), Some(start_day)) = (Day::parse(at), Day::parse(start)) else {
+        return Ok(Some(at.to_string()));
+    };
+    match day.cmp(&start_day) {
+        std::cmp::Ordering::Less => Err(FormError::BeforeRun(start.to_string())),
+        // both are UTC and start with the same day: the times compare as text
+        std::cmp::Ordering::Equal if at.get(11..19) < start.get(11..19) => {
+            Ok(Some(start.to_string()))
+        }
+        _ => Ok(Some(at.to_string())),
+    }
+}
+
 /// The "watched with..." sheet (`WatchedSheet`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WatchedForm {
@@ -83,18 +115,21 @@ pub struct WatchedForm {
 
 impl WatchedForm {
     /// The `log_progress` body for `progress` (`{"type": "finished"}`, an episode).
+    /// `run_start`: when the rewatch run that is running started ([`within_run`]).
     ///
     /// # Errors
-    /// See [`occurred_at`].
+    /// See [`occurred_at`] and [`within_run`].
     pub fn payload(
         &self,
         progress: serde_json::Value,
         today: Day,
         op: String,
+        run_start: Option<&str>,
     ) -> Result<NewProgressDto, FormError> {
+        let at = occurred_at(self.date, &self.picked, today)?;
         Ok(NewProgressDto {
             progress,
-            occurred_at: occurred_at(self.date, &self.picked, today)?,
+            occurred_at: within_run(at, run_start)?,
             client_op_id: Some(op),
             with: self.with.clone(),
         })
@@ -392,6 +427,55 @@ mod tests {
         );
     }
 
+    /// Review OT2E-1: while a rewatch run is running, a view dated before its start would
+    /// be logged and not counted. The dialog refuses the day and names the day of the start.
+    #[test]
+    fn a_day_before_the_start_of_a_running_rewatch_is_refused() {
+        let ep = serde_json::json!({"type": "episode", "season": 1, "episode": 1});
+        let at = |date, picked: &str, start: Option<&str>| {
+            WatchedForm {
+                date,
+                picked: picked.into(),
+                ..WatchedForm::default()
+            }
+            .payload(ep.clone(), today(), "op".into(), start)
+            .map(|p| p.occurred_at)
+        };
+        // started yesterday afternoon
+        let start = "2026-03-09T15:30:00.250+00:00";
+        assert_eq!(at(DateChip::Today, "", Some(start)), Ok(None));
+        assert_eq!(
+            at(DateChip::Pick, "2026-03-08", Some(start)),
+            Err(FormError::BeforeRun(start.into()))
+        );
+        // the day of the start: noon would sort before the start, so its own moment
+        assert_eq!(
+            at(DateChip::Yesterday, "", Some(start)),
+            Ok(Some(start.into()))
+        );
+        // started in the morning of that day: noon is after it
+        let morning = "2026-03-09T08:05:00+00:00";
+        assert_eq!(
+            at(DateChip::Yesterday, "", Some(morning)),
+            Ok(Some("2026-03-09T12:00:00Z".into()))
+        );
+        // started today: yesterday is before it
+        let now = "2026-03-10T07:00:00+00:00";
+        assert_eq!(
+            at(DateChip::Yesterday, "", Some(now)),
+            Err(FormError::BeforeRun(now.into()))
+        );
+        // no run: every past day is fine
+        assert_eq!(
+            at(DateChip::Pick, "2026-03-08", None),
+            Ok(Some("2026-03-08T12:00:00Z".into()))
+        );
+        assert_eq!(
+            FormError::BeforeRun(String::new()).key(),
+            "log-error-date-before-run"
+        );
+    }
+
     #[test]
     fn errors_name_their_message() {
         assert_eq!(FormError::DateMissing.key(), "log-error-date-missing");
@@ -413,7 +497,9 @@ mod tests {
             ..WatchedForm::default()
         };
         let ep = serde_json::json!({"type": "episode", "season": 2, "episode": 5});
-        let p = form.payload(ep.clone(), today(), "op-1".into()).unwrap();
+        let p = form
+            .payload(ep.clone(), today(), "op-1".into(), None)
+            .unwrap();
         assert_eq!(p.progress, ep);
         assert_eq!(p.occurred_at.as_deref(), Some("2026-03-09T12:00:00Z"));
         assert_eq!(p.client_op_id.as_deref(), Some("op-1"));
@@ -423,7 +509,7 @@ mod tests {
             ..WatchedForm::default()
         };
         assert_eq!(
-            bad.payload(ep, today(), "op".into()),
+            bad.payload(ep, today(), "op".into(), None),
             Err(FormError::DateMissing)
         );
     }

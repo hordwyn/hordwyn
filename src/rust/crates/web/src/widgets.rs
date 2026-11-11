@@ -306,6 +306,7 @@ pub fn QuickMenu(
             title: title.clone(),
             label: crate::next_step::logged_step_label(&i18n, &row.next_step),
             progress,
+            verb: crate::item_words::Verb::of_group(&row.group),
         };
         let ctx = ctx.clone();
         items.push(MenuItem {
@@ -555,6 +556,8 @@ pub fn progress_label(i: &crate::i18n::I18n, p: &serde_json::Value) -> String {
             i.t_args("progress-position", &[("time", time.into())])
         }
         "session" => i.t("progress-session"),
+        "rewatch" => i.t("progress-rewatch"),
+        "rewatch_stop" => i.t("progress-rewatch-stop"),
         other => other.to_string(),
     }
 }
@@ -687,6 +690,20 @@ mod tests {
         assert_eq!(super::progress_label(&en, &pos), "At 1:02:05");
         let page = serde_json::json!({"type": "paged", "page": 1212});
         assert_eq!(super::progress_label(&de, &page), "Seite 1.212");
+        // the start of a rewatch run is a row of the history (ot2e)
+        let again = serde_json::json!({"type": "rewatch"});
+        assert_eq!(
+            super::progress_label(&en, &again),
+            "Started again from the beginning"
+        );
+        assert_eq!(
+            super::progress_label(&de, &again),
+            "Nochmal von vorn begonnen"
+        );
+        // and so is its stop (DEC-590)
+        let stop = serde_json::json!({"type": "rewatch_stop"});
+        assert_eq!(super::progress_label(&en, &stop), "Stopped before the end");
+        assert_eq!(super::progress_label(&de, &stop), "Vorzeitig abgebrochen");
     }
 
     #[test]

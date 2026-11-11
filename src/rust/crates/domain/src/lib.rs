@@ -14,6 +14,7 @@ pub mod list;
 pub mod net;
 pub mod progress;
 pub mod review;
+pub mod rewatch;
 pub mod session;
 pub mod tag;
 pub mod user;

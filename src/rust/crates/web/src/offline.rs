@@ -119,6 +119,29 @@ pub fn log_command(
     }
 }
 
+/// A log for the queue, with its op id, its time (now when `occurred_at` is not given, so
+/// History keeps the real time and the logs of a queue keep their order: the start of a
+/// rewatch run before its episodes) and the queue's stamp for the status it implies
+/// (DEC-455).
+#[must_use]
+pub fn queued_log(
+    item_id: &str,
+    title: &str,
+    op: String,
+    progress: serde_json::Value,
+    occurred_at: Option<String>,
+    offline: Option<Offline>,
+) -> Queued {
+    let at = occurred_at.or_else(now_rfc3339);
+    let hlc = offline.map(Offline::stamp);
+    Queued::with_op_id(
+        op,
+        log_command(item_id, progress, at, hlc.as_deref()),
+        title,
+        now_ms(),
+    )
+}
+
 /// Set the status at the client stamp `hlc` (last writer wins).
 #[must_use]
 pub fn status_command(item_id: &str, status: &str, hlc: &str) -> SyncCommandDto {
@@ -609,6 +632,74 @@ mod tests {
                 field: None,
             }),
         }
+    }
+
+    /// Review OT2E-7 b: what the web queues when the start or the stop of a rewatch run
+    /// meets a network failure, and when "Log N again" does (the start, then the episodes,
+    /// in that order): `log_progress` commands that keep their op ids and their dates.
+    #[test]
+    fn a_rewatch_run_is_queued_as_logs_in_their_order() {
+        let ep = serde_json::json!({"type": "episode", "season": 1, "episode": 1});
+        let queue = [
+            queued_log(
+                "i1",
+                "Dark",
+                "op-1".into(),
+                crate::next_step::rewatch_start(),
+                None,
+                None,
+            ),
+            queued_log("i1", "Dark", "op-2".into(), ep.clone(), None, None),
+            queued_log(
+                "i1",
+                "Dark",
+                "op-3".into(),
+                crate::next_step::rewatch_stop(),
+                None,
+                None,
+            ),
+        ];
+        let sent: Vec<(String, serde_json::Value)> = queue
+            .iter()
+            .map(|q| {
+                let SyncCommandDto::LogProgress {
+                    item_id, progress, ..
+                } = &q.envelope.command
+                else {
+                    panic!("not a log: {q:?}");
+                };
+                assert_eq!((item_id.as_str(), q.title.as_str()), ("i1", "Dark"));
+                (q.envelope.op_id.clone(), progress.clone())
+            })
+            .collect();
+        assert_eq!(
+            sent,
+            [
+                ("op-1".to_string(), serde_json::json!({"type": "rewatch"})),
+                ("op-2".to_string(), ep.clone()),
+                (
+                    "op-3".to_string(),
+                    serde_json::json!({"type": "rewatch_stop"})
+                ),
+            ]
+        );
+        // a backfilled date is kept as it is
+        let dated = queued_log(
+            "i1",
+            "Dark",
+            "op-4".into(),
+            ep,
+            Some("2026-03-09T12:00:00Z".into()),
+            None,
+        );
+        let SyncCommandDto::LogProgress {
+            occurred_at, hlc, ..
+        } = dated.envelope.command
+        else {
+            panic!("not a log");
+        };
+        assert_eq!(occurred_at.as_deref(), Some("2026-03-09T12:00:00Z"));
+        assert_eq!(hlc, None, "no queue, no stamp");
     }
 
     #[test]

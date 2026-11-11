@@ -410,7 +410,8 @@ impl PgStore {
                SELECT kind AS "kind!",
                       to_char(occurred_at AT TIME ZONE $2, 'YYYY-MM') AS "month!",
                       COUNT(*) AS events,
-                      COUNT(*) FILTER (WHERE status_change ->> 'to' = 'completed') AS completions,
+                      COUNT(*) FILTER (WHERE status_change ->> 'to' = 'completed'
+                                        AND t <> 'rewatch_stop') AS completions,
                       COUNT(*) FILTER (WHERE t = 'finished') AS finished,
                       COUNT(*) FILTER (WHERE t = 'episode') AS episodes,
                       COUNT(*) FILTER (WHERE t = 'session') AS plays,

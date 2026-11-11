@@ -192,3 +192,81 @@ async fn a_replayed_play_is_one_session_and_stays_gone_after_undo() {
         "and stores nothing"
     );
 }
+
+/// Review OT2E-5: since DEC-588 an undo also reverts a status move whose write a later undo
+/// restored. Outside a rewatch run that changes nothing: no kind has two events on one entry
+/// that both move the status (`finished` is refused for a book and a show, and the single
+/// model has no In progress move), so there the rule is still "exactly that write". Inside
+/// runs the chain can be longer than one run: pinned here over two.
+#[tokio::test]
+async fn an_undo_chain_needs_two_moving_events_and_only_runs_have_them() {
+    let env = TestEnv::new();
+    let (_, me) = common::user(&env, "alice").await;
+    let page = |p| Progress::Paged {
+        page: Some(p),
+        chapter: None,
+        volume: None,
+    };
+    let status = async |item| {
+        let e = env.app.entry(me, item).await.unwrap().unwrap();
+        e.status.value.as_str().to_string()
+    };
+    let book = common::item(&env.app, "book", "Dune").await;
+    env.app.add_to_library(me, book.id, None).await.unwrap();
+    let first = env
+        .app
+        .log_progress(me, book.id, page(10), None, None)
+        .await
+        .unwrap();
+    assert!(first.status_change.is_some());
+    let finished = env
+        .app
+        .log_progress(me, book.id, Progress::Finished, None, None)
+        .await;
+    assert!(finished.is_err(), "a book has no finished event");
+    let second = env
+        .app
+        .log_progress(me, book.id, page(20), None, None)
+        .await
+        .unwrap();
+    assert_eq!(second.status_change, None);
+    env.app.undo_progress(me, second.id).await.unwrap();
+    assert_eq!(status(book.id).await, "in_progress");
+    env.app.undo_progress(me, first.id).await.unwrap();
+    assert_eq!(status(book.id).await, "planned");
+
+    // two rewatch runs of a one-episode show, taken back newest first
+    let mut show = common::item(&env.app, "show", "Dark").await;
+    show.attributes = serde_json::json!({ "seasons": [{"number": 1, "episode_count": 1}] });
+    env.store.state().catalog.insert(show.id, show.clone());
+    let ep = Progress::Episode {
+        season: 1,
+        episode: 1,
+    };
+    let log = async |p: Progress| {
+        env.clock.advance(chrono::Duration::minutes(1));
+        env.app
+            .log_progress(me, show.id, p, None, None)
+            .await
+            .unwrap()
+    };
+    log(ep.clone()).await;
+    env.app
+        .set_status(me, show.id, Status::completed(), None)
+        .await
+        .unwrap();
+    let start_1 = log(Progress::Rewatch).await;
+    let end_1 = log(ep.clone()).await;
+    assert_eq!(status(show.id).await, "completed");
+    let start_2 = log(Progress::Rewatch).await;
+    assert_eq!(status(show.id).await, "in_progress");
+    for (event, after) in [
+        (start_2, "completed"),
+        (end_1, "in_progress"),
+        (start_1, "completed"),
+    ] {
+        env.clock.advance(chrono::Duration::seconds(1));
+        env.app.undo_progress(me, event.id).await.unwrap();
+        assert_eq!(status(show.id).await, after);
+    }
+}

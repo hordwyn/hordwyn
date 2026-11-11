@@ -127,10 +127,12 @@ fn contributions<T: BuildHasher>(
     for e in events {
         let mut a = Amounts {
             events: 1,
+            // a stop marker gives Completed back without completing anything (DEC-590)
             completions: u64::from(
-                e.status_change
-                    .as_ref()
-                    .is_some_and(|c| c.to.as_str() == Status::COMPLETED),
+                !matches!(e.progress, Progress::RewatchStop)
+                    && e.status_change
+                        .as_ref()
+                        .is_some_and(|c| c.to.as_str() == Status::COMPLETED),
             ),
             ..Amounts::default()
         };
@@ -156,7 +158,10 @@ fn contributions<T: BuildHasher>(
                 a.plays = 1;
                 seconds = durations.get(&session_id).copied().unwrap_or(0) * 60;
             }
-            Progress::Paged { page: None, .. } | Progress::Undo { .. } => {}
+            Progress::Paged { page: None, .. }
+            | Progress::Rewatch
+            | Progress::RewatchStop
+            | Progress::Undo { .. } => {}
         }
         out.push((e.occurred_at, a, seconds));
     }

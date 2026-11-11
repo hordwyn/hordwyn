@@ -19,6 +19,7 @@ mod lists;
 mod next_step;
 mod people;
 pub mod ports;
+mod run_rules;
 mod sessions;
 mod stats;
 pub mod time_zone;
@@ -43,7 +44,7 @@ pub use error::{AppError, AppResult};
 pub use game_groups::{GameGroupInput, GameGroupView};
 pub use goals::{ComparePair, GoalProgress, NewGoal, YearCompare, same_day_last_year};
 pub use library::UNDO_WINDOW_HOURS;
-pub use next_step::{NextStep, first_step, next_step, times};
+pub use next_step::{NextStep, Rewatch, first_step, next_step, pass_at, rewatch, times};
 pub use people::{CompanionStats, MergeSuggestion, MostPlayed, StatItem, suggest_merges};
 pub use sessions::NewSession;
 pub use stats::{

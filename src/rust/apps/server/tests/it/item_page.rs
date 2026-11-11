@@ -331,6 +331,92 @@ async fn the_action_bar_follows_the_progress_model() {
     );
 }
 
+/// The words of the status pill in the header.
+fn pill(html: &str) -> &str {
+    let rest = part(html, "ip-status");
+    let from = rest.find('>').map_or(0, |i| i + 1);
+    rest[from..].split('<').next().unwrap_or_default()
+}
+
+/// ot2e (DEC-537 model A, DEC-587): a rewatch run of a Completed show in the rendered page:
+/// In progress with the run's line, next step and episode counts while it runs; Completed
+/// with the count and where it stopped afterwards.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_rewatch_run_shows_in_the_header_the_next_step_and_the_list() {
+    if !services() {
+        return;
+    }
+    let srv = server().await;
+    let app = router(&srv);
+    let cookie = sign_up(&app, "runa").await;
+    let seasons = serde_json::json!({"seasons": [{"number": 1, "episode_count": 3}]});
+    let show = seed(
+        &srv,
+        &app,
+        &cookie,
+        ("show", "Tideline", "completed", seasons),
+    )
+    .await;
+    let ep = |e: u32| serde_json::json!({"type": "episode", "season": 1, "episode": e});
+    for e in 1..=3 {
+        log(&app, &cookie, &show, ep(e)).await;
+    }
+    let page = format!("/items/{show}");
+    let (status, html) = call(&app, "GET", &page, Some(&cookie), None).await;
+    assert_eq!(status, 200);
+    assert_eq!(pill(&html), "Completed");
+    let fact = part(&html, "item-fact-line");
+    assert!(
+        fact.contains(">Watched once, finished on "),
+        "{}",
+        &fact[..120]
+    );
+    assert!(html.contains(">3/3<"), "every episode watched");
+
+    log(&app, &cookie, &show, serde_json::json!({"type": "rewatch"})).await;
+    log(&app, &cookie, &show, ep(1)).await;
+    let (_, html) = call(&app, "GET", &page, Some(&cookie), None).await;
+    assert_eq!(pill(&html), "In progress");
+    let fact = part(&html, "item-fact-line");
+    assert!(
+        fact.contains(">Rewatch: 1 of 3 episodes. Watched once before.<"),
+        "{}",
+        &fact[..160]
+    );
+    let bar = part(&html, "action-bar");
+    assert!(bar.contains(">Mark S1 E2 watched<"), "the run's next step");
+    assert!(bar.contains(">1 of 3 episodes<"), "the run's progress");
+    assert!(html.contains(">1/3<"), "the list shows the run");
+    assert!(!html.contains(">3/3<"), "not every view");
+    // a run is logged now: no backfill dates
+    assert!(!html.contains("Spread over a date range"));
+    // the start is a row of the item's history
+    assert!(html.contains("Started again from the beginning"));
+
+    // a view of yesterday while the run runs is refused (review OT2E-1)
+    let yesterday = (chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339();
+    let uri = format!("/api/v1/items/{show}/progress");
+    let body = serde_json::json!({"progress": ep(2), "occurred_at": yesterday});
+    let (code, text) = call(&app, "POST", &uri, Some(&cookie), Some(body)).await;
+    assert_eq!(code, 422, "{text}");
+    assert!(text.contains("\"invalid\""), "{text}");
+
+    // the stop is a marker (DEC-590): Completed, and a row of the history
+    let stop = serde_json::json!({"type": "rewatch_stop"});
+    log(&app, &cookie, &show, stop).await;
+    let (_, html) = call(&app, "GET", &page, Some(&cookie), None).await;
+    assert_eq!(pill(&html), "Completed");
+    assert!(html.contains("Stopped before the end"));
+    let fact = part(&html, "item-fact-line");
+    assert!(
+        fact.contains(">Watched once; rewatch stopped after 1 of 3 episodes<"),
+        "{}",
+        &fact[..160]
+    );
+    assert!(html.contains(">3/3<"), "every view again");
+    assert!(html.contains("Spread over a date range"));
+}
+
 /// Once a watch is logged, the next step of a movie is the rewatch (DEC-554, DEC-559).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_watched_movie_offers_the_rewatch() {

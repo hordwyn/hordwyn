@@ -11,7 +11,7 @@ use ui::{
 
 use crate::api;
 use crate::i18n::{I18n, use_i18n};
-use crate::item_words::{AddUndo, add_undo, entry_untouched};
+use crate::item_words::{AddUndo, RewatchWords, Verb, add_undo, entry_untouched};
 
 /// The button label: the server names the Fluent key (`next-step-*`), the episode steps take
 /// `$season` and `$episode`.
@@ -84,12 +84,15 @@ pub fn progress_text(i: &I18n, summary: &ProgressSummaryDto, step: &NextStepDto)
     if let Some(total) = summary.episodes_total
         && matches!(step.action.as_str(), "episode" | "caught_up")
     {
+        // a running rewatch counts within itself (DEC-587)
+        let done = summary
+            .rewatch
+            .as_ref()
+            .filter(|r| r.running)
+            .map_or(summary.episodes_watched, |r| r.done);
         return Some(i.t_args(
             "library-progress-episodes",
-            &[
-                ("done", summary.episodes_watched.into()),
-                ("total", total.into()),
-            ],
+            &[("done", done.into()), ("total", total.into())],
         ));
     }
     if let (Some(page), Some(pages)) = (step.page, step.pages) {
@@ -178,6 +181,9 @@ pub struct LoggedStep {
     /// The step in the past tense ([`logged_step_label`]).
     pub label: String,
     pub progress: serde_json::Value,
+    /// The verb of the item's kind where the caller knows it (the toast of the episode that
+    /// finishes a rewatch run is worded per verb); `None` reads like a show.
+    pub verb: Option<Verb>,
 }
 
 /// Log `progress` for `item_id` and show "Logged: <label>" with Undo; `on_done` runs after
@@ -223,6 +229,7 @@ fn log_step(
         title,
         label,
         progress,
+        verb,
     } = step;
     ctx.funnel.intent(crate::funnel::Flow::NextStep);
     busy.set(true);
@@ -243,7 +250,8 @@ fn log_step(
                     let _ = done.try_set(true);
                     toast_logged_added(&ctx, &label, (item_id, title), event.id, on_done);
                 } else {
-                    toast_logged(&ctx, &label, title, vec![event.id], on_done);
+                    let said = said_title(&ctx.i18n, verb, title, &[&event]);
+                    toast_logged(&ctx, &label, said, vec![event.id], on_done);
                 }
                 if let Some(cb) = on_done {
                     cb.run(());
@@ -272,6 +280,55 @@ fn log_step(
             }
         }
         busy.set(false);
+    });
+}
+
+/// Log a marker of a rewatch run: its start on a Completed show ([`rewatch_start`], sets In
+/// progress; ot2e, DEC-587) or its stop while it runs ([`rewatch_stop`], gives Completed
+/// back and ends the run for good; DEC-590). Says so (`said`, "Rewatch started") with Undo,
+/// which takes the marker and its status move back. Offline the marker goes into the queue
+/// with its stamp, like every log (DEC-455). `on_done` runs after the log and after an undo
+/// (to refetch); an error lands in `error`.
+pub fn log_run_marker(
+    ctx: StepCtx,
+    (item_id, title): (String, String),
+    (marker, said): (serde_json::Value, String),
+    error: RwSignal<Option<String>>,
+    on_done: Option<Callback<()>>,
+) {
+    error.set(None);
+    leptos::task::spawn_local(async move {
+        let op = uuid::Uuid::now_v7().to_string();
+        let p = NewProgressDto {
+            progress: marker.clone(),
+            occurred_at: None,
+            client_op_id: Some(op.clone()),
+            with: Vec::new(),
+        };
+        match api::log_progress(item_id.clone(), p).await {
+            Ok(event) => {
+                let undo_ctx = ctx.clone();
+                let undo = ToastAction::new(
+                    ctx.i18n.t("library-undo"),
+                    Callback::new(move |()| undo_event(&undo_ctx, event.id.clone(), on_done)),
+                );
+                ctx.toasts.push_action(said, Some(title), undo);
+            }
+            Err(e) if crate::offline::network_error(&e) && ctx.offline.is_some() => {
+                let q = crate::offline::queued_log(&item_id, &title, op, marker, None, ctx.offline);
+                ctx.save_offline(title, vec![q], None);
+            }
+            Err(e) => {
+                let text = crate::pages::error_text(&e);
+                error.set(Some(
+                    ctx.i18n
+                        .t_args("library-step-failed", &[("error", text.into())]),
+                ));
+            }
+        }
+        if let Some(cb) = on_done {
+            cb.run(());
+        }
     });
 }
 
@@ -312,6 +369,38 @@ pub fn undo_events(ctx: &StepCtx, mut event_ids: Vec<String>, on_done: Option<Ca
             cb.run(());
         }
     });
+}
+
+/// The progress that starts a rewatch run (DEC-587).
+#[must_use]
+pub fn rewatch_start() -> serde_json::Value {
+    serde_json::json!({"type": "rewatch"})
+}
+
+/// The progress that stops the rewatch run that is running (DEC-590).
+#[must_use]
+pub fn rewatch_stop() -> serde_json::Value {
+    serde_json::json!({"type": "rewatch_stop"})
+}
+
+/// The second line of the toast of a log: the title, or "Rewatch finished: <title>" (per
+/// `verb`) when one of the logged `events` was the episode that finished a rewatch run (its
+/// answer names the status it moved the entry to; ot2e).
+#[must_use]
+pub fn said_title(
+    i: &I18n,
+    verb: Option<Verb>,
+    title: String,
+    events: &[&contracts::ProgressEventDto],
+) -> String {
+    let finished = events
+        .iter()
+        .any(|e| e.progress["type"] == "episode" && e.status.as_deref() == Some("completed"));
+    if finished {
+        i.t_args(RewatchWords::of(verb).finished, &[("title", title.into())])
+    } else {
+        title
+    }
 }
 
 /// "Logged: <label>" with Undo for the events just logged (one step, a sheet or a bulk
@@ -480,6 +569,7 @@ pub fn NextStepButton(
         title,
         label: logged_step_label(&i18n, &step),
         progress,
+        verb: None,
     });
     let ctx = StepCtx::current();
     let control = match (logged, compact) {
@@ -697,6 +787,48 @@ mod tests {
         assert_eq!(step_progress(&step("episode", "next-step-episode")), None);
     }
 
+    /// ot2e: the toast of the episode that finished a rewatch run says so.
+    #[test]
+    fn the_toast_says_when_a_log_finished_a_rewatch() {
+        let en = I18n::new("en", BTreeMap::new());
+        let de = I18n::new("de", BTreeMap::new());
+        let event =
+            |progress: serde_json::Value, status: Option<&str>| contracts::ProgressEventDto {
+                id: "e".into(),
+                item_id: "i".into(),
+                occurred_at: "2026-11-11T10:00:00Z".into(),
+                progress,
+                status: status.map(String::from),
+            };
+        let ep = serde_json::json!({"type": "episode", "season": 1, "episode": 3});
+        let plain = event(ep.clone(), None);
+        let last = event(ep.clone(), Some("completed"));
+        let first = event(ep, Some("in_progress"));
+        let movie = event(serde_json::json!({"type": "finished"}), Some("completed"));
+        let said = |i: &I18n, events: &[&contracts::ProgressEventDto]| {
+            said_title(i, None, "Dark".into(), events)
+        };
+        assert_eq!(said(&en, &[&plain]), "Dark");
+        assert_eq!(said(&en, &[&first]), "Dark");
+        assert_eq!(
+            said(&en, &[&movie]),
+            "Dark",
+            "a first watch is not a rewatch"
+        );
+        // review OT2E-10: the approved wording, per verb
+        assert_eq!(said(&en, &[&plain, &last]), "Rewatch finished: Dark");
+        assert_eq!(said(&de, &[&last]), "Wiederholung beendet: Dark");
+        assert_eq!(
+            said_title(&en, Some(Verb::Listen), "Dark".into(), &[&last]),
+            "Finished listening again: Dark"
+        );
+        // the stop marker answers Completed too and finished nothing
+        let stop = event(rewatch_stop(), Some("completed"));
+        assert_eq!(said(&en, &[&stop]), "Dark");
+        assert_eq!(rewatch_start(), serde_json::json!({"type": "rewatch"}));
+        assert_eq!(rewatch_stop(), serde_json::json!({"type": "rewatch_stop"}));
+    }
+
     #[test]
     fn the_progress_bar_reads_as_words() {
         let en = I18n::new("en", BTreeMap::new());
@@ -711,6 +843,32 @@ mod tests {
         assert_eq!(
             progress_text(&en, &eps, &step("episode", "x")).as_deref(),
             Some("4 of 10 episodes")
+        );
+        // a running rewatch counts within itself (ot2e); a stopped one does not
+        let again = ProgressSummaryDto {
+            episodes_watched: 10,
+            fraction: Some(0.3),
+            rewatch: Some(contracts::RewatchDto {
+                start: "e1".into(),
+                done: 3,
+                running: true,
+            }),
+            ..eps.clone()
+        };
+        assert_eq!(
+            progress_text(&en, &again, &step("episode", "x")).as_deref(),
+            Some("3 of 10 episodes")
+        );
+        let stopped = ProgressSummaryDto {
+            rewatch: again.rewatch.clone().map(|r| contracts::RewatchDto {
+                running: false,
+                ..r
+            }),
+            ..again
+        };
+        assert_eq!(
+            progress_text(&en, &stopped, &step("caught_up", "x")).as_deref(),
+            Some("10 of 10 episodes")
         );
         let pages = ProgressSummaryDto {
             fraction: Some(0.5),

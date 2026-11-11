@@ -128,6 +128,7 @@ pub fn progress(e: &ProgressEvent) -> ProgressEventDto {
         item_id: e.item_id.0.to_string(),
         occurred_at: e.occurred_at.to_rfc3339(),
         progress: serde_json::to_value(&e.progress).unwrap_or_default(),
+        status: e.status_change.as_ref().map(|c| c.to.as_str().to_string()),
     }
 }
 

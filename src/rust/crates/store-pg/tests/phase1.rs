@@ -482,6 +482,38 @@ async fn stats_scenario(app: &app::App) -> domain::user::Actor {
     s.started_at = Some(at(2025, 3, 2));
     s.duration_minutes = Some(45);
     app.log_play(me, s).await.unwrap();
+    // a show completed by hand, then a rewatch run that is stopped (its marker gives
+    // Completed back and is no completion, DEC-590) and one that is finished (one completion)
+    let again = item(
+        app,
+        "show",
+        "Lost",
+        None,
+        serde_json::json!({"seasons": [{"number": 1, "episode_count": 2}]}),
+    )
+    .await;
+    for (p, t) in [(ep(1), at(2025, 2, 1)), (ep(2), at(2025, 2, 2))] {
+        app.log_progress(me, again.id, p, Some(t), None)
+            .await
+            .unwrap();
+    }
+    app.set_status(me, again.id, Status::completed(), None)
+        .await
+        .unwrap();
+    for (p, t) in [
+        (Progress::Rewatch, at(2025, 4, 1)),
+        (ep(1), at(2025, 4, 2)),
+        (Progress::RewatchStop, at(2025, 4, 3)),
+        (Progress::Rewatch, at(2025, 5, 1)),
+        (ep(1), at(2025, 5, 2)),
+        (ep(2), at(2025, 5, 3)),
+    ] {
+        let e = app
+            .log_progress(me, again.id, p, Some(t), None)
+            .await
+            .unwrap();
+        assert_eq!(e.occurred_at, t);
+    }
     me
 }
 
@@ -500,6 +532,9 @@ async fn stats_on_postgres_match_the_in_memory_rules() {
     assert_eq!(pg, expected);
     assert_eq!(expected.overall.amounts.pages, 270, "100, back to 80, 250");
     assert_eq!(expected.overall.amounts.finished, 3);
+    let years = mem.app.stats_series(mem_me, None, Bucket::Year).await;
+    let completions: u64 = years.unwrap().iter().map(|p| p.amounts.completions).sum();
+    assert_eq!(completions, 3, "two movies and the finished rewatch run");
     for group in [None, Some(KindGroup::Watch), Some(KindGroup::Read)] {
         for bucket in [Bucket::Month, Bucket::Year] {
             let pg = env.app.stats_series(pg_me, group, bucket).await.unwrap();

@@ -214,6 +214,7 @@ fn quick(
                             title: page.item.title,
                             label: logged_step_label(&ctx.i18n, &step),
                             progress,
+                            verb: None,
                         };
                         run_step(ctx.clone(), logged, busy, error, None);
                     }

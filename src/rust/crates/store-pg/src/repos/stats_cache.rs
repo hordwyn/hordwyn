@@ -254,7 +254,8 @@ async fn insert_item_months(
                                             finished, episodes, pages, plays, seconds)
              SELECT $1, item_id, kind, to_char(occurred_at AT TIME ZONE $2, 'YYYY-MM'),
                     COUNT(*),
-                    COUNT(*) FILTER (WHERE status_change ->> 'to' = 'completed'),
+                    COUNT(*) FILTER (WHERE status_change ->> 'to' = 'completed'
+                                        AND t <> 'rewatch_stop'),
                     COUNT(*) FILTER (WHERE t = 'finished'),
                     COUNT(*) FILTER (WHERE t = 'episode'),
                     COALESCE(SUM(GREATEST(page - prev_page, 0)), 0)::bigint,

@@ -81,6 +81,75 @@ pub fn with_legend_key(verb: Option<Verb>) -> &'static str {
     }
 }
 
+/// The Fluent keys of a rewatch run for a verb (ot2e): the menu items, the toast of the start
+/// and the lines under the title. A podcast is listened to again; every other kind reads like a
+/// show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RewatchWords {
+    /// "Start a rewatch" (overflow menu of a Completed show).
+    pub start: &'static str,
+    /// "Stop the rewatch" (sets Completed).
+    pub stop: &'static str,
+    /// Toast after the start.
+    pub started: &'static str,
+    /// Toast after the stop.
+    pub stopped_toast: &'static str,
+    /// Second line of the toast of the episode that finished the run (`title`).
+    pub finished: &'static str,
+
+    before: &'static str,
+    line: &'static str,
+    line_open: &'static str,
+    stopped: &'static str,
+    stopped_open: &'static str,
+}
+
+impl RewatchWords {
+    #[must_use]
+    pub fn of(verb: Option<Verb>) -> Self {
+        if verb == Some(Verb::Listen) {
+            Self {
+                start: "item-rewatch-start-listen",
+                stop: "item-rewatch-stop-listen",
+                started: "item-rewatch-started-listen",
+                stopped_toast: "item-rewatch-stopped-toast-listen",
+                finished: "item-rewatch-finished-listen",
+
+                before: "item-rewatch-before-listen",
+                line: "item-rewatch-line-listen",
+                line_open: "item-rewatch-line-open-listen",
+                stopped: "item-rewatch-stopped-listen",
+                stopped_open: "item-rewatch-stopped-open-listen",
+            }
+        } else {
+            Self {
+                start: "item-rewatch-start",
+                stop: "item-rewatch-stop",
+                started: "item-rewatch-started",
+                stopped_toast: "item-rewatch-stopped-toast",
+                finished: "item-rewatch-finished",
+
+                before: "item-rewatch-before",
+                line: "item-rewatch-line",
+                line_open: "item-rewatch-line-open",
+                stopped: "item-rewatch-stopped",
+                stopped_open: "item-rewatch-stopped-open",
+            }
+        }
+    }
+}
+
+/// When the rewatch run that is running started: the timestamp of its start event in the
+/// page's history; `None` without a running run. A view logged in the dialog cannot be dated
+/// before it (review OT2E-1).
+#[must_use]
+pub fn run_start(page: &contracts::ItemPageDto) -> Option<String> {
+    let summary = page.summary.as_ref()?;
+    let run = summary.rewatch.as_ref().filter(|r| r.running)?;
+    let start = page.progress.iter().find(|e| e.id == run.start)?;
+    Some(start.occurred_at.clone())
+}
+
 /// What the fact line under the title is made of.
 #[derive(Debug, Clone, Copy)]
 pub struct Facts<'a> {
@@ -91,6 +160,9 @@ pub struct Facts<'a> {
     pub times: u32,
     /// The entry's status is Completed.
     pub completed: bool,
+    /// RFC 3339: the day of the pass the count names (`ItemPageDto::times_at`), when it has
+    /// one.
+    pub times_at: Option<&'a str>,
     /// RFC 3339, when the entry was added.
     pub added_at: &'a str,
     pub summary: &'a ProgressSummaryDto,
@@ -100,16 +172,26 @@ pub struct Facts<'a> {
 /// The line under the title of an item in the library (OT-5, OT-7): "Watched 3 times, last
 /// on <date>" once it was watched, else where the person stands ("12 of 24 episodes", "Up to
 /// date: ...", "Page 120 of 240"), else "Added on <date>" while nothing is logged. `None`
-/// when there is nothing to say in numbers.
+/// when there is nothing to say in numbers. While a rewatch run is running the line is the
+/// run ("Rewatch: 5 of 24 episodes. Watched once before."); a stopped one follows the count
+/// ("Watched once; rewatch stopped after 5 of 24 episodes"; ot2e, DEC-587).
 ///
 /// A show is counted only once its entry is Completed (ux-owner-test.md 1.2): with every
 /// known episode watched it is "Up to date" until the person says it is finished; the app
 /// cannot know whether more will air (DEC-207, review OT2A-2).
 #[must_use]
 pub fn fact_line(i: &I18n, f: &Facts<'_>) -> Option<String> {
+    let run = f.summary.rewatch.as_ref();
+    if let Some(run) = run.filter(|r| r.running) {
+        return Some(running_line(i, f, run.done));
+    }
     if f.times > 0 && (f.completed || f.model != "episodic") {
         let times = times_text(i, f.verb, f.times);
-        let Some(last) = f.summary.last_at.as_deref() else {
+        if let Some(run) = run.filter(|_| f.completed) {
+            return Some(stopped_line(i, f, times, run.done));
+        }
+        // the day of the pass the count names, not of the newest view (review OT2A-7)
+        let Some(last) = f.times_at else {
             return Some(times);
         };
         let key = match (f.times, f.model) {
@@ -131,6 +213,46 @@ pub fn fact_line(i: &I18n, f: &Facts<'_>) -> Option<String> {
     } else {
         progress
     })
+}
+
+/// "Rewatch: 5 of 24 episodes. Watched once before." (a run starts on a Completed entry, so
+/// there is at least one time before it).
+fn running_line(i: &I18n, f: &Facts<'_>, done: u32) -> String {
+    let words = RewatchWords::of(f.verb);
+    let before = i.t_args(words.before, &[("count", f.times.max(1).into())]);
+    match f.summary.episodes_total {
+        Some(total) => i.t_args(
+            words.line,
+            &[
+                ("done", done.into()),
+                ("total", total.into()),
+                ("before", before.into()),
+            ],
+        ),
+        None => i.t_args(
+            words.line_open,
+            &[("done", done.into()), ("before", before.into())],
+        ),
+    }
+}
+
+/// "Watched once; rewatch stopped after 5 of 24 episodes".
+fn stopped_line(i: &I18n, f: &Facts<'_>, times: String, done: u32) -> String {
+    let words = RewatchWords::of(f.verb);
+    match f.summary.episodes_total {
+        Some(total) => i.t_args(
+            words.stopped,
+            &[
+                ("times", times.into()),
+                ("done", done.into()),
+                ("total", total.into()),
+            ],
+        ),
+        None => i.t_args(
+            words.stopped_open,
+            &[("times", times.into()), ("done", done.into())],
+        ),
+    }
 }
 
 /// How often the item was gone through before, for the dialog line of a step that says
@@ -281,6 +403,7 @@ mod tests {
             model,
             times,
             completed: times > 0,
+            times_at: summary.last_at.as_deref(),
             added_at: "2026-11-10T09:00:00Z",
             summary,
             step,
@@ -423,6 +546,167 @@ mod tests {
             fact_line(&en, &movie).as_deref(),
             Some("Watched once, on Nov 2, 2026")
         );
+    }
+
+    /// ot2e (DEC-537 model A, ux-owner-test.md 1.2): a running rewatch says how far it is
+    /// and what was before; a stopped one keeps the count and says where it stopped.
+    #[test]
+    fn the_fact_line_of_a_rewatch() {
+        let (en, de) = both();
+        let run = |done, running| contracts::RewatchDto {
+            start: "e9".into(),
+            done,
+            running,
+        };
+        let running = ProgressSummaryDto {
+            events: 30,
+            episodes_watched: 24,
+            episodes_total: Some(24),
+            last_at: Some("2026-11-09T20:00:00Z".into()),
+            fraction: Some(5.0 / 24.0),
+            rewatch: Some(run(5, true)),
+            ..ProgressSummaryDto::default()
+        };
+        let episode = step("episode");
+        let now = Facts {
+            completed: false,
+            ..facts(&running, &episode, "episodic", 1)
+        };
+        assert_eq!(
+            fact_line(&en, &now).as_deref(),
+            Some("Rewatch: 5 of 24 episodes. Watched once before.")
+        );
+        assert_eq!(
+            fact_line(&de, &now).as_deref(),
+            Some("Wiederholung: 5 von 24 Folgen. Davor einmal gesehen.")
+        );
+        let third = Facts { times: 2, ..now };
+        assert_eq!(
+            fact_line(&en, &third).as_deref(),
+            Some("Rewatch: 5 of 24 episodes. Watched 2 times before.")
+        );
+        // a podcast is listened to
+        let heard = Facts {
+            verb: Some(Verb::Listen),
+            ..now
+        };
+        assert_eq!(
+            fact_line(&en, &heard).as_deref(),
+            Some("Listening again: 5 of 24 episodes. Listened once before.")
+        );
+        // an item that does not know its episodes
+        let open = ProgressSummaryDto {
+            episodes_total: None,
+            fraction: None,
+            ..running.clone()
+        };
+        let open_now = Facts {
+            completed: false,
+            ..facts(&open, &episode, "episodic", 1)
+        };
+        assert_eq!(
+            fact_line(&en, &open_now).as_deref(),
+            Some("Rewatch: 5 episodes. Watched once before.")
+        );
+
+        // stopped: Completed again, the count, and where the rewatch stopped (no day)
+        let stopped = ProgressSummaryDto {
+            rewatch: Some(run(5, false)),
+            fraction: Some(1.0),
+            ..running.clone()
+        };
+        let caught_up = step("caught_up");
+        let after = facts(&stopped, &caught_up, "episodic", 1);
+        assert_eq!(
+            fact_line(&en, &after).as_deref(),
+            Some("Watched once; rewatch stopped after 5 of 24 episodes")
+        );
+        assert_eq!(
+            fact_line(&de, &after).as_deref(),
+            Some("Einmal gesehen; Wiederholung nach 5 von 24 Folgen abgebrochen")
+        );
+        let one = ProgressSummaryDto {
+            rewatch: Some(run(1, false)),
+            episodes_total: None,
+            ..stopped.clone()
+        };
+        assert_eq!(
+            fact_line(&en, &facts(&one, &caught_up, "episodic", 1)).as_deref(),
+            Some("Watched once; rewatch stopped after one episode")
+        );
+    }
+
+    /// Review OT2A-7: the day of the count line is the day of the pass it names, not of the
+    /// newest view; a pass without a day has none.
+    #[test]
+    fn the_count_line_names_the_day_of_its_pass() {
+        let (en, _) = both();
+        let all = ProgressSummaryDto {
+            events: 25,
+            episodes_watched: 24,
+            episodes_total: Some(24),
+            // one favourite episode again, last week
+            last_at: Some("2026-11-02T20:00:00Z".into()),
+            fraction: Some(1.0),
+            ..ProgressSummaryDto::default()
+        };
+        let caught_up = step("caught_up");
+        let show = Facts {
+            times_at: Some("2025-03-09T20:00:00Z"),
+            ..facts(&all, &caught_up, "episodic", 1)
+        };
+        assert_eq!(
+            fact_line(&en, &show).as_deref(),
+            Some("Watched once, finished on Mar 9, 2025")
+        );
+        let by_hand = Facts {
+            times_at: None,
+            ..show
+        };
+        assert_eq!(fact_line(&en, &by_hand).as_deref(), Some("Watched once"));
+    }
+
+    /// The words of the menu and the toasts of a run, per verb.
+    #[test]
+    fn a_rewatch_is_named_per_verb() {
+        let (en, de) = both();
+        let watch = RewatchWords::of(Some(Verb::Watch));
+        let listen = RewatchWords::of(Some(Verb::Listen));
+        assert_eq!(en.t(watch.start), "Start a rewatch");
+        assert_eq!(en.t(watch.stop), "Stop the rewatch");
+        assert_eq!(en.t(watch.started), "Rewatch started");
+        assert_eq!(de.t(watch.start), "Nochmal von vorn schauen");
+        assert_eq!(en.t(listen.start), "Start listening again");
+        // review OT2E-10: "Stop listening again" read as "once more, stop listening"
+        assert_eq!(en.t(listen.stop), "Stop this listen-through");
+        // a stop is a marker with its own toast (DEC-590)
+        assert_eq!(en.t(watch.stopped_toast), "Rewatch stopped");
+        assert_eq!(en.t(listen.stopped_toast), "Stopped listening again");
+        // review OT2E-10: in German a finished pass is "beendet", a stopped run "abgebrochen"
+        assert_eq!(de.t(watch.stop), "Wiederholung abbrechen");
+        assert_eq!(de.t(listen.stop), "Erneutes H\u{f6}ren abbrechen");
+        assert_eq!(de.t(watch.stopped_toast), "Wiederholung abgebrochen");
+        assert_eq!(
+            de.t(listen.stopped_toast),
+            "Erneutes H\u{f6}ren abgebrochen"
+        );
+        let title = [("title", "Dark".into())];
+        assert_eq!(en.t_args(watch.finished, &title), "Rewatch finished: Dark");
+        assert_eq!(
+            en.t_args(listen.finished, &title),
+            "Finished listening again: Dark"
+        );
+        assert_eq!(
+            de.t_args(watch.finished, &title),
+            "Wiederholung beendet: Dark"
+        );
+        assert_eq!(
+            de.t_args(listen.finished, &title),
+            "Erneutes H\u{f6}ren beendet: Dark"
+        );
+
+        // a kind without a verb of its own reads like a show
+        assert_eq!(RewatchWords::of(None), watch);
     }
 
     /// The same line for a game and a book.

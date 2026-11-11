@@ -11,6 +11,7 @@ use domain::user::Actor;
 
 use crate::error::OptionExt;
 use crate::ports::{AppEvent, LibraryCursor, LibrarySort, SortValue};
+use crate::run_rules::Source;
 use crate::{App, AppError, AppResult};
 
 /// How long after logging an event it can still be undone (hours).
@@ -183,9 +184,10 @@ impl App {
     }
 
     /// Append a progress event. Idempotent per `client_op_id`. Adds the item to the library
-    /// and moves the status to `in_progress` (or `completed` for `Finished`) unless the user
-    /// already set a later status. The status move is stored on the event, so undo can
-    /// take it back.
+    /// and moves the status as [`domain::rewatch::status_after`] says (Planned to In progress,
+    /// `finished` to Completed, a rewatch start from Completed to In progress, the last episode
+    /// of a rewatch run back to Completed) unless the user already set a later status. The
+    /// status move is stored on the event, so undo can take it back.
     ///
     /// # Errors
     /// Unknown item or progress that does not fit the kind's progress model.
@@ -198,6 +200,25 @@ impl App {
         client_op_id: Option<uuid::Uuid>,
     ) -> AppResult<ProgressEvent> {
         self.log_progress_stamped(actor, item_id, progress, occurred_at, client_op_id, None)
+            .await
+    }
+
+    /// [`App::log_progress`] for an import replaying a file: its views are dated in the past
+    /// on purpose, so one dated before the start of a running rewatch run is stored (and not
+    /// counted in the run) instead of refused (DEC-587 (7), DEC-591).
+    ///
+    /// # Errors
+    /// As [`App::log_progress`].
+    pub async fn import_progress(
+        &self,
+        actor: Actor,
+        item_id: ItemId,
+        progress: Progress,
+        occurred_at: Option<Timestamp>,
+        client_op_id: Option<uuid::Uuid>,
+    ) -> AppResult<ProgressEvent> {
+        let log = (progress, occurred_at, client_op_id);
+        self.log_from(actor, item_id, log, None, Source::Import)
             .await
     }
 
@@ -216,33 +237,120 @@ impl App {
         client_op_id: Option<uuid::Uuid>,
         status_hlc: Option<Hlc>,
     ) -> AppResult<ProgressEvent> {
+        let log = (progress, occurred_at, client_op_id);
+        self.log_from(actor, item_id, log, status_hlc, Source::Live)
+            .await
+    }
+
+    /// Would [`App::log_progress`] take this log as far as a rewatch run is concerned
+    /// ([`crate::run_rules`])? Nothing is written. For a caller that writes something else
+    /// first (the session of "watched with").
+    ///
+    /// # Errors
+    /// What the log would answer: `Conflict` or `invalid` (`occurred_at`).
+    pub async fn check_progress(
+        &self,
+        actor: Actor,
+        item_id: ItemId,
+        progress: &Progress,
+        occurred_at: Option<Timestamp>,
+        client_op_id: Option<uuid::Uuid>,
+    ) -> AppResult<()> {
+        let item = self.catalog_item(item_id).await?;
+        let Some(entry) = self.repos.library.get(actor.user_id, item_id).await? else {
+            return crate::run_rules::without_entry(progress);
+        };
+        let history = self.repos.progress.for_item(actor.user_id, item_id).await?;
+        if client_op_id.is_some() && history.iter().any(|e| e.client_op_id == client_op_id) {
+            return Ok(());
+        }
+        let status = &entry.status.value;
+        let now = self.now();
+        crate::run_rules::occurred_at(
+            &item,
+            status,
+            &history,
+            progress,
+            occurred_at,
+            now,
+            Source::Live,
+        )
+        .map(|_| ())
+    }
+
+    /// The log behind [`App::log_progress_stamped`] and [`App::import_progress`]. The rules
+    /// of a rewatch run ([`crate::run_rules`]) are checked before anything is written; a
+    /// replay of a stored log answers that log whatever they say now.
+    async fn log_from(
+        &self,
+        actor: Actor,
+        item_id: ItemId,
+        (progress, sent, client_op_id): (Progress, Option<Timestamp>, Option<uuid::Uuid>),
+        status_hlc: Option<Hlc>,
+        source: Source,
+    ) -> AppResult<ProgressEvent> {
         let item = self.catalog_item(item_id).await?;
         let kind = self.kind(&item.kind)?;
         progress.validate_for(kind.progress_model)?;
-        let mut entry = self.add_to_library(actor, item_id, None).await?;
-        let target = match progress {
-            Progress::Finished => Some(Status::completed()),
-            _ if entry.status.value.as_str() == Status::PLANNED => Some(Status::in_progress()),
-            _ => None,
+        let user = actor.user_id;
+        let replayed = |history: &[ProgressEvent]| {
+            let op = client_op_id?;
+            history.iter().find(|e| e.client_op_id == Some(op)).cloned()
         };
-        let status_change = target
-            .filter(|t| entry.status.value != *t)
-            .map(|to| StatusChange {
-                from: entry.status.value.clone(),
-                to,
-                stamp: self.stamp(status_hlc),
-            });
+        // the history is read only where a run can matter: for a marker, and for an episode
+        // on an In progress entry
+        let mut history = Vec::new();
+        let marker = matches!(progress, Progress::Rewatch | Progress::RewatchStop);
+        if marker {
+            history = self.repos.progress.for_item(user, item_id).await?;
+            if let Some(done) = replayed(&history) {
+                return Ok(done);
+            }
+            // a marker never adds the item: there is no run without an entry
+            if self.repos.library.get(user, item_id).await?.is_none() {
+                crate::run_rules::without_entry(&progress)?;
+            }
+        }
+        let mut entry = self.add_to_library(actor, item_id, None).await?;
+        let in_progress = entry.status.value.as_str() == Status::IN_PROGRESS;
+        if in_progress && matches!(progress, Progress::Episode { .. }) {
+            history = self.repos.progress.for_item(user, item_id).await?;
+            if let Some(done) = replayed(&history) {
+                return Ok(done);
+            }
+        }
         let now = self.now();
-        let event = ProgressEvent {
+        let status = &entry.status.value;
+        let occurred_at =
+            crate::run_rules::occurred_at(&item, status, &history, &progress, sent, now, source)?;
+        let mut event = ProgressEvent {
             id: EventId(self.uuid()),
-            user_id: actor.user_id,
+            user_id: user,
             item_id,
-            occurred_at: occurred_at.unwrap_or(now),
+            occurred_at,
             progress,
             client_op_id,
             recorded_at: now,
-            status_change,
+            status_change: None,
         };
+        // the episode that makes a running rewatch run whole gives Completed back (DEC-587),
+        // and so does the stop marker of an open run (it was refused above without one)
+        let closes = match event.progress {
+            Progress::RewatchStop => true,
+            Progress::Episode { .. } => {
+                in_progress && crate::next_step::completes_run(&item, &history, &event)
+            }
+            _ => false,
+        };
+        event.status_change =
+            domain::rewatch::status_after(&entry.status.value, &event.progress, closes)
+                .filter(|to| entry.status.value != *to)
+                .map(|to| StatusChange {
+                    from: entry.status.value.clone(),
+                    to,
+                    stamp: self.stamp(status_hlc),
+                    from_stamp: Some(entry.status.stamp),
+                });
         let stored = self.repos.progress.append(&event).await?;
         if stored.id != event.id {
             return Ok(stored);
@@ -295,6 +403,8 @@ impl App {
         if now - target.recorded_at > chrono::Duration::hours(UNDO_WINDOW_HOURS) {
             return Err(AppError::Conflict("the event is too old to undo".into()));
         }
+        // the move back is stored on the undo event, like every move (DEC-588)
+        let revert = self.status_to_restore(actor, &target, &history).await?;
         let undo = ProgressEvent {
             id: EventId(self.uuid()),
             user_id: actor.user_id,
@@ -303,13 +413,17 @@ impl App {
             progress: Progress::Undo { event_id: id },
             client_op_id: Some(uuid::Uuid::new_v5(&id.0, b"undo")),
             recorded_at: now,
-            status_change: None,
+            status_change: revert.as_ref().map(|(_, c)| c.clone()),
         };
         let stored = self.repos.progress.append(&undo).await?;
         if stored.id != undo.id {
             return Ok(stored);
         }
-        self.revert_status(actor, &target).await?;
+        if let Some((mut entry, c)) = revert
+            && entry.status.set(c.to.clone(), c.stamp)
+        {
+            self.save_entry(&entry).await?;
+        }
         if let Progress::Session { session_id } = target.progress
             && let Some(s) = self.repos.sessions.get(session_id).await?
             && s.owner == actor.user_id
@@ -326,22 +440,36 @@ impl App {
         Ok(stored)
     }
 
-    async fn revert_status(&self, actor: Actor, target: &ProgressEvent) -> AppResult<()> {
+    /// The move that takes back the status move of `target`, with the entry to write it to:
+    /// only while the entry still carries that write (DEC-208), also when an undo of a later
+    /// event restored it meanwhile ([`StatusChange::carried`]; the Undo of a whole rewatch
+    /// run takes its last episode back first, then its start). A status chosen by hand since
+    /// stays.
+    async fn status_to_restore(
+        &self,
+        actor: Actor,
+        target: &ProgressEvent,
+        history: &[ProgressEvent],
+    ) -> AppResult<Option<(LibraryEntry, StatusChange)>> {
         let Some(c) = &target.status_change else {
-            return Ok(());
+            return Ok(None);
         };
-        if let Some(mut entry) = self
+        let entry = self
             .repos
             .library
             .get(actor.user_id, target.item_id)
             .await?
-            && entry.status.value == c.to
-            && entry.status.stamp == c.stamp
-            && entry.status.set(c.from.clone(), self.stamp(None))
-        {
-            self.save_entry(&entry).await?;
-        }
-        Ok(())
+            .filter(|e| e.status.value == c.to)
+            .filter(|e| StatusChange::carried(e.status.stamp, c.stamp, history));
+        Ok(entry.map(|e| {
+            let back = StatusChange {
+                from: c.to.clone(),
+                to: c.from.clone(),
+                stamp: self.stamp(None),
+                from_stamp: Some(e.status.stamp),
+            };
+            (e, back)
+        }))
     }
 
     /// Every stored event of the item, undo events included, oldest first.

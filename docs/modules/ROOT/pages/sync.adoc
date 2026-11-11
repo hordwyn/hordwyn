@@ -29,6 +29,46 @@ Commands: `add`, `set_status`, `rate`, `set_notes` (each mutable field with the 
 HLC stamp) and `log_progress` (append-only, keyed by `op_id`). The answer has one result per
 command; a failing command does not stop the others.
 
+== Rewatch runs
+
+A show that is Completed can be gone through again as a run. A client starts one with
+`log_progress` and the progress `{"type": "rewatch"}` (kinds with episodes only): the status
+becomes In progress, and the episodes logged after the start are the run's. The episode that
+makes the run cover every known regular episode moves the status back to Completed: the run
+is finished.
+
+A client stops a run with `log_progress` and the progress `{"type": "rewatch_stop"}`: the
+status goes back to Completed and the run ends there for good. Episodes logged after the stop
+are plain extra views, whatever the status is set to later; only a new start begins a new
+run. Setting the status to Completed with `set_status` (a client that does not know the
+marker) also shows the run as stopped, but leaves no event: such a run runs again when the
+status is set back to In progress, and episodes logged after it still join it until the next
+start or stop marker. Clients should send the marker.
+
+What the server refuses (the command fails, nothing is stored):
+
+* a start on an entry that is not Completed, or on an item that is not in the library, and
+  a stop while no run is open: `conflict`;
+* a start whose `occurred_at` lies before the newest event of the item, and a stop whose
+  `occurred_at` lies before the start of its run: `invalid` (`occurred_at`);
+* while a run is running, an episode (season 1 and up) whose `occurred_at` lies before the
+  start of the run: `invalid` (`occurred_at`). It would be stored and not counted.
+
+A log sent without `occurred_at` is dated by the server and never before the event it
+follows (the start of the run, for an episode). A queue that sends its own times keeps them:
+the start first, then its episodes, each with a time not before the start's. A replay of a
+stored command answers as before, whatever the run says now.
+
+The item page (`GET /api/v1/items/{id}/page`) reports the run in `summary.rewatch` (`start`,
+`done`, `running`); an event's `status` names the status it moved the entry to. While
+`rewatch.running` is true, `summary.fraction` and `next_step` count within the run, while
+`episodes_watched` still counts every view. A client that does not know the types sees more
+events in the history; its own episode logs on a Completed entry stay plain extra views.
+
+The export (`GET /api/v1/export`) carries the markers in each row's `history` (the effective
+history: undone logs and their undo events are left out); the import replays them, so runs
+come back as they were, a running one included.
+
 == Guarantees
 
 * Replaying a batch changes nothing (no new change rows).

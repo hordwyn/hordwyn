@@ -56,6 +56,50 @@ pub fn season_rows(
     rows
 }
 
+/// [`season_rows`] while a rewatch run is running (ot2e, DEC-587): the seasons are the
+/// same, but only the episodes logged after the run's start (the event `run_start` of the
+/// history, oldest first) count as watched: the list shows where the rewatch is, and the
+/// marks log what it has not reached yet. Without a start, or with one the history does not
+/// have, every view counts.
+#[must_use]
+pub fn season_rows_in(
+    attributes: &serde_json::Value,
+    progress: &[ProgressEventDto],
+    run_start: Option<&str>,
+) -> Vec<SeasonRow> {
+    let mut rows = season_rows(attributes, progress);
+    let Some(at) = run_start.and_then(|id| progress.iter().position(|e| e.id == id)) else {
+        return rows;
+    };
+    let run = season_rows(attributes, &progress[at + 1..]);
+    for row in &mut rows {
+        row.watched = run
+            .iter()
+            .find(|r| r.number == row.number)
+            .map(|r| r.watched.clone())
+            .unwrap_or_default();
+    }
+    rows
+}
+
+/// Does the answer "Log N again" of the bulk question start a rewatch run (DEC-538,
+/// DEC-587)? On a Completed entry of a kind with episodes: the start is logged first and
+/// the episodes after it, now. On any other status the episodes are extra views (and while
+/// a run is running they are the run's anyway).
+#[must_use]
+pub fn again_starts_run(status: &str) -> bool {
+    status == "completed"
+}
+
+/// Is the date choice of the bulk marks shown? Not while a rewatch run is running (a
+/// backfilled view would sort before its start, DEC-589), and not while "Log N again" is
+/// asked on a Completed entry: that answer starts a run and logs now, so a date chosen
+/// there would be ignored (review OT2E-11).
+#[must_use]
+pub fn date_choice_shown(in_run: bool, again_starts_run: bool, asking_again: bool) -> bool {
+    !(in_run || again_starts_run && asking_again)
+}
+
 fn u32_of(v: &serde_json::Value) -> Option<u32> {
     v.as_u64().and_then(|n| u32::try_from(n).ok())
 }
@@ -398,6 +442,7 @@ mod tests {
             item_id: "i".into(),
             occurred_at: "2026-01-01T00:00:00Z".into(),
             progress,
+            status: None,
         }
     }
 
@@ -418,6 +463,65 @@ mod tests {
             &attrs,
             &[ep(1, 1, 1), ep(2, 1, 3), ep(3, 2, 2), ep(4, 1, 1)],
         )
+    }
+
+    /// ot2e: while a rewatch runs, the list shows the run: the seasons stay, the episodes
+    /// watched before its start are open again.
+    #[test]
+    fn a_running_rewatch_counts_only_its_own_episodes() {
+        let attrs = serde_json::json!({"seasons": [{"number": 1, "episode_count": 3}]});
+        let history = [
+            ep(1, 1, 1),
+            ep(2, 1, 2),
+            ep(3, 1, 3),
+            // a season only the history knows
+            ep(4, 2, 1),
+            ev(5, serde_json::json!({"type": "rewatch"})),
+            ep(6, 1, 1),
+            ep(7, 1, 2),
+        ];
+        let all = season_rows_in(&attrs, &history, None);
+        assert_eq!(all, season_rows(&attrs, &history));
+        assert_eq!(all[0].watched, BTreeSet::from([1, 2, 3]));
+        let run = season_rows_in(&attrs, &history, Some("e5"));
+        assert_eq!(run.len(), 2, "the seasons stay: {run:?}");
+        assert_eq!((run[0].number, run[0].count), (1, 3));
+        assert_eq!(run[0].watched, BTreeSet::from([1, 2]));
+        assert_eq!((run[1].number, run[1].count), (2, 1));
+        assert_eq!(run[1].watched.len(), 0);
+        // the marks follow: "Mark season watched" logs what the run has not reached
+        assert_eq!(
+            plan_bulk(&run, Bulk::Season(1)),
+            BulkPlan::Log {
+                eps: vec![(1, 3)],
+                skipped: 2
+            }
+        );
+        // a start the history does not have (a stale page): every view counts
+        assert_eq!(season_rows_in(&attrs, &history, Some("gone")), all);
+    }
+
+    /// DEC-538, DEC-587: "Log N again" starts a run on a Completed entry only.
+    #[test]
+    fn the_bulk_answer_starts_a_run_on_a_completed_entry() {
+        assert!(again_starts_run("completed"));
+        for other in ["planned", "in_progress", "paused", "dropped", ""] {
+            assert!(!again_starts_run(other), "{other}");
+        }
+    }
+
+    /// Review OT2E-11: no date choice where the dates would be ignored.
+    #[test]
+    fn the_date_choice_shows_only_where_it_has_a_say() {
+        assert!(date_choice_shown(false, false, false));
+        // "Log N again" on an In progress show logs extra views on the chosen dates
+        assert!(date_choice_shown(false, false, true));
+        assert!(date_choice_shown(false, true, false));
+        // on a Completed entry that answer starts a run, dated now
+        assert!(!date_choice_shown(false, true, true));
+        // and a running run takes no backfilled date at all
+        assert!(!date_choice_shown(true, false, false));
+        assert!(!date_choice_shown(true, false, true));
     }
 
     #[test]
