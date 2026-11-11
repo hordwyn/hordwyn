@@ -198,6 +198,12 @@ Playwright specs green under axe in both themes.
 
 ### ot2f - plays on game pages and in the stats (OT-11 rest)
 
+- Added 2026-11-11 from the second owner test (docs/handoff/owner-test-2026-11-10.md): OT-18 co-op play
+  without a result ("Played together", the default for co-op; stored as no outcome, additive,
+  old rows unchanged), OT-19 the time tiles wrap by the space of their column (container
+  query or auto-fit) and the stray line beside "All-time stats", OT-20 a tile with counts but
+  no known time says so ("13 episodes, runtimes not known yet") instead of "0 hours".
+
 - Scope: a "Plays" tab on game pages (date, people, scores, winner, duration); hours and
   win rate on the Stats Play tab. The activity sentence exists (DEC-502).
 - Files and crates: `crates/app` (plays read, stats), `crates/store-pg` (one aggregate

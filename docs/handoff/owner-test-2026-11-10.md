@@ -57,3 +57,15 @@ OT-1..OT-17 in the owner's order and words, then triaged. Nothing here is built 
   test-first, review, `cargo xtask ci` + `cargo xtask e2e`, tag.
 - **P3 UX pack "ot2":** the model, visual and stats changes the owner picked from F2.
 - **P4 then W0..W7** as before (HANDOFF section 0).
+
+## Second owner test, 2026-11-11 (after ot2d)
+
+"Rest seems to be working." New findings, folded into ot2f:
+
+| ID | Owner's finding | Type | Where |
+|---|---|---|---|
+| OT-18 | A co-op video game (LEGO Harry Potter) has no win or lose, but the play reads "Lost together"; the form only knows won/lost (`CoopOutcome`, `log_sheet.rs` `coop_won` defaults to true) | gap | `domain/src/session.rs` `CoopOutcome`, play form, History row |
+| OT-19 | "Grid is not aligning": the four time tiles use `md:grid-cols-4` on the viewport, the content column beside the side nav is narrower, tiles 3 and 4 run off to the right at about 770 px content width; a stray line left of "All-time stats" | bug | `web/src/time_tiles.rs:246`, Home heading |
+| OT-20 | "Shows 0 hours" beside "13 episodes": no TMDB episode runtimes are counted before ot2g; "0 hours" reads as wrong when episodes exist | UX | `time_tiles.rs`, DEC-577 |
+
+Board games: not usable yet (no catalogue source - BGG not built per HUB-7, Wikidata in d2/h1 - and no manual item entry); the play, score and group parts exist.
