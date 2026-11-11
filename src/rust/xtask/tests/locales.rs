@@ -97,6 +97,8 @@ const WEB_FAMILIES: &[&str] = &[
     "imports-lost-",
     // UX4-22: the mail health row's test outcome by category (`not_configured`, `connection`, ...)
     "admin-health-mail-result-",
+    // OT-5: the past-tense twin of a `next-step-*` label, for the toast and the dialog title
+    "logged-step-",
 ];
 
 #[test]

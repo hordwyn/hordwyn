@@ -139,22 +139,70 @@ pub enum Bulk {
     Show,
 }
 
-/// The episodes a bulk mark logs: the unwatched ones it covers. When every one of them is
-/// watched already it is the Fluent message that says so (OT-15: never a click that does
-/// nothing). A bulk rewatch is not offered here; "Again" on a row logs one episode again.
-///
-/// # Errors
-/// The message key, when there is nothing to log.
-pub fn plan_bulk(rows: &[SeasonRow], bulk: Bulk) -> Result<Vec<Ep>, &'static str> {
-    let (open, nothing) = match bulk {
-        Bulk::UpTo(target) => (unwatched_up_to(rows, target), "episodes-nothing-up-to"),
-        Bulk::Season(season) => (unwatched_in_season(rows, season), "episodes-nothing-season"),
-        Bulk::Show => (unwatched_in_show(rows), "episodes-nothing-show"),
-    };
-    if open.is_empty() {
-        Err(nothing)
+/// The id prefix of an episode row's menu (`ui::DropdownMenu`).
+#[must_use]
+pub fn row_menu_id((season, episode): Ep) -> String {
+    format!("ep-menu-{season}-{episode}")
+}
+
+impl Bulk {
+    /// A selector for the control that starts this mark: the row's menu button, or the
+    /// season's or the show's button (`data-ep-bulk`). The focus returns there when its
+    /// question is answered (review OT2A-4).
+    #[must_use]
+    pub fn asker(self) -> String {
+        match self {
+            Self::UpTo(ep) => format!("[aria-controls=\"{}-menu\"]", row_menu_id(ep)),
+            Self::Season(_) => "[data-ep-bulk=\"season\"]".into(),
+            Self::Show => "[data-ep-bulk=\"show\"]".into(),
+        }
+    }
+}
+
+/// What a bulk mark does (OT-15, DEC-538: never a click that does nothing).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BulkPlan {
+    /// Log the unwatched episodes it covers; `skipped` more are watched already and stay as
+    /// they are (the toast says how many).
+    Log { eps: Vec<Ep>, skipped: usize },
+    /// Every episode it covers is watched: ask "Log these N again as a rewatch?".
+    Again(Vec<Ep>),
+    /// It covers no episode (a season the item does not have).
+    Nothing,
+}
+
+/// Every episode a bulk mark covers, watched or not, in order.
+fn covered(rows: &[SeasonRow], bulk: Bulk) -> Vec<Ep> {
+    rows.iter()
+        .filter_map(|r| {
+            let last = match bulk {
+                Bulk::UpTo((season, _)) if r.number > season => return None,
+                Bulk::UpTo((season, episode)) if r.number == season => episode.min(r.count),
+                Bulk::Season(season) if r.number != season => return None,
+                Bulk::UpTo(_) | Bulk::Season(_) | Bulk::Show => r.count,
+            };
+            Some((1..=last).map(move |e| (r.number, e)))
+        })
+        .flatten()
+        .collect()
+}
+
+/// The plan of a bulk mark: the unwatched episodes it covers and how many it skips, or the
+/// whole range to offer again when all of it is watched.
+#[must_use]
+pub fn plan_bulk(rows: &[SeasonRow], bulk: Bulk) -> BulkPlan {
+    let all = covered(rows, bulk);
+    let watched = |(s, e): &Ep| rows.iter().any(|r| r.number == *s && r.watched.contains(e));
+    let eps: Vec<Ep> = all.iter().filter(|ep| !watched(ep)).copied().collect();
+    if all.is_empty() {
+        BulkPlan::Nothing
+    } else if eps.is_empty() {
+        BulkPlan::Again(all)
     } else {
-        Ok(open)
+        BulkPlan::Log {
+            skipped: all.len() - eps.len(),
+            eps,
+        }
     }
 }
 
@@ -318,16 +366,31 @@ pub fn plan_single(rows: &[SeasonRow], target: Ep, answer: Previous) -> Plan {
     }
 }
 
-/// The message of the bulk mark that logged nothing (`asked`), for as long as the rows still
-/// say so: after a refetch with an open episode in its range there is none (OT1A-2).
+/// The episodes of the question "Log these N again?" of the bulk mark `asked`, for as long as
+/// the rows still say that all of its range is watched: after a refetch with an open episode
+/// in it the question is gone (OT1A-2).
 #[must_use]
-pub fn standing_note(rows: &[SeasonRow], asked: Option<Bulk>) -> Option<&'static str> {
-    asked.and_then(|bulk| plan_bulk(rows, bulk).err())
+pub fn standing_again(rows: &[SeasonRow], asked: Option<Bulk>) -> Option<Vec<Ep>> {
+    match plan_bulk(rows, asked?) {
+        BulkPlan::Again(eps) => Some(eps),
+        BulkPlan::Log { .. } | BulkPlan::Nothing => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Review OT2A-4: each bulk mark names the control that asked.
+    #[test]
+    fn a_bulk_mark_knows_the_control_that_asked() {
+        assert_eq!(
+            Bulk::UpTo((2, 5)).asker(),
+            "[aria-controls=\"ep-menu-2-5-menu\"]"
+        );
+        assert_eq!(Bulk::Season(3).asker(), "[data-ep-bulk=\"season\"]");
+        assert_eq!(Bulk::Show.asker(), "[data-ep-bulk=\"show\"]");
+    }
 
     fn ev(n: u32, progress: serde_json::Value) -> ProgressEventDto {
         ProgressEventDto {
@@ -538,60 +601,74 @@ mod tests {
         assert_eq!(Previous::Ask.as_stored(), None);
     }
 
-    /// OT-15: a bulk mark whose episodes are all watched names its message instead of
-    /// logging nothing in silence; with open episodes it logs exactly those, as before.
+    /// OT-15 (DEC-538): a fully watched range offers N to log again, a mixed range reports
+    /// the skipped count.
     #[test]
-    fn a_bulk_mark_with_nothing_open_says_so() {
+    fn a_fully_watched_range_offers_to_log_again_a_mixed_range_reports_the_skipped() {
         // season 1: 1 and 3 of 3 watched; season 2: 2 of 4 watched
         let r = rows();
         assert_eq!(
             plan_bulk(&r, Bulk::UpTo((1, 1))),
-            Err("episodes-nothing-up-to")
+            BulkPlan::Again(vec![(1, 1)])
         );
-        assert_eq!(plan_bulk(&r, Bulk::UpTo((1, 3))), Ok(vec![(1, 2)]));
-        assert_eq!(plan_bulk(&r, Bulk::Season(1)), Ok(vec![(1, 2)]));
+        // a mixed range logs the open ones and counts the rest
+        assert_eq!(
+            plan_bulk(&r, Bulk::UpTo((1, 3))),
+            BulkPlan::Log {
+                eps: vec![(1, 2)],
+                skipped: 2
+            }
+        );
+        assert_eq!(
+            plan_bulk(&r, Bulk::Season(1)),
+            BulkPlan::Log {
+                eps: vec![(1, 2)],
+                skipped: 2
+            }
+        );
         assert_eq!(
             plan_bulk(&r, Bulk::Show),
-            Ok(vec![(1, 2), (2, 1), (2, 3), (2, 4)])
+            BulkPlan::Log {
+                eps: vec![(1, 2), (2, 1), (2, 3), (2, 4)],
+                skipped: 3
+            }
         );
+        // a season the item does not have covers nothing
+        assert_eq!(plan_bulk(&r, Bulk::Season(9)), BulkPlan::Nothing);
         let attrs = serde_json::json!({"seasons": [
             {"number": 1, "episode_count": 2},
             {"number": 2, "episode_count": 1},
         ]});
+        // nothing watched: nothing skipped
+        assert_eq!(
+            plan_bulk(&season_rows(&attrs, &[]), Bulk::Season(1)),
+            BulkPlan::Log {
+                eps: vec![(1, 1), (1, 2)],
+                skipped: 0
+            }
+        );
+        // everything watched: each mark offers its whole range again, in order
         let done = season_rows(&attrs, &[ep(1, 1, 1), ep(2, 1, 2), ep(3, 2, 1)]);
+        let all = vec![(1, 1), (1, 2), (2, 1)];
         assert_eq!(
             plan_bulk(&done, Bulk::UpTo((2, 1))),
-            Err("episodes-nothing-up-to")
+            BulkPlan::Again(all.clone())
         );
         assert_eq!(
             plan_bulk(&done, Bulk::Season(1)),
-            Err("episodes-nothing-season")
+            BulkPlan::Again(vec![(1, 1), (1, 2)])
         );
-        assert_eq!(plan_bulk(&done, Bulk::Show), Err("episodes-nothing-show"));
-        // the message stands only while the rows still say so (OT1A-2): after a refetch
-        // with an open episode, or with no mark asked, there is none
-        assert_eq!(
-            standing_note(&done, Some(Bulk::Show)),
-            Some("episodes-nothing-show")
-        );
+        assert_eq!(plan_bulk(&done, Bulk::Show), BulkPlan::Again(all.clone()));
+        // the question stands only while the rows still say that all of it is watched
+        // (OT1A-2): after a refetch with an open episode, or with no mark asked, it is gone
+        assert_eq!(standing_again(&done, Some(Bulk::Show)), Some(all));
         let undone = season_rows(&attrs, &[ep(1, 1, 1), ep(3, 2, 1)]);
-        assert_eq!(standing_note(&undone, Some(Bulk::Show)), None);
-        assert_eq!(standing_note(&undone, Some(Bulk::Season(1))), None);
+        assert_eq!(standing_again(&undone, Some(Bulk::Show)), None);
+        assert_eq!(standing_again(&undone, Some(Bulk::Season(1))), None);
         assert_eq!(
-            standing_note(&undone, Some(Bulk::Season(2))),
-            Some("episodes-nothing-season")
+            standing_again(&undone, Some(Bulk::Season(2))),
+            Some(vec![(2, 1)])
         );
-        assert_eq!(standing_note(&done, None), None);
-        // each message exists in both locales
-        for key in [
-            "episodes-nothing-up-to",
-            "episodes-nothing-season",
-            "episodes-nothing-show",
-        ] {
-            for locale in ["en", "de"] {
-                let i = crate::i18n::I18n::new(locale, std::collections::BTreeMap::new());
-                assert_ne!(i.t(key), key, "{locale}");
-            }
-        }
+        assert_eq!(standing_again(&done, None), None);
     }
 }

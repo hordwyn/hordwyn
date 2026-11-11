@@ -9,10 +9,10 @@ use leptos::prelude::*;
 use leptos_router::NavigateOptions;
 use leptos_router::hooks::{use_navigate, use_query_map};
 use ui::{
-    Alert, AlertRole, AlertVariant, Button, ButtonSize, ButtonVariant, Disclosure, DisclosureMode,
-    EmptyState, Icon, IconName, ProgressBar, ProgressSize, Segmented, SegmentedMode,
-    SegmentedOption, Skeleton, Table, TableBody, TableCaption, TableCell, TableHead, TableHeader,
-    TableRow,
+    Alert, AlertRole, AlertVariant, Button, ButtonLink, ButtonSize, ButtonVariant, Disclosure,
+    DisclosureMode, EmptyState, Icon, IconName, ProgressBar, ProgressSize, Segmented,
+    SegmentedMode, SegmentedOption, Skeleton, Table, TableBody, TableCaption, TableCell, TableHead,
+    TableHeader, TableRow,
 };
 
 use crate::api;
@@ -50,8 +50,8 @@ pub fn Home() -> impl IntoView {
             <h1 class="text-3xl font-semibold tracking-tight">{t("home-title")}</h1>
             <p class="mt-4 text-muted-foreground">{t("home-lead")}</p>
             <div class="mt-8 flex justify-center gap-4">
-                <a href="/library" class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">{t("nav-library")}</a>
-                <a href="/sign-up" class="rounded-md border border-input px-4 py-2 text-sm font-medium">{t("nav-sign-up")}</a>
+                <ButtonLink href="/library">{t("nav-library")}</ButtonLink>
+                <ButtonLink href="/sign-up" variant=ButtonVariant::Outline>{t("nav-sign-up")}</ButtonLink>
             </div>
         </section>
     }

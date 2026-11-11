@@ -292,7 +292,7 @@ test("palette: Ctrl+Enter adds a provider hit as Planned and stays open, Undo re
   // the active row shows what Enter and Ctrl+Enter do
   await expect(option).toContainText("Add as Planned or next step");
   await page.keyboard.press("Control+Enter");
-  const added = page.locator("[role=status][aria-live] > div").filter({ hasText: "Added to Planned" });
+  const added = page.locator("[role=status][aria-live] > div").filter({ hasText: "Added to your library as Planned" });
   await expect(added).toBeVisible();
   await expect(added).toContainText("Fight Club (1999)");
   await expect(palette).toBeVisible();

@@ -1,6 +1,8 @@
 //! The item page `/items/:id` (design.md 6.3, 3.4, 5.4, 5.5; addendum-1 1.3 Item row): cover
 //! with the entry facts card (status, progress, rating open; the rest behind "More facts"),
-//! title block, the action bar per progress model with the next step first, the rating /
+//! title block with the status pill and the fact line ("Watched 3 times, last on ...", OT-5,
+//! OT-7), the action bar per progress model with the next step first (two actions for an item
+//! that is not in the library: "Mark as watched" and "Want to watch", OT-4), the rating /
 //! tags / lists row, and tabs (Episodes where the kind has them, About, History, Notes).
 //! The sheets, the open tab and the episode question live here, outside the view that a
 //! refetch rebuilds.
@@ -22,12 +24,16 @@ use crate::episode_list::{EpisodeList, EpisodeUi};
 use crate::events::{mentions, use_events};
 use crate::history::ActivityRow;
 use crate::i18n::{kind_label, t, use_i18n};
+use crate::item_words::{
+    Facts, Verb, again_count, fact_line, times_text, want_key, with_button_key,
+};
 use crate::log_sheet::{
     InlineDraft, ItemInfo, PagesInline, PlaySheet, PlayState, PositionInline, SheetTarget,
     WatchedSheet, WatchedState,
 };
 use crate::next_step::{
-    LoggedStep, StepCtx, next_step_label, progress_text, run_step, step_progress,
+    LoggedStep, StepCtx, logged_step_label, next_step_label, progress_text, run_first_step,
+    run_step, step_progress, toast_added,
 };
 use crate::pages::{error_text, go, needs_sign_in};
 use crate::widgets::{Cover, RatingInput, TagBadges, TagEditor};
@@ -240,7 +246,7 @@ fn open_asked_sheet(page: &ItemPageDto, model: &str, ui: &ItemUi) {
     let i18n = use_i18n();
     let step = page.next_step.clone().unwrap_or_default();
     let watched = step_progress(&step).filter(|_| matches!(model, "single" | "episodic"));
-    let label = next_step_label(&i18n, &step);
+    let label = logged_step_label(&i18n, &step);
     let plays = model == "sessions";
     Effect::new(move |_| {
         let Some((with, group)) = ui.auto_log.get() else {
@@ -261,8 +267,12 @@ fn open_asked_sheet(page: &ItemPageDto, model: &str, ui: &ItemUi) {
     });
 }
 
-fn info_of(page: &ItemPageDto, refresh: Callback<()>) -> ItemInfo {
+fn info_of(page: &ItemPageDto, kind: Option<&KindDto>, refresh: Callback<()>) -> ItemInfo {
     ItemInfo {
+        verb: kind.and_then(|k| Verb::of_group(&k.group)),
+        board_game: page.item.kind == "board_game",
+        // the newest play comes first
+        last_duration: page.plays.first().and_then(|p| p.play.duration_minutes),
         item_id: page.item.id.clone(),
         title: crate::i18n::title_text(&page.item.title),
         rating: page.entry.as_ref().and_then(|e| e.rating),
@@ -271,7 +281,11 @@ fn info_of(page: &ItemPageDto, refresh: Callback<()>) -> ItemInfo {
             .as_ref()
             .and_then(|e| e.notes.clone())
             .unwrap_or_default(),
-        finished: page.summary.as_ref().map_or(0, |s| s.finished),
+        // what the header counts, for a step that says "again" (review OT2A-1)
+        finished: page
+            .next_step
+            .as_ref()
+            .map_or(0, |s| again_count(s, page.times)),
         refresh,
     }
 }
@@ -285,7 +299,7 @@ fn ItemView(
 ) -> impl IntoView {
     let i18n = use_i18n();
     let item = page.item.clone();
-    let info = info_of(&page, ui.refresh);
+    let info = info_of(&page, kind.as_ref(), ui.refresh);
     let model = kind
         .as_ref()
         .map(|k| k.progress_model.clone())
@@ -293,6 +307,23 @@ fn ItemView(
     let loading = item.state == "stub";
     let square = crate::library_state::square_art(&item.kind);
     let play_title = page.next_step.as_ref().map(|s| next_step_label(&i18n, s));
+    // the status as a pill, and where the person stands in one line (OT-5, OT-7)
+    let pill = page
+        .entry
+        .as_ref()
+        .map(|e| i18n.t(&format!("status-{}", e.status)));
+    let fact = page.entry.as_ref().and_then(|e| {
+        let facts = Facts {
+            verb: info.verb,
+            model: &model,
+            times: page.times,
+            completed: e.status == "completed",
+            added_at: &e.added_at,
+            summary: &page.summary.clone().unwrap_or_default(),
+            step: &page.next_step.clone().unwrap_or_default(),
+        };
+        fact_line(&i18n, &facts)
+    });
     remember_recent(&page, kind.as_ref());
     open_asked_sheet(&page, &model, &ui);
     view! {
@@ -307,8 +338,10 @@ fn ItemView(
                     <div class="flex flex-wrap gap-1.5">
                         <Badge variant=BadgeVariant::Secondary><Icon name=crate::library::kind_icon(&item.kind)/> {kind_label(&item.kind)}</Badge>
                         {item.year.map(|y| view! { <Badge variant=BadgeVariant::Outline>{y.to_string()}</Badge> })}
+                        {pill.map(|p| view! { <Badge attr:data-testid="ip-status">{p}</Badge> })}
                     </div>
                     <h1 class="text-2xl font-semibold tracking-tight md:text-3xl">{crate::i18n::title_text(&item.title)}</h1>
+                    {fact.map(|f| view! { <p class="text-sm text-muted-foreground" data-testid="item-fact-line">{f}</p> })}
                     {item.original_title.clone().filter(|o| o != &item.title).map(|o| view! {
                         <p class="text-sm text-muted-foreground">{use_i18n().t_args("item-original-title", &[("title", o.into())])}</p>
                     })}
@@ -339,9 +372,12 @@ fn FactsCard(page: ItemPageDto, kind: Option<KindDto>, ui: ItemUi) -> impl IntoV
     };
     let summary = page.summary.clone().unwrap_or_default();
     let step = page.next_step.clone().unwrap_or_default();
+    let verb = kind.as_ref().and_then(|k| Verb::of_group(&k.group));
     let progress = progress_text(&i18n, &summary, &step).unwrap_or_else(|| {
         if summary.events == 0 {
             i18n.t("item-not-started")
+        } else if page.times > 0 {
+            times_text(&i18n, verb, page.times)
         } else {
             next_step_label(&i18n, &step)
         }
@@ -371,11 +407,8 @@ fn FactsCard(page: ItemPageDto, kind: Option<KindDto>, ui: ItemUi) -> impl IntoV
         }
         now
     });
-    let repeats = if summary.sessions > 0 {
-        (i18n.t("item-plays"), summary.sessions)
-    } else {
-        (i18n.t("item-rewatches"), summary.finished.saturating_sub(1))
-    };
+    // "Rewatches: N" is gone (OT-7): the header counts in words, "Watched 3 times"
+    let plays = (summary.sessions > 0).then_some(summary.sessions);
     let row = "flex items-baseline justify-between gap-3";
     view! {
         <section class="grid gap-3 rounded-lg border border-border bg-card p-4 text-sm" data-testid="item-facts" aria-label=t("item-facts")>
@@ -391,7 +424,7 @@ fn FactsCard(page: ItemPageDto, kind: Option<KindDto>, ui: ItemUi) -> impl IntoV
                     <div class=row><dt class="text-muted-foreground">{t("item-added")}</dt><dd>{use_i18n().date(&entry.added_at)}</dd></div>
                     {summary.first_at.clone().map(|d| view! { <div class=row><dt class="text-muted-foreground">{use_i18n().t("item-started")}</dt><dd>{use_i18n().date(&d)}</dd></div> })}
                     {summary.last_at.clone().map(|d| view! { <div class=row><dt class="text-muted-foreground">{use_i18n().t("item-last")}</dt><dd>{use_i18n().date(&d)}</dd></div> })}
-                    <div class=row><dt class="text-muted-foreground">{repeats.0}</dt><dd>{use_i18n().number(f64::from(repeats.1))}</dd></div>
+                    {plays.map(|n| view! { <div class=row><dt class="text-muted-foreground">{use_i18n().t("item-plays")}</dt><dd>{use_i18n().number(f64::from(n))}</dd></div> })}
                 </dl>
             </Disclosure>
         </section>
@@ -483,8 +516,92 @@ fn overflow(
     })
 }
 
-/// The action bar (design.md 6.3, 3.4): the next step first, "With..." for a sheet, the
-/// overflow menu; pages and positions log inline. Sticky above the tab bar on phones.
+const BAR_CARD: &str = "grid gap-3 rounded-lg border border-border bg-card p-4 shadow-sm";
+
+/// The action bar of an item that is not in the library (OT-4): two verbs. The first is the
+/// item's first step, "Mark as watched" (one click, logged with Undo; the first log adds the
+/// item, the toast says so and its Undo takes the log and the add back) or "Log a play" (its
+/// dialog); the second, "Want to watch", adds it as Planned and says so in the shared toast
+/// with Undo. A kind whose first step needs a field (a page, a
+/// position) has the second button only, as the primary one.
+#[component]
+fn AddBar(page: ItemPageDto, info: ItemInfo, ui: ItemUi) -> impl IntoView {
+    let i18n = use_i18n();
+    let ctx = StepCtx::current();
+    let step = page.next_step.clone().unwrap_or_default();
+    let (busy, adding, error) = (
+        RwSignal::new(false),
+        RwSignal::new(false),
+        RwSignal::new(None::<String>),
+    );
+    let refresh = info.refresh;
+    let first = match (step_progress(&step), step.action.as_str()) {
+        (Some(progress), _) => {
+            let logged = LoggedStep {
+                item_id: info.item_id.clone(),
+                title: info.title.clone(),
+                label: logged_step_label(&i18n, &step),
+                progress,
+            };
+            let ctx = ctx.clone();
+            Some(view! {
+                <Button size=ButtonSize::Lg loading=busy attr:data-next-step=""
+                    on:click=move |_| run_first_step(ctx.clone(), logged.clone(), busy, error, Some(refresh))>
+                    <Icon name=IconName::Check/> {next_step_label(&i18n, &step)}
+                </Button>
+            }.into_any())
+        }
+        (None, "session") => {
+            let open = ui.play.open;
+            Some(view! {
+                <Button size=ButtonSize::Lg attr:data-next-step="" on:click=move |_| open.set(true)>
+                    <Icon name=IconName::Meeple/> {next_step_label(&i18n, &step)}
+                </Button>
+            }.into_any())
+        }
+        _ => None,
+    };
+    let (id, title) = (info.item_id.clone(), info.title.clone());
+    let add = move |_| {
+        let (id, title, ctx) = (id.clone(), title.clone(), ctx.clone());
+        adding.set(true);
+        error.set(None);
+        leptos::task::spawn_local(async move {
+            match api::add_to_library(id.clone()).await {
+                Ok(_) => toast_added(&ctx, id, title, Some(refresh)),
+                Err(e) => error.set(Some(
+                    ctx.i18n
+                        .t_args("library-step-failed", &[("error", error_text(&e).into())]),
+                )),
+            }
+            adding.set(false);
+            refresh.run(());
+        });
+    };
+    // alone it is the primary action, and the one the W key runs
+    let alone = first.is_none();
+    let variant = if alone {
+        ButtonVariant::Default
+    } else {
+        ButtonVariant::Outline
+    };
+    view! {
+        <section class=BAR_CARD data-testid="action-bar" data-action-bar="" aria-label=t("item-action-bar")>
+            <div class="flex flex-wrap items-end gap-2">
+                {first}
+                <Button size=ButtonSize::Lg variant=variant loading=adding attr:data-want=""
+                    attr:data-next-step=alone.then_some("") on:click=add>
+                    {t(want_key(info.verb))}
+                </Button>
+                {move || error.get().map(|e| view! { <p role="alert" class="basis-full text-sm text-destructive-text">{e}</p> })}
+            </div>
+        </section>
+    }
+}
+
+/// The action bar (design.md 6.3, 3.4): the next step first, "Watched with..." for a sheet,
+/// the overflow menu; pages and positions log inline. Sticky above the tab bar on phones. An
+/// item that is not in the library has [`AddBar`] instead.
 #[component]
 fn ActionBar(
     page: ItemPageDto,
@@ -493,26 +610,9 @@ fn ActionBar(
     ui: ItemUi,
 ) -> impl IntoView {
     let i18n = use_i18n();
-    let card = "grid gap-3 rounded-lg border border-border bg-card p-4 shadow-sm";
+    let card = BAR_CARD;
     let Some(step) = page.next_step.clone().filter(|_| page.entry.is_some()) else {
-        let busy = RwSignal::new(false);
-        let id = page.item.id.clone();
-        let refresh = ui.refresh;
-        let add = move |_| {
-            let id = id.clone();
-            busy.set(true);
-            leptos::task::spawn_local(async move {
-                let _ = api::add_to_library(id).await;
-                busy.set(false);
-                refresh.run(());
-            });
-        };
-        return view! {
-            <section class=card data-testid="action-bar" data-action-bar="" aria-label=t("item-action-bar")>
-                <div><Button size=ButtonSize::Lg loading=busy attr:data-next-step="" on:click=add>{t("item-add")}</Button></div>
-            </section>
-        }
-        .into_any();
+        return view! { <AddBar page=page info=info ui=ui/> }.into_any();
     };
     let summary = page.summary.clone().unwrap_or_default();
     let line = progress_text(&i18n, &summary, &step).or_else(|| {
@@ -555,11 +655,14 @@ fn ActionBar(
     .into_any()
 }
 
-/// One-click next step and "With..." (single and episodic models).
+/// One-click next step and "Watched with..." (single and episodic models). The button is an
+/// imperative ("Mark as watched"); the toast and the dialog's title say it in the past tense
+/// (OT-5).
 #[component]
 fn StepButtons(step: NextStepDto, info: ItemInfo, ui: ItemUi) -> impl IntoView {
     let i18n = use_i18n();
     let label = next_step_label(&i18n, &step);
+    let done = logged_step_label(&i18n, &step);
     let Some(progress) = step_progress(&step) else {
         return view! {
             <span class="inline-flex h-10 items-center gap-2 text-sm font-medium"><Icon name=IconName::CheckCheck/> {label}</span>
@@ -570,24 +673,31 @@ fn StepButtons(step: NextStepDto, info: ItemInfo, ui: ItemUi) -> impl IntoView {
     let logged = LoggedStep {
         item_id: info.item_id.clone(),
         title: info.title.clone(),
-        label: label.clone(),
+        label: done.clone(),
         progress: progress.clone(),
     };
     let ctx = StepCtx::current();
     let refresh = info.refresh;
     let target = SheetTarget {
         progress,
-        label: label.clone(),
+        label: done,
     };
     let sheet = ui.watched.target;
-    let with = i18n.t_args("item-with-named", &[("title", info.title.clone().into())]);
+    let with_text = i18n.t(with_button_key(info.verb));
+    let with = i18n.t_args(
+        "item-with-named",
+        &[
+            ("with", with_text.clone().into()),
+            ("title", info.title.clone().into()),
+        ],
+    );
     view! {
         <Button size=ButtonSize::Lg loading=busy attr:data-next-step="" on:click=move |_| run_step(ctx.clone(), logged.clone(), busy, error, Some(refresh))>
             <Icon name=IconName::Check/> {label.clone()}
         </Button>
         <Button size=ButtonSize::Lg variant=ButtonVariant::Outline attr:aria-label=with
             on:click=move |_| sheet.set(Some(target.clone()))>
-            <Icon name=IconName::Users/> {t("item-with")}
+            <Icon name=IconName::Users/> {with_text}
         </Button>
         {move || error.get().map(|e| view! { <p role="alert" class="basis-full text-sm text-destructive-text">{e}</p> })}
     }

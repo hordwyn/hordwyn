@@ -196,20 +196,20 @@ test("the next step logs in one click and Undo takes it back; the quick menu set
   await signUp(page, `step${Date.now()}`, "Step Tester");
   await seed(page);
   await open(page, "/library?kind=show");
-  const step = page.getByRole("button", { name: "Watched S1 E2: Downstream" });
+  const step = page.getByRole("button", { name: "Mark S1 E2 watched: Downstream" });
   await step.click();
   const toast = page.getByRole("status").filter({ hasText: "Logged: Watched S1 E2" });
   await expect(toast).toBeVisible();
-  await expect(page.getByRole("button", { name: "Watched S1 E3: Downstream" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Mark S1 E3 watched: Downstream" })).toBeVisible();
   await toast.getByRole("button", { name: "Undo" }).click();
   await expect(page.getByText("Undone")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Watched S1 E2: Downstream" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Mark S1 E2 watched: Downstream" })).toBeVisible();
   // after each refetch the new card's button works: two more clicks log E2, then E3 (UX1-2)
-  await page.getByRole("button", { name: "Watched S1 E2: Downstream" }).click();
+  await page.getByRole("button", { name: "Mark S1 E2 watched: Downstream" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Logged: Watched S1 E2" })).toBeVisible();
-  await page.getByRole("button", { name: "Watched S1 E3: Downstream" }).click();
+  await page.getByRole("button", { name: "Mark S1 E3 watched: Downstream" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Logged: Watched S1 E3" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Watched S1 E4: Downstream" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Mark S1 E4 watched: Downstream" })).toBeVisible();
 
   await open(page, "/library?kind=movie");
   await page.getByRole("button", { name: "Actions for Harbour Lights" }).click();
@@ -380,7 +380,7 @@ test("bulk: the selection survives a background refresh; quick menu add to list 
   await page.getByRole("button", { name: "More actions for Ninety Winters" }).click();
   await page.getByRole("menuitem", { name: "Remove from library" }).click();
   await expect(toast(page, "Removed Ninety Winters from your library")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Add to library" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Want to watch" })).toBeVisible();
   const history = await (await page.request.get(`/api/v1/items/${id("Ninety Winters")}/progress`)).json();
   expect(history.length).toBeGreaterThan(0);
 });

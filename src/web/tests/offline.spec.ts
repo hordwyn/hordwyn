@@ -55,7 +55,7 @@ test("offline the next step is queued, counted and sent once when back online", 
 
   await context.setOffline(true);
   await expect(page.getByText("You are offline.")).toBeVisible();
-  await card.getByRole("button", { name: "Watched S1 E2: Downstream" }).click();
+  await card.getByRole("button", { name: "Mark S1 E2 watched: Downstream" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Saved offline, will sync" })).toBeVisible();
   await expect(page.getByText("1 change waiting")).toBeVisible();
 
@@ -73,7 +73,7 @@ test("a change queued offline is sent on the next page load", async ({ page, con
   const item = await seed(page);
   const card = await home(page);
   await context.setOffline(true);
-  await card.getByRole("button", { name: "Watched S1 E2: Downstream" }).click();
+  await card.getByRole("button", { name: "Mark S1 E2 watched: Downstream" }).click();
   await expect(page.getByText("1 change waiting")).toBeVisible();
   await page.close();
 
@@ -92,7 +92,7 @@ test("Undo while offline takes the change out of the queue", async ({ page, cont
   const card = await home(page);
 
   await context.setOffline(true);
-  await card.getByRole("button", { name: "Watched S1 E2: Downstream" }).click();
+  await card.getByRole("button", { name: "Mark S1 E2 watched: Downstream" }).click();
   const toast = page.getByRole("status").filter({ hasText: "Saved offline, will sync" });
   await expect(toast).toBeVisible();
   await page.getByRole("button", { name: "Undo", exact: true }).click();
@@ -118,7 +118,7 @@ async function queueOne(page: Page, context: import("@playwright/test").BrowserC
   await page.route("**/api/v1/sync/commands", (r) => r.abort());
   const card = await home(page);
   await context.setOffline(true);
-  await card.getByRole("button", { name: "Watched S1 E2: Downstream" }).click();
+  await card.getByRole("button", { name: "Mark S1 E2 watched: Downstream" }).click();
   await expect(page.getByText("1 change waiting")).toBeVisible();
   await context.setOffline(false);
   await expect(page.getByText("You are offline.")).toHaveCount(0);
@@ -175,7 +175,7 @@ test("a change the server refuses is dropped with a toast that names it", async 
   await seed(page);
   const card = await home(page);
   await context.setOffline(true);
-  await card.getByRole("button", { name: "Watched S1 E2: Downstream" }).click();
+  await card.getByRole("button", { name: "Mark S1 E2 watched: Downstream" }).click();
   await expect(page.getByText("1 change waiting")).toBeVisible();
   await page.route("**/api/v1/sync/commands", async (route) => {
     const body = route.request().postDataJSON() as { commands: { op_id: string }[] };
@@ -241,7 +241,7 @@ test("offline, an event leaves Home as it is: the next step still works; others'
   await frames(page);
   await expect(failedHome).toHaveCount(0);
   await page.unroute("**/_fn/home*");
-  await card.getByRole("button", { name: "Watched S1 E2: Downstream" }).click();
+  await card.getByRole("button", { name: "Mark S1 E2 watched: Downstream" }).click();
   await expect(page.getByText("Logged: Watched S1 E2").first()).toBeVisible();
   await expect.poll(() => episodes(page, item)).toEqual(["S1E1", "S1E2"]);
 });
@@ -260,7 +260,7 @@ test.describe("the offline banner at 360 px", () => {
       const card = await home(page);
       await context.setOffline(true);
       await expect(page.getByText("You are offline.")).toBeVisible();
-      await card.getByRole("button", { name: /^Watched S1 E\d+: Downstream$/ }).click();
+      await card.getByRole("button", { name: /^Mark S1 E\d+ watched: Downstream$/ }).click();
       await expect(page.getByText("1 change waiting")).toBeVisible();
       await expectNoA11yViolations(page, `offline banner ${theme}`);
       await expectReflow(page, `offline banner ${theme}`);

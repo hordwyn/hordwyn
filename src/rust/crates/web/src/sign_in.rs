@@ -16,7 +16,9 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::{use_params_map, use_query_map};
 use serde_json::json;
-use ui::{Alert, AlertRole, AlertVariant, FormField, Input, Skeleton, field_described_by};
+use ui::{
+    Alert, AlertRole, AlertVariant, ButtonLink, FormField, Input, Skeleton, field_described_by,
+};
 
 use crate::admin_api::{self, SignInPageDto};
 use crate::api;
@@ -28,10 +30,9 @@ use crate::i18n::{t, use_i18n};
 use crate::pages::{PageTitle, go};
 use crate::rest;
 
-/// A link that looks like the primary button (provider buttons, "Sign in" on `/signed-out`).
-const LINK_BUTTON: &str = "inline-flex min-h-target-touch w-full items-center justify-center gap-2 \
-    rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground hover:bg-primary/90 \
-    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2";
+/// What a link that is the page's primary button adds to [`ButtonLink`] (provider buttons,
+/// "Sign in" on `/signed-out`): the full width and the touch height.
+const WIDE: &str = "min-h-target-touch w-full";
 
 /// The provider error codes the sign-in page explains (DEC-311, DEC-326); anything else reads
 /// as `oidc_failed`.
@@ -173,7 +174,7 @@ fn SignInBody(
         .iter()
         .map(|p| {
             let label = i18n.t_args("signin-continue", &[("provider", p.display_name.clone().into())]);
-            view! { <li><a class=LINK_BUTTON rel="external" href=start_url(&p.slug, next.as_deref())>{label}</a></li> }
+            view! { <li><ButtonLink class=WIDE rel="external" href=start_url(&p.slug, next.as_deref())>{label}</ButtonLink></li> }
         })
         .collect_view();
     let has_providers = !page.providers.is_empty();
@@ -324,7 +325,7 @@ pub fn SignedOut() -> impl IntoView {
         <AuthFrame>
             <PageTitle text=t("signed-out-title")/>
             <p class="-mt-3 mb-6 text-muted-foreground">{t("signed-out-lead")}</p>
-            <a class=LINK_BUTTON href="/sign-in">{t("nav-sign-in")}</a>
+            <ButtonLink class=WIDE href="/sign-in">{t("nav-sign-in")}</ButtonLink>
         </AuthFrame>
     }
 }
@@ -570,7 +571,7 @@ pub fn ResetPassword() -> impl IntoView {
                 </form>
             }>
                 <Alert variant=AlertVariant::Success role=AlertRole::Status class="mb-4">{t("signin-reset-done")}</Alert>
-                <a class=LINK_BUTTON href="/sign-in">{t("nav-sign-in")}</a>
+                <ButtonLink class=WIDE href="/sign-in">{t("nav-sign-in")}</ButtonLink>
             </Show>
         </AuthFrame>
     }

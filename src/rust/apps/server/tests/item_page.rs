@@ -187,12 +187,12 @@ async fn a_show_has_its_next_episode_seasons_episodes_tags_and_note() {
     assert!(facts.contains("In progress"), "status in the facts");
     assert!(facts.contains("2 of 7 episodes"), "progress in the facts");
     assert!(html.contains("More facts"), "facts disclosure");
-    // the action bar: next episode first, "With...", the overflow menu
+    // the action bar: next episode first, "Watched with...", the overflow menu
     let bar = part(&html, "action-bar");
-    assert!(bar.contains(">Watched S1 E3<"), "next step first");
+    assert!(bar.contains(">Mark S1 E3 watched<"), "next step first");
     assert!(
-        bar.contains("aria-label=\"Log with details: Northern Lights\""),
-        "With..."
+        bar.contains("aria-label=\"Watched with...: Northern Lights\""),
+        "Watched with..."
     );
     assert!(bar.contains("More actions for Northern Lights"), "overflow");
     // rating, tags, lists in one row
@@ -322,11 +322,51 @@ async fn the_action_bar_follows_the_progress_model() {
 
     let (_, html) = call(&app, "GET", &format!("/items/{movie}"), Some(&cookie), None).await;
     let bar = part(&html, "action-bar");
-    assert!(bar.contains(">Watched again<"), "completed movie");
-    assert!(bar.contains("Log with details: Harbour Lights"), "With...");
+    // completed by hand, nothing logged: the first watch is not a rewatch (DEC-559)
+    assert!(bar.contains(">Mark as watched<"), "completed movie");
+    assert!(!bar.contains("Log a rewatch"), "no rewatch before a watch");
+    assert!(
+        bar.contains("aria-label=\"Watched with...: Harbour Lights\""),
+        "Watched with..."
+    );
 }
 
-/// Not in the library yet: the primary action adds it, and there is no note.
+/// Once a watch is logged, the next step of a movie is the rewatch (DEC-554, DEC-559).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_watched_movie_offers_the_rewatch() {
+    if !services() {
+        return;
+    }
+    let srv = server().await;
+    let app = router(&srv);
+    let cookie = sign_up(&app, "lea").await;
+    let movie = seed(
+        &srv,
+        &app,
+        &cookie,
+        ("movie", "Harbour Lights", "planned", serde_json::json!({})),
+    )
+    .await;
+    log(
+        &app,
+        &cookie,
+        &movie,
+        serde_json::json!({"type": "finished"}),
+    )
+    .await;
+    let (status, html) = call(&app, "GET", &format!("/items/{movie}"), Some(&cookie), None).await;
+    assert_eq!(status, 200);
+    let bar = part(&html, "action-bar");
+    assert!(bar.contains(">Log a rewatch<"), "watched movie");
+    assert!(!bar.contains(">Mark as watched<"), "one next step");
+    assert!(
+        bar.contains("aria-label=\"Watched with...: Harbour Lights\""),
+        "Watched with..."
+    );
+}
+
+/// Not in the library yet: the first step logs it (and adds it), the second button adds it
+/// as planned (DEC-554), and there is no note.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_item_outside_the_library_offers_to_add_it() {
     if !services() {
@@ -352,7 +392,11 @@ async fn an_item_outside_the_library_offers_to_add_it() {
     let uri = format!("/items/{}", other.id.0);
     let (status, html) = call(&app, "GET", &uri, Some(&cookie), None).await;
     assert_eq!(status, 200);
-    assert!(part(&html, "action-bar").contains(">Add to library<"));
+    let bar = part(&html, "action-bar");
+    assert!(bar.contains(">Mark as watched<"), "the first step");
+    assert!(bar.contains(">Want to watch<"), "the add as planned");
+    assert!(!bar.contains("Add to library"), "a movie has its verb");
+    assert!(!bar.contains("Watched with..."), "no sheet before an entry");
     assert!(
         !html.contains("id=\"item-tab-notes\""),
         "no note without an entry"

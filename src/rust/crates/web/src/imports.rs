@@ -11,7 +11,8 @@
 use contracts::imports::{ImportDto, PreviewDto, UnmatchedDto};
 use leptos::prelude::*;
 use ui::{
-    Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, EmptyState, IconName, ProgressBar,
+    Badge, BadgeVariant, Button, ButtonLink, ButtonSize, ButtonVariant, EmptyState, IconName,
+    ProgressBar,
 };
 
 use crate::api;
@@ -53,12 +54,6 @@ pub fn card_of(format: &str) -> &'static str {
         _ => "generic",
     }
 }
-
-/// Classes of a download link that looks like an outline button.
-const LINK_BUTTON: &str = "inline-flex h-9 w-fit items-center justify-center gap-2 \
-    whitespace-nowrap rounded-md border border-input bg-background px-4 py-2 text-sm \
-    font-medium hover:bg-accent hover:text-accent-foreground focus-visible:outline-none \
-    focus-visible:ring-2 focus-visible:ring-ring";
 
 /// The file picker's label: a link button that shows the focus of its hidden input.
 const PICK_LABEL: &str = "inline-flex h-9 w-fit cursor-pointer items-center justify-center gap-2 \
@@ -598,13 +593,13 @@ fn Export() -> impl IntoView {
             <p class="text-sm text-muted-foreground">{t("imports-export-lead")}</p>
             <ul class="grid gap-3 sm:grid-cols-2">
                 <li class="grid content-start gap-2 rounded-xl border border-border bg-card p-4">
-                    <a href="/api/v1/export?format=jsonl" download="library-export.jsonl" class=LINK_BUTTON
-                        data-testid="imp-export-jsonl">{t("imports-export-jsonl")}</a>
+                    <ButtonLink href="/api/v1/export?format=jsonl" variant=ButtonVariant::Outline class="w-fit"
+                        attr:download="library-export.jsonl" attr:data-testid="imp-export-jsonl">{t("imports-export-jsonl")}</ButtonLink>
                     <p class="text-sm text-muted-foreground">{t("imports-export-jsonl-body")}</p>
                 </li>
                 <li class="grid content-start gap-2 rounded-xl border border-border bg-card p-4">
-                    <a href="/api/v1/export?format=csv" download="library-export.csv" class=LINK_BUTTON
-                        data-testid="imp-export-csv">{t("imports-export-csv")}</a>
+                    <ButtonLink href="/api/v1/export?format=csv" variant=ButtonVariant::Outline class="w-fit"
+                        attr:download="library-export.csv" attr:data-testid="imp-export-csv">{t("imports-export-csv")}</ButtonLink>
                     <p class="text-sm text-muted-foreground">{t("imports-export-csv-body")}</p>
                 </li>
             </ul>

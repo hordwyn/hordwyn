@@ -285,7 +285,7 @@ impl App {
             .map(|(_, t)| t)
             .collect();
         let summary = ProgressSummary::of(events);
-        let next_step = step_for(&entry, &kind, &item, &summary);
+        let next_step = step_for(&kind, &item, &summary);
         Ok(LibraryRow {
             tags,
             group: kind.group,
@@ -331,7 +331,7 @@ impl App {
             let item = items.get(&h.entry.item_id).cloned().found("catalog item")?;
             let kind = self.kind(&item.kind)?;
             let summary = ProgressSummary::of(events.get(&item.id).map_or(&[][..], Vec::as_slice));
-            let next_step = step_for(&h.entry, &kind, &item, &summary);
+            let next_step = step_for(&kind, &item, &summary);
             out.push(LibraryRow {
                 tags: tags.remove(&h.entry.id).unwrap_or_default(),
                 group: kind.group,

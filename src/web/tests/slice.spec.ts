@@ -16,9 +16,8 @@ test("sign up, find a movie, watch it with a companion", async ({ page }) => {
   await page.getByLabel("Display name").fill("E2E User");
   await page.getByLabel("Password").fill("correct horse battery");
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page).toHaveURL(/\/library$/);
+  await expect(page).toHaveURL(/\/$/);
   await hydrated(page);
-  await expect(page.getByText("Your library is empty")).toBeVisible();
   // the shell knows the session (owner bug: "Create account" after sign-in)
   await expect(page.getByRole("link", { name: "Create account" })).toHaveCount(0);
   const account = page.getByRole("button", { name: "Account menu for E2E User" });
@@ -44,9 +43,9 @@ test("sign up, find a movie, watch it with a companion", async ({ page }) => {
   await hydrated(page);
   await expect(page.getByRole("heading", { level: 1, name: "Fight Club" })).toBeVisible();
   await expect(page.getByTestId("attribution")).toContainText("uses TMDB and the TMDB APIs");
-  await page.getByRole("button", { name: "Add to library" }).click();
-  await page.getByRole("button", { name: "Log with details: Fight Club" }).click();
-  const sheet = page.getByRole("dialog", { name: "Log with details" });
+  await page.getByRole("button", { name: "Want to watch" }).click();
+  await page.getByRole("button", { name: "Watched with...: Fight Club" }).click();
+  const sheet = page.getByRole("dialog", { name: "Watched", exact: true });
   await sheet.getByRole("button", { name: "Ben", exact: true }).click();
   await sheet.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Logged: Watched")).toBeVisible();

@@ -9,8 +9,8 @@ use leptos::prelude::*;
 use serde_json::{Value, json};
 use ui::{
     Alert, AlertRole, AlertVariant, Badge, BadgeVariant, Button, ButtonSize, ButtonVariant,
-    CopyField, FormField, Input, Segmented, SegmentedOption, StatusDot, StatusState, Switch,
-    field_described_by,
+    CardActions, CopyField, FormField, Input, Segmented, SegmentedOption, StatusDot, StatusState,
+    Switch, field_described_by,
 };
 
 use crate::i18n::{t, use_i18n};
@@ -294,18 +294,25 @@ fn ChannelCard(
                     </Alert>
                 }.into_any(),
             })}
-            <div class="flex flex-wrap gap-2">
+            // one size per card footer and no filled button (OT-12)
+            {
+                let named = |key: &str| i18n.t_args(key, &[("name", name.clone().into())]);
+                let (test_label, edit_label, delete_label) = (named("notify-test-named"), named("notify-edit-named"), named("notify-delete-named"));
+                view! {
+            <CardActions>
                 <Button size=ButtonSize::Sm variant=ButtonVariant::Outline loading=testing
-                    attr:aria-label=i18n.t_args("notify-test-named", &[("name", name.clone().into())])
+                    attr:aria-label=test_label
                     on:click=move |_| { test.dispatch(id.get_value()); }>{t("notify-test")}</Button>
                 <Button size=ButtonSize::Sm variant=ButtonVariant::Outline
-                    attr:aria-label=i18n.t_args("notify-edit-named", &[("name", name.clone().into())])
+                    attr:aria-label=edit_label
                     attr:aria-expanded=move || if editing.get() { "true" } else { "false" }
                     on:click=move |_| editing.update(|e| *e = !*e)>{t("notify-edit")}</Button>
-                <Button size=ButtonSize::Sm variant=ButtonVariant::Ghost
-                    attr:aria-label=i18n.t_args("notify-delete-named", &[("name", name.clone().into())])
+                <Button size=ButtonSize::Sm variant=ButtonVariant::Outline
+                    attr:aria-label=delete_label
                     on:click=move |_| confirm.set(true)>{t("notify-delete")}</Button>
-            </div>
+            </CardActions>
+                }
+            }
             <Show when=move || editing.get()>
                 <EditChannel c=edit_c.clone() state=state editing=editing/>
             </Show>

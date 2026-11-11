@@ -77,20 +77,20 @@ test("home shows its sections, links to history and runs the next step with undo
 
   // the next step logs in one click; Undo in the toast takes it back
   const card = page.getByTestId("continue-card").filter({ hasText: "Downstream" });
-  await card.getByRole("button", { name: "Watched S1 E2: Downstream" }).click();
+  await card.getByRole("button", { name: "Mark S1 E2 watched: Downstream" }).click();
   await expect(page.getByText("Logged: Watched S1 E2")).toBeVisible();
-  await expect(card.getByRole("button", { name: "Watched S1 E3: Downstream" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Mark S1 E3 watched: Downstream" })).toBeVisible();
   await expect(rows(page)).toHaveCount(3);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await expect(page.getByText("Undone", { exact: true })).toBeVisible();
-  await expect(card.getByRole("button", { name: "Watched S1 E2: Downstream" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Mark S1 E2 watched: Downstream" })).toBeVisible();
   await expect(rows(page)).toHaveCount(2);
   // after each refetch the new card's button works: two more clicks log E2, then E3 (UX1-2)
-  await card.getByRole("button", { name: "Watched S1 E2: Downstream" }).click();
+  await card.getByRole("button", { name: "Mark S1 E2 watched: Downstream" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Logged: Watched S1 E2" })).toBeVisible();
-  await card.getByRole("button", { name: "Watched S1 E3: Downstream" }).click();
+  await card.getByRole("button", { name: "Mark S1 E3 watched: Downstream" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Logged: Watched S1 E3" })).toBeVisible();
-  await expect(card.getByRole("button", { name: "Watched S1 E4: Downstream" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Mark S1 E4 watched: Downstream" })).toBeVisible();
   await expect(rows(page)).toHaveCount(4);
 
   await page.getByRole("link", { name: "All history" }).click();
@@ -114,7 +114,7 @@ test("the next step on Home is counted in one usage beacon without item ids", as
   const ids = await seed(page);
   await open(page, "/");
   const card = page.getByTestId("continue-card").filter({ hasText: "Downstream" });
-  await card.getByRole("button", { name: "Watched S1 E2: Downstream" }).click();
+  await card.getByRole("button", { name: "Mark S1 E2 watched: Downstream" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Logged: Watched S1 E2" })).toBeVisible();
   await expect.poll(() => beacons.length, { timeout: 20_000 }).toBeGreaterThan(0);
   const events = beacons.flatMap((b) => b.events);

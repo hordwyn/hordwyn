@@ -64,6 +64,20 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
         )),
         None => None,
     };
+    // an item outside the library has its first step too (OT-4), and the count of whole
+    // passes is the page's alone (OT-7). A stored item of a kind this deployment switched
+    // off has neither, and still has its page (as before the step was added)
+    let kind = s.app.kind(&item.kind).ok();
+    let completed = entry
+        .as_ref()
+        .is_some_and(|e| e.status.value.as_str() == domain::kind::Status::COMPLETED);
+    let times = kind
+        .as_ref()
+        .map_or(0, |k| app::times(completed, k, &item, &progress));
+    let first = kind.as_ref().filter(|_| entry.is_none()).map(|k| {
+        let step = app::first_step(k, &item, &progress);
+        crate::browse::next_step(&step, k.group, &item.kind)
+    });
     let namespaces: BTreeSet<String> = item
         .external_ids
         .iter()
@@ -100,7 +114,8 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
         sources,
         tags: state.as_ref().map(|x| x.2.clone()).unwrap_or_default(),
         summary: state.as_ref().map(|x| x.0.clone()),
-        next_step: state.map(|x| x.1),
+        next_step: state.map(|x| x.1).or(first),
+        times,
         episodes,
         plays,
     })

@@ -39,6 +39,7 @@ pub mod i18n;
 pub mod imports;
 mod integrations;
 mod item;
+pub mod item_words;
 pub mod keyboard;
 mod library;
 pub mod library_state;

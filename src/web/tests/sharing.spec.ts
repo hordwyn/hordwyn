@@ -15,7 +15,7 @@ async function signUp(page: Page, path: string, user: string, display: string) {
   await page.getByLabel("Display name").fill(display);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page).toHaveURL(/\/library$/);
+  await expect(page).toHaveURL(/\/$/);
   await hydrated(page);
 }
 
@@ -69,10 +69,10 @@ test("promote, accept, see history, unlink, merge and undo the merge", async ({ 
   await option.click();
   await expect(page).toHaveURL(/\/items\//);
   await hydrated(page);
-  await page.getByRole("button", { name: "Add to library" }).click();
+  await page.getByRole("button", { name: "Want to watch" }).click();
   // the item page's "With..." sheet (design.md 5.4): people as toggle chips
-  await page.getByRole("button", { name: "Log with details: Fight Club" }).click();
-  const sheet = page.getByRole("dialog", { name: "Log with details" });
+  await page.getByRole("button", { name: "Watched with...: Fight Club" }).click();
+  const sheet = page.getByRole("dialog", { name: "Watched", exact: true });
   await sheet.getByRole("button", { name: "Carl", exact: true }).click();
   await sheet.getByRole("button", { name: "Karl", exact: true }).click();
   await sheet.getByRole("button", { name: "Save" }).click();

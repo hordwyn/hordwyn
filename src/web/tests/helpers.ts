@@ -30,7 +30,7 @@ export async function signUp(page: Page, user: string, display = "") {
   }
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page).toHaveURL(/\/library$/);
+  await expect(page).toHaveURL(/\/$/);
   await hydrated(page);
 }
 

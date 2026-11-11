@@ -4,10 +4,14 @@
 use contracts::{NewProgressDto, NextStepDto, ProgressSummaryDto};
 use fluent_bundle::FluentValue;
 use leptos::prelude::*;
-use ui::{Icon, IconName, ToastAction, ToastVariant, Toasts, cn, use_toasts};
+use ui::{
+    Button, ButtonLink, ButtonSize, Icon, IconName, ToastAction, ToastVariant, Toasts, cn,
+    use_toasts,
+};
 
 use crate::api;
 use crate::i18n::{I18n, use_i18n};
+use crate::item_words::entry_untouched;
 
 /// The button label: the server names the Fluent key (`next-step-*`), the episode steps take
 /// `$season` and `$episode`.
@@ -18,6 +22,44 @@ pub fn next_step_label(i: &I18n, step: &NextStepDto) -> String {
         &step.label_key,
         &[("season", num(step.season)), ("episode", num(step.episode))],
     )
+}
+
+/// The step in the past tense, for the toast ("Logged: Watched S2 E5") and the title of the
+/// log dialog: the `logged-step-*` twin of the `next-step-*` key (OT-5: buttons are
+/// imperatives, confirmations are not). Steps without a twin keep their label.
+#[must_use]
+pub fn logged_step_label(i: &I18n, step: &NextStepDto) -> String {
+    let Some(rest) = step.label_key.strip_prefix("next-step-") else {
+        return next_step_label(i, step);
+    };
+    let key = format!("logged-step-{rest}");
+    let num = |v: Option<u32>| FluentValue::from(v.unwrap_or(0));
+    let text = i.t_args(
+        &key,
+        &[("season", num(step.season)), ("episode", num(step.episode))],
+    );
+    // a missing message comes back as its key
+    if text == key {
+        next_step_label(i, step)
+    } else {
+        text
+    }
+}
+
+/// The words on the pill of a poster card: an episode step is "S2 E5" there (the imperative
+/// sentence does not fit a card at 360 px; it stays the accessible name), other steps their
+/// label.
+#[must_use]
+pub fn card_step_label(i: &I18n, step: &NextStepDto) -> String {
+    if step.action == "episode" {
+        let num = |v: Option<u32>| FluentValue::from(v.unwrap_or(0));
+        i.t_args(
+            "next-step-episode-short",
+            &[("season", num(step.season)), ("episode", num(step.episode))],
+        )
+    } else {
+        next_step_label(i, step)
+    }
 }
 
 /// The progress a one-click step logs; `None` when the step needs more input (page,
@@ -133,6 +175,7 @@ impl StepCtx {
 pub struct LoggedStep {
     pub item_id: String,
     pub title: String,
+    /// The step in the past tense ([`logged_step_label`]).
     pub label: String,
     pub progress: serde_json::Value,
 }
@@ -144,6 +187,29 @@ pub struct LoggedStep {
 pub fn run_step(
     ctx: StepCtx,
     step: LoggedStep,
+    busy: RwSignal<bool>,
+    error: RwSignal<Option<String>>,
+    on_done: Option<Callback<()>>,
+) {
+    log_step(ctx, step, false, busy, error, on_done);
+}
+
+/// [`run_step`] for an item that is not in the library (OT-4): the first log adds it. The
+/// toast says so, and its Undo takes the log and the add back ([`toast_logged_added`]).
+pub fn run_first_step(
+    ctx: StepCtx,
+    step: LoggedStep,
+    busy: RwSignal<bool>,
+    error: RwSignal<Option<String>>,
+    on_done: Option<Callback<()>>,
+) {
+    log_step(ctx, step, true, busy, error, on_done);
+}
+
+fn log_step(
+    ctx: StepCtx,
+    step: LoggedStep,
+    added: bool,
     busy: RwSignal<bool>,
     error: RwSignal<Option<String>>,
     on_done: Option<Callback<()>>,
@@ -168,7 +234,11 @@ pub fn run_step(
         match api::log_progress(item_id.clone(), p).await {
             Ok(event) => {
                 ctx.funnel.logged();
-                toast_logged(&ctx, &label, title, vec![event.id], on_done);
+                if added {
+                    toast_logged_added(&ctx, &label, (item_id, title), event.id, on_done);
+                } else {
+                    toast_logged(&ctx, &label, title, vec![event.id], on_done);
+                }
                 if let Some(cb) = on_done {
                     cb.run(());
                 }
@@ -259,21 +329,105 @@ pub fn toast_logged(
     ctx.toasts.push_action(logged, Some(title), undo);
 }
 
+/// "Logged: <label>" for the first log of an item that was not in the library: the second
+/// line says that it was added ("<title>, added to your library"), and Undo takes both back,
+/// the event and then the entry. The entry goes only while it is as the add left it
+/// ([`entry_untouched`]); a rating or a tag given meanwhile keeps it (review OT2A-3: Undo
+/// left the item in the library as Planned, and nothing had said that it was added).
+pub fn toast_logged_added(
+    ctx: &StepCtx,
+    label: &str,
+    (item_id, title): (String, String),
+    event_id: String,
+    on_done: Option<Callback<()>>,
+) {
+    let logged = ctx.i18n.t_args("library-logged", &[("step", label.into())]);
+    let said = ctx
+        .i18n
+        .t_args("item-logged-added", &[("title", title.into())]);
+    let undo_ctx = ctx.clone();
+    let undo = ToastAction::new(
+        ctx.i18n.t("library-undo"),
+        Callback::new(move |()| {
+            let (ctx, id, event) = (undo_ctx.clone(), item_id.clone(), event_id.clone());
+            leptos::task::spawn_local(async move {
+                let mut ok = api::undo_progress(event).await.is_ok();
+                let untouched = ok
+                    && api::item_page(id.clone()).await.is_ok_and(|p| {
+                        p.entry
+                            .as_ref()
+                            .is_some_and(|e| entry_untouched(e, p.progress.len(), p.tags.len()))
+                    });
+                if untouched {
+                    let req = crate::bulk::request(vec![id], "remove");
+                    ok = api::library_bulk(req).await.is_ok();
+                }
+                if ok {
+                    ctx.toasts
+                        .push(ctx.i18n.t("library-undone"), None, ToastVariant::Default);
+                } else {
+                    ctx.toasts
+                        .push(ctx.i18n.t("error-generic"), None, ToastVariant::Destructive);
+                }
+                if let Some(cb) = on_done {
+                    cb.run(());
+                }
+            });
+        }),
+    );
+    ctx.toasts.push_action(logged, Some(said), undo);
+}
+
+/// "Added to your library as Planned" with the title and Undo, which removes the entry again
+/// (WP4-3). One toast for every add: the item page's "Want to watch" and the palette's quick
+/// path (OT-4). `on_done` runs after an undo (to refetch).
+pub fn toast_added(ctx: &StepCtx, item_id: String, title: String, on_done: Option<Callback<()>>) {
+    let undo_ctx = ctx.clone();
+    let undo = ToastAction::new(
+        ctx.i18n.t("library-undo"),
+        Callback::new(move |()| {
+            let (ctx, id) = (undo_ctx.clone(), item_id.clone());
+            leptos::task::spawn_local(async move {
+                let req = crate::bulk::request(vec![id], "remove");
+                match api::library_bulk(req).await {
+                    Ok(_) => {
+                        ctx.toasts
+                            .push(ctx.i18n.t("library-undone"), None, ToastVariant::Default);
+                    }
+                    Err(_) => ctx.toasts.push(
+                        ctx.i18n.t("error-generic"),
+                        None,
+                        ToastVariant::Destructive,
+                    ),
+                }
+                if let Some(cb) = on_done {
+                    cb.run(());
+                }
+            });
+        }),
+    );
+    ctx.toasts
+        .push_action(ctx.i18n.t("item-added-planned"), Some(title), undo);
+}
+
 /// Shared look of the compact (pill on a poster) variant.
 const PILL: &str = "inline-flex min-h-7 max-w-full items-center gap-1 rounded-full border border-border \
     bg-background/95 px-2.5 text-xs font-semibold text-foreground shadow-sm";
 const PILL_ACTION: &str = "cursor-pointer focus-visible:outline-none focus-visible:ring-2 \
     focus-visible:ring-ring disabled:opacity-60";
-/// The hover of each look: the pill's own text stays on `accent`; the primary button only
-/// darkens (`accent` under `primary-foreground` text was 1.05:1, found by axe with the pointer
-/// still on the button after a click).
+/// The pill's hover; its own text stays on `accent`.
 const PILL_HOVER: &str = "hover:bg-accent";
-const BUTTON_HOVER: &str = "hover:bg-primary/90";
+/// "Up to date" outside a poster: a label, not a button (a state does not look like an action,
+/// OT-5).
+const LABEL: &str =
+    "inline-flex h-8 items-center gap-1.5 text-xs font-medium text-muted-foreground";
 
 /// The primary action of an entry (design.md 7.3): label and action from its next step.
 /// Finish and episode steps log in one click (toast with Undo); page, position and session
 /// steps need input and open the item page, where the log sheets live; "Up to date" is a
-/// label only. `compact` is the pill on a poster card.
+/// label only. `compact` is the pill on a poster card (an episode step reads "S2 E5" there);
+/// otherwise it is a small [`ui::Button`] (or [`ui::ButtonLink`]), so it shares its size with
+/// the other actions of a card (OT-12).
 #[component]
 pub fn NextStepButton(
     #[prop(into)] item_id: String,
@@ -289,63 +443,75 @@ pub fn NextStepButton(
     #[prop(into, optional)] class: MaybeProp<String>,
 ) -> impl IntoView {
     let i18n = use_i18n();
-    let label = next_step_label(&i18n, &step);
+    let label = if compact {
+        card_step_label(&i18n, &step)
+    } else {
+        next_step_label(&i18n, &step)
+    };
     let named = i18n.t_args(
         "library-next-step-named",
         &[
-            ("step", label.clone().into()),
+            ("step", next_step_label(&i18n, &step).into()),
             ("title", title.clone().into()),
         ],
     );
     let busy = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
-    let (look, hover) = if compact {
-        (PILL, PILL_HOVER)
-    } else {
-        (
-            "inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground",
-            BUTTON_HOVER,
-        )
-    };
-    let extra = move || class.get().unwrap_or_default();
-    let control = match step_progress(&step) {
-        Some(progress) => {
-            let logged = LoggedStep {
-                item_id: item_id.clone(),
-                title: title.clone(),
-                label: label.clone(),
-                progress,
-            };
-            let ctx = StepCtx::current();
-            view! {
-                <button
-                    type="button"
-                    aria-label=named
-                    data-next-step=""
-                    tabindex=move || tabindex.get()
-                    aria-busy=move || busy.get().then_some("true")
-                    disabled=move || busy.get()
-                    class=move || cn(&[look, PILL_ACTION, hover, &extra()])
-                    on:click=move |_| run_step(ctx.clone(), logged.clone(), busy, error, on_done)
-                >
-                    <Icon name=IconName::Check/>
-                    <span class="truncate">{label.clone()}</span>
-                </button>
-            }
-            .into_any()
+    let extra = Signal::derive(move || class.get().unwrap_or_default());
+    let href = format!("/items/{item_id}");
+    let logged = step_progress(&step).map(|progress| LoggedStep {
+        item_id,
+        title,
+        label: logged_step_label(&i18n, &step),
+        progress,
+    });
+    let ctx = StepCtx::current();
+    let control = match (logged, compact) {
+        (Some(logged), true) => view! {
+            <button
+                type="button"
+                aria-label=named
+                data-next-step=""
+                tabindex=move || tabindex.get()
+                aria-busy=move || busy.get().then_some("true")
+                disabled=move || busy.get()
+                class=move || cn(&[PILL, PILL_ACTION, PILL_HOVER, &extra.get()])
+                on:click=move |_| run_step(ctx.clone(), logged.clone(), busy, error, on_done)
+            >
+                <Icon name=IconName::Check/>
+                <span class="truncate">{label.clone()}</span>
+            </button>
         }
-        None if step.action == "caught_up" => view! {
-            <span class=move || cn(&[look, &extra()])>
+        .into_any(),
+        (Some(logged), false) => view! {
+            <Button size=ButtonSize::Sm loading=busy class=extra attr:aria-label=named attr:data-next-step=""
+                attr:tabindex=move || tabindex.get()
+                on:click=move |_| run_step(ctx.clone(), logged.clone(), busy, error, on_done)>
+                <Icon name=IconName::Check/>
+                <span class="truncate">{label.clone()}</span>
+            </Button>
+        }
+        .into_any(),
+        (None, _) if step.action == "caught_up" => view! {
+            <span class=move || cn(&[if compact { PILL } else { LABEL }, &extra.get()])>
                 <Icon name=IconName::CheckCheck/>
                 <span class="truncate">{label.clone()}</span>
             </span>
         }
         .into_any(),
-        None => view! {
-            <a href=format!("/items/{item_id}") aria-label=named data-next-step="" tabindex=move || tabindex.get() class=move || cn(&[look, PILL_ACTION, hover, &extra()])>
+        (None, true) => view! {
+            <a href=href aria-label=named data-next-step="" tabindex=move || tabindex.get() class=move || cn(&[PILL, PILL_ACTION, PILL_HOVER, &extra.get()])>
                 <Icon name=IconName::Pencil/>
                 <span class="truncate">{label.clone()}</span>
             </a>
+        }
+        .into_any(),
+        (None, false) => view! {
+            <ButtonLink href=href size=ButtonSize::Sm class=extra attr:aria-label=named attr:data-next-step=""
+                attr:tabindex=move || tabindex.get()>
+                <Icon name=IconName::Pencil/>
+                <span class="truncate">{label.clone()}</span>
+            </ButtonLink>
         }
         .into_any(),
     };
@@ -382,15 +548,114 @@ mod tests {
             episode: Some(5),
             ..step("episode", "next-step-episode")
         };
-        assert_eq!(next_step_label(&en, &ep), "Watched S2 E5");
-        assert_eq!(next_step_label(&de, &ep), "S2 E5 gesehen");
+        // OT-5: a button says what it does (an imperative), not a state
+        assert_eq!(next_step_label(&en, &ep), "Mark S2 E5 watched");
+        assert_eq!(next_step_label(&de, &ep), "S2 E5 als gesehen markieren");
+        let listened = NextStepDto {
+            label_key: "next-step-episode-listened".into(),
+            ..ep.clone()
+        };
+        assert_eq!(next_step_label(&en, &listened), "Mark S2 E5 listened");
         assert_eq!(
-            next_step_label(&en, &step("finish", "next-step-watched-again")),
-            "Watched again"
+            next_step_label(&de, &listened),
+            "S2 E5 als geh\u{f6}rt markieren"
         );
+        for (key, en_text, de_text) in [
+            (
+                "next-step-watched",
+                "Mark as watched",
+                "Als gesehen markieren",
+            ),
+            (
+                "next-step-watched-again",
+                "Log a rewatch",
+                "Nochmal gesehen eintragen",
+            ),
+            (
+                "next-step-finished",
+                "Mark as finished",
+                "Als beendet markieren",
+            ),
+            (
+                "next-step-finished-again",
+                "Log it again",
+                "Nochmal eintragen",
+            ),
+        ] {
+            assert_eq!(next_step_label(&en, &step("finish", key)), en_text);
+            assert_eq!(next_step_label(&de, &step("finish", key)), de_text);
+        }
         assert_eq!(
             next_step_label(&de, &step("session", "next-step-log-play")),
             "Partie eintragen"
+        );
+    }
+
+    /// OT-5: the toast and the dialog title confirm in the past tense ("Logged: Watched S2
+    /// E5"); steps without a past form keep their label.
+    #[test]
+    fn confirmations_keep_the_past_tense() {
+        let (en, de) = (
+            I18n::new("en", BTreeMap::new()),
+            I18n::new("de", BTreeMap::new()),
+        );
+        let ep = NextStepDto {
+            season: Some(2),
+            episode: Some(5),
+            ..step("episode", "next-step-episode")
+        };
+        assert_eq!(logged_step_label(&en, &ep), "Watched S2 E5");
+        assert_eq!(logged_step_label(&de, &ep), "S2 E5 gesehen");
+        let listened = NextStepDto {
+            label_key: "next-step-episode-listened".into(),
+            ..ep.clone()
+        };
+        assert_eq!(logged_step_label(&en, &listened), "Listened to S2 E5");
+        for (key, en_text, de_text) in [
+            ("next-step-watched", "Watched", "Gesehen"),
+            (
+                "next-step-watched-again",
+                "Watched again",
+                "Nochmal gesehen",
+            ),
+            ("next-step-finished", "Finished", "Beendet"),
+            (
+                "next-step-finished-again",
+                "Finished again",
+                "Nochmal beendet",
+            ),
+        ] {
+            assert_eq!(logged_step_label(&en, &step("finish", key)), en_text);
+            assert_eq!(logged_step_label(&de, &step("finish", key)), de_text);
+        }
+        assert_eq!(
+            logged_step_label(&en, &step("session", "next-step-log-play")),
+            "Log a play"
+        );
+    }
+
+    /// The pill on a poster is narrow: an episode step shows "S2 E5" there (the full
+    /// sentence stays its accessible name), other steps their label.
+    #[test]
+    fn the_card_pill_shortens_episode_steps_only() {
+        let (en, de) = (
+            I18n::new("en", BTreeMap::new()),
+            I18n::new("de", BTreeMap::new()),
+        );
+        let ep = NextStepDto {
+            season: Some(2),
+            episode: Some(5),
+            ..step("episode", "next-step-episode")
+        };
+        assert_eq!(card_step_label(&en, &ep), "S2 E5");
+        assert_eq!(card_step_label(&de, &ep), "S2 E5");
+        assert_eq!(
+            card_step_label(&en, &step("finish", "next-step-watched")),
+            "Mark as watched"
+        );
+        assert_eq!(
+            card_step_label(&en, &step("caught_up", "next-step-caught-up")),
+            "Up to date"
         );
     }
 

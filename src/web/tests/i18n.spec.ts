@@ -15,7 +15,9 @@ test("the account menu switches the language for this account", async ({ page })
   await page.getByLabel("Username").fill(user);
   await page.getByLabel("Password").fill("correct horse battery");
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page).toHaveURL(/\/library$/);
+  await expect(page).toHaveURL(/\/$/);
+  // a new account lands on Home (OWN-7); the headings below are the library's
+  await page.goto("/library");
   await hydrated(page);
 
   await page.getByRole("button", { name: `Account menu for ${user}` }).click();
@@ -43,7 +45,7 @@ test("the phase 1 pages render in German", async ({ page }) => {
   await page.getByLabel("Display name").fill("Jonas");
   await page.getByLabel("Password").fill("correct horse battery");
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page).toHaveURL(/\/library$/);
+  await expect(page).toHaveURL(/\/$/);
   const file = [
     JSON.stringify({ format: "library-export", version: 1 }),
     JSON.stringify({ source_id: "1", kind: "movie", title: "Harbour Lights", year: 2021, status: "planned" }),

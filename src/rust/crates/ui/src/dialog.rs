@@ -91,7 +91,7 @@ fn restore_focus(opener: Option<web_sys::HtmlElement>, fallback: Option<&str>) {
 #[component]
 fn Panel(
     open: RwSignal<bool>,
-    title: String,
+    title: Signal<String>,
     description: Option<String>,
     close_label: String,
     panel_class: &'static str,
@@ -107,7 +107,9 @@ fn Panel(
             open.set(false);
         }
     };
-    let base = slug(&title);
+    // the ids come from the first title: a title that changes later (the log dialog is named
+    // after its step) keeps them
+    let base = slug(&title.get_untracked());
     let title_id = format!("{base}-title");
     let desc_id = description.as_ref().map(|_| format!("{base}-description"));
     let panel = NodeRef::<html::Div>::new();
@@ -161,7 +163,7 @@ fn Panel(
                 ])
             >
                 <div class="flex flex-col gap-1.5">
-                    <h2 id=title_id.clone() class="text-lg font-semibold leading-none tracking-tight">{title.clone()}</h2>
+                    <h2 id=title_id.clone() class="text-lg font-semibold leading-none tracking-tight">{move || title.get()}</h2>
                     {description.clone().map(|d| view! {
                         <p id=desc_id.clone() class="text-sm text-muted-foreground">{d}</p>
                     })}
@@ -184,7 +186,7 @@ fn Panel(
 #[component]
 pub fn Dialog(
     open: RwSignal<bool>,
-    #[prop(into)] title: String,
+    #[prop(into)] title: Signal<String>,
     #[prop(into)] close_label: String,
     #[prop(into, optional)] description: Option<String>,
     #[prop(into, optional)] class: MaybeProp<String>,
@@ -218,7 +220,7 @@ pub fn Dialog(
 #[component]
 pub fn Sheet(
     open: RwSignal<bool>,
-    #[prop(into)] title: String,
+    #[prop(into)] title: Signal<String>,
     #[prop(into)] close_label: String,
     #[prop(optional)] side: SheetSide,
     #[prop(into, optional)] description: Option<String>,

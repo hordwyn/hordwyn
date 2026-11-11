@@ -8,8 +8,8 @@
 use contracts::{LinkRequestDto, MergeSuggestionDto, PeoplePageDto, PersonDto, PersonRefDto};
 use leptos::prelude::*;
 use ui::{
-    Avatar, Badge, BadgeVariant, Button, ButtonLink, ButtonSize, ButtonVariant, DropdownMenu,
-    EmptyState, IconName, MenuItem, Tabs, TabsContent, TabsList, TabsTrigger,
+    Avatar, Badge, BadgeVariant, Button, ButtonLink, ButtonSize, ButtonVariant, CardActions,
+    DropdownMenu, EmptyState, IconName, MenuItem, Tabs, TabsContent, TabsList, TabsTrigger,
 };
 
 use crate::api;
@@ -383,14 +383,15 @@ fn PersonCard(p: PersonDto) -> impl IntoView {
             <Numbers p=p.clone()/>
             {last.map(|l| view! { <p class="text-sm text-muted-foreground">{l}</p> })}
             {most.map(|m| view! { <p class="text-sm text-muted-foreground">{m}</p> })}
-            <div class="flex flex-wrap gap-2">
+            // one size per card footer, the link first (OT-12)
+            <CardActions>
                 <ButtonLink href=format!("/history?person={}", p.id) size=ButtonSize::Sm variant=ButtonVariant::Outline
                     attr:aria-label=history>
                     {t("companions-history")}
                 </ButtonLink>
                 {invite}
                 {log_with}
-            </div>
+            </CardActions>
         </li>
     }
 }

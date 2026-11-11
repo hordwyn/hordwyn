@@ -88,6 +88,23 @@ pub fn Button(
     }
 }
 
+/// The actions of a card, in its footer (OT-12 card-footer rule): every action in it has one
+/// size. Give each `ButtonSize::Sm` (32 px); below 640 px the row raises its links and buttons
+/// to 40 px, whichever they are. Order: the navigation link first, then the actions, the
+/// overflow menu last; at most one of them filled, the rest `ButtonVariant::Outline`.
+#[component]
+pub fn CardActions(
+    #[prop(into, optional)] class: MaybeProp<String>,
+    children: Children,
+) -> impl IntoView {
+    const ROW: &str = "flex flex-wrap items-center gap-2 max-sm:[&>a]:h-10 max-sm:[&>button]:h-10";
+    view! {
+        <div class=move || cn(&[ROW, &class.get().unwrap_or_default()])>
+            {children()}
+        </div>
+    }
+}
+
 /// What a link shares with a button of the same variant and size: everything but the
 /// `disabled:` states, which a link does not have.
 fn link_classes(variant: ButtonVariant, size: ButtonSize) -> String {
@@ -107,10 +124,15 @@ pub fn ButtonLink(
     #[prop(optional)] variant: ButtonVariant,
     #[prop(optional)] size: ButtonSize,
     #[prop(into, optional)] class: MaybeProp<String>,
+    /// `rel` of the link, e.g. `external` for an address the client router must not take
+    /// as a page (the OIDC start URL).
+    #[prop(into, optional)]
+    rel: Option<String>,
     children: Children,
 ) -> impl IntoView {
     view! {
         <a
+            rel=rel
             href=href
             class=move || cn(&[&link_classes(variant, size), &class.get().unwrap_or_default()])
         >

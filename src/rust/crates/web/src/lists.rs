@@ -10,8 +10,8 @@ use leptos::prelude::*;
 use leptos_router::hooks::use_params_map;
 use serde_json::json;
 use ui::{
-    Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, EmptyState, FormField, IconName, Input,
-    Sheet, SheetSide, Tabs, TabsContent, TabsList, TabsTrigger, Textarea,
+    Badge, BadgeVariant, Button, ButtonLink, ButtonSize, ButtonVariant, EmptyState, FormField,
+    IconName, Input, Sheet, SheetSide, Tabs, TabsContent, TabsList, TabsTrigger, Textarea,
 };
 
 use crate::admin::ConfirmDialog;
@@ -647,9 +647,7 @@ fn SharedBody(l: contracts::SharedListDto, token: String, signed_in: bool) -> im
         view! { <AddAll id=String::new() shared_token=Some(token)/> }.into_any()
     } else {
         view! {
-            <a href=next class="inline-flex min-h-11 w-fit items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                {t("shared-list-cta")}
-            </a>
+            <ButtonLink href=next class="min-h-11 w-fit">{t("shared-list-cta")}</ButtonLink>
         }
         .into_any()
     };

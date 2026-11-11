@@ -4,7 +4,13 @@
 //! now, spread over a date range (backfill, R-09) or on the release dates (WP4-7, when every
 //! episode of the season shown has one up to today). Marking one episode while earlier ones
 //! are open asks once, inline, whether to mark those too; "Remember for this show" keeps the
-//! answer in this browser (DEC-231). The ranges come from [`crate::episode_plan`].
+//! answer in this browser (DEC-231). A bulk mark on a range that is watched already asks,
+//! inline as well, "Log these N again as a rewatch?"; a mixed range says in its toast how
+//! many it skipped (OT-15, DEC-538). The ranges come from [`crate::episode_plan`].
+//!
+//! A refetch of the page rebuilds this list. What must outlive that sits in [`EpisodeUi`]:
+//! the open question, the open row menu (it stays open under the pointer) and where the
+//! focus goes once the list is back (review OT2A-4, OT2A-5).
 
 use contracts::ProgressEventDto;
 use leptos::html;
@@ -15,11 +21,12 @@ use ui::{
 };
 
 use crate::episode_plan::{
-    AirDates, Bulk, Ep, Plan, Previous, SeasonRow, air_dates, missing_release, parse_range,
-    plan_bulk, plan_single, previous_key, release_dates, spread_over, standing_note,
+    AirDates, Bulk, BulkPlan, Ep, Plan, Previous, SeasonRow, air_dates, missing_release,
+    parse_range, plan_bulk, plan_single, previous_key, release_dates, spread_over, standing_again,
     unwatched_in_season, unwatched_up_to,
 };
 use crate::i18n::{t, use_i18n};
+use crate::item_words::{Verb, again_ask_key, skipped_key, with_button_key};
 use crate::log_sheet::{ItemInfo, SheetTarget};
 use crate::next_step::{StepCtx, toast_logged};
 
@@ -31,9 +38,17 @@ pub struct EpisodeUi {
     pub ask: RwSignal<Option<Ep>>,
     pub busy: RwSignal<bool>,
     pub error: RwSignal<Option<String>>,
-    /// The bulk mark that logged nothing (every episode it covers is watched, OT-15); the
-    /// line shows its message while the rows still say so.
-    pub note: RwSignal<Option<Bulk>>,
+    /// The bulk mark whose episodes are all watched (OT-15): "Log these N again as a
+    /// rewatch?" is asked while the rows still say so.
+    pub again: RwSignal<Option<Bulk>>,
+    /// The question was asked just now and takes the focus once; a rebuild of the list under
+    /// a standing question does not take it again.
+    pub ask_focus: RwSignal<bool>,
+    /// The control (a selector) that gets the focus when the list is back after "Log N
+    /// again": the one that asked.
+    pub focus_back: RwSignal<Option<String>>,
+    /// The episode whose row menu is open.
+    pub menu: RwSignal<Option<Ep>>,
     /// Dates of the bulk marks: `now`, `range` ("Spread over a date range", R-09) or `release`
     /// ("On release dates", WP4-7).
     pub when: RwSignal<String>,
@@ -48,7 +63,10 @@ impl Default for EpisodeUi {
             ask: RwSignal::new(None),
             busy: RwSignal::new(false),
             error: RwSignal::new(None),
-            note: RwSignal::new(None),
+            again: RwSignal::new(None),
+            ask_focus: RwSignal::new(false),
+            focus_back: RwSignal::new(None),
+            menu: RwSignal::new(None),
             when: RwSignal::new("now".into()),
             from: RwSignal::new(String::new()),
             to: RwSignal::new(String::new()),
@@ -63,17 +81,42 @@ impl EpisodeUi {
         self.season.set(None);
         self.ask.set(None);
         self.error.set(None);
-        self.note.set(None);
+        self.again.set(None);
+        self.ask_focus.set(false);
+        self.focus_back.set(None);
+        self.menu.set(None);
     }
 }
 
-/// A bulk mark has nothing to log: say so, again when it is the same mark as before. A live
-/// region reports changes only, so the line is emptied and filled on the next frame (OT1A-5).
-fn say_nothing_to_mark(note: RwSignal<Option<Bulk>>, what: Bulk) {
-    note.set(None);
+/// Focus the first element matching `selector` on the next frame (after the list is in the
+/// document).
+fn focus_soon(selector: String) {
     request_animation_frame(move || {
-        let _ = note.try_set(Some(what));
+        let _ = crate::keyboard::focus(&selector);
     });
+}
+
+/// The words of the toast of a mark: "Watched S1 E2" or "5 episodes", and its second line,
+/// the title or what a mixed range left alone.
+fn mark_words(
+    eps: &[Ep],
+    skipped: usize,
+    info: &ItemInfo,
+    i18n: &crate::i18n::I18n,
+) -> (String, String) {
+    let label = match eps {
+        [(s, e)] => i18n.t_args(
+            "logged-step-episode",
+            &[("season", (*s).into()), ("episode", (*e).into())],
+        ),
+        _ => i18n.t_args("episodes-logged", &[("count", eps.len().into())]),
+    };
+    let said = if skipped > 0 {
+        i18n.t_args(skipped_key(info.verb), &[("count", skipped.into())])
+    } else {
+        info.title.clone()
+    };
+    (label, said)
 }
 
 /// The remembered answer for a show (browser storage; nothing stored: ask).
@@ -105,10 +148,12 @@ fn remember_answer(item_id: &str, answer: Previous) {
 }
 
 /// Log `eps` one after the other (at `dates`, one per episode, else now), then one toast
-/// with Undo for all of them.
+/// with Undo for all of them; it also says how many episodes of a bulk mark were `skipped`
+/// as already watched.
 fn log_episodes(
     eps: Vec<Ep>,
     dates: Option<Vec<String>>,
+    skipped: usize,
     info: &ItemInfo,
     ctx: StepCtx,
     ui: EpisodeUi,
@@ -116,20 +161,12 @@ fn log_episodes(
     if eps.is_empty() {
         return;
     }
-    let label = match eps.as_slice() {
-        [(s, e)] => ctx.i18n.t_args(
-            "next-step-episode",
-            &[("season", (*s).into()), ("episode", (*e).into())],
-        ),
-        _ => ctx
-            .i18n
-            .t_args("episodes-logged", &[("count", eps.len().into())]),
-    };
+    let (label, said) = mark_words(&eps, skipped, info, &ctx.i18n);
     let (item_id, title, refresh) = (info.item_id.clone(), info.title.clone(), info.refresh);
     ctx.funnel.intent(crate::funnel::Flow::EpisodeMark);
     ui.busy.set(true);
     ui.error.set(None);
-    ui.note.set(None);
+    ui.again.set(None);
     leptos::task::spawn_local(async move {
         let mut ids = Vec::new();
         let mut failed = None;
@@ -177,10 +214,11 @@ fn log_episodes(
             }
         }
         if !ids.is_empty() {
-            toast_logged(&ctx, &label, title.clone(), ids, Some(refresh));
+            toast_logged(&ctx, &label, said.clone(), ids, Some(refresh));
         }
+        // offline the toast says what a mixed range skipped as well (OT2A-11)
         if !queued.is_empty() {
-            ctx.save_offline(title, queued, None);
+            ctx.save_offline(said, queued, None);
         }
         if let Some(text) = failed {
             ctx.funnel.abandoned_if(crate::funnel::Flow::EpisodeMark);
@@ -216,52 +254,69 @@ fn offline_log(
     )
 }
 
-/// A bulk mark ("Mark season", "Mark show", "Mark up to here"): now, spread over the chosen
-/// date range (design.md 5.4, R-09), or each on its release day (refused, with nothing
-/// logged, when one of them has none up to today). When every episode it covers is watched
-/// already it says so instead of doing nothing (OT-15).
-fn bulk(
-    what: Bulk,
+/// What a bulk mark needs besides its range: the rows, the item, the contexts and the
+/// episodes' release days.
+#[derive(Clone)]
+struct BulkCtx {
     rows: StoredValue<Vec<SeasonRow>>,
     info: StoredValue<ItemInfo>,
     ctx: StepCtx,
     ui: EpisodeUi,
     released: StoredValue<AirDates>,
-) {
-    let Ok(eps) = rows.with_value(|r| plan_bulk(r, what)) else {
-        ui.error.set(None);
-        say_nothing_to_mark(ui.note, what);
-        return;
-    };
-    ui.note.set(None);
-    let dates = if ui.when.get_untracked() == "release" {
-        match released.with_value(|d| release_dates(&eps, d, crate::history::today())) {
-            Ok(days) => Some(days),
-            Err(n) => {
-                ui.error.set(Some(
-                    ctx.i18n
-                        .t_args("episodes-release-refused", &[("count", n.into())]),
-                ));
-                return;
-            }
+}
+
+/// When the episodes of a bulk mark happened, as the date choice says: now (`None`), spread
+/// over the chosen date range (design.md 5.4, R-09), or each on its release day.
+///
+/// # Errors
+/// The message for the person: a bad range, or episodes without a release day up to today.
+fn bulk_dates(eps: &[Ep], b: &BulkCtx) -> Result<Option<Vec<String>>, String> {
+    let today = crate::history::today();
+    match b.ui.when.get_untracked().as_str() {
+        "release" => b
+            .released
+            .with_value(|d| release_dates(eps, d, today))
+            .map(Some)
+            .map_err(|n| {
+                b.ctx
+                    .i18n
+                    .t_args("episodes-release-refused", &[("count", n.into())])
+            }),
+        "range" => parse_range(&b.ui.from.get_untracked(), &b.ui.to.get_untracked(), today)
+            .map(|(from, to)| Some(spread_over(eps.len(), from, to)))
+            .map_err(|e| b.ctx.i18n.t(e.key())),
+        _ => Ok(None),
+    }
+}
+
+/// Log the episodes of a bulk mark on the chosen dates (nothing is logged when the dates
+/// cannot be used; the reason shows inline).
+fn log_bulk(eps: Vec<Ep>, skipped: usize, b: &BulkCtx) {
+    match bulk_dates(&eps, b) {
+        Ok(dates) => b
+            .info
+            .with_value(|i| log_episodes(eps, dates, skipped, i, b.ctx.clone(), b.ui)),
+        Err(text) => b.ui.error.set(Some(text)),
+    }
+}
+
+/// A bulk mark ("Mark season", "Mark show", "Mark up to here"): the unwatched episodes of
+/// its range are logged (the toast says how many watched ones were skipped). When all of the
+/// range is watched already it asks whether to log it again (OT-15, DEC-538).
+fn bulk(what: Bulk, b: &BulkCtx) {
+    b.ui.error.set(None);
+    match b.rows.with_value(|r| plan_bulk(r, what)) {
+        BulkPlan::Nothing => b.ui.again.set(None),
+        // set again for the same mark too: the question takes the focus once more
+        BulkPlan::Again(_) => {
+            b.ui.ask_focus.set(true);
+            b.ui.again.set(Some(what));
         }
-    } else if ui.when.get_untracked() == "range" {
-        let range = parse_range(
-            &ui.from.get_untracked(),
-            &ui.to.get_untracked(),
-            crate::history::today(),
-        );
-        match range {
-            Ok((from, to)) => Some(spread_over(eps.len(), from, to)),
-            Err(e) => {
-                ui.error.set(Some(ctx.i18n.t(e.key())));
-                return;
-            }
+        BulkPlan::Log { eps, skipped } => {
+            b.ui.again.set(None);
+            log_bulk(eps, skipped, b);
         }
-    } else {
-        None
-    };
-    info.with_value(|i| log_episodes(eps, dates, i, ctx, ui));
+    }
 }
 
 /// When the bulk marks happened: now, spread over a date range (backfill), or on the release
@@ -361,20 +416,24 @@ pub fn EpisodeList(
     });
     let offered = Memo::new(move |_| has_dates && missing.get() == 0);
     let ctx = StepCtx::current();
-    let c2 = ctx.clone();
-    let mark_season = move |_| {
-        let season = Bulk::Season(shown.get_untracked());
-        bulk(season, rows, info, c2.clone(), ui, released);
+    let b = BulkCtx {
+        rows,
+        info,
+        ctx: ctx.clone(),
+        ui,
+        released,
     };
-    let c3 = ctx.clone();
+    let b2 = b.clone();
+    let mark_season = move |_| bulk(Bulk::Season(shown.get_untracked()), &b2);
+    let (b3, c3) = (b.clone(), ctx.clone());
     let mark = Callback::new(move |(target, up_to): (Ep, bool)| {
         if up_to {
-            bulk(Bulk::UpTo(target), rows, info, c3.clone(), ui, released);
+            bulk(Bulk::UpTo(target), &b3);
             return;
         }
         let answer = info.with_value(|i| stored_answer(&i.item_id));
         match rows.with_value(|r| plan_single(r, target, answer)) {
-            Plan::Log(eps) => info.with_value(|i| log_episodes(eps, None, i, c3.clone(), ui)),
+            Plan::Log(eps) => info.with_value(|i| log_episodes(eps, None, 0, i, c3.clone(), ui)),
             Plan::Ask { .. } => ui.ask.set(Some(target)),
         }
     });
@@ -389,40 +448,58 @@ pub fn EpisodeList(
         }
         let eps = rows.with_value(|r| plan_single(r, target, choice));
         if let Plan::Log(eps) = eps {
-            info.with_value(|i| log_episodes(eps, None, i, ctx.clone(), ui));
+            info.with_value(|i| log_episodes(eps, None, 0, i, ctx.clone(), ui));
         }
     });
-    let c4 = StepCtx::current();
-    let mark_show = move |_| bulk(Bulk::Show, rows, info, c4.clone(), ui, released);
+    let b4 = b.clone();
+    let mark_show = move |_| bulk(Bulk::Show, &b4);
+    focus_after_log(ui);
+    let verb = info.with_value(|i| i.verb);
     view! {
         <section class="grid gap-3 py-2">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <SeasonChips rows=rows.get_value() shown=shown ui=ui/>
                 <div class="flex flex-wrap gap-2">
-                    <Button variant=ButtonVariant::Outline size=ButtonSize::Sm disabled=ui.busy on:click=mark_season>
+                    <Button variant=ButtonVariant::Outline size=ButtonSize::Sm disabled=ui.busy attr:data-ep-bulk="season" on:click=mark_season>
                         {t("episodes-mark-season")}
                     </Button>
-                    <Button variant=ButtonVariant::Outline size=ButtonSize::Sm disabled=ui.busy on:click=mark_show>
+                    <Button variant=ButtonVariant::Outline size=ButtonSize::Sm disabled=ui.busy attr:data-ep-bulk="show" on:click=mark_show>
                         {t("episodes-mark-show")}
                     </Button>
                 </div>
             </div>
             <BulkDates ui=ui offered=offered missing=missing has_dates=has_dates/>
             <AskPrevious ui=ui rows=rows answer=answer/>
+            <AskAgain bulk=b/>
             {move || ui.error.get().map(|e| view! { <p role="alert" class="text-sm text-destructive-text">{e}</p> })}
-            // always there, so the text is announced when it appears
-            <p role="status" data-testid="episodes-note" class="text-sm empty:hidden">{move || rows.with_value(|r| standing_note(r, ui.note.get())).map(t)}</p>
             {move || rows.with_value(|r| r.iter().find(|s| s.number == shown.get()).cloned()).map(|season| view! {
                 <ul class="divide-y divide-border rounded-md border border-border" aria-label=use_i18n().t_args("episodes-season", &[("season", season.number.into())])>
                     {(1..=season.count).map(|e| view! {
                         <EpisodeRow season=season.number episode=e watched=season.watched.contains(&e)
-                            next=next == Some((season.number, e)) mark=mark open_sheet=open_sheet busy=ui.busy/>
+                            next=next == Some((season.number, e)) mark=mark open_sheet=open_sheet ui=ui verb=verb/>
                     }).collect_view()}
                 </ul>
             })}
         </section>
     }
     .into_any()
+}
+
+/// Once the list is back after "Log N again" (the refetch rebuilt it), the focus goes to the
+/// control that asked; the answer's button is gone with the question (2.4.3). A row menu
+/// that is open keeps the focus it takes itself.
+fn focus_after_log(ui: EpisodeUi) {
+    Effect::new(move |_| {
+        if ui.busy.get_untracked() {
+            return;
+        }
+        if let Some(selector) = ui.focus_back.get_untracked() {
+            ui.focus_back.set(None);
+            if ui.menu.get_untracked().is_none() {
+                focus_soon(selector);
+            }
+        }
+    });
 }
 
 /// One chip per season with watched/total; exactly one is pressed.
@@ -443,8 +520,9 @@ fn SeasonChips(rows: Vec<SeasonRow>, shown: Memo<u32>, ui: EpisodeUi) -> impl In
                         // a chip never unpresses itself: the season stays shown
                         pressed.set(true);
                         ui.season.set(Some(n));
-                        // a message about another season's mark does not follow
-                        ui.note.set(None);
+                        // a question about another season's mark does not follow
+                        ui.again.set(None);
+                        ui.menu.set(None);
                     })>
                         {use_i18n().t_args("episodes-season", &[("season", n.into())])}
                     </Chip>
@@ -503,6 +581,74 @@ fn AskPrevious(
     }
 }
 
+/// "Log these N again as a rewatch?" after a bulk mark on a range that is watched already
+/// (OT-15, DEC-538). Inline, not a dialog (addendum-1 D15); the first button takes the focus
+/// when the question is asked, so it is announced (once: a refetch that rebuilds the list
+/// under a standing question does not pull the focus back to it, review OT2A-4). "Cancel"
+/// gives the focus back to the control that asked; after "Log N again" it goes there once
+/// the list is back. Until the rewatch run exists (ot2e) the answer logs plain extra views,
+/// which is what "Again" on a row does.
+#[component]
+fn AskAgain(bulk: BulkCtx) -> impl IntoView {
+    let ui = bulk.ui;
+    let rows = bulk.rows;
+    let verb = bulk.info.with_value(|i| i.verb);
+    let first = NodeRef::<html::Div>::new();
+    Effect::new(move |_| {
+        if ui.again.get().is_some()
+            && ui.ask_focus.get_untracked()
+            && let Some(el) = first.get()
+            && let Ok(Some(b)) = el.query_selector("button")
+        {
+            use leptos::wasm_bindgen::JsCast;
+            ui.ask_focus.set(false);
+            if let Ok(b) = b.dyn_into::<leptos::web_sys::HtmlElement>() {
+                let _ = b.focus();
+            }
+        }
+    });
+    move || {
+        let asked = ui.again.get()?;
+        let eps = rows.with_value(|r| standing_again(r, Some(asked)))?;
+        let i = use_i18n();
+        let count = eps.len();
+        let question = i.t_args(again_ask_key(verb), &[("count", count.into())]);
+        let (all, cancel) = (
+            i.t_args("episodes-again-all", &[("count", count.into())]),
+            i.t("episodes-again-cancel"),
+        );
+        let bulk = bulk.clone();
+        // the question stays while the date choice cannot be used (its reason shows inline)
+        let log = move |_| match bulk_dates(&eps, &bulk) {
+            Ok(dates) => {
+                ui.focus_back.set(Some(asked.asker()));
+                bulk.info
+                    .with_value(|i| log_episodes(eps.clone(), dates, 0, i, bulk.ctx.clone(), ui));
+            }
+            Err(text) => ui.error.set(Some(text)),
+        };
+        let cancel_it = move |_| {
+            // first the focus, then the group goes (with the button that had it)
+            let _ = crate::keyboard::focus(&asked.asker());
+            ui.again.set(None);
+        };
+        Some(view! {
+            <div node_ref=first role="group" aria-label=question.clone() data-testid="episodes-again"
+                class="grid gap-3 rounded-md border border-info/40 bg-info-soft p-3">
+                <p class="text-sm font-medium">{question.clone()}</p>
+                <div class="flex flex-wrap items-center gap-2">
+                    <Button size=ButtonSize::Sm disabled=ui.busy on:click=log>
+                        {all}
+                    </Button>
+                    <Button size=ButtonSize::Sm variant=ButtonVariant::Outline on:click=cancel_it>
+                        {cancel}
+                    </Button>
+                </div>
+            </div>
+        })
+    }
+}
+
 #[component]
 fn EpisodeRow(
     season: u32,
@@ -511,11 +657,25 @@ fn EpisodeRow(
     next: bool,
     mark: Callback<(Ep, bool)>,
     open_sheet: Callback<SheetTarget>,
-    busy: RwSignal<bool>,
+    ui: EpisodeUi,
+    verb: Option<Verb>,
 ) -> impl IntoView {
     let i18n = use_i18n();
+    let busy = ui.busy;
+    // the menu's open state lives in `ui`: a refetch rebuilds the row, and a menu the
+    // person has open stays open (review OT2A-5)
+    let here = (season, episode);
+    let open = RwSignal::new(ui.menu.get_untracked() == Some(here));
+    Effect::new(move |_| {
+        if open.get() {
+            ui.menu.set(Some(here));
+        } else if ui.menu.get_untracked() == Some(here) {
+            ui.menu.set(None);
+        }
+    });
     let n = [("season", season.into()), ("episode", episode.into())];
-    let label = i18n.t_args("next-step-episode", &n);
+    // the words of the toast and of the dialog's title: the past tense (OT-5)
+    let label = i18n.t_args("logged-step-episode", &n);
     let menu = vec![
         MenuItem {
             label: i18n.t("episodes-up-to-here"),
@@ -523,7 +683,7 @@ fn EpisodeRow(
             destructive: false,
         },
         MenuItem {
-            label: i18n.t("episodes-with"),
+            label: i18n.t(with_button_key(verb)),
             on_select: {
                 let label = label.clone();
                 Callback::new(move |()| {
@@ -562,7 +722,7 @@ fn EpisodeRow(
                 {if watched { t("episodes-again") } else { t("episodes-watched") }}
             </Button>
             <DropdownMenu label=use_i18n().t_args("episodes-row-menu", &n) items=menu
-                id=format!("ep-menu-{season}-{episode}") trigger_class="size-8 px-0"
+                id=crate::episode_plan::row_menu_id(here) open=open trigger_class="size-8 px-0"
                 trigger=Box::new(|| view! { <Icon name=IconName::More/> }.into_any())/>
         </li>
     }

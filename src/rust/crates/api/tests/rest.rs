@@ -1648,3 +1648,73 @@ async fn the_library_text_filter_says_when_search_is_down() {
     .await;
     assert_eq!(st, StatusCode::OK, "without text the search is not asked");
 }
+
+async fn a_movie(t: &testkit::TestEnv, title: &str) -> domain::catalog::CatalogItem {
+    t.app
+        .upsert_catalog_item(app::NewCatalogItem {
+            kind: domain::kind::KindId::new("movie").unwrap(),
+            title: title.into(),
+            original_title: None,
+            year: Some(1995),
+            description: None,
+            external_ids: vec![],
+            attributes: serde_json::json!({}),
+            cover_url: None,
+        })
+        .await
+        .unwrap()
+}
+
+/// OT-4, OT-7 (DEC-553; review OT2A-16): the item page of an item that is not in the library
+/// carries its first step and a count of zero; the first log adds it and counts once.
+#[tokio::test]
+async fn the_item_page_has_a_first_step_and_the_count_without_an_entry() {
+    let (s, t) = state();
+    let item = a_movie(&t, "Heat").await;
+    let app = api::router(s);
+    let token = signed_up(&app).await;
+    let page = format!("/api/v1/items/{}/page", item.id.0);
+    let (status, _, p) = call(&app, "GET", &page, Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK, "{p}");
+    assert!(p["entry"].is_null(), "{p}");
+    assert!(p["summary"].is_null(), "{p}");
+    assert_eq!(p["times"], 0);
+    assert_eq!(p["next_step"]["action"], "finish");
+    assert_eq!(p["next_step"]["again"], false);
+    assert_eq!(p["next_step"]["label_key"], "next-step-watched");
+
+    let (status, _, _) = call(
+        &app,
+        "POST",
+        &format!("/api/v1/items/{}/progress", item.id.0),
+        Some(&token),
+        Some(serde_json::json!({"progress": {"type": "finished"}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, _, p) = call(&app, "GET", &page, Some(&token), None).await;
+    assert_eq!(p["entry"]["status"], "completed");
+    assert_eq!(p["times"], 1);
+    assert_eq!(p["next_step"]["again"], true);
+    assert_eq!(p["summary"]["finished"], 1);
+}
+
+/// Review OT2A, "not verified": a stored item whose kind this deployment no longer has (the
+/// kind was switched off, D-10) still has a page outside the library, as before the first
+/// step was added: no step, no count, no error.
+#[tokio::test]
+async fn the_item_page_of_a_switched_off_kind_still_answers() {
+    let (s, t) = state();
+    let mut item = a_movie(&t, "Hoerspiel").await;
+    item.kind = domain::kind::KindId::new("radio_play").unwrap();
+    t.app.repos.catalog.upsert(&item).await.unwrap();
+    let app = api::router(s);
+    let token = signed_up(&app).await;
+    let page = format!("/api/v1/items/{}/page", item.id.0);
+    let (status, _, p) = call(&app, "GET", &page, Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK, "{p}");
+    assert_eq!(p["item"]["kind"], "radio_play");
+    assert!(p["entry"].is_null(), "{p}");
+    assert!(p["next_step"].is_null(), "{p}");
+    assert_eq!(p["times"], 0);
+}

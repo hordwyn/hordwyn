@@ -11,17 +11,16 @@ use contracts::admin::{SkippedSourceDto, SourceStatusPageDto};
 use contracts::{CatalogItemDto, SearchResultsEventDto};
 use leptos::prelude::*;
 use leptos_router::hooks::use_navigate;
-use ui::{
-    Command, CommandHints, CommandItem, Dialog, Segmented, SegmentedOption, StatusDot, ToastAction,
-    ToastVariant,
-};
+use ui::{Command, CommandHints, CommandItem, Dialog, Segmented, SegmentedOption, StatusDot};
 
 use crate::admin_api;
 use crate::admin_state::source_state;
 use crate::api;
 use crate::events::use_events;
 use crate::i18n::{I18n, t, use_i18n};
-use crate::next_step::{LoggedStep, StepCtx, next_step_label, run_step, step_progress};
+use crate::next_step::{
+    LoggedStep, StepCtx, logged_step_label, run_step, step_progress, toast_added,
+};
 use crate::recent::RecentItem;
 use crate::settings::AskAdmin;
 use crate::source_hints::{
@@ -187,34 +186,8 @@ pub fn idle_items(
     out
 }
 
-/// "Added to Planned" with the title and Undo, which removes the entry again (WP4-3).
-fn toast_added(ctx: &StepCtx, item_id: String, label: String) {
-    let undo_ctx = ctx.clone();
-    let undo = ToastAction::new(
-        ctx.i18n.t("library-undo"),
-        Callback::new(move |()| {
-            let (ctx, id) = (undo_ctx.clone(), item_id.clone());
-            leptos::task::spawn_local(async move {
-                let req = crate::bulk::request(vec![id], "remove");
-                match api::library_bulk(req).await {
-                    Ok(_) => {
-                        ctx.toasts
-                            .push(ctx.i18n.t("library-undone"), None, ToastVariant::Default);
-                    }
-                    Err(_) => ctx.toasts.push(
-                        ctx.i18n.t("error-generic"),
-                        None,
-                        ToastVariant::Destructive,
-                    ),
-                }
-            });
-        }),
-    );
-    ctx.toasts
-        .push_action(ctx.i18n.t("search-added-planned"), Some(label), undo);
-}
-
-/// The quick path (design.md 5.3, 3.4): a result not in the library is added as Planned; an
+/// The quick path (design.md 5.3, 3.4): a result not in the library is added as Planned (the
+/// same toast with Undo as the item page's "Want to watch", OT-4); an
 /// entry runs its one-click next step; a step that needs input opens the item page. The
 /// palette stays open except for that last case; errors show in the palette.
 fn quick(
@@ -239,7 +212,7 @@ fn quick(
                         let logged = LoggedStep {
                             item_id: item.id,
                             title: page.item.title,
-                            label: next_step_label(&ctx.i18n, &step),
+                            label: logged_step_label(&ctx.i18n, &step),
                             progress,
                         };
                         run_step(ctx.clone(), logged, busy, error, None);
@@ -250,7 +223,7 @@ fn quick(
             Ok(_) => match api::add_to_library(item.id.clone()).await {
                 Ok(_) => {
                     ctx.funnel.logged();
-                    toast_added(&ctx, item.id, item.label);
+                    toast_added(&ctx, item.id, item.label, None);
                 }
                 Err(e) => error.set(Some(failed(&e))),
             },

@@ -122,7 +122,7 @@ pub struct PlayForm {
     /// Co-op game: everyone wins or loses together.
     pub coop: bool,
     pub coop_won: bool,
-    /// Minutes, as typed.
+    /// As typed: minutes or `h:mm` ([`parse_duration`]).
     pub duration: String,
     pub location: String,
     pub notes: String,
@@ -158,6 +158,43 @@ pub fn parse_score(s: &str) -> Result<Option<f64>, NotANumber> {
     match s.replace(',', ".").parse::<f64>() {
         Ok(v) if v.is_finite() => Ok(Some(v)),
         _ => Err(NotANumber),
+    }
+}
+
+/// A typed duration in minutes: `90` or `1:30` (hours, then two digits of minutes below
+/// 60); empty is none (OT-16), and so is zero: `0` typed over a prefilled duration clears
+/// it, a play of no minutes is a play without a duration (review OT2A-14).
+///
+/// # Errors
+/// [`FormError::Duration`] for anything else; `1:5` too, which could be 1:05 or 1:50.
+pub fn parse_duration(s: &str) -> Result<Option<u32>, FormError> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Ok(None);
+    }
+    let digits = |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
+    let minutes = match s.split_once(':') {
+        None if digits(s) => s.parse::<u32>().ok(),
+        Some((h, m)) if digits(h) && digits(m) && m.len() == 2 => h
+            .parse::<u32>()
+            .ok()
+            .zip(m.parse::<u32>().ok().filter(|m| *m < 60))
+            .and_then(|(h, m)| h.checked_mul(60)?.checked_add(m)),
+        _ => None,
+    };
+    minutes
+        .map(|m| (m > 0).then_some(m))
+        .ok_or(FormError::Duration)
+}
+
+/// Minutes the way they are typed: `45` below an hour, `1:30` from an hour on (the prefill
+/// from the last play).
+#[must_use]
+pub fn format_duration(minutes: u32) -> String {
+    if minutes < 60 {
+        minutes.to_string()
+    } else {
+        format!("{}:{:02}", minutes / 60, minutes % 60)
     }
 }
 
@@ -236,14 +273,9 @@ impl PlayForm {
                 Err(NotANumber) => errors.push(FormError::Score(p.companion_id.clone())),
             }
         }
-        let duration_minutes = match trimmed(&self.duration).map(|d| d.parse::<u32>()) {
-            None => None,
-            Some(Ok(m)) => Some(m),
-            Some(Err(_)) => {
-                errors.push(FormError::Duration);
-                None
-            }
-        };
+        let duration_minutes = parse_duration(&self.duration)
+            .map_err(|e| errors.push(e))
+            .unwrap_or_default();
         if !errors.is_empty() {
             return Err(errors);
         }
@@ -569,5 +601,52 @@ mod tests {
         assert_eq!(now, start);
         now.with.push("anna".into());
         assert_ne!(now, start);
+    }
+
+    /// OT-16: the play dialog takes "1:30" or "90".
+    #[test]
+    fn a_duration_is_hours_and_minutes_or_plain_minutes() {
+        assert_eq!(parse_duration("90"), Ok(Some(90)));
+        assert_eq!(parse_duration(" 1:30 "), Ok(Some(90)));
+        assert_eq!(parse_duration("0:45"), Ok(Some(45)));
+        assert_eq!(parse_duration("12:05"), Ok(Some(725)));
+        // OT2A-14: zero is "no duration" (typed to clear the prefill), not a play of 0 minutes
+        assert_eq!(parse_duration("0"), Ok(None));
+        assert_eq!(parse_duration("0:00"), Ok(None));
+        // empty is no duration
+        assert_eq!(parse_duration(""), Ok(None));
+        assert_eq!(parse_duration("   "), Ok(None));
+        // "1:5" could be 1:05 or 1:50: refused, as are minutes from 60 on and anything else
+        for bad in [
+            "1:5", "1:60", "1:234", ":30", "1:", "1:30:00", "ninety", "1.5", "-5", "1h 30",
+        ] {
+            assert_eq!(parse_duration(bad), Err(FormError::Duration), "{bad}");
+        }
+        // shown again the way it is typed
+        assert_eq!(format_duration(45), "45");
+        assert_eq!(format_duration(60), "1:00");
+        assert_eq!(format_duration(90), "1:30");
+        assert_eq!(format_duration(725), "12:05");
+        for m in [1, 59, 60, 61, 600] {
+            assert_eq!(parse_duration(&format_duration(m)), Ok(Some(m)));
+        }
+    }
+
+    #[test]
+    fn a_play_takes_its_duration_as_hours_and_minutes() {
+        let form = PlayForm {
+            duration: "1:30".into(),
+            ..PlayForm::default()
+        };
+        let play = form.payload(today(), "op".into()).unwrap();
+        assert_eq!(play.duration_minutes, Some(90));
+        let bad = PlayForm {
+            duration: "1:5".into(),
+            ..PlayForm::default()
+        };
+        assert_eq!(
+            bad.payload(today(), "op".into()).unwrap_err(),
+            vec![FormError::Duration]
+        );
     }
 }

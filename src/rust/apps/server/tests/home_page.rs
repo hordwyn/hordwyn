@@ -246,7 +246,7 @@ async fn home_shows_continue_up_next_activity_and_stats() {
     }
     // Continue: the next step of the show, with its progress
     assert!(
-        html.contains("aria-label=\"Watched S1 E3: Downstream\""),
+        html.contains("aria-label=\"Mark S1 E3 watched: Downstream\""),
         "next step"
     );
     // Up next: the planned movie with its reason

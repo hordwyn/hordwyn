@@ -8,9 +8,9 @@ use leptos::html;
 use leptos::prelude::*;
 use leptos_router::hooks::use_location;
 use ui::{
-    Alert, AlertRole, AlertVariant, Avatar, Dialog, Icon, IconName, KeyHint, NavGroup, NavItem,
-    Segmented, SegmentedOption, SideNav, TabBar, TabBarAction, ThemeToggle, Toaster,
-    provide_toasts,
+    Alert, AlertRole, AlertVariant, Avatar, Button, ButtonLink, ButtonVariant, Dialog, Icon,
+    IconName, KeyHint, NavGroup, NavItem, Segmented, SegmentedOption, SideNav, TabBar,
+    TabBarAction, ThemeToggle, Toaster, provide_toasts,
 };
 
 use crate::app::ClientConfig;
@@ -422,7 +422,7 @@ fn SignedOutBar() -> impl IntoView {
         <span class="flex-1"></span>
         <ThemeToggle dark_label=i18n.t("theme-dark") light_label=i18n.t("theme-light") storage_key=THEME_KEY/>
         <a href="/sign-in" class=NAV_LINK>{t("nav-sign-in")}</a>
-        <a href="/sign-up" class="inline-flex min-h-11 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-[47.5rem]:min-h-9">{t("nav-sign-up")}</a>
+        <ButtonLink href="/sign-up" class="min-h-11 min-[47.5rem]:min-h-9">{t("nav-sign-up")}</ButtonLink>
     }
 }
 
@@ -939,19 +939,19 @@ pub fn You() -> impl IntoView {
             <ThemeChoiceControl/>
             <LanguageChoice/>
             <div class="flex flex-wrap gap-2">
-                <button type="button" class="inline-flex min-h-11 items-center rounded-md border border-input px-4 text-sm font-medium cursor-pointer" on:click=move |_| help.set(true)>
+                <Button variant=ButtonVariant::Outline class="min-h-11" on:click=move |_| help.set(true)>
                     {t("shell-shortcuts")}
-                </button>
+                </Button>
                 {cfg.support_url.clone().map(|url| view! {
-                    <a href=url target="_blank" rel="noopener" class="inline-flex min-h-11 items-center rounded-md border border-input px-4 text-sm font-medium">
+                    <ButtonLink href=url variant=ButtonVariant::Outline class="min-h-11" attr:target="_blank" attr:rel="noopener">
                         {t("shell-help")}
-                    </a>
+                    </ButtonLink>
                 })}
             </div>
-            <button type="submit" form=SIGN_OUT_FORM class="inline-flex min-h-11 w-fit items-center gap-2 rounded-md border border-input px-4 text-sm font-medium cursor-pointer">
+            <Button r#type="submit" variant=ButtonVariant::Outline class="min-h-11 w-fit" attr:form=SIGN_OUT_FORM>
                     <Icon name=IconName::LogOut/>
                     {t("nav-sign-out")}
-            </button>
+            </Button>
         </div>
     }
     .into_any()

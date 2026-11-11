@@ -220,3 +220,132 @@ fn paged_timed_and_sessions_report_where_you_are() {
         NextStep::Session { plays: 2 }
     );
 }
+
+/// OT-4: an item that is not in the library still has a first step (the item page offers
+/// "Mark as watched" next to "Want to watch").
+#[test]
+fn an_item_without_an_entry_has_a_first_step() {
+    let movie = kind("movie", ProgressModel::Single);
+    let i = item("movie", json!({}));
+    assert_eq!(
+        app::first_step(&movie, &i, &[]),
+        NextStep::Finish { again: false }
+    );
+    // removed from the library, the history stays: the next watch is a rewatch
+    assert_eq!(
+        app::first_step(&movie, &i, &[ev(1, Progress::Finished)]),
+        NextStep::Finish { again: true }
+    );
+    let show = kind("show", ProgressModel::Episodic);
+    let s = item(
+        "show",
+        json!({"seasons": [{"number": 1, "episode_count": 2}]}),
+    );
+    assert_eq!(
+        app::first_step(&show, &s, &[]),
+        NextStep::Episode {
+            season: 1,
+            episode: 1
+        }
+    );
+    assert_eq!(
+        app::first_step(&kind("board_game", ProgressModel::Sessions), &i, &[]),
+        NextStep::Session { plays: 0 }
+    );
+}
+
+/// OT-7: "Watched 3 times" counts whole passes, never "once plus N rewatches".
+#[test]
+fn times_counts_whole_passes_per_model() {
+    let movie = kind("movie", ProgressModel::Single);
+    let i = item("movie", json!({}));
+    assert_eq!(app::times(false, &movie, &i, &[]), 0);
+    let three = [
+        ev(1, Progress::Finished),
+        ev(2, Progress::Finished),
+        ev(3, Progress::Finished),
+    ];
+    assert_eq!(app::times(true, &movie, &i, &three), 3);
+    // an undone watch does not count
+    let undone = [
+        ev(1, Progress::Finished),
+        ev(2, Progress::Finished),
+        ev(
+            3,
+            Progress::Undo {
+                event_id: EventId(uuid::Uuid::from_u128(2)),
+            },
+        ),
+    ];
+    assert_eq!(app::times(true, &movie, &i, &undone), 1);
+    // completed by hand, nothing logged: once
+    assert_eq!(app::times(true, &movie, &i, &[]), 1);
+
+    // a show: every known regular episode watched n times is n passes; specials do not count
+    let show = kind("show", ProgressModel::Episodic);
+    let s = item(
+        "show",
+        json!({"seasons": [{"number": 0, "episode_count": 1}, {"number": 1, "episode_count": 2}]}),
+    );
+    assert_eq!(app::times(false, &show, &s, &[ep(1, 1, 1)]), 0);
+    assert_eq!(app::times(false, &show, &s, &[ep(1, 1, 1), ep(2, 1, 2)]), 1);
+    let again = [ep(1, 1, 1), ep(2, 1, 2), ep(3, 1, 1), ep(4, 0, 1)];
+    assert_eq!(app::times(false, &show, &s, &again), 1);
+    let twice = [ep(1, 1, 1), ep(2, 1, 2), ep(3, 1, 1), ep(4, 1, 2)];
+    assert_eq!(app::times(false, &show, &s, &twice), 2);
+    // completed by hand with episodes open (or none known): once
+    assert_eq!(app::times(true, &show, &s, &[ep(1, 1, 1)]), 1);
+    assert_eq!(
+        app::times(false, &show, &item("show", json!({})), &[ep(1, 1, 1)]),
+        0
+    );
+
+    // plays are counted as they are
+    let game = kind("board_game", ProgressModel::Sessions);
+    let play = |n| {
+        ev(
+            n,
+            Progress::Session {
+                session_id: SessionId(uuid::Uuid::from_u128(n)),
+            },
+        )
+    };
+    assert_eq!(app::times(false, &game, &i, &[play(1), play(2)]), 2);
+
+    // a book finished by status only (pages do not complete it): once
+    let book = kind("book", ProgressModel::Paged);
+    assert_eq!(app::times(false, &book, &i, &[]), 0);
+    assert_eq!(app::times(true, &book, &i, &[]), 1);
+}
+
+/// OT2A-1: the button, the dialog and the header count the same thing. A completion set by
+/// hand (or imported without a date) and the first logged finish are one and the same pass:
+/// the step is not "again" before a finish is logged, and the count does not stand still
+/// after a step that said "again".
+#[test]
+fn a_completion_by_hand_and_the_first_finish_are_one_pass() {
+    let movie = kind("movie", ProgressModel::Single);
+    let i = item("movie", json!({}));
+    let done = entry("movie", "completed");
+    // completed by hand, nothing logged: counted once, and the log that follows is that watch
+    assert_eq!(app::times(true, &movie, &i, &[]), 1);
+    assert_eq!(
+        next_step(&done, &movie, &i, &[]),
+        NextStep::Finish { again: false }
+    );
+    // then one finish: still once (now with a day), and the next one is a rewatch
+    let one = [ev(1, Progress::Finished)];
+    assert_eq!(app::times(true, &movie, &i, &one), 1);
+    assert_eq!(
+        next_step(&done, &movie, &i, &one),
+        NextStep::Finish { again: true }
+    );
+    // every step that says "again" raises the count
+    let two = [ev(1, Progress::Finished), ev(2, Progress::Finished)];
+    assert_eq!(app::times(true, &movie, &i, &two), 2);
+    // the same without an entry (removed, the history stayed)
+    assert_eq!(
+        app::first_step(&movie, &i, &one),
+        NextStep::Finish { again: true }
+    );
+}

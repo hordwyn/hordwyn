@@ -20,8 +20,10 @@ test("signing up 'Robin' succeeds as 'robin'", async ({ page }) => {
   await page.getByLabel("Password").fill(PASSWORD);
   await expect(page.locator("#password-rules")).toContainText("At least 10 characters (21 so far)");
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page).toHaveURL(/\/library$/);
+  await expect(page).toHaveURL(/\/$/);
   await hydrated(page);
+  // OWN-7 (DEC-551): a new account lands on Home, not on the library
+  await expect(page.getByText("Nothing here yet")).toBeVisible();
   await expect(page.getByRole("button", { name: `Account menu for ${stored}` })).toBeVisible();
 });
 
@@ -44,7 +46,7 @@ test("a taken name offers free names that fill the field", async ({ page, browse
   await first.getByLabel("Username").fill(name);
   await first.getByLabel("Password").fill(PASSWORD);
   await first.getByRole("button", { name: "Create account" }).click();
-  await expect(first).toHaveURL(/\/library$/);
+  await expect(first).toHaveURL(/\/$/);
   await other.close();
 
   await page.goto("/sign-up");

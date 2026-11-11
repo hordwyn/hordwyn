@@ -304,7 +304,7 @@ pub fn QuickMenu(
         let logged = LoggedStep {
             item_id: item_id.clone(),
             title: title.clone(),
-            label: label.clone(),
+            label: crate::next_step::logged_step_label(&i18n, &row.next_step),
             progress,
         };
         let ctx = ctx.clone();
@@ -573,6 +573,9 @@ pub fn CompanionPicker(
     companions: RwSignal<Vec<CompanionDto>>,
     selected: RwSignal<Vec<String>>,
     #[prop(optional)] include_self: bool,
+    /// Id of a hint that belongs to the group (read with it, 1.3.1).
+    #[prop(into, optional)]
+    described_by: Option<String>,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let error = RwSignal::new(None::<String>);
@@ -638,7 +641,7 @@ pub fn CompanionPicker(
     let legend_id = format!("{id}-legend");
     let labelled = legend_id.clone();
     view! {
-        <div role="group" aria-labelledby=labelled class="grid gap-2">
+        <div role="group" aria-labelledby=labelled aria-describedby=described_by class="grid gap-2">
             <span id=legend_id.clone() class="text-sm font-medium">{legend}</span>
             <div class="flex flex-wrap gap-2">
                 <For each=chips key=|c| c.id.clone() let:c>

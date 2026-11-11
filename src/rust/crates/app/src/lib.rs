@@ -43,7 +43,7 @@ pub use error::{AppError, AppResult};
 pub use game_groups::{GameGroupInput, GameGroupView};
 pub use goals::{ComparePair, GoalProgress, NewGoal, YearCompare, same_day_last_year};
 pub use library::UNDO_WINDOW_HOURS;
-pub use next_step::{NextStep, next_step};
+pub use next_step::{NextStep, first_step, next_step, times};
 pub use people::{CompanionStats, MergeSuggestion, MostPlayed, StatItem, suggest_merges};
 pub use sessions::NewSession;
 pub use stats::{

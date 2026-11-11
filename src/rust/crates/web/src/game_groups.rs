@@ -8,8 +8,8 @@ use contracts::{CompanionDto, GameGroupDto};
 use leptos::prelude::*;
 use serde_json::json;
 use ui::{
-    Button, ButtonSize, ButtonVariant, Dialog, DropdownMenu, EmptyState, FormField, IconName,
-    Input, MenuItem,
+    Button, ButtonSize, ButtonVariant, CardActions, Dialog, DropdownMenu, EmptyState, FormField,
+    IconName, Input, MenuItem,
 };
 
 use crate::admin::ConfirmDialog;
@@ -153,7 +153,7 @@ fn GroupCard(g: GameGroupDto) -> impl IntoView {
                 </div>
             </dl>
             <p class="text-sm text-muted-foreground">{last}</p>
-            <div class="flex flex-wrap gap-2">{log}</div>
+            <CardActions>{log}</CardActions>
         </li>
     }
 }

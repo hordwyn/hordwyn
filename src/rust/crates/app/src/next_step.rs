@@ -2,7 +2,7 @@
 //! card, on Home and on the item page does.
 
 use domain::catalog::CatalogItem;
-use domain::kind::{KindDescriptor, ProgressModel, Status};
+use domain::kind::{KindDescriptor, ProgressModel};
 use domain::library::LibraryEntry;
 use domain::progress::{ProgressEvent, ProgressSummary};
 use serde_json::Value;
@@ -12,7 +12,9 @@ use serde_json::Value;
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum NextStep {
-    /// `Single`: mark watched / read / played; `again` once it was finished before.
+    /// `Single`: mark watched / read / played; `again` once a finish is logged. A
+    /// completion set by hand is not one: the first logged finish is that same pass (it gives
+    /// it a day), so every step that says "again" raises [`times`] (OT2A-1).
     Finish { again: bool },
     /// `Episodic`: the next unwatched episode.
     Episode { season: u32, episode: u32 },
@@ -94,28 +96,77 @@ fn next_episode(item: &CatalogItem, summary: &ProgressSummary) -> NextStep {
     }
 }
 
-/// The next step of `entry` (an item of `kind`) given its progress history (undo events
-/// included; they are applied here).
+/// The next step of an entry (an item of `kind`) given its progress history (undo events
+/// included; they are applied here). The entry's status does not decide it (OT2A-1): the
+/// history does.
 #[must_use]
 pub fn next_step(
-    entry: &LibraryEntry,
+    _entry: &LibraryEntry,
     kind: &KindDescriptor,
     item: &CatalogItem,
     progress: &[ProgressEvent],
 ) -> NextStep {
-    let summary = ProgressSummary::of(progress);
-    step_for(entry, kind, item, &summary)
+    step_for(kind, item, &ProgressSummary::of(progress))
+}
+
+/// The step of an item that is not in the viewer's library (OT-4): what its first log would
+/// be, given any history that outlived a removed entry.
+#[must_use]
+pub fn first_step(
+    kind: &KindDescriptor,
+    item: &CatalogItem,
+    progress: &[ProgressEvent],
+) -> NextStep {
+    step_for(kind, item, &ProgressSummary::of(progress))
+}
+
+/// How many times the person went through the item (OT-7, "Watched 3 times"; never "once
+/// plus N rewatches"): finished events for the single, paged and timed models, plays for
+/// sessions, and for an episodic item the whole passes over its known regular episodes (the
+/// least often watched one decides; none while an episode is open or none is known). A
+/// `completed` entry counts once at least: a status set by hand is the person's word, and
+/// the first finish logged after it is that same pass, not a second one (OT2A-1).
+#[must_use]
+pub fn times(
+    completed: bool,
+    kind: &KindDescriptor,
+    item: &CatalogItem,
+    progress: &[ProgressEvent],
+) -> u32 {
+    let counted = match kind.progress_model {
+        ProgressModel::Sessions => return ProgressSummary::of(progress).sessions,
+        ProgressModel::Episodic => passes(item, progress),
+        ProgressModel::Single | ProgressModel::Paged | ProgressModel::Timed => {
+            ProgressSummary::of(progress).finished
+        }
+    };
+    counted.max(u32::from(completed))
+}
+
+/// Whole passes over the known regular episodes: how often the least watched one was watched.
+fn passes(item: &CatalogItem, progress: &[ProgressEvent]) -> u32 {
+    let mut views = std::collections::BTreeMap::<(u32, u32), u32>::new();
+    for e in domain::progress::effective(progress) {
+        if let domain::progress::Progress::Episode { season, episode } = e.progress {
+            *views.entry((season, episode)).or_default() += 1;
+        }
+    }
+    seasons(item)
+        .into_iter()
+        .flat_map(|(season, count)| (1..=count).map(move |episode| (season, episode)))
+        .map(|ep| views.get(&ep).copied().unwrap_or(0))
+        .min()
+        .unwrap_or(0)
 }
 
 pub(crate) fn step_for(
-    entry: &LibraryEntry,
     kind: &KindDescriptor,
     item: &CatalogItem,
     summary: &ProgressSummary,
 ) -> NextStep {
     match kind.progress_model {
         ProgressModel::Single => NextStep::Finish {
-            again: summary.finished > 0 || entry.status.value.as_str() == Status::COMPLETED,
+            again: summary.finished > 0,
         },
         ProgressModel::Episodic => next_episode(item, summary),
         ProgressModel::Paged => NextStep::Page {

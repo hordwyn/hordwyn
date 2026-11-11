@@ -457,7 +457,7 @@ pub fn SignUp() -> impl IntoView {
 }
 
 /// Create the account: the first one through the setup wizard (`setup`, then run it), else
-/// a sign-up (with the invite, if any) that opens the library. Server refusals go back to
+/// a sign-up (with the invite, if any) that opens Home. Server refusals go back to
 /// the fields.
 fn sign_up_action(
     f: SignUpForm,
@@ -478,7 +478,8 @@ fn sign_up_action(
             };
             match (result, setup) {
                 (Ok(_), Some(done)) => done.run(()),
-                (Ok(_), None) => go("/library"),
+                // a new account lands on Home (design.md 5.2; OWN-7, DEC-551)
+                (Ok(_), None) => go("/"),
                 (Err(e), _) => f.server_error(&i18n, &api::error_code(&e), &v, avail),
             }
         }
@@ -487,7 +488,7 @@ fn sign_up_action(
 
 /// The sign-up form. With `setup` it creates the first account through the setup wizard
 /// (design.md 5.1: the same fields and inline validation as 5.2) and runs `setup` after;
-/// otherwise it signs up (with the invite, if any) and opens the library.
+/// otherwise it signs up (with the invite, if any) and opens Home (OWN-7, DEC-551).
 #[component]
 pub(crate) fn SignUpFields(
     #[prop(optional_no_strip)] invite: Option<String>,

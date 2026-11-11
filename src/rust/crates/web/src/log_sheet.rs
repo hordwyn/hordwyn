@@ -1,6 +1,7 @@
 //! Log sheets and inline loggers of the item page (design.md 5.4, 7.3; addendum-1 1.3 "5.4
-//! Log sheets"): `WatchedSheet` (date chips, people, rating and note behind "More"),
-//! `PlaySheet` (date and duration, players, scores, winner; place, notes and co-op behind "More"),
+//! Log sheets"): `WatchedSheet` (titled with the step; date chips, "Watched with" people,
+//! rating and note behind "More"), `PlaySheet` (date and duration, players, scores, winner;
+//! place, notes and co-op behind "More"; for a video game the scores wait behind "More" too),
 //! `PagesInline` and `PositionInline`. Every save shows "Logged: ..." with Undo; a failure
 //! keeps the sheet open with the data and an inline error; closing a changed sheet asks
 //! first. The sheets' state lives in the page (a refetch never resets an open sheet); the
@@ -17,12 +18,14 @@ use ui::{
     disclosure_storage_key,
 };
 
+use crate::item_words::{Verb, again_line, with_legend_key};
+
 use crate::api;
 use crate::history_state::Day;
 use crate::i18n::{I18n, t, use_i18n};
 use crate::log_form::{
-    DateChip, FormError, PlayForm, Player, WatchedForm, format_position, group_players,
-    page_progress, position_progress,
+    DateChip, FormError, PlayForm, Player, WatchedForm, format_duration, format_position,
+    group_players, page_progress, position_progress,
 };
 use crate::next_step::{LoggedStep, StepCtx, run_step, toast_logged};
 use crate::widgets::{CompanionPicker, RatingInput, progress_label};
@@ -34,8 +37,16 @@ pub struct ItemInfo {
     pub title: String,
     pub rating: Option<u8>,
     pub note: String,
-    /// Times finished so far (the sheet says when a log is a rewatch).
+    /// Times gone through so far when the next step is one more ("again"), else 0: the sheet
+    /// says which watch the next one will be (OT-7; the header's count, review OT2A-1).
     pub finished: u32,
+    /// The verb of the kind's group ("Watched with", "Played with"); `None` for a kind
+    /// without one and while the kind is not known.
+    pub verb: Option<Verb>,
+    /// A board game: its plays have players with scores, open in the dialog (OT-16).
+    pub board_game: bool,
+    /// Minutes of the newest play, the prefill of the next one (OT-16).
+    pub last_duration: Option<u32>,
     /// Refetch the page.
     pub refresh: Callback<()>,
 }
@@ -110,12 +121,17 @@ fn DateChips(
 /// second dialog). Focus moves to "Keep editing".
 #[component]
 fn DiscardPrompt(confirm: RwSignal<bool>, discard: Callback<()>) -> impl IntoView {
-    let keep = NodeRef::<html::Button>::new();
+    // the first button ("Keep editing") takes the focus
+    let group = NodeRef::<html::Div>::new();
     Effect::new(move |_| {
         if confirm.get()
-            && let Some(b) = keep.get()
+            && let Some(el) = group.get()
+            && let Ok(Some(b)) = el.query_selector("button")
         {
-            let _ = b.focus();
+            use leptos::wasm_bindgen::JsCast;
+            if let Ok(b) = b.dyn_into::<leptos::web_sys::HtmlElement>() {
+                let _ = b.focus();
+            }
         }
     });
     let i18n = use_i18n();
@@ -126,13 +142,10 @@ fn DiscardPrompt(confirm: RwSignal<bool>, discard: Callback<()>) -> impl IntoVie
     );
     view! {
         <Show when=move || confirm.get()>
-            <div role="group" aria-label=question.clone() class="grid gap-2 rounded-md border border-warning/50 bg-warning-soft p-3">
+            <div node_ref=group role="group" aria-label=question.clone() class="grid gap-2 rounded-md border border-warning/50 bg-warning-soft p-3">
                 <p class="text-sm font-medium">{question.clone()}</p>
                 <div class="flex flex-wrap gap-2">
-                    <button node_ref=keep type="button" on:click=move |_| confirm.set(false)
-                        class="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                        {keep_label.clone()}
-                    </button>
+                    {let label = keep_label.clone(); view! { <Button variant=ButtonVariant::Outline on:click=move |_| confirm.set(false)>{label}</Button> }}
                     {let label = discard_label.clone(); view! { <Button variant=ButtonVariant::Destructive on:click=move |_| discard.run(())>{label}</Button> }}
                 </div>
             </div>
@@ -148,6 +161,8 @@ pub struct WatchedState {
     /// People the next opening starts with (the palette's "Log with ...", WP4-4).
     pub preset: RwSignal<Vec<String>>,
     open: RwSignal<bool>,
+    /// The dialog's title: the step it logs, in the past tense; kept while it closes.
+    title: RwSignal<String>,
     chip: RwSignal<String>,
     picked: RwSignal<String>,
     with: RwSignal<Vec<String>>,
@@ -173,6 +188,7 @@ impl WatchedState {
             target: RwSignal::new(None),
             preset: RwSignal::new(Vec::new()),
             open: RwSignal::new(false),
+            title: RwSignal::new(String::new()),
             chip: RwSignal::new("today".into()),
             picked: RwSignal::new(String::new()),
             with: RwSignal::new(Vec::new()),
@@ -242,7 +258,8 @@ fn close_guard(
     })
 }
 
-/// The "With..." sheet of single and episodic items (design.md 5.4).
+/// The "Watched with..." sheet of single and episodic items (design.md 5.4). Its title is the
+/// step it logs ("Watched S2 E5"), its description the item (OT-6).
 #[component]
 pub fn WatchedSheet(
     state: WatchedState,
@@ -252,8 +269,18 @@ pub fn WatchedSheet(
     let i18n = use_i18n();
     let s = state;
     let info = StoredValue::new(info);
+    // before the first opening (and for the ids of the panel) the plain name
+    let plain = i18n.t("log-sheet-title");
+    let title = Signal::derive(move || {
+        Some(s.title.get())
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| plain.clone())
+    });
     Effect::new(move |_| {
-        if s.target.with(Option::is_some) && !s.open.get_untracked() {
+        if let Some(label) = s.target.with(|t| t.as_ref().map(|t| t.label.clone()))
+            && !s.open.get_untracked()
+        {
+            s.title.set(label);
             info.with_value(|i| s.reset(i));
             load_companions(companions);
             s.open.set(true);
@@ -279,11 +306,11 @@ pub fn WatchedSheet(
         s.initial.set(s.form());
         s.open.set(false);
     });
-    let rewatch = info.with_value(|i| i.finished);
+    let (rewatch, verb) = info.with_value(|i| (i.finished, i.verb));
     view! {
-        <Sheet open=s.open title=t("log-sheet-title") close_label=t("dialog-close")
+        <Sheet open=s.open title=title close_label=t("dialog-close")
             description=info.with_value(|i| i.title.clone()) side=SheetSide::Adaptive can_close=can_close>
-            <WatchedFields state=s companions=companions rewatch=rewatch save=save discard=discard/>
+            <WatchedFields state=s companions=companions rewatch=rewatch verb=verb save=save discard=discard/>
         </Sheet>
     }
 }
@@ -293,13 +320,13 @@ fn WatchedFields(
     state: WatchedState,
     companions: RwSignal<Vec<CompanionDto>>,
     rewatch: u32,
+    verb: Option<Verb>,
     save: Callback<()>,
     discard: Callback<()>,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let s = state;
-    let step = move || s.target.with(|t| t.as_ref().map(|t| t.label.clone()));
-    let again = (rewatch > 0).then(|| i18n.t_args("log-rewatch", &[("count", rewatch.into())]));
+    let again = again_line(&i18n, verb, rewatch);
     view! {
         <form class="grid gap-4" novalidate
             on:submit=move |ev| { ev.prevent_default(); save.run(()); }
@@ -307,10 +334,13 @@ fn WatchedFields(
                 ev.prevent_default();
                 save.run(());
             }>
-            <p class="text-sm font-medium" data-testid="sheet-step">{step}</p>
             {again.map(|a| view! { <p class="text-sm text-muted-foreground">{a}</p> })}
             <DateChips id="watched-when" chip=s.chip picked=s.picked error=s.date_error/>
-            <CompanionPicker id="watched-people" legend=t("log-people") companions=companions selected=s.with/>
+            <div class="grid gap-1">
+                <CompanionPicker id="watched-people" legend=t(with_legend_key(verb)) companions=companions selected=s.with
+                    described_by="watched-people-hint"/>
+                <p id="watched-people-hint" class="text-xs text-muted-foreground">{t("log-with-hint")}</p>
+            </div>
             <Disclosure id="watched-more" title=t("log-more") summary=t("log-more-watched")
                 mode=DisclosureMode::Button level=3 storage_key=disclosure_storage_key("item", "log-more")>
                 <div class="grid gap-4 pt-2">
@@ -502,16 +532,17 @@ impl PlayState {
         }
     }
 
-    /// Fresh fields; the players start as the last group that played this game, else you
-    /// (design.md 5.4, D12).
-    fn reset(&self, last_group: Vec<String>) {
+    /// Fresh fields; the players start as the last group that played this game, else you,
+    /// and the duration as the last play's (design.md 5.4, D12; OT-16).
+    fn reset(&self, last_group: Vec<String>, last_duration: Option<u32>) {
         self.chip.set("today".into());
         self.picked.set(String::new());
         self.scores.set(BTreeMap::new());
         self.winner.set(String::new());
         self.coop.set(false);
         self.coop_won.set(true);
-        self.duration.set(String::new());
+        self.duration
+            .set(last_duration.map(format_duration).unwrap_or_default());
         self.location.set(String::new());
         self.notes.set(String::new());
         let me = self.me();
@@ -580,7 +611,8 @@ pub fn PlaySheet(state: PlayState, info: ItemInfo, #[prop(into)] title: String) 
         if open && !s.opened.get_untracked() {
             s.opened.set(true);
             s.busy.set(true);
-            let item_id = info.with_value(|i| i.item_id.clone());
+            let (item_id, last_duration) =
+                info.with_value(|i| (i.item_id.clone(), i.last_duration));
             leptos::task::spawn_local(async move {
                 if s.companions.with_untracked(Vec::is_empty)
                     && let Ok(cs) = api::companions().await
@@ -593,7 +625,7 @@ pub fn PlaySheet(state: PlayState, info: ItemInfo, #[prop(into)] title: String) 
                 if preset {
                     load_groups(s.groups).await;
                 }
-                s.reset(last_group(&item_id).await);
+                s.reset(last_group(&item_id).await, last_duration);
                 s.busy.set(false);
                 if !preset {
                     load_groups(s.groups).await;
@@ -617,18 +649,32 @@ pub fn PlaySheet(state: PlayState, info: ItemInfo, #[prop(into)] title: String) 
         s.initial.set(s.form());
         s.open.set(false);
     });
+    let board = info.with_value(|i| i.board_game);
     view! {
         <Sheet open=s.open title=title close_label=t("dialog-close")
             description=info.with_value(|i| i.title.clone()) side=SheetSide::Adaptive can_close=can_close>
-            <PlayFields state=s save=save discard=discard/>
+            <PlayFields state=s board=board save=save discard=discard/>
         </Sheet>
     }
 }
 
+/// The fields of the play dialog. A board game (`board`) has "Players" with their scores and
+/// the winner open; any other game has "Played with" and keeps the scores behind "More", so
+/// it opens with three inputs: when, duration, played with (OT-6, OT-16; OD-01).
 #[component]
-fn PlayFields(state: PlayState, save: Callback<()>, discard: Callback<()>) -> impl IntoView {
+fn PlayFields(
+    state: PlayState,
+    board: bool,
+    save: Callback<()>,
+    discard: Callback<()>,
+) -> impl IntoView {
     let s = state;
     let no_error = Signal::derive(|| None::<String>);
+    let (legend, more) = if board {
+        ("log-players", "log-more-play")
+    } else {
+        (with_legend_key(Some(Verb::Play)), "log-more-session")
+    };
     view! {
         <form class="grid gap-4" novalidate
             on:submit=move |ev| { ev.prevent_default(); save.run(()); }
@@ -639,15 +685,21 @@ fn PlayFields(state: PlayState, save: Callback<()>, discard: Callback<()>) -> im
             // row 1 as in the mockup (log.html): the date and the duration, open (OT-16)
             <div class="flex flex-wrap items-start gap-x-4 gap-y-4">
                 <DateChips id="play-when" chip=s.chip picked=s.picked error=no_error/>
-                <FormField id="play-duration" label=t("log-duration")>
-                    <Input id="play-duration" value=s.duration inputmode="numeric" autocomplete="off" class="max-w-24"/>
-                </FormField>
+                // "1:30" or "90" (OT-16): a text field, the colon is not on a numeric keypad
+                // (the fixed width keeps it beside the date in the 398 px of the desktop sheet;
+                // the hint wraps inside it)
+                <div class="w-[7.5rem]">
+                    <FormField id="play-duration" label=t("log-duration") description=t("log-duration-hint")>
+                        <Input id="play-duration" value=s.duration autocomplete="off" class="max-w-24" described_by="play-duration-description"/>
+                    </FormField>
+                </div>
             </div>
             <GroupChips state=s/>
-            <CompanionPicker id="play-people" legend=t("log-players") companions=s.companions selected=s.players include_self=true/>
-            <Scores state=s/>
-            <Disclosure id="play-more" title=t("log-more") summary=t("log-more-play")
+            <CompanionPicker id="play-people" legend=t(legend) companions=s.companions selected=s.players include_self=true/>
+            {board.then(|| view! { <Scores state=s/> })}
+            <Disclosure id="play-more" title=t("log-more") summary=t(more)
                 mode=DisclosureMode::Button level=3 storage_key=disclosure_storage_key("item", "play-more")>
+                {(!board).then(|| view! { <Scores state=s/> })}
                 <PlayMore state=s/>
             </Disclosure>
             <DiscardPrompt confirm=s.confirm discard=discard/>

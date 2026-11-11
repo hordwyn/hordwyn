@@ -211,3 +211,29 @@ fn button_link_is_a_link_that_looks_like_the_button_of_its_size() {
     }
     assert!(class(&link).contains("focus-visible:ring-2"));
 }
+
+#[test]
+fn card_actions_hold_links_and_buttons_at_one_size_that_grows_on_phones() {
+    // OT-12 card-footer rule: one size per footer (the small one), 40 px below 640 px for
+    // every action in it, whether a link or a button
+    let html = render(|| {
+        view! {
+            <CardActions>
+                <ButtonLink href="/history" variant=ButtonVariant::Outline size=ButtonSize::Sm>"History"</ButtonLink>
+                <Button variant=ButtonVariant::Outline size=ButtonSize::Sm>"Invite"</Button>
+            </CardActions>
+        }
+    });
+    let class = html.split("class=\"").nth(1).unwrap_or_default();
+    let class = class.split('"').next().unwrap_or_default();
+    for c in [
+        "flex",
+        "flex-wrap",
+        "gap-2",
+        "max-sm:[&amp;&gt;a]:h-10",
+        "max-sm:[&amp;&gt;button]:h-10",
+    ] {
+        assert!(class.split(' ').any(|x| x == c), "{c} missing: {class}");
+    }
+    assert!(html.contains("<a ") && html.contains("<button"), "{html}");
+}

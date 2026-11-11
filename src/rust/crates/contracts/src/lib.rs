@@ -283,11 +283,18 @@ pub struct ItemPageDto {
     /// The entry's tags (empty when not in the library).
     #[serde(default)]
     pub tags: Vec<String>,
-    /// Progress summary and next step, when the item is in the library.
+    /// Progress summary, when the item is in the library.
     #[serde(default)]
     pub summary: Option<ProgressSummaryDto>,
+    /// The next step; for an item that is not in the library, what its first log would be
+    /// (OT-4: "Mark as watched" next to "Want to watch").
     #[serde(default)]
     pub next_step: Option<NextStepDto>,
+    /// How many times the viewer went through the item (OT-7, "Watched 3 times"): finished
+    /// events, whole passes over the known episodes of a show, plays of a game; at least 1
+    /// for a completed entry.
+    #[serde(default)]
+    pub times: u32,
     /// Release dates of the episodes, for "On release dates" (WP4-7); empty when the item has
     /// none.
     #[serde(default)]
@@ -545,6 +552,28 @@ mod tests {
         assert_eq!(back, e);
         let old: ErrorDto = serde_json::from_str(r#"{"code":"x","message":"y"}"#).unwrap();
         assert_eq!(old.retry_after_secs, None);
+    }
+
+    /// OT-7: the item page carries how many times the item was watched (read, played);
+    /// a page from an older server has none.
+    #[test]
+    fn the_item_page_times_round_trip_and_default_to_zero() {
+        let json = serde_json::json!({
+            "item": {
+                "id": "i", "kind": "movie", "title": "Harbour", "original_title": null,
+                "year": 2021, "description": null, "cover": null, "external_ids": [],
+                "attributes": {}, "state": "full", "provenance": {}
+            },
+            "entry": null, "progress": [], "sources": [], "times": 3
+        });
+        let page: ItemPageDto = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(page.times, 3);
+        let again: ItemPageDto =
+            serde_json::from_str(&serde_json::to_string(&page).unwrap()).unwrap();
+        assert_eq!(again, page);
+        let mut old = json;
+        old.as_object_mut().unwrap().remove("times");
+        assert_eq!(serde_json::from_value::<ItemPageDto>(old).unwrap().times, 0);
     }
 
     /// UX3-26: input DTOs with a password never print it (a stray `{:?}` in a log line).

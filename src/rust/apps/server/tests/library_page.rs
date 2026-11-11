@@ -177,7 +177,7 @@ async fn the_library_renders_groups_chips_and_counts() {
     // cards: next-step pill, square art for board games, tags, the quick menu
     assert_eq!(count(&html, "data-testid=\"library-card\""), 6);
     assert!(
-        html.contains("aria-label=\"Watched: Harbour Lights\""),
+        html.contains("aria-label=\"Mark as watched: Harbour Lights\""),
         "one-click pill"
     );
     assert!(
@@ -297,7 +297,10 @@ async fn the_next_step_logs_an_episode_and_undo_takes_it_back() {
     assert_eq!(code, 200, "{event}");
     let event: serde_json::Value = serde_json::from_str(&event).unwrap();
     let (_, html) = call(&app, "GET", "/library", Some(&cookie), None).await;
-    assert!(html.contains("Watched S1 E3: Downstream"), "next episode");
+    assert!(
+        html.contains("Mark S1 E3 watched: Downstream"),
+        "next episode"
+    );
     // undo_progress has a flat argument and keeps the URL encoding
     let form = format!("event_id={}", event["id"].as_str().unwrap());
     let resp = support::send(
@@ -314,7 +317,7 @@ async fn the_next_step_logs_an_episode_and_undo_takes_it_back() {
     assert_eq!(resp.status(), 200, "undo");
     let (_, html) = call(&app, "GET", "/library", Some(&cookie), None).await;
     assert!(
-        html.contains("Watched S1 E1: Downstream"),
+        html.contains("Mark S1 E1 watched: Downstream"),
         "back to the first episode (nothing watched before)"
     );
 }

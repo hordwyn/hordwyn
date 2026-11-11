@@ -187,3 +187,35 @@ test("a channel is edited in place keeping its secret; a rule for one item (DEC-
   const subs = await (await page.request.get("/api/v1/notifications/subscriptions")).json();
   expect(subs.some((s: { filter: { items?: string[] } }) => (s.filter?.items ?? []).length === 1)).toBe(true);
 });
+
+test("the actions of a channel card share one size and none is filled", async ({ page }) => {
+  // OT-12 card-footer rule on a second card page
+  test.setTimeout(60_000);
+  await signUp(page, `nfoot${Date.now()}`, "Nia");
+  await page.goto(PAGE);
+  await hydrated(page);
+  await addChannel(page, "Webhook (signed)", "Footer", { URL: "http://127.0.0.1:9/in" });
+  const c = card(page, "Footer");
+  const actions = [
+    c.getByRole("button", { name: "Send test to Footer" }),
+    c.getByRole("button", { name: "Edit Footer" }),
+    c.getByRole("button", { name: "Delete Footer" }),
+  ];
+  const looks = [];
+  for (const action of actions) {
+    await expect(action).toBeVisible();
+    looks.push(
+      await action.evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { height: el.getBoundingClientRect().height, font: s.fontSize, weight: s.fontWeight, radius: s.borderRadius, border: s.borderTopWidth };
+      }),
+    );
+  }
+  expect(looks[0].height).toBe(32);
+  expect(looks[1]).toEqual(looks[0]);
+  expect(looks[2]).toEqual(looks[0]);
+  await page.setViewportSize({ width: 390, height: 800 });
+  for (const action of actions) {
+    expect((await action.boundingBox())!.height).toBe(40);
+  }
+});

@@ -167,19 +167,57 @@ kind-group-play = Play
 kind-group-other = Other
 
 # next step buttons (design.md 3.4); the server names the key
-next-step-watched = Watched
-next-step-watched-again = Watched again
-next-step-finished = Finished
-next-step-finished-again = Finished again
-next-step-episode = Watched S{ $season } E{ $episode }
-next-step-episode-listened = Listened to S{ $season } E{ $episode }
+next-step-watched = Mark as watched
+next-step-watched-again = Log a rewatch
+next-step-finished = Mark as finished
+next-step-finished-again = Log it again
+next-step-episode = Mark S{ $season } E{ $episode } watched
+next-step-episode-listened = Mark S{ $season } E{ $episode } listened
 next-step-caught-up = Up to date
 next-step-update-page = Update page
 next-step-update-position = Update position
 next-step-log-play = Log a play
 next-step-log-session = Log a session
+logged-step-watched = Watched
+logged-step-watched-again = Watched again
+logged-step-finished = Finished
+logged-step-finished-again = Finished again
+logged-step-episode = Watched S{ $season } E{ $episode }
+logged-step-episode-listened = Listened to S{ $season } E{ $episode }
+next-step-episode-short = S{ $season } E{ $episode }
 
 item-add = Add to library
+item-want-watch = Want to watch
+item-want-read = Want to read
+item-want-listen = Want to listen
+item-want-play = Want to play
+item-added-planned = Added to your library as Planned
+item-logged-added = { $title }, added to your library
+item-added-on = Added on { $date }
+item-times-watch = { $count ->
+    [one] Watched once
+   *[other] Watched { $count } times
+}
+item-times-read = { $count ->
+    [one] Read once
+   *[other] Read { $count } times
+}
+item-times-listen = { $count ->
+    [one] Listened once
+   *[other] Listened { $count } times
+}
+item-times-play = { $count ->
+    [one] Played once
+   *[other] Played { $count } times
+}
+item-times = { $count ->
+    [one] Finished once
+   *[other] Finished { $count } times
+}
+item-times-on = { $times }, on { $date }
+item-times-last-on = { $times }, last on { $date }
+item-times-finished-on = { $times }, finished on { $date }
+item-fact-up-to-date = Up to date: { $progress }
 item-rating = Your rating
 item-rate = Rate { $stars } of 5
 item-history = History
@@ -201,7 +239,6 @@ item-added = Added
 item-started = Started
 item-last = Last logged
 item-plays = Plays
-item-rewatches = Rewatches
 item-plays-count = { $count ->
     [one] One play
    *[other] { $count } plays
@@ -209,7 +246,11 @@ item-plays-count = { $count ->
 item-actions = More actions for { $title }
 item-action-bar = Next step
 item-with = With...
-item-with-named = Log with details: { $title }
+item-with-watch = Watched with...
+item-with-read = Read with...
+item-with-listen = Listened with...
+item-with-play = Played with...
+item-with-named = { $with }: { $title }
 item-tags = Tags
 item-edit-tags = Edit tags
 item-lists-title = Lists
@@ -233,6 +274,11 @@ log-yesterday = Yesterday
 log-pick = Pick a date
 log-date = Date
 log-people = With
+log-with-watch = Watched with
+log-with-read = Read with
+log-with-listen = Listened with
+log-with-play = Played with
+log-with-hint = Leave empty if nobody was with you.
 log-players = Players
 log-people-add = Add a person
 log-people-create = Add "{ $name }"
@@ -240,10 +286,27 @@ log-people-none = Nobody with that name
 log-more = More
 log-more-watched = Rating and note
 log-more-play = Co-op, place, notes
+log-more-session = Scores, co-op, place, notes
 log-note = Note on this title (private)
 log-rewatch = { $count ->
-    [one] Finished once before: this counts as a rewatch.
-   *[other] Finished { $count } times before: this counts as a rewatch.
+    [one] Finished once before. This will be number { $next }.
+   *[other] Finished { $count } times before. This will be number { $next }.
+}
+log-rewatch-watch = { $count ->
+    [one] Watched once before. This will be watch number { $next }.
+   *[other] Watched { $count } times before. This will be watch number { $next }.
+}
+log-rewatch-read = { $count ->
+    [one] Read once before. This will be number { $next }.
+   *[other] Read { $count } times before. This will be number { $next }.
+}
+log-rewatch-listen = { $count ->
+    [one] Listened once before. This will be number { $next }.
+   *[other] Listened { $count } times before. This will be number { $next }.
+}
+log-rewatch-play = { $count ->
+    [one] Played once before. This will be number { $next }.
+   *[other] Played { $count } times before. This will be number { $next }.
 }
 log-save = Save
 log-discard-question = Discard your changes?
@@ -254,7 +317,8 @@ log-winner = Winner
 log-winner-auto = Highest score
 log-coop = Co-op game
 log-coop-won = We won
-log-duration = Duration (min)
+log-duration = Duration
+log-duration-hint = h:mm or minutes
 log-location = Place
 log-notes = Notes
 log-play-step = Play
@@ -270,7 +334,7 @@ log-plus-minutes = +{ $count } min
 log-error-date-missing = Pick a date.
 log-error-date-future = The date is in the future.
 log-error-score = Scores are numbers, for example 42 or 12.5.
-log-error-duration = The duration is a whole number of minutes.
+log-error-duration = Enter the duration as hours:minutes (1:30) or as minutes (90).
 log-error-page = Enter a page number from 1 on.
 log-error-page-beyond = This has { $pages } pages.
 log-error-position = Enter a position as h:mm:ss, within the length.
@@ -288,7 +352,6 @@ episodes-again = Again
 episodes-next = Next up
 episodes-row-menu = More for S{ $season } E{ $episode }
 episodes-up-to-here = Mark up to here
-episodes-with = Watched with...
 episodes-ask = { $count ->
     [one] Also mark the earlier episode as watched?
    *[other] Also mark the { $count } earlier episodes as watched?
@@ -301,9 +364,27 @@ episodes-logged = { $count ->
    *[other] { $count } episodes
 }
 episodes-none = No episodes known yet.
-episodes-nothing-up-to = Every episode up to here is already watched. Use Again on an episode to log it once more.
-episodes-nothing-season = Every episode of this season is already watched. Use Again on an episode to log it once more.
-episodes-nothing-show = Every episode of this show is already watched. Use Again on an episode to log it once more.
+episodes-again-ask = { $count ->
+    [one] This episode is already watched. Log it again as a rewatch?
+   *[other] These { $count } episodes are already watched. Log them again as a rewatch?
+}
+episodes-again-ask-listen = { $count ->
+    [one] This episode is already listened to. Log it again?
+   *[other] These { $count } episodes are already listened to. Log them again?
+}
+episodes-again-all = { $count ->
+    [one] Log it again
+   *[other] Log { $count } again
+}
+episodes-again-cancel = Cancel
+episodes-skipped = { $count ->
+    [one] One already watched, not logged again
+   *[other] { $count } already watched, not logged again
+}
+episodes-skipped-listen = { $count ->
+    [one] One already listened to, not logged again
+   *[other] { $count } already listened to, not logged again
+}
 
 search-title = Search
 search-label = Search the catalog
@@ -1990,7 +2071,6 @@ search-cmd-lists = Go to Lists
 search-cmd-new-list = New list
 search-cmd-log-play = Log a play of { $title }
 search-cmd-import = Import a file
-search-added-planned = Added to Planned
 search-hint-open = Open
 search-hint-choose = Choose
 search-hint-quick = Add as Planned or next step

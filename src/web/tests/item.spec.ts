@@ -29,6 +29,7 @@ const ROWS = [
     status: "in_progress",
     history: [{ date: "2026-03-04", progress: { type: "paged", page: 40 } }],
   },
+  { source_id: "5", kind: "video_game", title: "Pixel Harbour", year: 2020, status: "planned" },
 ];
 
 /** Import the rows through the API and wait until the show has its seasons. */
@@ -98,14 +99,14 @@ test("the next step logs with Undo; the note and the tags are edited in place", 
   await open(page, `/items/${ids["Harbour Lights"]}`);
   await expect(page.getByRole("heading", { level: 1, name: "Harbour Lights" })).toBeVisible();
 
-  await bar(page).getByRole("button", { name: "Watched", exact: true }).click();
+  await bar(page).getByRole("button", { name: "Mark as watched", exact: true }).click();
   const toast = page.getByRole("status").filter({ hasText: "Logged: Watched" });
   await expect(toast).toBeVisible();
-  await expect(bar(page).getByRole("button", { name: "Watched again" })).toBeVisible();
+  await expect(bar(page).getByRole("button", { name: "Log a rewatch" })).toBeVisible();
   await expect(page.getByLabel("Status")).toHaveValue("completed");
   await toast.getByRole("button", { name: "Undo" }).click();
   await expect(page.getByText("Undone")).toBeVisible();
-  await expect(bar(page).getByRole("button", { name: "Watched", exact: true })).toBeVisible();
+  await expect(bar(page).getByRole("button", { name: "Mark as watched", exact: true })).toBeVisible();
   await expect(page.getByLabel("Status")).toHaveValue("planned");
 
   // the private note (Notes tab)
@@ -133,12 +134,13 @@ test("the With... sheet logs with a new person and a rating; focus stays in it; 
   await signUp(page, `sheet${Date.now()}`, "Sheet Tester");
   const ids = await seed(page);
   await open(page, `/items/${ids["Game of Thrones"]}`);
-  const opener = page.getByRole("button", { name: "Log with details: Game of Thrones" });
+  const opener = page.getByRole("button", { name: "Watched with...: Game of Thrones" });
   await opener.click();
-  const sheet = page.getByRole("dialog", { name: "Log with details" });
+  const sheet = page.getByRole("dialog", { name: "Watched S1 E2", exact: true });
   await expect(sheet).toBeVisible();
   await expect(sheet).toBeFocused();
-  await expect(sheet.getByTestId("sheet-step")).toHaveText("Watched S1 E2");
+  // OT2A-12: the hint belongs to the group, so it is read with it
+  await expect(sheet.getByRole("group", { name: "Watched with" })).toHaveAccessibleDescription("Leave empty if nobody was with you.");
   // Tab and Shift+Tab stay inside the sheet
   for (let i = 0; i < 12; i++) {
     await page.keyboard.press("Tab");
@@ -162,15 +164,18 @@ test("the With... sheet logs with a new person and a rating; focus stays in it; 
   await page.getByRole("tab", { name: /^History/ }).click();
   await expect(page.getByRole("tabpanel", { name: /^History/ })).toContainText("Season 1, episode 2");
 
-  // a changed sheet asks before it closes; Discard closes it and focus returns
+  // a changed sheet asks before it closes; Discard closes it and focus returns. The dialog is
+  // named after the step it logs (OT-6), which is the next episode now
   await opener.click();
-  await expect(sheet).toBeVisible();
-  await sheet.getByRole("button", { name: "Anna", exact: true }).click();
+  const next = page.getByRole("dialog", { name: "Watched S1 E3", exact: true });
+  await expect(next).toBeVisible();
+  await expect(next.getByRole("group", { name: "Watched with" })).toBeVisible();
+  await next.getByRole("button", { name: "Anna", exact: true }).click();
   await page.keyboard.press("Escape");
-  await expect(sheet.getByText("Discard your changes?")).toBeVisible();
-  await expect(sheet.getByRole("button", { name: "Keep editing" })).toBeFocused();
-  await sheet.getByRole("button", { name: "Discard" }).click();
-  await expect(sheet).toHaveCount(0);
+  await expect(next.getByText("Discard your changes?")).toBeVisible();
+  await expect(next.getByRole("button", { name: "Keep editing" })).toBeFocused();
+  await next.getByRole("button", { name: "Discard" }).click();
+  await expect(next).toHaveCount(0);
   await expect(opener).toBeFocused();
 });
 
@@ -247,7 +252,8 @@ test("the play sheet shows the duration in its first row, without opening More",
   const more = sheet.getByRole("button", { name: /^More/ });
   await expect(more).toHaveAttribute("aria-expanded", "false");
   await expect(more).not.toContainText(/duration/i);
-  const duration = sheet.getByLabel("Duration (min)");
+  const duration = sheet.getByLabel("Duration", { exact: true });
+  await expect(sheet.getByText("h:mm or minutes")).toBeVisible();
   await expect(duration).toBeVisible();
   // first row: beside the date, above the players
   const box = (await duration.boundingBox())!;
@@ -261,8 +267,9 @@ test("the play sheet shows the duration in its first row, without opening More",
   await expect(sheet.getByRole("combobox")).toHaveCount(2);
   await duration.fill("ninety");
   await sheet.getByRole("button", { name: "Save" }).click();
-  await expect(sheet.getByRole("alert").filter({ hasText: "The duration is a whole number of minutes." })).toBeVisible();
-  await duration.fill("90");
+  await expect(sheet.getByRole("alert").filter({ hasText: "Enter the duration as hours:minutes (1:30) or as minutes (90)." })).toBeVisible();
+  // OT-16: hours:minutes works as well as plain minutes
+  await duration.fill("1:30");
   await sheet.getByRole("button", { name: "Save" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Logged: Play" })).toBeVisible();
   // stored, and shown where the play is read (OT-11)
@@ -270,12 +277,116 @@ test("the play sheet shows the duration in its first row, without opening More",
   expect(feed.rows[0].play.duration_minutes).toBe(90);
   await page.getByRole("tab", { name: /^History/ }).click();
   await expect(page.getByRole("tabpanel", { name: /^History/ }).getByTestId("activity-row").first()).toContainText("90 min");
+  // the next play starts with the duration of the last one
+  await bar(page).getByRole("button", { name: "Log a play" }).click();
+  await expect(sheet.getByLabel("Duration", { exact: true })).toHaveValue("1:30");
+  // a prefilled sheet is not a changed one: Escape closes it without the question
+  await page.keyboard.press("Escape");
+  await expect(sheet).toHaveCount(0);
 });
 
-test("a bulk mark with nothing left to mark says so", async ({ page }) => {
-  // OT-15 minimum: "Mark up to here" and "Mark season" on watched episodes did nothing
+test("a video game session: played with, the scores wait behind More", async ({ page }) => {
+  // OT-6, OT-16: three open inputs (when, duration, played with); scores are a board game matter
+  test.setTimeout(150_000);
+  await signUp(page, `vgplay${Date.now()}`, "Pad Tester");
+  const ids = await seed(page);
+  await open(page, `/items/${ids["Pixel Harbour"]}`);
+  await bar(page).getByRole("button", { name: "Log a session" }).click();
+  const sheet = page.getByRole("dialog", { name: "Log a session" });
+  await expect(sheet.getByRole("group", { name: "Played with" })).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Pad Tester", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const more = sheet.getByRole("button", { name: /^More/ });
+  // a fresh account has no stored disclosure state: the dialog itself opens with More closed
+  await expect(more).toHaveAttribute("aria-expanded", "false");
+  await expect(more).toContainText(/scores/i);
+  await expect(sheet.getByLabel("Score of Pad Tester")).toBeHidden();
+  await expect(sheet.getByRole("textbox")).toHaveCount(1);
+  await expect(sheet.getByRole("combobox")).toHaveCount(1);
+  await more.click();
+  await expect(sheet.getByLabel("Score of Pad Tester")).toBeVisible();
+  await sheet.getByLabel("Duration", { exact: true }).fill("6:00");
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Logged: Play" })).toBeVisible();
+  const feed = await (await page.request.get("/api/v1/activity")).json();
+  expect(feed.rows[0].play.duration_minutes).toBe(360);
+  // OT-7: plays are counted in the header too
+  await expect(page.getByTestId("item-fact-line")).toHaveText(/^Played once, on /);
+});
+
+test("an item outside the library: two actions, the add toast with Undo, the status pill and the count", async ({ page }) => {
+  // OT-4, OT-5, OT-6, OT-7
+  test.setTimeout(150_000);
+  await signUp(page, `twobtn${Date.now()}`, "Two Tester");
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Search" });
+  await palette.getByRole("combobox").fill("fight club");
+  const option = palette.getByRole("option", { name: /^Fight Club \(1999\)/ }).first();
+  await expect(option).toBeVisible({ timeout: 20_000 });
+  await option.click();
+  await expect(page).toHaveURL(/\/items\//);
+  await hydrated(page);
+  await expect(page.getByRole("heading", { level: 1, name: "Fight Club" })).toBeVisible();
+
+  // not in the library: two verbs, no state
+  const mark = bar(page).getByRole("button", { name: "Mark as watched", exact: true });
+  const want = bar(page).getByRole("button", { name: "Want to watch", exact: true });
+  await expect(mark).toBeVisible();
+  await expect(want).toBeVisible();
+  await expect(bar(page).getByRole("button", { name: "Add to library" })).toHaveCount(0);
+  const pill = page.getByTestId("ip-status");
+  const fact = page.getByTestId("item-fact-line");
+  await expect(pill).toHaveCount(0);
+  await expectNoA11yViolations(page, "item outside the library");
+
+  // "Want to watch" adds it as Planned, says so, and can be taken back
+  await want.click();
+  const added = page.locator("[role=status][aria-live] > div").filter({ hasText: "Added to your library as Planned" });
+  await expect(added).toBeVisible();
+  await expect(added).toContainText("Fight Club");
+  await expect(pill).toHaveText("Planned");
+  await expect(fact).toHaveText(/^Added on /);
+  await expect(want).toHaveCount(0);
+  await added.getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByText("Undone").first()).toBeVisible();
+  await expect(pill).toHaveCount(0);
+  await expect(want).toBeVisible();
+
+  // "Mark as watched" adds it too, and says so; its Undo takes the watch and the add back
+  // (OT2A-3: the item stayed in the library as Planned)
+  await mark.click();
+  const logged = page.locator("[role=status][aria-live] > div").filter({ hasText: "Logged: Watched" });
+  await expect(logged).toContainText("Fight Club, added to your library");
+  await expect(pill).toHaveText("Completed");
+  await logged.getByRole("button", { name: "Undo" }).click();
+  await expect(want).toBeVisible();
+  await expect(pill).toHaveCount(0);
+  const id = page.url().split("/items/")[1].split(/[?#]/)[0];
+  const after = await (await page.request.get(`/api/v1/items/${id}/page`)).json();
+  expect(after.entry ?? null).toBeNull();
+  expect(after.progress).toHaveLength(0);
+
+  // "Mark as watched" logs it at once: Completed, counted in words
+  await mark.click();
+  await expect(logged.last()).toBeVisible();
+  await expect(pill).toHaveText("Completed");
+  await expect(fact).toHaveText(/^Watched once, on /);
+  await bar(page).getByRole("button", { name: "Log a rewatch" }).click();
+  await expect(fact).toHaveText(/^Watched 2 times, last on /);
+  await expect(page.getByTestId("item-facts")).not.toContainText("Rewatches");
+
+  // "Watched with...": the dialog is named after the step and says which watch this will be
+  await page.getByRole("button", { name: "Watched with...: Fight Club" }).click();
+  const sheet = page.getByRole("dialog", { name: "Watched again" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet).toContainText("Watched 2 times before. This will be watch number 3.");
+  await expect(sheet.getByRole("group", { name: "Watched with" })).toBeVisible();
+  await expectNoA11yViolations(page, "watched with sheet");
+});
+
+test("a bulk mark on watched episodes asks to log them again; a mixed range says what it skipped", async ({ page }) => {
+  // OT-15 (DEC-538): the marks did nothing on watched episodes, then only said so
   test.setTimeout(240_000);
-  await signUp(page, `epnone${Date.now()}`, "None Tester");
+  await signUp(page, `epagain${Date.now()}`, "Again Tester");
   const ids = await seed(page);
   const show = ids["Game of Thrones"];
   // a second show with its first episode watched too, for the end of the test
@@ -283,54 +394,94 @@ test("a bulk mark with nothing left to mark says so", async ({ page }) => {
   await open(page, `/items/${show}`);
   const tab = page.getByRole("tabpanel", { name: "Episodes" });
   await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("1/10");
-  const note = tab.getByTestId("episodes-note");
-  await expect(note).toHaveAttribute("role", "status");
-  await expect(note).toHaveText("");
+  const ask = tab.getByTestId("episodes-again");
+  await expect(ask).toHaveCount(0);
   const events = async () => ((await (await page.request.get(`/api/v1/items/${show}/progress`)).json()) as unknown[]).length;
   const before = await events();
-  await tab.getByRole("button", { name: "More for S1 E1", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Mark up to here" }).click();
-  await expect(note).toHaveText("Every episode up to here is already watched. Use Again on an episode to log it once more.");
+  const upToFirst = async () => {
+    await tab.getByRole("button", { name: "More for S1 E1", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Mark up to here" }).click();
+  };
+  await upToFirst();
+  await expect(ask).toContainText("This episode is already watched. Log it again as a rewatch?");
+  // the question takes the focus, so a keyboard and a screen reader land on it
+  await expect(ask.getByRole("button", { name: "Log it again" })).toBeFocused();
+  expect(await events()).toBe(before);
+  await ask.getByRole("button", { name: "Cancel" }).click();
+  await expect(ask).toHaveCount(0);
+  // OT2A-4: the focus goes back to what asked, here the row's menu button
+  await expect(tab.getByRole("button", { name: "More for S1 E1", exact: true })).toBeFocused();
   expect(await events()).toBe(before);
 
-  // a mark that logs something takes the message away
+  // a mixed range logs the open ones and says how many it left alone
   await tab.getByRole("button", { name: "Mark season watched" }).click();
+  const mixed = page.locator("[role=status][aria-live] > div").filter({ hasText: "Logged: 9 episodes" });
+  await expect(mixed).toContainText("One already watched, not logged again");
   await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("10/10");
-  await expect(note).toHaveText("");
-  await expect(bar(page).getByRole("button", { name: "Watched S2 E1" })).toBeVisible();
+  await expect(bar(page).getByRole("button", { name: "Mark S2 E1 watched" })).toBeVisible();
   await tab.getByRole("button", { name: /^Season 1/ }).click();
   await expect(tab.getByRole("button", { name: /^Season 1/ })).toHaveAttribute("aria-pressed", "true");
   await tab.getByRole("button", { name: "Mark season watched" }).click();
-  const seasonDone = "Every episode of this season is already watched. Use Again on an episode to log it once more.";
-  await expect(note).toHaveText(seasonDone);
+  const seasonAgain = "These 10 episodes are already watched. Log them again as a rewatch?";
+  await expect(ask).toContainText(seasonAgain);
+  const markSeason = tab.getByRole("button", { name: "Mark season watched" });
+  await expect(ask.getByRole("button", { name: "Log 10 again" })).toBeFocused();
+  await ask.getByRole("button", { name: "Cancel" }).click();
+  await expect(markSeason).toBeFocused();
+  // OT2A-4: the question takes the focus when it is asked, not when the page refetches under
+  // it (a rating does that): Enter would have logged ten rewatches nobody meant
+  await markSeason.click();
+  await expect(ask.getByRole("button", { name: "Log 10 again" })).toBeFocused();
+  await page.locator("#ip-rate").getByRole("radio", { name: "Rate 4 of 5" }).click();
+  await expect(page.getByTestId("item-facts")).toContainText("4 of 5");
+  await expect(ask).toContainText(seasonAgain);
+  await page.waitForTimeout(300);
+  await expect(ask.getByRole("button", { name: "Log 10 again" })).not.toBeFocused();
 
-  // OT1A-5: the same mark again says it again (a live region reports changes only, so the
-  // text has to change for a screen reader to hear it a second time)
-  await note.evaluate((el) => {
-    const said: string[] = [];
-    (window as unknown as { saidAgain: string[] }).saidAgain = said;
-    new MutationObserver(() => said.push(el.textContent ?? "")).observe(el, { childList: true, characterData: true, subtree: true });
-  });
-  await tab.getByRole("button", { name: "Mark season watched" }).click();
-  await expect.poll(() => page.evaluate(() => (window as unknown as { saidAgain: string[] }).saidAgain)).toContain(seasonDone);
-  await expect(note).toHaveText(seasonDone);
-
-  // OT1A-2: the message does not outlive what it says. An episode of the season is undone
+  // OT1A-2: the question does not outlive what it says. An episode of the season is undone
   // on another device (this page does not hear of it); the next step logged here refetches
   // the page, and the season is no longer watched
   const logged = (await (await page.request.get(`/api/v1/items/${show}/progress`)).json()) as { id: string; progress: { season?: number; episode?: number } }[];
   const last = logged.filter((e) => e.progress.season === 1 && e.progress.episode === 10).pop()!;
   expect((await page.request.post(`/api/v1/progress/${last.id}/undo`)).ok()).toBe(true);
-  await bar(page).getByRole("button", { name: "Watched S2 E1" }).click();
+  await bar(page).getByRole("button", { name: "Mark S2 E1 watched" }).click();
   await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("9/10");
-  await expect(note).toHaveText("");
+  await expect(ask).toHaveCount(0);
 
-  // and it does not follow to another show: the message is up again, then the palette opens
-  // another show whose first episode is watched as well (the page component stays, only its
-  // id changes), so only a cleared message is gone there
+  // the season complete again, then logged again as a whole: ten more views, nothing else moves
+  await tab.getByRole("button", { name: "Mark season watched" }).click();
+  await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("10/10");
+  const full = await events();
+  await tab.getByRole("button", { name: "Mark season watched" }).click();
+  await expect(ask).toContainText(seasonAgain);
+  const history = page.getByRole("tab", { name: /^History/ });
+  const historyBefore = await history.innerText();
+  await ask.getByRole("button", { name: "Log 10 again" }).click();
+  await expect(page.locator("[role=status][aria-live] > div").filter({ hasText: "Logged: 10 episodes" }).first()).toBeVisible();
+  // OT2A-5: a row menu opened right after the toast stays open through the refetch that
+  // follows the bulk log (it was closed under the pointer)
   await tab.getByRole("button", { name: "More for S1 E1", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Mark up to here" }).click();
-  await expect(note).toHaveText("Every episode up to here is already watched. Use Again on an episode to log it once more.");
+  const upTo = page.getByRole("menuitem", { name: "Mark up to here" });
+  await expect(upTo).toBeVisible();
+  await expect.poll(events).toBe(full + 10);
+  await expect(history).not.toHaveText(historyBefore);
+  await expect(ask).toHaveCount(0);
+  await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("10/10");
+  await expect(page.getByLabel("Status")).toHaveValue("in_progress");
+  await expect(upTo).toBeVisible();
+  await upTo.click();
+  await expect(ask).toContainText("This episode is already watched. Log it again as a rewatch?");
+  // the answer logs it; once the list is back the focus is on what asked
+  await ask.getByRole("button", { name: "Log it again" }).click();
+  await expect(page.locator("[role=status][aria-live] > div").filter({ hasText: "Logged: Watched S1 E1" }).first()).toBeVisible();
+  await expect.poll(events).toBe(full + 11);
+  await expect(tab.getByRole("button", { name: "More for S1 E1", exact: true })).toBeFocused();
+
+  // and it does not follow to another show: the question is up again, then the palette opens
+  // another show whose first episode is watched as well (the page component stays, only its
+  // id changes), so only a cleared question is gone there
+  await upToFirst();
+  await expect(ask).toContainText("This episode is already watched. Log it again as a rewatch?");
   await page.keyboard.press("Control+k");
   const palette = page.getByRole("dialog", { name: "Search" });
   await palette.getByRole("combobox").fill("Lantern Coast");
@@ -339,7 +490,27 @@ test("a bulk mark with nothing left to mark says so", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1, name: "Lantern Coast" })).toBeVisible();
   await page.getByRole("tab", { name: "Episodes" }).click();
   await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("1/3");
-  await expect(tab.getByTestId("episodes-note")).toHaveText("");
+  await expect(tab.getByTestId("episodes-again")).toHaveCount(0);
+});
+
+test("offline, a mixed bulk mark still says what it skipped", async ({ page, context }) => {
+  // OT2A-11: the queued toast named the title only
+  test.setTimeout(150_000);
+  await signUp(page, `epoff${Date.now()}`, "Offline Tester");
+  const ids = await seed(page);
+  const show = ids["Game of Thrones"];
+  await open(page, `/items/${show}`);
+  const tab = page.getByRole("tabpanel", { name: "Episodes" });
+  await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("1/10");
+  await context.setOffline(true);
+  await expect(page.getByText("You are offline.")).toBeVisible();
+  await tab.getByRole("button", { name: "Mark season watched" }).click();
+  const toast = page.locator("[role=status][aria-live] > div").filter({ hasText: "Saved offline, will sync" });
+  await expect(toast).toContainText("One already watched, not logged again");
+  await context.setOffline(false);
+  await expect
+    .poll(async () => ((await (await page.request.get(`/api/v1/items/${show}/progress`)).json()) as unknown[]).length)
+    .toBe(10);
 });
 
 test("a play shows its people, scores, winner and duration on the item History tab and on History", async ({ page }) => {
@@ -447,10 +618,10 @@ test("episodes: one mark asks once about the earlier ones, remembered; a season 
   await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("8/10");
 
   // each logged episode refetches the page (entity.updated): wait until it settled
-  await expect(bar(page).getByRole("button", { name: "Watched S1 E9" })).toBeVisible();
+  await expect(bar(page).getByRole("button", { name: "Mark S1 E9 watched" })).toBeVisible();
   await tab.getByRole("button", { name: "Mark season watched" }).click();
   await expect(tab.getByRole("button", { name: /^Season 1/ })).toContainText("10/10");
-  await expect(bar(page).getByRole("button", { name: "Watched S2 E1" })).toBeVisible();
+  await expect(bar(page).getByRole("button", { name: "Mark S2 E1 watched" })).toBeVisible();
 
   // Undo takes the whole bulk mark back
   const toast = page.getByRole("status").locator("> div").filter({ hasText: "Logged: 2 episodes" });
@@ -491,7 +662,7 @@ test("episodes: a season spreads over a date range, a bad range says why, Mark s
 
   // "Mark show": every season's open episodes at once (63 = 73 regular episodes - 10)
   await tab.getByRole("radio", { name: "Now" }).click();
-  await expect(bar(page).getByRole("button", { name: "Watched S2 E1" })).toBeVisible();
+  await expect(bar(page).getByRole("button", { name: "Mark S2 E1 watched" })).toBeVisible();
   await tab.getByRole("button", { name: "Mark show watched" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Logged: 63 episodes" })).toBeVisible({ timeout: 120_000 });
   await expect(tab.getByRole("button", { name: /^Season 8/ })).toContainText("6/6");
@@ -514,8 +685,8 @@ for (const size of [
         await open(page, `/items/${ids["Game of Thrones"]}`);
         await expect(page.getByRole("tabpanel", { name: "Episodes" })).toBeVisible();
         await expectNoA11yViolations(page, `${size.name} ${theme} show`);
-        await page.getByRole("button", { name: "Log with details: Game of Thrones" }).click();
-        const sheet = page.getByRole("dialog", { name: "Log with details" });
+        await page.getByRole("button", { name: "Watched with...: Game of Thrones" }).click();
+        const sheet = page.getByRole("dialog", { name: "Watched S1 E2", exact: true });
         await expect(sheet).toBeVisible();
         const more = sheet.getByRole("button", { name: /^More/ });
         if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();

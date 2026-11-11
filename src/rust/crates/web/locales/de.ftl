@@ -167,19 +167,57 @@ kind-group-play = Spielen
 kind-group-other = Sonstiges
 
 # next step buttons (design.md 3.4); the server names the key
-next-step-watched = Gesehen
-next-step-watched-again = Nochmal gesehen
-next-step-finished = Beendet
-next-step-finished-again = Nochmal beendet
-next-step-episode = S{ $season } E{ $episode } gesehen
-next-step-episode-listened = S{ $season } E{ $episode } gehört
+next-step-watched = Als gesehen markieren
+next-step-watched-again = Nochmal gesehen eintragen
+next-step-finished = Als beendet markieren
+next-step-finished-again = Nochmal eintragen
+next-step-episode = S{ $season } E{ $episode } als gesehen markieren
+next-step-episode-listened = S{ $season } E{ $episode } als gehört markieren
 next-step-caught-up = Auf dem neuesten Stand
 next-step-update-page = Seite eintragen
 next-step-update-position = Position eintragen
 next-step-log-play = Partie eintragen
 next-step-log-session = Sitzung eintragen
+logged-step-watched = Gesehen
+logged-step-watched-again = Nochmal gesehen
+logged-step-finished = Beendet
+logged-step-finished-again = Nochmal beendet
+logged-step-episode = S{ $season } E{ $episode } gesehen
+logged-step-episode-listened = S{ $season } E{ $episode } gehört
+next-step-episode-short = S{ $season } E{ $episode }
 
 item-add = Zur Bibliothek hinzufügen
+item-want-watch = Möchte ich sehen
+item-want-read = Möchte ich lesen
+item-want-listen = Möchte ich hören
+item-want-play = Möchte ich spielen
+item-added-planned = Als „Geplant“ in die Bibliothek aufgenommen
+item-logged-added = { $title }, in die Bibliothek aufgenommen
+item-added-on = Hinzugefügt am { $date }
+item-times-watch = { $count ->
+    [one] Einmal gesehen
+   *[other] { $count }-mal gesehen
+}
+item-times-read = { $count ->
+    [one] Einmal gelesen
+   *[other] { $count }-mal gelesen
+}
+item-times-listen = { $count ->
+    [one] Einmal gehört
+   *[other] { $count }-mal gehört
+}
+item-times-play = { $count ->
+    [one] Einmal gespielt
+   *[other] { $count }-mal gespielt
+}
+item-times = { $count ->
+    [one] Einmal beendet
+   *[other] { $count }-mal beendet
+}
+item-times-on = { $times }, am { $date }
+item-times-last-on = { $times }, zuletzt am { $date }
+item-times-finished-on = { $times }, beendet am { $date }
+item-fact-up-to-date = Auf dem neuesten Stand: { $progress }
 item-rating = Deine Bewertung
 item-rate = Mit { $stars } von 5 bewerten
 item-history = Verlauf
@@ -201,7 +239,6 @@ item-added = Hinzugefügt
 item-started = Begonnen
 item-last = Zuletzt eingetragen
 item-plays = Partien
-item-rewatches = Wiederholungen
 item-plays-count = { $count ->
     [one] Eine Partie
    *[other] { $count } Partien
@@ -209,7 +246,11 @@ item-plays-count = { $count ->
 item-actions = Weitere Aktionen für { $title }
 item-action-bar = Nächster Schritt
 item-with = Mit...
-item-with-named = Mit Details eintragen: { $title }
+item-with-watch = Gesehen mit...
+item-with-read = Gelesen mit...
+item-with-listen = Gehört mit...
+item-with-play = Gespielt mit...
+item-with-named = { $with }: { $title }
 item-tags = Tags
 item-edit-tags = Tags bearbeiten
 item-lists-title = Listen
@@ -233,6 +274,11 @@ log-yesterday = Gestern
 log-pick = Datum wählen
 log-date = Datum
 log-people = Mit
+log-with-watch = Gesehen mit
+log-with-read = Gelesen mit
+log-with-listen = Gehört mit
+log-with-play = Gespielt mit
+log-with-hint = Leer lassen, wenn niemand dabei war.
 log-players = Mitspielende
 log-people-add = Person hinzufügen
 log-people-create = „{ $name }“ hinzufügen
@@ -240,10 +286,27 @@ log-people-none = Niemand mit diesem Namen
 log-more = Mehr
 log-more-watched = Bewertung und Notiz
 log-more-play = Kooperativ, Ort, Notizen
+log-more-session = Punkte, kooperativ, Ort, Notizen
 log-note = Notiz zu diesem Titel (privat)
 log-rewatch = { $count ->
-    [one] Schon einmal abgeschlossen: Das zählt als Wiederholung.
-   *[other] Schon { $count }-mal abgeschlossen: Das zählt als Wiederholung.
+    [one] Schon einmal beendet. Das wird Nummer { $next }.
+   *[other] Schon { $count }-mal beendet. Das wird Nummer { $next }.
+}
+log-rewatch-watch = { $count ->
+    [one] Schon einmal gesehen. Das wird Nummer { $next }.
+   *[other] Schon { $count }-mal gesehen. Das wird Nummer { $next }.
+}
+log-rewatch-read = { $count ->
+    [one] Schon einmal gelesen. Das wird Nummer { $next }.
+   *[other] Schon { $count }-mal gelesen. Das wird Nummer { $next }.
+}
+log-rewatch-listen = { $count ->
+    [one] Schon einmal gehört. Das wird Nummer { $next }.
+   *[other] Schon { $count }-mal gehört. Das wird Nummer { $next }.
+}
+log-rewatch-play = { $count ->
+    [one] Schon einmal gespielt. Das wird Nummer { $next }.
+   *[other] Schon { $count }-mal gespielt. Das wird Nummer { $next }.
 }
 log-save = Speichern
 log-discard-question = Änderungen verwerfen?
@@ -254,7 +317,8 @@ log-winner = Gewonnen hat
 log-winner-auto = Höchste Punktzahl
 log-coop = Kooperatives Spiel
 log-coop-won = Wir haben gewonnen
-log-duration = Dauer (Min.)
+log-duration = Dauer
+log-duration-hint = h:mm oder Minuten
 log-location = Ort
 log-notes = Notizen
 log-play-step = Partie
@@ -270,7 +334,7 @@ log-plus-minutes = +{ $count } Min.
 log-error-date-missing = Wähle ein Datum.
 log-error-date-future = Das Datum liegt in der Zukunft.
 log-error-score = Punkte sind Zahlen, zum Beispiel 42 oder 12,5.
-log-error-duration = Die Dauer ist eine ganze Zahl von Minuten.
+log-error-duration = Gib die Dauer als Stunden:Minuten (1:30) oder in Minuten (90) ein.
 log-error-page = Gib eine Seitenzahl ab 1 ein.
 log-error-page-beyond = Das hat { $pages } Seiten.
 log-error-position = Gib die Position als h:mm:ss ein, innerhalb der Länge.
@@ -288,7 +352,6 @@ episodes-again = Nochmal
 episodes-next = Als Nächstes
 episodes-row-menu = Mehr zu S{ $season } E{ $episode }
 episodes-up-to-here = Bis hierhin markieren
-episodes-with = Gesehen mit...
 episodes-ask = { $count ->
     [one] Auch die frühere Folge als gesehen markieren?
    *[other] Auch die { $count } früheren Folgen als gesehen markieren?
@@ -301,9 +364,27 @@ episodes-logged = { $count ->
    *[other] { $count } Folgen
 }
 episodes-none = Noch keine Folgen bekannt.
-episodes-nothing-up-to = Alle Folgen bis hierhin sind schon gesehen. Mit „Nochmal“ bei einer Folge trägst du sie noch einmal ein.
-episodes-nothing-season = Alle Folgen dieser Staffel sind schon gesehen. Mit „Nochmal“ bei einer Folge trägst du sie noch einmal ein.
-episodes-nothing-show = Alle Folgen dieser Serie sind schon gesehen. Mit „Nochmal“ bei einer Folge trägst du sie noch einmal ein.
+episodes-again-ask = { $count ->
+    [one] Diese Folge ist schon gesehen. Nochmal als Wiederholung eintragen?
+   *[other] Diese { $count } Folgen sind schon gesehen. Nochmal als Wiederholung eintragen?
+}
+episodes-again-ask-listen = { $count ->
+    [one] Diese Folge ist schon gehört. Nochmal eintragen?
+   *[other] Diese { $count } Folgen sind schon gehört. Nochmal eintragen?
+}
+episodes-again-all = { $count ->
+    [one] Nochmal eintragen
+   *[other] { $count } nochmal eintragen
+}
+episodes-again-cancel = Abbrechen
+episodes-skipped = { $count ->
+    [one] Eine schon gesehen, nicht erneut eingetragen
+   *[other] { $count } schon gesehen, nicht erneut eingetragen
+}
+episodes-skipped-listen = { $count ->
+    [one] Eine schon gehört, nicht erneut eingetragen
+   *[other] { $count } schon gehört, nicht erneut eingetragen
+}
 
 search-title = Suche
 search-label = Katalog durchsuchen
@@ -1981,7 +2062,6 @@ search-cmd-lists = Zu den Listen
 search-cmd-new-list = Neue Liste
 search-cmd-log-play = Partie von { $title } eintragen
 search-cmd-import = Datei importieren
-search-added-planned = Als „Geplant“ hinzugefügt
 search-hint-open = Öffnen
 search-hint-choose = Auswählen
 search-hint-quick = Als „Geplant“ hinzufügen oder nächster Schritt

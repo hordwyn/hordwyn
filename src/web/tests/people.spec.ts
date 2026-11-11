@@ -157,7 +157,7 @@ test("Log with a person: the palette picks the item, its sheet opens with them (
   await expect(option).toBeVisible({ timeout: 20_000 });
   await option.click();
   await expect(page).toHaveURL(/\/items\/.+\?log=1&with=/);
-  const sheet = page.getByRole("dialog", { name: "Log with details" });
+  const sheet = page.getByRole("dialog", { name: "Watched", exact: true });
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole("button", { name: "Ada", exact: true })).toHaveAttribute("aria-pressed", "true");
   await sheet.getByRole("button", { name: "Save" }).click();
@@ -321,4 +321,23 @@ test("the actions of a person card share one size", async ({ page }) => {
   // the link keeps a visible keyboard focus
   await actions[0].focus();
   await expectNoA11yViolations(page, "people card actions");
+});
+
+test("card actions grow to 40 px on a phone, all of them", async ({ page }) => {
+  // OT-12 card-footer rule: one size per footer, 32 px with a pointer, 40 px below 640 px
+  await page.setViewportSize({ width: 390, height: 800 });
+  await signUp(page, `pfoot${Date.now()}`, "Fia");
+  await person(page, "Anna");
+  await page.goto("/people");
+  await hydrated(page);
+  const a = card(page, "Anna");
+  for (const action of [
+    a.getByRole("link", { name: "History with Anna" }),
+    a.getByRole("button", { name: "Invite Anna" }),
+    a.getByRole("button", { name: "Log with Anna" }),
+  ]) {
+    await expect(action).toBeVisible();
+    expect((await action.boundingBox())!.height).toBe(40);
+  }
+  await expectReflow(page, "people card 390");
 });
