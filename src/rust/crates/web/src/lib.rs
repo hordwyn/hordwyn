@@ -72,6 +72,7 @@ mod sign_out;
 pub mod source_hints;
 mod stats_extras;
 mod time_tiles;
+pub mod tint;
 pub mod widgets;
 
 pub use app::{App, CONFIG_ID, ClientConfig, shell};

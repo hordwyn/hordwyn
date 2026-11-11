@@ -98,7 +98,7 @@ fn SignInFirst() -> impl IntoView {
         <section class="mx-auto max-w-xl py-16 text-center">
             <PageTitle text=t("setup-title")/>
             <p class="text-muted-foreground">{t("setup-sign-in-lead")}</p>
-            <p class="mt-6"><a class="underline" href="/sign-in">{t("nav-sign-in")}</a></p>
+            <p class="mt-6"><a class="text-primary underline" href="/sign-in">{t("nav-sign-in")}</a></p>
         </section>
     }
 }
@@ -313,7 +313,7 @@ fn SourceCards(open: Vec<String>, hosted: bool) -> impl IntoView {
                                     <SourceKeyHowTo s=s.clone()/>
                                     <SourceCredential s=s.clone() data=data/>
                                     {hosted.then(|| view! { <SourceLicence s=s.clone() data=data/> })}
-                                    <p class="text-sm"><a class="underline" href=s.terms_url.clone() rel="noopener">{t("admin-sources-terms")}</a></p>
+                                    <p class="text-sm"><a class="text-primary underline" href=s.terms_url.clone() rel="noopener">{t("admin-sources-terms")}</a></p>
                                 </div>
                             </Disclosure>
                         }

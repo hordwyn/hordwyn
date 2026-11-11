@@ -690,7 +690,7 @@ pub fn SearchPalette() -> impl IntoView {
     let (label, placeholder) = (i18n.t("search-label"), i18n.t("search-placeholder"));
     let scopes: Vec<SegmentedOption> = SCOPES
         .iter()
-        .map(|s| SegmentedOption::new(*s, i18n.t(&format!("kind-group-{s}"))))
+        .map(|s| crate::tint::group_option(s, i18n.t(&format!("kind-group-{s}"))))
         .collect();
     let hints = hints(&i18n, scope);
     let filter = Signal::derive(move || {
@@ -703,7 +703,11 @@ pub fn SearchPalette() -> impl IntoView {
                 let (id, text) = target_line(&use_i18n(), &target);
                 view! { <p class="mb-2 text-sm" data-testid=id>{text}</p> }
             })}
-            <Segmented id="palette-scope" label=i18n.t("search-scope") value=s.scope options=scopes.clone() class="mb-3"/>
+            // a strip that scrolls sideways when the five scopes are wider than the dialog (a
+            // long locale on a 360 px phone); without it they widened the whole dialog (OT2D-1)
+            <div class="-mx-6 mb-3 max-w-[calc(100%+3rem)] overflow-x-auto px-6">
+                <Segmented id="palette-scope" label=i18n.t("search-scope") value=s.scope options=scopes.clone()/>
+            </div>
             <Command
                 id="search"
                 label=label.clone()
@@ -745,7 +749,7 @@ fn source_name(status: Option<&SourceStatusPageDto>, id: &str) -> String {
 fn HintActionView(action: HintAction, #[prop(into)] name: String) -> impl IntoView {
     match action {
         HintAction::SetUp => view! {
-            <a class="text-sm font-medium underline" href=SET_UP_HREF>{t("settings-sources-set-up")}</a>
+            <a class="text-sm font-medium text-primary underline" href=SET_UP_HREF>{t("settings-sources-set-up")}</a>
         }
         .into_any(),
         HintAction::AskGroup(g) => view! { <AskAdmin source=None group=Some(g) name=name/> }.into_any(),

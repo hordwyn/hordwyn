@@ -50,6 +50,37 @@ pub fn section_of(path: &str) -> &'static str {
     }
 }
 
+/// How wide a page may get on a large screen (owner test OT-14, DEC-541). Forms, the wizard
+/// and prose keep their own, narrower measure inside either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageWidth {
+    /// Grids and dashboards (Home, Library, Lists, People, Stats): 96 rem, more columns.
+    Grid,
+    /// Records and streams (an item, History, one list, one person), settings and admin:
+    /// 80 rem.
+    Record,
+}
+
+impl PageWidth {
+    #[must_use]
+    pub const fn class(self) -> &'static str {
+        match self {
+            Self::Grid => "max-w-[96rem]",
+            Self::Record => "max-w-7xl",
+        }
+    }
+}
+
+/// The width of the page at `path`: the five grid pages are wide, everything below them
+/// (`/lists/<id>`, `/people/<id>`) and every other page is a record page.
+#[must_use]
+pub fn page_width(path: &str) -> PageWidth {
+    match path.trim_matches('/') {
+        "" | "library" | "lists" | "people" | "stats" => PageWidth::Grid,
+        _ => PageWidth::Record,
+    }
+}
+
 /// The admin entry of the account menu and the You hub leads to Admin > Overview
 /// (addendum-1 3.4).
 const ADMIN_HREF: &str = "/admin";
@@ -349,13 +380,20 @@ pub fn AppShell(children: Children) -> impl IntoView {
     let chord = shortcut_keys(cfg.signed_in, palette, help);
     let location = use_location();
     let current = Signal::derive(move || section_of(&location.pathname.get()).to_string());
+    let width = Signal::derive(move || page_width(&location.pathname.get()));
+    let main_class = move || {
+        format!(
+            "mx-auto w-full {} px-4 pt-6 pb-[calc(1.5rem+var(--tab-bar-height))] focus:outline-none",
+            width.get().class()
+        )
+    };
     view! {
         <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded focus:bg-background focus:p-2 focus:ring-2 focus:ring-ring">
             {t("skip-to-content")}
         </a>
         <TopBar current=current/>
-        <OfflineBanner online=online waiting=waiting/>
-        <main id="main" tabindex="-1" class="mx-auto w-full max-w-7xl px-4 pt-6 pb-[calc(1.5rem+var(--tab-bar-height))] focus:outline-none">
+        <OfflineBanner online=online waiting=waiting width=width/>
+        <main id="main" tabindex="-1" class=main_class>
             {children()}
         </main>
         {cfg.signed_in.then(|| view! { <MobileTabs current=current/> <crate::reauth::ReauthDialog/> <crate::sign_out::SignOutForm/> })}
@@ -394,14 +432,14 @@ const ADD_BTN: &str = "relative hidden size-9 shrink-0 items-center justify-cent
 
 const NAV_LINK: &str = "rounded-md px-3 py-2 text-sm font-medium text-muted-foreground \
     hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 \
-    focus-visible:ring-ring aria-[current=page]:bg-secondary aria-[current=page]:text-foreground";
+    focus-visible:ring-ring aria-[current=page]:bg-primary-soft aria-[current=page]:text-primary";
 
 #[component]
 fn TopBar(current: Signal<String>) -> impl IntoView {
     let cfg = expect_context::<ClientConfig>();
     view! {
         <header class="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
-            <div class="mx-auto flex h-[var(--top-bar-height)] max-w-7xl items-center gap-2 px-4">
+            <div class="mx-auto flex h-[var(--top-bar-height)] max-w-[96rem] items-center gap-2 px-4">
                 <a href="/" class="mr-2 rounded-md text-lg font-semibold tracking-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     {cfg.product_name.clone()}
                 </a>
@@ -812,7 +850,12 @@ fn provide_online() -> RwSignal<bool> {
 /// Offline banner (design.md 6.15), a polite live region that is always in the page so the
 /// change is announced.
 #[component]
-fn OfflineBanner(online: RwSignal<bool>, waiting: Option<RwSignal<usize>>) -> impl IntoView {
+fn OfflineBanner(
+    online: RwSignal<bool>,
+    waiting: Option<RwSignal<usize>>,
+    /// The page's column: the line sits above it (OT-14).
+    width: Signal<PageWidth>,
+) -> impl IntoView {
     let count = move || waiting.map_or(0, |w| w.get());
     let has_waiting = move || count() > 0;
     let line = move || {
@@ -822,7 +865,7 @@ fn OfflineBanner(online: RwSignal<bool>, waiting: Option<RwSignal<usize>>) -> im
         })
     };
     view! {
-        <div role="status" class="mx-auto w-full max-w-7xl px-4 empty:hidden">
+        <div role="status" class=move || format!("mx-auto w-full {} px-4 empty:hidden", width.get().class())>
             <Show when=move || !online.get() || has_waiting()>
                 <Alert variant=AlertVariant::Warning role=AlertRole::None class="mt-4">
                     {move || (!online.get()).then(|| view! { <span class="block">{t("shell-offline")}</span> })}
@@ -882,13 +925,20 @@ fn ShortcutHelp(open: RwSignal<bool>) -> impl IntoView {
 }
 
 /// "G pressed: then ..." while a chord waits (design.md 3.2): a polite live region that is
-/// always in the page, so the change is announced; the words show above the tab bar.
+/// always in the page, so the change is announced; the words show above the tab bar. Without
+/// words the region has no box (`sr-only`, not `display: none`, which would take it out of
+/// the accessibility tree; `empty:hidden` never matched, the reactive text leaves a node
+/// behind, so an empty pill showed on every page: review OT2D-13).
 #[component]
 fn ChordHint(hint: RwSignal<String>) -> impl IntoView {
     view! {
         <div data-float="" class="pointer-events-none fixed inset-x-0 bottom-[calc(var(--tab-bar-height)+1rem)] z-50 flex justify-center px-4">
             <p role="status" data-testid="chord-hint"
-                class="rounded-md border border-border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-elevation-2 empty:hidden">
+                class=move || if hint.with(String::is_empty) {
+                    "sr-only"
+                } else {
+                    "rounded-md border border-border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-elevation-2"
+                }>
                 {move || hint.get()}
             </p>
         </div>
@@ -905,8 +955,8 @@ pub fn You() -> impl IntoView {
         return view! {
             <crate::pages::PageTitle text=i18n.t("nav-you")/>
             <p class="flex gap-4">
-                <a href="/sign-in" class="underline">{t("nav-sign-in")}</a>
-                <a href="/sign-up" class="underline">{t("nav-sign-up")}</a>
+                <a href="/sign-in" class="text-primary underline">{t("nav-sign-in")}</a>
+                <a href="/sign-up" class="text-primary underline">{t("nav-sign-up")}</a>
             </p>
         }
         .into_any();
@@ -966,8 +1016,8 @@ pub fn NotFound() -> impl IntoView {
             <crate::pages::PageTitle text=t("notfound-title")/>
             <p class="text-muted-foreground">{t("notfound-lead")}</p>
             <p class="mt-6 flex justify-center gap-4">
-                <a href="/" class="underline">{t("nav-home")}</a>
-                {cfg.signed_in.then(|| view! { <a href="/library" class="underline">{t("nav-library")}</a> })}
+                <a href="/" class="text-primary underline">{t("nav-home")}</a>
+                {cfg.signed_in.then(|| view! { <a href="/library" class="text-primary underline">{t("nav-library")}</a> })}
             </p>
         </section>
     }
@@ -998,6 +1048,40 @@ mod tests {
         assert_eq!(section_of("/admin/users"), "/you");
         assert_eq!(section_of("/notifications"), "");
         assert_eq!(section_of("/sessions"), "");
+    }
+
+    #[test]
+    fn grid_pages_are_wide_and_record_pages_keep_80_rem() {
+        // OT-14, DEC-541: 96 rem for grids and dashboards, 80 rem for records, streams,
+        // settings and admin
+        for path in [
+            "/",
+            "/library",
+            "/lists",
+            "/people",
+            "/stats",
+            "/library/",
+            "/people/",
+        ] {
+            assert_eq!(page_width(path), PageWidth::Grid, "{path}");
+        }
+        for path in [
+            "/items/abc",
+            "/history",
+            "/lists/abc",
+            "/people/abc",
+            "/shared/lists/x",
+            "/settings/account",
+            "/admin",
+            "/you",
+            "/sign-in",
+            "/setup",
+            "/dev/gallery",
+        ] {
+            assert_eq!(page_width(path), PageWidth::Record, "{path}");
+        }
+        assert_eq!(PageWidth::Grid.class(), "max-w-[96rem]");
+        assert_eq!(PageWidth::Record.class(), "max-w-7xl");
     }
 
     #[test]

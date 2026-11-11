@@ -2,7 +2,8 @@
 
 No product name, logo, colour, domain or support URL is hard-coded. Everything brand
 specific comes from a brand directory; a test fails if the codename appears in code outside
-`config/brand/` and `docs/`.
+`config/brand/` and `docs/`, and a second one if component code writes down a colour (see
+"Colours").
 
 == Brand directory
 
@@ -22,8 +23,11 @@ imprint = "https://example.org/imprint"
 privacy = "https://example.org/privacy"
 
 [theme]                        # CSS custom properties for the light theme
-primary = "oklch(0.55 0.2 145)"
-primary-foreground = "oklch(0.98 0 0)"
+primary = "#016630"            # the accent; white on it and it on white are 7.13:1
+primary-foreground = "#ffffff"
+primary-soft = "#f0fdf4"       # optional: surface behind "selected" and "next up"
+group-read = "#ca3500"         # optional: tint of an activity group (watch, read, listen,
+group-read-soft = "#fff7ed"    # play) and the soft surface under normal text
 
 [theme_dark]                   # the same for the dark theme
 primary = "oklch(0.7 0.18 145)"
@@ -46,7 +50,59 @@ style = "normal"               # normal or italic
 ----
 
 Nothing else changes: the same binary renders another brand (`apps/server/tests/it/brand.rs`
-checks product name, theme tokens, locale, string overrides and cookie names).
+checks product name, theme tokens, locale, string overrides and cookie names). The colours
+of this example pass the start-up check described under "Colours"
+(`crates/brand/tests/contrast.rs` reads this page and checks it).
+
+== Colours
+
+The stylesheet is neutral (zinc). A brand colours the app with these theme tokens, per
+theme; every token is optional and falls back to grey:
+
+[cols="1,2,1"]
+|===
+|Token |Used for |Fallback
+
+|`primary`, `primary-foreground` |filled buttons, text links on the page and on cards (links
+on alerts keep the text colour), chart bars, progress bars, the selected chip, the text of
+the active navigation item and of the selected segment, the bar above the current tab on
+phones
+|zinc-900 / zinc-50 (dark: reversed)
+|`primary-soft` |surface of the active navigation item, the "next up" row and the hero tile
+|`secondary`
+|`group-watch`, `group-read`, `group-listen`, `group-play` |kind icons, group markers and
+chart bars of that activity group |`muted-foreground`
+|`group-<id>-soft` |surface of that group's tiles and kind badges, under normal text |`muted`
+|===
+
+A tint never carries the meaning alone: it always comes with the group's icon or name
+(WCAG 1.4.1). The default brand sets a violet accent and four tints
+(`config/brand/default/brand.toml`).
+
+The start-up check (`crates/brand/src/contrast.rs`) reads the brand's values, fills in the
+fallbacks and warns per theme when one of these pairs is too low:
+
+* text, 4.5:1 (WCAG 1.4.3): `primary-foreground` on `primary`, also at 75 % opacity (the
+  count in a pressed chip, logged as `primary-foreground/75`; it needs about 7.2:1 for the
+  plain pair); `primary` on `background`, `card` and `primary-soft`; `foreground` and
+  `muted-foreground` on `primary-soft`; each `group-<id>` on `background`, `card` and its
+  own soft surface; `foreground` and `muted-foreground` on each `group-<id>-soft`
+* bars, markers and icons, 3:1 (WCAG 1.4.11): `primary` and each `group-<id>` on `muted`;
+  each `group-<id>` on `info-soft` (the kind icon of a shared History row)
+
+A brand that changes `background`, `card`, `muted`, `foreground`, `muted-foreground` or
+`info-soft` is checked with its own values. The check warns, it does not stop the server.
+An accent that is fine as a button can still be too light as text: `oklch(0.55 0.2 145)`
+(a mid green) with near-white text gets five warnings in the light theme, the darker
+`#016630` of the example above none.
+
+Component code names tokens only. The repository test `brand_colours_not_hard_coded`
+(`xtask/tests/whitelabel.rs`) fails when a file under `crates/ui/src`, `crates/web/src` or
+`apps/server/src` contains a Tailwind palette class of any family (`text-indigo-600`,
+`bg-black/60`), an arbitrary colour value (`bg-[#7008e7]`), a hex colour, a colour function
+(`rgb(`, `hsl(`, `oklch(`, ...), or an SVG `fill` / `stroke` or inline `style` colour other
+than `currentColor`, `none`, `transparent` or `var(--token)`; in the stylesheet it fails on
+the palette families the default brand takes its colours from.
 
 == What is derived from the brand
 
@@ -60,9 +116,9 @@ letters and digits
 |TOTP issuer |`name`
 |Theme |`[theme]` and `[theme_dark]` become `:root:not(.dark){...}` and `:root.dark{...}`, which
 outrank the stylesheet defaults; a theme without values keeps the defaults; values that could
-break out of the style element are dropped. At start-up the server logs a warning when
-`primary` on `primary-foreground` is below 4.5:1 (WCAG 1.4.3) or cannot be checked (use hex,
-`rgb()` or `oklch()`)
+break out of the style element are dropped. At start-up the server logs a warning for
+every colour pair the pages rely on that is below WCAG AA or cannot be checked (use hex,
+`rgb()` or `oklch()`), see "Colours" above
 |Font |`[fonts]` becomes `@font-face` rules (`font-display: swap`) with URLs below
 `/brand/fonts/<fingerprint>/` on the same origin (cached as immutable) and `--font-sans`
 = the brand font, then the system stack. Files must exist and be WOFF2, or start-up fails.

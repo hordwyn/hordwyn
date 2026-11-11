@@ -295,7 +295,8 @@ async fn home_shows_continue_up_next_activity_and_stats() {
         "the status counts come after the time tiles"
     );
     assert!(
-        html.contains(">Watch: 2 entries, 1 in progress, 1 planned</li>"),
+        // the line follows its group marker (ot2d)
+        html.contains("<span>Watch: 2 entries, 1 in progress, 1 planned</span></li>"),
         "library line"
     );
     assert!(!html.contains("<svg role=\"img\""), "no chart on Home");

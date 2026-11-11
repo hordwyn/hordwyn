@@ -85,7 +85,7 @@ fn AdminOnly(signed_in: bool) -> impl IntoView {
         <section data-testid="admin-only" class="max-w-xl py-8">
             <PageTitle text=t("admin-only-title")/>
             <p class="text-muted-foreground">{lead}</p>
-            <p class="mt-4"><a class="underline" href=href>{back}</a></p>
+            <p class="mt-4"><a class="text-primary underline" href=href>{back}</a></p>
         </section>
     }
 }

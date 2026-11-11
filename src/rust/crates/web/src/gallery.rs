@@ -12,9 +12,11 @@ use ui::{
     ProgressSize, Rating, RuleState, Segmented, SegmentedMode, SegmentedOption, Select,
     SelectOption, Sheet, SideNav, Skeleton, StatusDot, StatusState, Steps, Switch, TabBar,
     TabBarAction, Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow,
-    Tabs, TabsContent, TabsList, TabsTrigger, TaskItem, TaskList, Textarea, ThemeToggle,
+    Tabs, TabsContent, TabsList, TabsTrigger, TaskItem, TaskList, Textarea, ThemeToggle, Tint,
     ToastVariant, Tooltip, disclosure_storage_key, field_described_by, slug, use_toasts,
 };
+
+use crate::charts::{Bar, BarList};
 
 #[component]
 fn Section(#[prop(into)] title: String, children: Children) -> impl IntoView {
@@ -231,6 +233,7 @@ pub fn Gallery() -> impl IntoView {
             </Section>
 
             <FeedbackSections/>
+            <TintSections/>
             <ChoiceSections/>
             <FormPatternSections/>
             <NavSections/>
@@ -385,6 +388,64 @@ fn GalleryRating() -> impl IntoView {
                 {move || rating.get().map(|v| v.to_string()).unwrap_or_default()}
             </span>
         </div>
+    }
+}
+
+/// The accent and the group tints side by side (DEC-540, review OT2D-10): what the brand's
+/// `[theme]` values look like as a marker, a kind badge, a soft surface under text and a bar,
+/// plus the group switcher with its markers and a text link. The axe run on the gallery
+/// covers them in both themes.
+#[component]
+fn TintSections() -> impl IntoView {
+    let scope = RwSignal::new("all".to_string());
+    let scopes: Vec<SegmentedOption> = [
+        ("all", "All"),
+        ("watch", "Watch"),
+        ("read", "Read"),
+        ("listen", "Listen"),
+        ("play", "Play"),
+    ]
+    .into_iter()
+    .map(|(id, label)| crate::tint::group_option(id, label.to_string()))
+    .collect();
+    let samples = [
+        (Tint::Neutral, "Neutral", IconName::KindBoardGame),
+        (Tint::Accent, "Accent", IconName::Grid),
+        (Tint::Watch, "Watch", IconName::KindMovie),
+        (Tint::Read, "Read", IconName::KindBook),
+        (Tint::Listen, "Listen", IconName::KindMusic),
+        (Tint::Play, "Play", IconName::KindVideoGame),
+    ]
+    .into_iter()
+    .map(|(tint, name, icon)| {
+        let bars = vec![
+            Bar { label: "This month".into(), value: 8, text: "8".into() },
+            Bar { label: "Last month".into(), value: 5, text: "5".into() },
+        ];
+        view! {
+            <li class="grid content-start gap-2 rounded-xl border border-border bg-card p-3" data-testid=format!("g-tint-{}", name.to_lowercase())>
+                <div class="flex items-center gap-2">
+                    <span aria-hidden="true" data-part="marker" class=format!("size-2 shrink-0 rounded-full {}", tint.solid())></span>
+                    <Badge variant=BadgeVariant::Tint(tint)><Icon name=icon class=tint.text()/>{name}</Badge>
+                </div>
+                <p data-part="soft" class=format!("rounded-md p-2 text-sm {}", tint.soft())>
+                    "Text on the soft surface, " <span class="text-muted-foreground">"muted text"</span> " and an icon "
+                    <Icon name=icon class=format!("inline {}", tint.text())/>
+                </p>
+                <BarList summary=format!("{name}: 8 this month, 5 last month") bars=bars tint=tint/>
+            </li>
+        }
+    })
+    .collect_view();
+    view! {
+        <Section title="Tints">
+            <Segmented id="g-tint-scope" label="Tint group" value=scope options=scopes/>
+            <ul class="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Tint samples">{samples}</ul>
+            <p class="w-full text-sm">
+                "Text links on the page and on cards take the accent: "
+                <a href="#tints" class="text-primary underline">"a text link"</a>
+            </p>
+        </Section>
     }
 }
 

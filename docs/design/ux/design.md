@@ -286,13 +286,37 @@ Rules:
 
 - Semantic colours carry meaning only together with an icon or a word (status dots always
   have a text label next to them). Colour alone never encodes state (WCAG 1.4.1).
-- `--primary` is the brand's one accent. The default is neutral on purpose; an operator who
-  sets `[theme] primary` must keep `primary-foreground` at >= 4.5:1. Example that passes in
-  both themes: light `primary = violet-700 (#7008e7)`, `primary-foreground = white` (7.29);
-  dark `primary = violet-400 (#a684ff)`, `primary-foreground = zinc-950` (6.98). The brand
-  crate should compute and log the ratio at start-up and refuse (or warn) below 4.5.
-- Covers are the only saturated surfaces. Poster placeholders use the item's dominant colour
-  (already stored, DEC-094) so empty grids are not grey.
+- `--primary` is the brand's one accent. The stylesheet stays neutral (the tables above are
+  its fallbacks); since the owner test (OT-13, DEC-540, DEC-580) the default brand file
+  `config/brand/default/brand.toml` sets a violet accent: light `primary = violet-700
+  (#7008e7)`, `primary-foreground = white` (7.30), `primary-soft = violet-50 (#f5f3ff)`;
+  dark `primary = violet-400 (#a684ff)`, `primary-foreground = zinc-950` (6.98),
+  `primary-soft = violet-950 (#2f0d68)`. The accent colours filled buttons, pressed chips,
+  progress and chart bars, the text of the selected segment, tab and navigation item, and
+  text links on the page and on cards (underlined; links on alerts and soft surfaces keep
+  the text colour, DEC-581, DEC-584). `primary-soft` is the surface of the current
+  navigation item, the "next up" row and the hero tile. The current tab of the mobile tab
+  bar also has a 2 px bar in the accent above it, so it is not told apart by hue and weight
+  alone.
+- One tint per activity group, each with a soft surface (DEC-540, DEC-580), light / dark:
+  watch fuchsia-700 #a800b7 / fuchsia-400 #ed6aff on #fdf4ff / #4b004f; read orange-700
+  #ca3500 / orange-400 #ff8904 on #fff7ed / #441306; listen teal-700 #00786f / teal-400
+  #00d5be on #f0fdfa / #022f2e; play blue-700 #1447e6 / blue-400 #51a2ff on #eff6ff /
+  #162456. A tint colours the kind icon, a marker dot (from 30 rem up) and the chart bars
+  of its group; the soft surface sits under normal text (time tiles, kind badge). Without
+  brand values the tokens fall back to grey (`group-*` = `muted-foreground`, `group-*-soft`
+  = `muted`, `primary-soft` = `secondary`). A tint never carries the meaning alone: the
+  group's icon or name is always next to it (WCAG 1.4.1).
+- The brand crate checks the pairs the pages rely on at start-up and logs a warning per
+  pair below 4.5:1 for text or 3:1 for bars and markers (it does not stop the server); the
+  list of pairs and the ratios of the default brand are in DEC-580 and DEC-586, the guide
+  for operators in `docs/modules/ROOT/pages/white-labelling.adoc` ("Colours").
+- No colour is written down in component code: classes name tokens, and a repository test
+  fails on a palette class, hex value, colour function or SVG / inline style colour in
+  `crates/ui`, `crates/web` and `apps/server` (DEC-583, DEC-585).
+- Covers, the accent and the group tints are the only saturated surfaces. Poster
+  placeholders use the item's dominant colour (already stored, DEC-094) so empty grids are
+  not grey.
 - Dark is not an inverted light theme: cards are one step lighter than the page
   (zinc-900 on zinc-950), shadows are replaced by borders, and elevation is expressed by
   surface lightness.
@@ -343,9 +367,13 @@ paragraphs (NN/g dark mode guidance, R-42). Titles clamp to two lines in cards.
 
 ### 2.9 Spacing, radius, elevation, motion
 
-- **Spacing:** 4 px base (Tailwind scale). Page gutter 1 rem (16 px) at every width, content
-  max-width 80 rem (1280 px) for app pages, 36-52 rem for forms and wizards. Card padding
-  1 rem; dense lists 0.65 rem vertical. Section gap 1.75 rem.
+- **Spacing:** 4 px base (Tailwind scale). Page gutter 1 rem (16 px) at every width. Content
+  max-width (owner test OT-14, DEC-541, DEC-582): 96 rem (1536 px) for grid pages (Home,
+  Library, Lists, People, Stats; their grids get more columns, the content uses the whole
+  column) and for the top bar on every page; 80 rem (1280 px) for record pages (an item,
+  History, one list, one person, You, settings, admin, signed-out pages); 36-52 rem for
+  forms and wizards inside either. Card padding 1 rem; dense lists 0.65 rem vertical.
+  Section gap 1.75 rem.
 - **Radius:** `--radius: 0.5rem` stays. Buttons, inputs, chips (pill), cards (`radius + 4px`),
   dialogs (`radius + 6px`), posters (`radius`), avatars (full).
 - **Elevation:** three levels. 1: cards (1 px border + `0 1px 2px` 6% shadow). 2: popovers,
@@ -861,7 +889,7 @@ undoable through the merge record (DEC-017).
 ## 6. Page-by-page specifications
 
 Shared rules for every page: one H1; `<Title>` is `"{page} - {name}"`; main content max
-80 rem with 1 rem gutters; loading uses skeletons shaped like the final layout (never a
+96 rem on grid pages and 80 rem on record pages (2.9) with 1 rem gutters; loading uses skeletons shaped like the final layout (never a
 page-wide spinner, R-39); errors from server functions render inline with a Retry button;
 `unauthorized` redirects to sign-in with `?next=`; every list refetches on `entity.updated`
 without resetting scroll or open sheets. Mobile rules per page are listed where they differ

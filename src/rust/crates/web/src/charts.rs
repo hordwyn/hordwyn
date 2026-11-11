@@ -7,6 +7,7 @@
 use contracts::{AmountsDto, SeriesPointDto};
 
 use leptos::prelude::*;
+use ui::Tint;
 
 use crate::i18n::I18n;
 
@@ -202,6 +203,22 @@ pub fn label_stride(n: usize, max_labels: usize) -> usize {
     n.div_ceil(max_labels.max(1)).max(1)
 }
 
+/// The classes of the time label under column `i`, or `None` for a column without one. Every
+/// `stride`-th column is named; every second of those names goes away where the chart is
+/// narrower than 28 rem (a container query on the chart), so "Feb 2026", "Apr 2026", ... do
+/// not run together on a phone (review OT2D-13).
+#[must_use]
+pub fn axis_label_class(i: usize, stride: usize) -> Option<&'static str> {
+    let stride = stride.max(1);
+    i.is_multiple_of(stride).then(|| {
+        if (i / stride).is_multiple_of(2) {
+            "fill-muted-foreground text-caption"
+        } else {
+            "fill-muted-foreground text-caption @max-md:hidden"
+        }
+    })
+}
+
 fn month_index(bucket: &str) -> Option<i64> {
     let (y, m) = bucket.split_once('-')?;
     let (y, m): (i64, i64) = (y.parse().ok()?, m.parse().ok()?);
@@ -297,7 +314,13 @@ const ROW: u32 = 34;
 /// the scale of the largest. `summary` is the image's accessible name (the text equivalent
 /// in one sentence); the caller shows the numbers as a list too.
 #[component]
-pub fn BarList(#[prop(into)] summary: String, bars: Vec<Bar>) -> impl IntoView {
+pub fn BarList(
+    #[prop(into)] summary: String,
+    bars: Vec<Bar>,
+    /// Colour of the bars: the accent, or a group's tint on that group's tab (OT-13).
+    #[prop(default = Tint::Accent)]
+    tint: Tint,
+) -> impl IntoView {
     let i18n = crate::i18n::use_i18n();
     let top = bars.iter().map(|b| b.value).max().unwrap_or(0);
     let height = ROW * u32::try_from(bars.len()).unwrap_or(0);
@@ -312,7 +335,7 @@ pub fn BarList(#[prop(into)] summary: String, bars: Vec<Bar>) -> impl IntoView {
                         <text x="0" y=y + 13 class="fill-current text-[0.8125rem]">{b.label}</text>
                         <text x="100%" y=y + 13 text-anchor="end" class="fill-current text-[0.8125rem] font-semibold tabular-nums">{b.text}</text>
                         <rect x="0" y=y + 19 width="100%" height="8" rx="2" class="fill-muted"/>
-                        {(b.value > 0).then(|| view! { <rect x="0" y=y + 19 width=width height="8" rx="2" class="fill-primary"/> })}
+                        {(b.value > 0).then(|| view! { <rect x="0" y=y + 19 width=width height="8" rx="2" class=tint.fill()/> })}
                     </g>
                 }
             }).collect_view()}
@@ -334,6 +357,9 @@ pub fn ColumnChart(
     /// Raw amounts per unit of the axis labels (60: values in minutes, an axis in hours).
     #[prop(default = 1)]
     unit: u64,
+    /// Colour of the columns, as for [`BarList`].
+    #[prop(default = Tint::Accent)]
+    tint: Tint,
 ) -> impl IntoView {
     let i18n = crate::i18n::use_i18n();
     let max = columns.iter().map(|c| c.value).max().unwrap_or(0);
@@ -351,7 +377,7 @@ pub fn ColumnChart(
         .collect::<Vec<_>>();
     let grid = ticks.iter().map(|t| y_of(t.0)).collect::<Vec<_>>();
     view! {
-        <div class="grid grid-cols-[2.75rem_1fr] text-foreground">
+        <div class="@container grid grid-cols-[2.75rem_1fr] text-foreground">
             <svg aria-hidden="true" width="100%" height="172" class="block overflow-visible">
                 {tick_labels.into_iter().map(|(y, text)| view! {
                     <text x="100%" dx="-6" y=y + 4.0 text-anchor="end" class="fill-muted-foreground text-caption tabular-nums">{text}</text>
@@ -365,8 +391,8 @@ pub fn ColumnChart(
                     #[allow(clippy::cast_precision_loss)]
                     let left = i as f64 * slot;
                     let y = y_of(c.value);
-                    let label = (i % stride == 0).then(|| view! {
-                        <text x=format!("{:.3}%", left + slot / 2.0) y="168" text-anchor="middle" class="fill-muted-foreground text-caption">{c.label.clone()}</text>
+                    let label = axis_label_class(i, stride).map(|class| view! {
+                        <text x=format!("{:.3}%", left + slot / 2.0) y="168" text-anchor="middle" class=class>{c.label.clone()}</text>
                     });
                     view! {
                         <g>
@@ -374,7 +400,7 @@ pub fn ColumnChart(
                             <rect x=format!("{left:.3}%") y="0" width=format!("{slot:.3}%") height=PLOT_BOTTOM class="fill-transparent"/>
                             {(c.value > 0).then(|| view! {
                                 <rect x=format!("{:.3}%", left + slot * 0.15) y=y width=format!("{:.3}%", slot * 0.7)
-                                    height=PLOT_BOTTOM - y rx="2" class="fill-primary"/>
+                                    height=PLOT_BOTTOM - y rx="2" class=tint.fill()/>
                             })}
                             {label}
                         </g>
@@ -423,6 +449,26 @@ mod tests {
         assert!((pct(40, 40) - 100.0).abs() < f64::EPSILON);
         assert!((pct(50, 40) - 100.0).abs() < f64::EPSILON, "clamped");
         assert!(pct(3, 0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn a_narrow_chart_names_every_second_label_only() {
+        // twelve months, every second one named: Feb, Apr, Jun, ... ; narrow: Feb, Jun, Oct
+        let stride = label_stride(12, 8);
+        let classes: Vec<_> = (0..12).map(|i| axis_label_class(i, stride)).collect();
+        let named = classes.iter().filter(|c| c.is_some()).count();
+        let narrow = classes
+            .iter()
+            .flatten()
+            .filter(|c| !c.contains("@max-md:hidden"))
+            .count();
+        assert_eq!((named, narrow), (6, 3));
+        assert_eq!(axis_label_class(1, 2), None);
+        assert!(axis_label_class(0, 2).is_some_and(|c| !c.contains("hidden")));
+        assert!(axis_label_class(2, 2).is_some_and(|c| c.ends_with("@max-md:hidden")));
+        assert!(axis_label_class(4, 2).is_some_and(|c| !c.contains("hidden")));
+        // a stride of 0 is read as 1
+        assert!(axis_label_class(3, 0).is_some());
     }
 
     #[test]

@@ -2,6 +2,8 @@ import { expect, request, type APIRequestContext, type Page } from "@playwright/
 import AxeBuilder from "@axe-core/playwright";
 import { execFileSync } from "node:child_process";
 import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 // Shared by the specs: hydration marker, the WCAG A/AA axe check (design.md 8) and sign-up.
 
@@ -46,10 +48,56 @@ export async function signIn(page: Page, user: string) {
   expect(r.ok(), `sign-in ${user}: ${r.status()}`).toBeTruthy();
 }
 
-/** No horizontal page scroll at the current viewport (WCAG 1.4.10 reflow). */
+/**
+ * No horizontal scroll at the current viewport (WCAG 1.4.10 reflow): not of the page, and not
+ * inside an open dialog or any other box that scrolls up and down (a `position: fixed` dialog
+ * that is wider than the screen does not widen the document, review OT2D-1). A strip that
+ * only scrolls sideways (a row of tabs, a shelf of covers) is meant to and is not counted.
+ */
 export async function expectReflow(page: Page, where = "") {
-  const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  expect(over, `${where} horizontal overflow`).toBeLessThanOrEqual(1);
+  const over = await page.evaluate(() => {
+    const root = document.documentElement;
+    const found: string[] = [];
+    if (root.scrollWidth - root.clientWidth > 1) {
+      found.push(`document by ${root.scrollWidth - root.clientWidth}px`);
+    }
+    for (const el of Array.from(document.body.querySelectorAll<HTMLElement>("*"))) {
+      if (el.clientWidth === 0 || el.scrollWidth - el.clientWidth <= 1) {
+        continue;
+      }
+      const dialog = el.matches('[role="dialog"], [role="alertdialog"], dialog[open]');
+      const y = getComputedStyle(el).overflowY;
+      const scrollsDown = (y === "auto" || y === "scroll") && el.scrollHeight - el.clientHeight > 1;
+      if (dialog || scrollsDown) {
+        const name = el.getAttribute("role") || el.id || el.className;
+        found.push(`${el.tagName.toLowerCase()} (${name}) by ${el.scrollWidth - el.clientWidth}px`);
+      }
+    }
+    return found;
+  });
+  expect(over, `${where} horizontal overflow`).toEqual([]);
+}
+
+/**
+ * The value of `key` in `[theme]` / `[theme_dark]` of the brand file the server runs with
+ * (`E2E_BRAND_DIR`, else the default brand); `undefined` when the brand does not set it. The
+ * specs read brand colours from here and never pin them (review OT2D-9).
+ */
+export function brandValue(section: "theme" | "theme_dark", key: string): string | undefined {
+  const dir = process.env.E2E_BRAND_DIR ?? resolve(__dirname, "../../../config/brand/default");
+  let inSection = false;
+  for (const line of readFileSync(resolve(dir, "brand.toml"), "utf8").split("\n")) {
+    const head = line.match(/^\s*\[([^\]]+)\]/);
+    if (head) {
+      inSection = head[1].trim() === section;
+      continue;
+    }
+    const pair = inSection ? line.match(/^\s*"?(?:--)?([a-z-]+)"?\s*=\s*"([^"]*)"/) : null;
+    if (pair && pair[1] === key) {
+      return pair[2];
+    }
+  }
+  return undefined;
 }
 
 /** The e2e database (`cargo xtask e2e` passes a fresh one). */
@@ -184,4 +232,41 @@ export function entityEvents(page: Page): Promise<number> {
 /** The entity ids named by the `entity.updated` events delivered so far (see `countEntityEvents`). */
 export function entityIds(page: Page): Promise<string[]> {
   return page.evaluate(() => (window as unknown as { __entityIds?: string[] }).__entityIds ?? []);
+}
+
+/** WCAG contrast ratio of two CSS colours (any syntax the browser paints). */
+export async function contrast(page: Page, a: string, b: string): Promise<number> {
+  return page.evaluate(
+    ([a, b]) => {
+      const lum = (colour: string) => {
+        const c = document.createElement("canvas");
+        c.width = c.height = 1;
+        const ctx = c.getContext("2d", { willReadFrequently: true })!;
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, 1, 1);
+        ctx.fillStyle = colour;
+        ctx.fillRect(0, 0, 1, 1);
+        const [r, g, bl] = Array.from(ctx.getImageData(0, 0, 1, 1).data).map((v) => {
+          const s = v / 255;
+          return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+      };
+      const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+      return (x + 0.05) / (y + 0.05);
+    },
+    [a, b],
+  );
+}
+
+/** The colour a theme token (`group-watch-soft`) paints on this page, as the browser reports colours. */
+export async function token(page: Page, name: string): Promise<string> {
+  return page.evaluate((name) => {
+    const probe = document.createElement("span");
+    probe.style.color = `var(--${name})`;
+    document.body.append(probe);
+    const colour = getComputedStyle(probe).color;
+    probe.remove();
+    return colour;
+  }, name);
 }

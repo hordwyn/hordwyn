@@ -183,7 +183,7 @@ fn Section(
         <section aria-labelledby=labelled class="flex flex-col gap-3">
             <div class="flex items-baseline justify-between gap-3">
                 <h2 id=heading class="text-lg font-semibold">{title}</h2>
-                {link.map(|(href, text)| view! { <a href=href class="text-sm font-medium underline underline-offset-2">{text}</a> })}
+                {link.map(|(href, text)| view! { <a href=href class="text-sm font-medium text-primary underline underline-offset-2">{text}</a> })}
             </div>
             {children()}
         </section>
@@ -417,7 +417,10 @@ fn HomeStats(stats: StatsTotalsDto) -> impl IntoView {
                 <h3 class="text-sm font-semibold">{i18n.t("stats-library-heading")}</h3>
                 <ul class="text-sm text-muted-foreground">
                     {lines.into_iter().map(|(group, line)| view! {
-                        <li data-testid=format!("totals-line-{group}")>{line}</li>
+                        <li class="flex items-baseline gap-2" data-testid=format!("totals-line-{group}")>
+                            <span aria-hidden="true" class=ui::cn(&["size-2 shrink-0 rounded-full", crate::tint::group_tint(&group).solid()])></span>
+                            <span>{line}</span>
+                        </li>
                     }).collect_view()}
                 </ul>
             </div>
@@ -435,7 +438,7 @@ fn LibraryByStatus(totals: TotalsDto) -> impl IntoView {
     view! {
         <Disclosure id="st-library" title=i18n.t("stats-library-by-status") mode=DisclosureMode::Native>
             <div class="flex flex-col gap-3">
-                <BarList summary=summary bars=status_bars(&i18n, &totals)/>
+                <BarList summary=summary bars=status_bars(&i18n, &totals) tint=crate::tint::chart_tint(&totals.group)/>
                 <p class="text-sm text-muted-foreground" data-testid="st-library-line">{line}</p>
             </div>
         </Disclosure>
@@ -553,7 +556,7 @@ pub fn Stats() -> impl IntoView {
                     {move || kinds.get().and_then(Result::ok).map(|k| {
                         let i = use_i18n();
                         let mut options = vec![SegmentedOption::new("all", i.t("kind-group-all")).controls("st-panel")];
-                        options.extend(k.groups.iter().map(|g| SegmentedOption::new(g.id.clone(), i.t(&g.label_key)).controls("st-panel")));
+                        options.extend(k.groups.iter().map(|g| crate::tint::group_option(&g.id, i.t(&g.label_key)).controls("st-panel")));
                         view! { <Segmented id="st-group" label=i.t("stats-groups") value=group options=options mode=SegmentedMode::Tabs/> }
                     })}
                 </Suspense>
@@ -642,10 +645,11 @@ fn SeriesCharts(series: StatsSeriesDto, timed: bool) -> impl IntoView {
         return view! { <EmptyState title=i18n.t("stats-empty") icon=IconName::History body=i18n.t("stats-empty-body") level=2/> }.into_any();
     }
     let group = group_label(&i18n, &series.group);
+    let tint = crate::tint::chart_tint(&series.group);
     view! {
         <div class="grid gap-6 xl:grid-cols-2">
             {measures_led(&series.group, timed).into_iter().map(|m| view! {
-                <MeasureChart measure=m points=points.clone() group=group.clone() bucket=series.bucket.clone()/>
+                <MeasureChart measure=m points=points.clone() group=group.clone() bucket=series.bucket.clone() tint=tint/>
             }).collect_view()}
         </div>
     }
@@ -658,6 +662,7 @@ fn MeasureChart(
     points: Vec<contracts::SeriesPointDto>,
     group: String,
     bucket: String,
+    tint: ui::Tint,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let name = i18n.t(measure.label_key());
@@ -703,7 +708,7 @@ fn MeasureChart(
                 <span class="font-semibold">{caption_name}</span>
                 <span class="text-sm text-muted-foreground tabular-nums">{measure.text(&i18n, total)}</span>
             </figcaption>
-            <ColumnChart summary=summary columns=columns unit=measure.unit()/>
+            <ColumnChart summary=summary columns=columns unit=measure.unit() tint=tint/>
             <MeasureTable id=format!("{id}-table") name=name head=head rows=table/>
         </figure>
     }

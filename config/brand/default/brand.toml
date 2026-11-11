@@ -17,3 +17,33 @@ style = "normal"
 file = "fonts/AtkinsonHyperlegibleNext-Italic-wght.woff2"
 weight = "200 800"
 style = "italic"
+
+# Colours (owner ruling OT-13, DEC-540): a violet accent and one tint per activity group.
+# Tailwind 4.1 palette values as hex, so the start-up contrast check can read them
+# (crates/brand/src/contrast.rs); ratios in docs/DECISIONS.md DEC-580. A brand without
+# these keys stays neutral: the stylesheet falls back to its grey tokens.
+[theme]
+primary = "#7008e7"            # violet-700
+primary-foreground = "#ffffff"
+primary-soft = "#f5f3ff"       # violet-50
+group-watch = "#a800b7"        # fuchsia-700
+group-watch-soft = "#fdf4ff"   # fuchsia-50
+group-read = "#ca3500"         # orange-700
+group-read-soft = "#fff7ed"    # orange-50
+group-listen = "#00786f"       # teal-700
+group-listen-soft = "#f0fdfa"  # teal-50
+group-play = "#1447e6"         # blue-700
+group-play-soft = "#eff6ff"    # blue-50
+
+[theme_dark]
+primary = "#a684ff"            # violet-400
+primary-foreground = "#09090b" # zinc-950
+primary-soft = "#2f0d68"       # violet-950
+group-watch = "#ed6aff"        # fuchsia-400
+group-watch-soft = "#4b004f"   # fuchsia-950
+group-read = "#ff8904"         # orange-400
+group-read-soft = "#441306"    # orange-950
+group-listen = "#00d5be"       # teal-400
+group-listen-soft = "#022f2e"  # teal-950
+group-play = "#51a2ff"         # blue-400
+group-play-soft = "#162456"    # blue-950

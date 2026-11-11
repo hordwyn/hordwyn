@@ -331,7 +331,7 @@ fn Toolbar(lib: Lib) -> impl IntoView {
                     {move || lib.kinds_now().map(|k| {
                         let i = use_i18n();
                         let mut options = vec![SegmentedOption::new("all", i.t("kind-group-all"))];
-                        options.extend(k.groups.iter().map(|g| SegmentedOption::new(g.id.clone(), i.t(&g.label_key))));
+                        options.extend(k.groups.iter().map(|g| crate::tint::group_option(&g.id, i.t(&g.label_key))));
                         view! { <Segmented id="lib-group" label=i.t("library-group") value=group options=options/> }
                     })}
                 </Suspense>

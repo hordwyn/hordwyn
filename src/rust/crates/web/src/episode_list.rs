@@ -703,7 +703,7 @@ fn EpisodeRow(
     } else {
         String::new()
     };
-    let look = if next { "bg-accent" } else { "" };
+    let look = if next { "bg-primary-soft" } else { "" };
     view! {
         <li data-testid="episode-row" data-next=next.then_some("true")
             class=format!("flex items-center gap-3 px-3 py-2 {look}")>

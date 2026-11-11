@@ -478,7 +478,7 @@ pub fn SettingsSources() -> impl IntoView {
                                 <li class="rounded-md border border-border p-3 text-sm">
                                     <p class="font-medium">{s.name.clone()}</p>
                                     <p lang="en">{s.text.clone()}</p>
-                                    <p class="text-muted-foreground"><span lang="en">{s.licence.clone()}</span> " - " <a class="underline" href=s.url.clone() rel="noopener">{s.url.clone()}</a></p>
+                                    <p class="text-muted-foreground"><span lang="en">{s.licence.clone()}</span> " - " <a class="text-primary underline" href=s.url.clone() rel="noopener">{s.url.clone()}</a></p>
                                 </li>
                             }).collect_view()}
                         </ul>
@@ -579,7 +579,7 @@ fn MemberSource(
                 <span class="basis-full text-sm text-muted-foreground">{kinds}</span>
             </div>
             {(ask && !has_fields).then(|| if admin {
-                view! { <a class="w-fit text-sm underline" href="/admin/sources">{t("settings-sources-set-up")}</a> }.into_any()
+                view! { <a class="w-fit text-sm text-primary underline" href="/admin/sources">{t("settings-sources-set-up")}</a> }.into_any()
             } else {
                 view! { <AskAdmin source=Some(id.clone()) group=None name=s.name.clone()/> }.into_any()
             })}

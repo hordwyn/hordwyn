@@ -172,7 +172,7 @@ fn Panel(
     };
     view! {
         <Show when=move || open.get()>
-            <div class="fixed inset-0 z-50 bg-black/60" aria-hidden="true" on:click=move |_| close()></div>
+            <div class="fixed inset-0 z-50 bg-scrim" aria-hidden="true" on:click=move |_| close()></div>
             <div
                 node_ref=panel
                 role="dialog"

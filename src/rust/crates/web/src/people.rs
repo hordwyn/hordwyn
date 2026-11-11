@@ -60,7 +60,9 @@ pub fn People() -> impl IntoView {
     view! {
         <PageTitle text=t("companions-title")/>
         <Lead text=t("companions-lead")/>
-        <div class="grid max-w-4xl gap-4">
+        // a grid page: the cards use the whole 96 rem column (DEC-541, review OT2D-2); the
+        // requests and suggestions are lines of text and keep a readable measure
+        <div class="grid gap-4">
             <Button class="w-fit" on:click=move |_| ui.add.set(true)>{t("companions-add-open")}</Button>
             <Outcome message=ui.outcome/>
             <crate::people_dialogs::UndoMerge ui=ui/>
@@ -165,7 +167,7 @@ fn Requests(requests: Vec<LinkRequestDto>) -> impl IntoView {
         })
         .collect_view();
     view! {
-        <section aria-labelledby="pp-requests-h" class="grid gap-2">
+        <section aria-labelledby="pp-requests-h" class="grid max-w-4xl gap-2">
             <h2 id="pp-requests-h" class="text-lg font-semibold">{t("companions-requests")}</h2>
             <ul class="grid gap-2">{cards}</ul>
         </section>
@@ -197,7 +199,7 @@ fn Suggestions(list: Vec<MergeSuggestionDto>) -> impl IntoView {
             }
         })
         .collect_view();
-    view! { <ul class="grid gap-2" aria-label=t("companions-suggestions")>{rows}</ul> }
+    view! { <ul class="grid max-w-4xl gap-2" aria-label=t("companions-suggestions")>{rows}</ul> }
 }
 
 #[component]
@@ -206,9 +208,12 @@ fn Cards(people: Vec<PersonDto>, #[prop(into)] empty: String) -> impl IntoView {
         return view! { <EmptyState title=empty icon=IconName::Users level=2/> }.into_any();
     }
     view! {
-        <ul class="mt-2 grid gap-3 md:grid-cols-2" aria-label=t("companions-title")>
-            {people.into_iter().map(|p| view! { <PersonCard p=p/> }).collect_view()}
-        </ul>
+        // a third column where the cards have 80 rem or more (a wide screen, DEC-541)
+        <div class="@container mt-2">
+            <ul class="grid gap-3 md:grid-cols-2 @7xl:grid-cols-3" aria-label=t("companions-title")>
+                {people.into_iter().map(|p| view! { <PersonCard p=p/> }).collect_view()}
+            </ul>
+        </div>
     }
     .into_any()
 }
@@ -419,7 +424,7 @@ pub fn PersonPage() -> impl IntoView {
     ui.leave_on_delete = true;
     provide_context(ui);
     view! {
-        <p class="mb-2 text-sm"><a href="/people" class="underline">{t("companions-person-back")}</a></p>
+        <p class="mb-2 text-sm"><a href="/people" class="text-primary underline">{t("companions-person-back")}</a></p>
         <div class="grid max-w-4xl gap-4">
             <Outcome message=ui.outcome/>
             <crate::people_dialogs::UndoMerge ui=ui/>
@@ -505,7 +510,7 @@ fn PersonHistory(
                     </ul>
                 }.into_any()
             })}
-            <p><a href=format!("/history?person={id}") class="text-sm underline">{all}</a></p>
+            <p><a href=format!("/history?person={id}") class="text-sm text-primary underline">{all}</a></p>
         </section>
     }
 }

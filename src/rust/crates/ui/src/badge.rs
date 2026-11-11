@@ -13,6 +13,9 @@ pub enum BadgeVariant {
     Success,
     Warning,
     Info,
+    /// Soft surface of the accent or a group tint with normal text (DEC-540); the icon in
+    /// it takes `Tint::text`.
+    Tint(crate::Tint),
 }
 
 impl BadgeVariant {
@@ -26,6 +29,7 @@ impl BadgeVariant {
             Self::Success => "border-transparent bg-success-soft text-success",
             Self::Warning => "border-transparent bg-warning-soft text-warning",
             Self::Info => "border-transparent bg-info-soft text-info",
+            Self::Tint(t) => t.badge(),
         }
     }
 }

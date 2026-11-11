@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { ADMIN, expectNoA11yViolations, expectReflow, hydrated, signIn, signUp } from "./helpers";
+import { ADMIN, expectNoA11yViolations, expectReflow, hydrated, signIn, signUp, token } from "./helpers";
 
 // UX phase 2, "why is nothing happening" (design.md 4.4, 6.1, 6.4): the palette's no-results
 // card for a kind group without a source with Ask admin (member) or Set up (admin), the
@@ -71,7 +71,13 @@ test("the Home nudge shows for the admin with one action, never for a member", a
   await expect(nudge).toBeVisible();
   await expect(nudge).toContainText("Play");
   await expect(nudge.getByRole("link")).toHaveCount(1);
-  await expect(nudge.getByRole("link", { name: "Set up data sources" })).toHaveAttribute("href", "/admin/sources");
+  const setUp = nudge.getByRole("link", { name: "Set up data sources" });
+  await expect(setUp).toHaveAttribute("href", "/admin/sources");
+  // a link on an alert keeps the colour of the text around it (DEC-584): the accent is only
+  // checked against the page and card surfaces
+  const colours = await setUp.evaluate((a) => [getComputedStyle(a).color, getComputedStyle(a.closest("[data-testid=nudge] > *")!).color]);
+  expect(colours[0]).toBe(colours[1]);
+  expect(colours[0]).not.toBe(await token(page, "primary"));
 
   const member = await browser.newPage();
   await signUp(member, `nud${Date.now()}`);

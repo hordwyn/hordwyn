@@ -153,7 +153,7 @@ fn OverviewBody() -> impl IntoView {
                         } else {
                             view! { <AuditTable entries=o.recent.clone() caption=t("admin-overview-recent")/> }.into_any()
                         }}
-                        <p class="mt-2 text-sm"><a class="underline" href="/admin/audit">{t("admin-overview-audit")}</a></p>
+                        <p class="mt-2 text-sm"><a class="text-primary underline" href="/admin/audit">{t("admin-overview-audit")}</a></p>
                     </section>
                     <BrandCard b=o.brand.clone()/>
                 </div>
@@ -179,7 +179,7 @@ fn HealthRow(h: HealthRowDto) -> impl IntoView {
                 {stale_note(&h).map(|s| view! { <span data-testid="health-stale" class="block font-medium text-foreground">{s}</span> })}
             </span>
             {health_action(&h.id).map(|href| view! {
-                <a class="text-sm underline" href=href aria-label=label>{t("admin-overview-details")}</a>
+                <a class="text-sm text-primary underline" href=href aria-label=label>{t("admin-overview-details")}</a>
             })}
         </li>
     }
@@ -201,7 +201,7 @@ fn RecentSignups(users: Vec<AdminUserDto>) -> impl IntoView {
                 </li>
             }).collect_view()}
         </ul>
-        <p class="mt-2 text-sm"><a class="underline" href="/admin/users">{t("admin-nav-users")}</a></p>
+        <p class="mt-2 text-sm"><a class="text-primary underline" href="/admin/users">{t("admin-nav-users")}</a></p>
     }
 }
 

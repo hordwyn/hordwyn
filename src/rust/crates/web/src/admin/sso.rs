@@ -573,8 +573,8 @@ fn TestPanel(p: OidcProviderDto, data: Data) -> impl IntoView {
             <Outcome message=error/>
             {move || result.get().map(|r| view! { <TestOutcome r=r/> })}
             <p class="flex flex-wrap gap-4 text-sm">
-                <a class="underline" rel="external" href=probe_url(&slug, "probe_silent")>{t("admin-sso-probe-silent")}</a>
-                <a class="underline" rel="external" href=probe_url(&slug, "probe_max_age")>{t("admin-sso-probe-max-age")}</a>
+                <a class="text-primary underline" rel="external" href=probe_url(&slug, "probe_silent")>{t("admin-sso-probe-silent")}</a>
+                <a class="text-primary underline" rel="external" href=probe_url(&slug, "probe_max_age")>{t("admin-sso-probe-max-age")}</a>
             </p>
             <p class="text-sm text-muted-foreground">{t("admin-sso-probe-hint")}</p>
         </section>

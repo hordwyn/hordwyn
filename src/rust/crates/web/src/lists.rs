@@ -65,7 +65,8 @@ pub fn Lists() -> impl IntoView {
     view! {
         <PageTitle text=t("lists-title")/>
         <Lead text=t("lists-lead")/>
-        <div class="grid max-w-5xl gap-4">
+        // a grid page: the cards use the whole 96 rem column (DEC-541, review OT2D-2)
+        <div class="grid gap-4">
             <Button class="w-fit" on:click=move |_| new.set(true)>{t("lists-new-open")}</Button>
             {loaded(data, move |ov: ListsOverviewDto| view! { <Overview ov=ov/> })}
         </div>
@@ -114,12 +115,16 @@ fn CardsOr(lists: Vec<ListCardDto>, empty: &'static str) -> impl IntoView {
 }
 
 /// List cards (design.md 6.5): cover strip, count and kinds, visibility, owner, freshness.
+/// A fourth column where the cards have 80 rem or more to themselves (the Lists page on a
+/// wide screen, DEC-541); on a person's page they sit in a narrower column and stay at three.
 #[component]
 pub(crate) fn ListCards(lists: Vec<ListCardDto>) -> impl IntoView {
     view! {
-        <ul class="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label=t("lists-title")>
-            {lists.into_iter().map(|l| view! { <ListCard l=l/> }).collect_view()}
-        </ul>
+        <div class="@container mt-2">
+            <ul class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 @7xl:grid-cols-4" aria-label=t("lists-title")>
+                {lists.into_iter().map(|l| view! { <ListCard l=l/> }).collect_view()}
+            </ul>
+        </div>
     }
 }
 
@@ -224,7 +229,7 @@ pub fn ListPage() -> impl IntoView {
     let target = expect_context::<crate::palette::PaletteScope>().0;
     on_cleanup(move || target.set(None));
     view! {
-        <p class="mb-2 text-sm"><a href="/lists" class="underline">{t("lists-back")}</a></p>
+        <p class="mb-2 text-sm"><a href="/lists" class="text-primary underline">{t("lists-back")}</a></p>
         <div class="grid max-w-4xl gap-4">
             <Outcome message=page.outcome/>
             <p role="status" class="sr-only" data-testid="lst-status">{move || page.status.get()}</p>
@@ -625,8 +630,8 @@ fn SharedMissing() -> impl IntoView {
             <PageTitle text=t("shared-list-missing")/>
             <p class="text-muted-foreground">{t("shared-list-missing-lead")}</p>
             <p class="mt-6 flex justify-center gap-4">
-                <a href="/" class="underline">{t("nav-home")}</a>
-                {cfg.signed_in.then(|| view! { <a href="/lists" class="underline">{t("lists-title")}</a> })}
+                <a href="/" class="text-primary underline">{t("nav-home")}</a>
+                {cfg.signed_in.then(|| view! { <a href="/lists" class="text-primary underline">{t("lists-title")}</a> })}
             </p>
         </section>
     }

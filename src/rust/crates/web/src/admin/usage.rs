@@ -64,7 +64,7 @@ pub fn UsageMeasurement(settings: Vec<SettingDto>) -> impl IntoView {
                     Err(e) => view! { <p role="alert" class="text-sm text-destructive-text">{e}</p> }.into_any(),
                 })}
                 <p class="text-sm">
-                    <a class="underline" href="/api/v1/admin/usage.csv" download="usage.csv">{t("admin-usage-csv")}</a>
+                    <a class="text-primary underline" href="/api/v1/admin/usage.csv" download="usage.csv">{t("admin-usage-csv")}</a>
                 </p>
             </div>
         </Disclosure>

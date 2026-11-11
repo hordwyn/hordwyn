@@ -529,23 +529,29 @@ impl Server {
     }
 }
 
-/// design.md 7.4: warn when the brand accent pair is below WCAG AA (4.5:1).
+/// design.md 7.4, DEC-540: warn about every theme colour pair (accent, soft surfaces, group
+/// tints) below WCAG AA: 4.5:1 for text (1.4.3), 3:1 for bars and markers (1.4.11).
 fn log_contrast(brand: &brand::Brand) {
     for f in brand.contrast_findings() {
         if let Some(ratio) = f.ratio {
             tracing::warn!(
                 theme = f.theme,
-                primary = %f.primary,
+                foreground_token = %f.foreground_token,
+                background_token = %f.background_token,
                 foreground = %f.foreground,
+                background = %f.background,
                 ratio = format!("{ratio:.2}"),
-                "brand primary/primary-foreground contrast is below 4.5:1 (WCAG 1.4.3)"
+                required = f.required,
+                "brand theme contrast is below the WCAG AA minimum (1.4.3 text 4.5:1, 1.4.11 non-text 3:1)"
             );
         } else {
             tracing::warn!(
                 theme = f.theme,
-                primary = %f.primary,
+                foreground_token = %f.foreground_token,
+                background_token = %f.background_token,
                 foreground = %f.foreground,
-                "brand primary/primary-foreground contrast cannot be checked: use hex, rgb() or oklch()"
+                background = %f.background,
+                "brand theme contrast cannot be checked: use a hex value or the rgb or oklch notation"
             );
         }
     }

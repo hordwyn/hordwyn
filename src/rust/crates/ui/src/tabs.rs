@@ -109,7 +109,7 @@ pub fn TabsTrigger(#[prop(into)] value: String, children: Children) -> impl Into
             class=move || cn(&[
                 "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 \
                  text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                if selected.get() { "bg-background text-foreground shadow" } else { "" },
+                if selected.get() { "bg-background text-primary shadow" } else { "" },
             ])
         >
             {children()}

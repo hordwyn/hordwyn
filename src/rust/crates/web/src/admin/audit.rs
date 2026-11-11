@@ -90,7 +90,7 @@ fn AuditBody() -> impl IntoView {
                 </select>
             </div>
             <Button r#type="submit">{t("admin-audit-apply")}</Button>
-            <a class="inline-flex h-9 items-center text-sm underline" href=move || filter.get().csv_href()>{t("admin-audit-csv")}</a>
+            <a class="inline-flex h-9 items-center text-sm text-primary underline" href=move || filter.get().csv_href()>{t("admin-audit-csv")}</a>
         </form>
         {loaded(rows, |page| if page.entries.is_empty() {
             view! { <p class="text-sm text-muted-foreground">{t("admin-audit-none")}</p> }.into_any()

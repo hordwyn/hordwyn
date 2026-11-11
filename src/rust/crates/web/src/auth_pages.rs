@@ -91,7 +91,7 @@ pub(crate) fn AuthFrame(children: Children) -> impl IntoView {
             .into_iter()
             .map(|(key, url)| {
                 let label = legal_label(&i18n, &key);
-                view! { <li><a href=url class="underline">{label}</a></li> }
+                view! { <li><a href=url class="text-primary underline">{label}</a></li> }
             })
             .collect_view();
         view! {
@@ -565,7 +565,7 @@ pub(crate) fn SignUpFields(
                 <SubmitButton pending=submit.pending() label=submit_label/>
                 {(!wizard).then(|| view! {
                     <p class="text-sm text-muted-foreground">
-                        {have} " " <A href="/sign-in" attr:class="underline">{link}</A>
+                        {have} " " <A href="/sign-in" attr:class="text-primary underline">{link}</A>
                     </p>
                 })}
             </form>

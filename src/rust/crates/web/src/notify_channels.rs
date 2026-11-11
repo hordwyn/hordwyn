@@ -534,6 +534,7 @@ fn kind_options() -> Vec<SegmentedOption> {
             icon: None,
             controls: None,
             lang: None,
+            tint: None,
         })
         .collect()
 }

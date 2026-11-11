@@ -103,8 +103,8 @@ pub fn SideNav(
                                         class="flex min-h-9 items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground \
                                                hover:bg-accent hover:text-accent-foreground focus-visible:outline-none \
                                                focus-visible:ring-2 focus-visible:ring-ring \
-                                               aria-[current=page]:bg-secondary aria-[current=page]:font-medium \
-                                               aria-[current=page]:text-foreground"
+                                               aria-[current=page]:bg-primary-soft aria-[current=page]:font-medium \
+                                               aria-[current=page]:text-primary"
                                     >
                                         {i.icon.map(|ic| view! { <Icon name=ic class="size-5"/> })}
                                         <span class="flex-1">{i.label}</span>
@@ -139,9 +139,16 @@ impl TabBarAction {
     }
 }
 
-const TAB: &str = "flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-md px-1 text-xs \
+/// A tab of the [`TabBar`]. The current one is told apart by more than hue and weight
+/// (accent against grey is about 1.1:1 in luminance): a 2 px bar in the accent sits above
+/// it, which has the 3:1 of the checked pair `primary` on `background` against the bar
+/// around it (WCAG 1.4.1, 1.4.11; review OT2D-4).
+const TAB: &str = "relative flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-md px-1 text-xs \
     text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring \
-    aria-[current=page]:font-semibold aria-[current=page]:text-foreground";
+    aria-[current=page]:font-semibold aria-[current=page]:text-primary \
+    aria-[current=page]:before:absolute aria-[current=page]:before:inset-x-3 \
+    aria-[current=page]:before:top-0 aria-[current=page]:before:h-0.5 \
+    aria-[current=page]:before:rounded-full aria-[current=page]:before:bg-primary";
 
 fn tab_link(i: NavItem, current: Signal<String>) -> impl IntoView {
     let is_current = current_attr(current, i.href.clone());

@@ -62,6 +62,10 @@ pub struct SegmentedOption {
     pub controls: Option<String>,
     /// Language of the label when it differs from the page (`lang`, WCAG 3.1.2).
     pub lang: Option<String>,
+    /// A marker dot in the tint before the label (group switchers, DEC-540). Decoration:
+    /// the label names the option. Shown from 30 rem up: on a phone the five groups with
+    /// their dots are wider than the screen (review OT2D-1).
+    pub tint: Option<crate::Tint>,
 }
 
 impl SegmentedOption {
@@ -73,6 +77,7 @@ impl SegmentedOption {
             icon: None,
             controls: None,
             lang: None,
+            tint: None,
         }
     }
 
@@ -81,6 +86,12 @@ impl SegmentedOption {
     #[must_use]
     pub fn lang(mut self, lang: impl Into<String>) -> Self {
         self.lang = Some(lang.into());
+        self
+    }
+
+    #[must_use]
+    pub const fn tint(mut self, tint: crate::Tint) -> Self {
+        self.tint = Some(tint);
         self
     }
 
@@ -190,12 +201,13 @@ pub fn Segmented(
                              transition-colors focus-visible:outline-none focus-visible:ring-2 \
                              focus-visible:ring-ring cursor-pointer",
                             if selected.get() {
-                                "bg-background text-foreground shadow-sm"
+                                "bg-background text-primary shadow-sm"
                             } else {
                                 "text-muted-foreground hover:text-foreground"
                             },
                         ])
                     >
+                        {o.tint.map(|t| view! { <span aria-hidden="true" class=cn(&["size-2 shrink-0 rounded-full max-[30rem]:hidden", t.solid()])></span> })}
                         {o.icon.map(|i| view! { <Icon name=i/> })}
                         {o.label}
                     </button>

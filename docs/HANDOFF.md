@@ -13,6 +13,7 @@ rules (section 2, verbatim), `docs/DECISIONS.md`, `docs/design/DESIGN.md`, the U
 
 **Update 2026-11-10 (after the restart), this wins over the threads below:**
 
+- **ot2d done** (tag `ot2d`): violet accent and group tints from the brand config, 96 rem grid pages / 80 rem record pages, colour guard over ui, web and server (DEC-580..586); ci 931 passed / 0 failed / 4 ignored, e2e 152 passed, 0 panics. Owner preview of the screenshots: https://claude.ai/artifact/HYBvieoz97P91tQo8tU3GV. Noticed for later: palette key hints overlap a wrapped title at 390 px; `/stats` marks Home as current in the top bar. Next: ot2e.
 - **ot2c done** (tag `ot2c`): stats led by time, hero tile with piggy-bank, four time tiles, "Also" line (DEC-572..579); ci 904 passed / 0 failed / 4 ignored, e2e 147 passed, 0 panics. Load run skipped by DEC-579 (no SQL change). Next: ot2d.
 - **ot2b done** (tag `ot2b`): centered log dialog, mounted outside the refetched view (DEC-566..571); ci 886 passed / 0 failed / 4 ignored, e2e 145 passed, 0 panics. Noticed, not built: the item page does not refetch on entry changes from another tab or device (DEC-569). Next: ot2c.
 - **ot2a done** (tag `ot2a`, fc1bc15): item page actions, labels, counts; review applied (DEC-553..564). Verified with the server tests run on their own (106 passed) because the full test build no longer fits the 57 GB disk; e2e 139 passed. TBIN done (one server test binary `it`, DEC-565): `cargo xtask ci` fits again: 877 passed, 0 failed, 4 ignored; e2e 139 passed, 0 panics. Next: ot2b.

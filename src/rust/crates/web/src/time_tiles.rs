@@ -7,7 +7,7 @@
 
 use contracts::{AmountsDto, StatsTotalsDto};
 use leptos::prelude::*;
-use ui::{Icon, IconName};
+use ui::{Icon, IconName, Tint, cn};
 
 use crate::charts::{Measure, hours_of};
 use crate::i18n::{I18n, use_i18n};
@@ -26,6 +26,10 @@ pub struct Tile {
     pub big: String,
     /// "164 movies watched".
     pub small: String,
+    /// The kind's icon and its group's tint (OT-13); the label names the kind, so the
+    /// colour never stands alone.
+    pub icon: IconName,
+    pub tint: Tint,
 }
 
 /// The words of the block.
@@ -152,6 +156,17 @@ pub fn banked(i: &I18n, stats: &StatsTotalsDto) -> Banked {
         label: i.t(label),
         big,
         small,
+        icon: match id {
+            "movies" => IconName::KindMovie,
+            "shows" => IconName::KindShow,
+            "books" => IconName::KindBook,
+            _ => IconName::KindVideoGame,
+        },
+        tint: match id {
+            "movies" | "shows" => Tint::Watch,
+            "books" => Tint::Read,
+            _ => Tint::Play,
+        },
     };
     let tiles = vec![
         tile(
@@ -218,8 +233,8 @@ pub fn TimeBanked(stats: StatsTotalsDto, #[prop(default = 3)] level: u8) -> impl
     view! {
         <div class="flex flex-col gap-3" data-testid="banked">
             <section aria-labelledby="st-hero-title" data-testid="banked-hero"
-                class="flex items-center gap-4 rounded-xl border border-border p-4 md:w-1/2">
-                <span class="flex size-16 shrink-0 items-center justify-center rounded-full bg-muted">
+                class="flex items-center gap-4 rounded-xl border border-border bg-primary-soft p-4 md:w-1/2">
+                <span class="flex size-16 shrink-0 items-center justify-center rounded-full bg-background text-primary">
                     <Icon name=IconName::PiggyBank class="size-10"/>
                 </span>
                 <div class="min-w-0">
@@ -230,8 +245,11 @@ pub fn TimeBanked(stats: StatsTotalsDto, #[prop(default = 3)] level: u8) -> impl
             </section>
             <dl class="grid grid-cols-2 gap-3 md:grid-cols-4">
                 {b.tiles.into_iter().map(|t| view! {
-                    <div class="rounded-xl border border-border p-4" data-testid=format!("banked-tile-{}", t.id)>
-                        <dt class="text-sm font-medium text-muted-foreground">{t.label}</dt>
+                    <div class=cn(&["rounded-xl border border-border p-4", t.tint.soft()]) data-testid=format!("banked-tile-{}", t.id)>
+                        <dt class="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                            <Icon name=t.icon class=t.tint.text()/>
+                            {t.label}
+                        </dt>
                         <dd class="text-xl font-semibold tabular-nums">{t.big}</dd>
                         <dd class="text-sm text-muted-foreground tabular-nums">{t.small}</dd>
                     </div>
@@ -386,6 +404,26 @@ mod tests {
             [
                 "Reading is counted in pages.",
                 "Titles without a known length count as 0."
+            ]
+        );
+    }
+
+    #[test]
+    fn every_tile_has_the_icon_and_the_tint_of_its_group() {
+        // OT-13: the tint never stands alone, the tile names its kind and shows its icon
+        let en = I18n::new("en", BTreeMap::new());
+        let b = banked(&en, &full());
+        assert_eq!(
+            b.tiles.iter().map(|t| t.tint).collect::<Vec<_>>(),
+            [Tint::Watch, Tint::Watch, Tint::Read, Tint::Play]
+        );
+        assert_eq!(
+            b.tiles.iter().map(|t| t.icon).collect::<Vec<_>>(),
+            [
+                IconName::KindMovie,
+                IconName::KindShow,
+                IconName::KindBook,
+                IconName::KindVideoGame
             ]
         );
     }

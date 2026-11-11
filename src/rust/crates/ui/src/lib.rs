@@ -38,6 +38,7 @@ mod steps;
 mod table;
 mod tabs;
 mod theme;
+mod tint;
 mod toast;
 mod tooltip;
 
@@ -74,6 +75,7 @@ pub use steps::{Steps, TaskItem, TaskList};
 pub use table::{Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow};
 pub use tabs::{Tabs, TabsContent, TabsList, TabsTrigger};
 pub use theme::ThemeToggle;
+pub use tint::Tint;
 pub use toast::{
     ACTION_TOAST_SECS, TOAST_SECS, Toast, ToastAction, ToastVariant, Toaster, Toasts,
     provide_toasts, use_toasts,

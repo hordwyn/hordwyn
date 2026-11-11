@@ -201,18 +201,31 @@ impl Brand {
         self.font_assets.iter().find(|a| a.url == url)
     }
 
-    /// Accent pairs (`primary` / `primary-foreground`) below WCAG AA (4.5:1) or not checkable,
-    /// per theme. The server logs them as warnings at start-up (design.md 7.4).
+    /// Every colour pair the stylesheet and the components rely on, per theme, with its WCAG
+    /// ratio: the accent pair, the accent on the page surfaces and on its soft surface, and
+    /// per group the tint and the text on its soft surface (DEC-540). Tokens the brand does
+    /// not set take the stylesheet fallbacks.
     #[must_use]
-    pub fn contrast_findings(&self) -> Vec<contrast::ContrastFinding> {
-        contrast::findings(&self.theme, &self.theme_dark)
+    pub fn contrast_checks(&self) -> Vec<contrast::PairCheck> {
+        contrast::checks(&self.theme, &self.theme_dark)
+    }
+
+    /// The pairs of [`Brand::contrast_checks`] below their threshold (4.5:1 for text, WCAG
+    /// 1.4.3; 3:1 for bars and markers, 1.4.11) or not checkable. The server logs them as
+    /// warnings at start-up (design.md 7.4).
+    #[must_use]
+    pub fn contrast_findings(&self) -> Vec<contrast::PairCheck> {
+        self.contrast_checks()
+            .into_iter()
+            .filter(contrast::PairCheck::fails)
+            .collect()
     }
 
     /// The accent pair (`primary` / `primary-foreground`) of the light and the dark theme
     /// with its contrast ratio, defaults filled in (the admin Branding page, design.md 6.13).
     #[must_use]
     pub fn accent_pairs(&self) -> Vec<contrast::ContrastFinding> {
-        contrast::pairs(&self.theme, &self.theme_dark, true)
+        contrast::pairs(&self.theme, &self.theme_dark)
     }
 }
 

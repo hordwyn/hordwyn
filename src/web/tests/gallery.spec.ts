@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { expectNoA11yViolations } from "./helpers";
+import { contrast, expectNoA11yViolations, token } from "./helpers";
 
 async function openGallery(page: Page) {
   await page.goto("/dev/gallery");
@@ -193,7 +193,7 @@ test("chips, segmented control, tab bar action and copy field", async ({ page, c
   const grid = page.getByRole("radiogroup", { name: "View" }).getByRole("radio", { name: "Grid" });
   await grid.focus();
   await page.keyboard.press("ArrowRight");
-  await expect(page.getByRole("radio", { name: "List" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("radiogroup", { name: "View" }).getByRole("radio", { name: "List" })).toHaveAttribute("aria-checked", "true");
   await page.getByRole("tab", { name: "Board games" }).click();
   await expect(page.getByRole("tabpanel", { name: "Board games" })).toBeVisible();
   await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Add" }).click();
@@ -202,4 +202,45 @@ test("chips, segmented control, tab bar action and copy field", async ({ page, c
   await expect(page.locator("#g-token").locator("..").locator("..").getByRole("status")).toHaveText(
     /Copied|Press Ctrl\+C to copy/,
   );
+});
+
+test("tints: every sample names its tokens and keeps its contrast in both themes", async ({ page }) => {
+  // review OT2D-10: the accent and the four group tints side by side, with the group switcher
+  await openGallery(page);
+  const look = (target: ReturnType<Page["locator"]>) =>
+    target.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { background: s.backgroundColor, colour: s.color, fill: s.fill };
+    });
+  const samples = [
+    ["neutral", "muted-foreground", "muted"],
+    ["accent", "primary", "primary-soft"],
+    ["watch", "group-watch", "group-watch-soft"],
+    ["read", "group-read", "group-read-soft"],
+    ["listen", "group-listen", "group-listen-soft"],
+    ["play", "group-play", "group-play-soft"],
+  ];
+  for (const theme of ["light", "dark"]) {
+    if (theme === "dark") {
+      await page.getByRole("main").getByRole("button", { name: "Switch to dark theme" }).click();
+      await expect(page.locator("html")).toHaveClass(/dark/);
+    }
+    for (const [name, tint, soft] of samples) {
+      const card = page.getByTestId(`g-tint-${name}`);
+      expect((await look(card.locator('[data-part="marker"]'))).background, `${theme} ${name} marker`).toBe(await token(page, tint));
+      const surface = card.locator('[data-part="soft"]');
+      const s = await look(surface);
+      expect(s.background, `${theme} ${name} soft`).toBe(await token(page, soft));
+      expect(await contrast(page, s.colour, s.background), `${theme} ${name} text`).toBeGreaterThanOrEqual(4.5);
+      expect(await contrast(page, (await look(surface.locator("svg"))).colour, s.background), `${theme} ${name} icon`).toBeGreaterThanOrEqual(3);
+      const bar = card.locator('svg[role="img"] rect').nth(1);
+      expect((await look(bar)).fill, `${theme} ${name} bar`).toBe(await token(page, tint));
+    }
+    // the group switcher: a marker for each of the four groups, none for "All"
+    const scope = page.getByRole("radiogroup", { name: "Tint group" });
+    await expect(scope.getByRole("radio", { name: "All" }).locator("span[aria-hidden]")).toHaveCount(0);
+    expect((await look(scope.getByRole("radio", { name: "Listen" }).locator("span[aria-hidden]"))).background).toBe(await token(page, "group-listen"));
+    const link = await look(page.getByRole("link", { name: "a text link" }));
+    expect(link.colour, `${theme} link`).toBe(await token(page, "primary"));
+  }
 });

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { expectNoA11yViolations, expectReflow, hydrated, signUp, importDone } from "./helpers";
+import { brandValue, contrast, expectNoA11yViolations, expectReflow, hydrated, signUp, importDone, token } from "./helpers";
 
 // UX phase 1 Home, Stats and History (design.md 6.1, 6.6; addendum-1 1.3): Home sections and
 // the activity link, the next step with Undo, Stats tabs with the table equivalent, History
@@ -357,4 +357,126 @@ test("home, stats and history have no axe violations in both themes at 1280 and 
       }
     }
   }
+});
+
+test("colour: the accent and the group tints of the brand reach the tiles, the kind badge, the history icon and the charts in both themes", async ({ page }) => {
+  // OT-13 (DEC-540): the values come from the brand file, the page only names tokens. A tint
+  // never stands alone (the tile has its icon and name), and the pairs on screen keep
+  // 4.5:1 for text and 3:1 for icons and bars (WCAG 1.4.3, 1.4.11).
+  test.setTimeout(180_000);
+  await signUp(page, `tint${Date.now()}`, "Tina");
+  const ids = await seed(page);
+  // the brand file the server runs with, never a pinned value (review OT2D-9)
+  const brand = {
+    light: { primary: brandValue("theme", "primary"), watch: brandValue("theme", "group-watch") },
+    dark: { primary: brandValue("theme_dark", "primary"), watch: brandValue("theme_dark", "group-watch") },
+  };
+  const look = (target: ReturnType<Page["locator"]>) =>
+    target.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { background: s.backgroundColor, colour: s.color, fill: s.fill };
+    });
+  for (const theme of ["light", "dark"] as const) {
+    await page.evaluate((t) => localStorage.setItem("app-theme", t), theme);
+    await open(page, "/");
+    await (theme === "dark" ? expect(page.locator("html")).toHaveClass(/dark/) : expect(page.locator("html")).not.toHaveClass(/dark/));
+    const root = (name: string) => page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(`--${n}`).trim(), name);
+    // a value the brand sets reaches the page as written; one it leaves out stays a fallback
+    for (const [name, value] of [["primary", brand[theme].primary], ["group-watch", brand[theme].watch]] as const) {
+      if (value !== undefined) {
+        expect(await root(name), `${theme} ${name}`).toBe(value);
+      }
+    }
+
+    // the hero tile sits on the accent's soft surface, its icon is in the accent
+    const hero = page.getByTestId("banked-hero");
+    expect((await look(hero)).background).toBe(await token(page, "primary-soft"));
+    expect((await look(hero.locator("svg").first())).colour).toBe(await token(page, "primary"));
+    // the four tiles: soft surface and icon of their group, text in the normal colours
+    for (const [tile, group] of [["movies", "watch"], ["shows", "watch"], ["books", "read"], ["games", "play"]]) {
+      const box = page.getByTestId(`banked-tile-${tile}`);
+      const surface = (await look(box)).background;
+      expect(surface, `${theme} ${tile} surface`).toBe(await token(page, `group-${group}-soft`));
+      const icon = box.locator("dt svg");
+      await expect(icon).toHaveAttribute("aria-hidden", "true");
+      expect((await look(icon)).colour, `${theme} ${tile} icon`).toBe(await token(page, `group-${group}`));
+      expect(await contrast(page, (await look(icon)).colour, surface), `${theme} ${tile} icon contrast`).toBeGreaterThanOrEqual(3);
+      for (const part of ["dt", "dd >> nth=0", "dd >> nth=1"]) {
+        expect(await contrast(page, (await look(box.locator(part))).colour, surface), `${theme} ${tile} ${part}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+    // a text link on the page takes the accent and keeps its underline (DEC-584)
+    const allHistory = page.getByRole("main").getByRole("link", { name: "All history" });
+    const link = await allHistory.evaluate((a) => ({ colour: getComputedStyle(a).color, line: getComputedStyle(a).textDecorationLine }));
+    expect(link.colour, `${theme} link`).toBe(await token(page, "primary"));
+    expect(link.line).toBe("underline");
+    expect(await contrast(page, link.colour, await token(page, "background"))).toBeGreaterThanOrEqual(4.5);
+    // the active navigation item takes the accent on its soft surface
+    const home = page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Home" });
+    const nav = await look(home);
+    expect(nav.colour).toBe(await token(page, "primary"));
+    expect(nav.background).toBe(await token(page, "primary-soft"));
+    expect(await contrast(page, nav.colour, nav.background)).toBeGreaterThanOrEqual(4.5);
+
+    // the item page: the kind badge on its group's soft surface, normal text, tinted icon
+    await open(page, `/items/${ids["Harbour Lights"]}`);
+    const badge = page.getByTestId("ip-kind");
+    await expect(badge).toHaveText(/Movie/);
+    const b = await look(badge);
+    expect(b.background, `${theme} kind badge`).toBe(await token(page, "group-watch-soft"));
+    expect(b.colour).toBe(await token(page, "foreground"));
+    expect((await look(badge.locator("svg"))).colour).toBe(await token(page, "group-watch"));
+
+    // History: the row's kind icon is in its group's tint
+    await open(page, "/history");
+    const bookRow = rows(page).filter({ hasText: "The Glass Ferry" }).first();
+    expect((await look(bookRow.locator("svg").first())).colour, `${theme} history icon`).toBe(await token(page, "group-read"));
+
+    // Stats: all groups together are drawn in the accent, a group's tab in its tint, and the
+    // group tabs carry their marker
+    await open(page, "/stats");
+    const column = page.locator('#st-panel figure svg[role="img"] rect:not(.fill-transparent)').first();
+    await expect(column).toBeVisible();
+    expect((await look(column)).fill, `${theme} all groups`).toBe(await token(page, "primary"));
+    const readTab = page.getByRole("tab", { name: "Read" });
+    expect((await look(readTab.locator("span[aria-hidden]"))).background).toBe(await token(page, "group-read"));
+    await expect(page.getByRole("tab", { name: "All" }).locator("span[aria-hidden]")).toHaveCount(0);
+    await readTab.click();
+    await expect(page).toHaveURL(/group=read/);
+    await expect(readTab).toHaveAttribute("aria-selected", "true");
+    await expect.poll(async () => (await look(column)).fill, { message: `${theme} read tab` }).toBe(await token(page, "group-read"));
+    expect(await contrast(page, (await look(column)).fill, await token(page, "card"))).toBeGreaterThanOrEqual(3);
+  }
+});
+
+test("stats at 390 px: the month labels under the columns do not touch", async ({ page }) => {
+  // review OT2D-13: "Feb 2026Apr 2026Jun 2026" ran together on a phone
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 390, height: 800 });
+  await signUp(page, `axis${Date.now()}`, "Axa");
+  const ids = await seed(page);
+  // twelve months on the axis: every second one is named, six labels
+  const now = new Date();
+  const month = (back: number) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 2, 12)).toISOString();
+  await log(page, ids["Milk Teeth"], { type: "finished" }, month(11));
+  await log(page, ids["Harbour Lights"], { type: "finished" }, month(0));
+  await open(page, "/stats");
+  const chart = page.locator('#st-panel figure svg[role="img"]').first();
+  await expect(chart).toBeVisible();
+  await expect(chart.locator("g")).toHaveCount(12);
+  const boxes = await chart.locator("text").evaluateAll((labels) =>
+    labels
+      .map((l) => l.getBoundingClientRect())
+      .filter((r) => r.width > 0)
+      .map((r) => ({ left: r.left, right: r.right }))
+      .sort((a, b) => a.left - b.left),
+  );
+  expect(boxes.length).toBeGreaterThanOrEqual(3);
+  for (let i = 1; i < boxes.length; i += 1) {
+    expect(boxes[i].left - boxes[i - 1].right, `gap before label ${i + 1}`).toBeGreaterThanOrEqual(4);
+  }
+  // on a wide screen every second month is named again
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const wide = await chart.locator("text").evaluateAll((labels) => labels.filter((l) => l.getBoundingClientRect().width > 0).length);
+  expect(wide).toBe(6);
 });

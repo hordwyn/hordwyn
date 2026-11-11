@@ -40,6 +40,22 @@
   --warning-soft: var(--color-amber-50);
   --info-soft: var(--color-sky-50);
   --destructive-soft: var(--color-red-50);
+  /* OT-13 (DEC-540): the accent's soft surface and one tint per activity group. Neutral
+     here; a brand sets them in [theme] / [theme_dark] and the start-up contrast check reads
+     them (crates/brand/src/contrast.rs, which mirrors these fallbacks; its test
+     `the_fallbacks_are_those_of_the_stylesheet` reads this file) */
+  --primary-soft: var(--secondary);
+  --group-watch: var(--muted-foreground);
+  --group-watch-soft: var(--muted);
+  --group-read: var(--muted-foreground);
+  --group-read-soft: var(--muted);
+  --group-listen: var(--muted-foreground);
+  --group-listen-soft: var(--muted);
+  --group-play: var(--muted-foreground);
+  --group-play-soft: var(--muted);
+  /* the veil behind dialogs and sheets, the same in both themes (a token, so component
+     code names no colour: review OT2D-3) */
+  --scrim: rgb(0 0 0 / 0.6);
   /* elevation: 1 cards, 2 popovers and menus, 3 dialogs and sheets */
   --shadow-1: 0 1px 2px rgb(9 9 11 / 0.06);
   --shadow-2: 0 4px 12px rgb(9 9 11 / 0.1);
@@ -87,6 +103,16 @@
   --warning-soft: #2e1a05;
   --info-soft: #052235;
   --destructive-soft: #2e0a0a;
+  /* the same fallbacks again, so they follow the dark tokens wherever `.dark` is set */
+  --primary-soft: var(--secondary);
+  --group-watch: var(--muted-foreground);
+  --group-watch-soft: var(--muted);
+  --group-read: var(--muted-foreground);
+  --group-read-soft: var(--muted);
+  --group-listen: var(--muted-foreground);
+  --group-listen-soft: var(--muted);
+  --group-play: var(--muted-foreground);
+  --group-play-soft: var(--muted);
   /* dark: shadows go to 50-60% black, borders carry the edge */
   --shadow-1: 0 1px 2px rgb(0 0 0 / 0.5);
   --shadow-2: 0 4px 12px rgb(0 0 0 / 0.5);
@@ -102,6 +128,15 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-group-watch: var(--group-watch);
+  --color-group-watch-soft: var(--group-watch-soft);
+  --color-group-read: var(--group-read);
+  --color-group-read-soft: var(--group-read-soft);
+  --color-group-listen: var(--group-listen);
+  --color-group-listen-soft: var(--group-listen-soft);
+  --color-group-play: var(--group-play);
+  --color-group-play-soft: var(--group-play-soft);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -121,6 +156,7 @@
   --color-warning-soft: var(--warning-soft);
   --color-info: var(--info);
   --color-info-soft: var(--info-soft);
+  --color-scrim: var(--scrim);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

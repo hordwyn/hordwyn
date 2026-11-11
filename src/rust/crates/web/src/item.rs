@@ -328,6 +328,10 @@ fn ItemView(
         .unwrap_or_default();
     let loading = item.state == "stub";
     let square = crate::library_state::square_art(&item.kind);
+    // the kind badge takes its group's tint (OT-13)
+    let tint = kind
+        .as_ref()
+        .map_or(ui::Tint::Neutral, |k| crate::tint::group_tint(&k.group));
     let play_title = page
         .next_step
         .as_ref()
@@ -368,7 +372,7 @@ fn ItemView(
             <div class="flex min-w-0 flex-col gap-5">
                 <header class="grid gap-1">
                     <div class="flex flex-wrap gap-1.5">
-                        <Badge variant=BadgeVariant::Secondary><Icon name=crate::library::kind_icon(&item.kind)/> {kind_label(&item.kind)}</Badge>
+                        <Badge variant=BadgeVariant::Tint(tint) attr:data-testid="ip-kind"><Icon name=crate::library::kind_icon(&item.kind) class=tint.text()/> {kind_label(&item.kind)}</Badge>
                         {item.year.map(|y| view! { <Badge variant=BadgeVariant::Outline>{y.to_string()}</Badge> })}
                         {pill.map(|p| view! { <Badge attr:data-testid="ip-status">{p}</Badge> })}
                     </div>
@@ -1080,7 +1084,7 @@ fn Attribution(page: ItemPageDto) -> impl IntoView {
                 <p>
                     {use_i18n().t_args("item-source", &[("name", s.name.clone().into())])} " - "
                     // the attribution text is the provider's own wording, in English
-                    <span lang="en">{s.text.clone()}</span> " " <a href=s.url.clone() class="underline" rel="noopener">{s.url.clone()}</a>
+                    <span lang="en">{s.text.clone()}</span> " " <a href=s.url.clone() class="text-primary underline" rel="noopener">{s.url.clone()}</a>
                 </p>
             }).collect_view()}
         </footer>

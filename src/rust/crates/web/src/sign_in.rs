@@ -197,7 +197,7 @@ fn SignInBody(
     };
     // the break-glass page is linked from the outage notice and, in auto mode, here
     let footer = (page.auto && !outage).then(|| view! {
-        <p class="mt-4 text-sm"><a class="underline" href="/sign-in/local">{t("signin-break-glass")}</a></p>
+        <p class="mt-4 text-sm"><a class="text-primary underline" href="/sign-in/local">{t("signin-break-glass")}</a></p>
     });
     view! {
         {notice}
@@ -296,7 +296,7 @@ fn PasswordSignIn(
             <FormAlert error=f.form_error/>
             {sign_up.then(|| view! {
                 <p class="text-sm text-muted-foreground">
-                    {have.clone()} " " <A href="/sign-up" attr:class="underline">{link.clone()}</A>
+                    {have.clone()} " " <A href="/sign-up" attr:class="text-primary underline">{link.clone()}</A>
                 </p>
             })}
         </form>
@@ -397,7 +397,7 @@ fn LinkGone(code: String) -> impl IntoView {
     };
     view! {
         <Alert variant=AlertVariant::Destructive role=AlertRole::Alert class="mb-4">{t(key)}</Alert>
-        <a class="underline" href="/sign-in">{t("signin-link-back")}</a>
+        <a class="text-primary underline" href="/sign-in">{t("signin-link-back")}</a>
     }
 }
 
@@ -419,7 +419,7 @@ fn LinkForm(p: OidcLinkPendingDto) -> impl IntoView {
             } else {
                 view! { <Alert variant=AlertVariant::Info role=AlertRole::None class="mb-4">{t("signin-link-no-password")}</Alert> }.into_any()
             }}
-            <a class="underline" href="/sign-in">{t("signin-link-back")}</a>
+            <a class="text-primary underline" href="/sign-in">{t("signin-link-back")}</a>
         }
         .into_any();
     }
@@ -464,7 +464,7 @@ fn LinkForm(p: OidcLinkPendingDto) -> impl IntoView {
             <SubmitButton pending=submit.pending() label=t("signin-link-submit")/>
             <FormAlert error=error/>
         </form>
-        <p class="mt-4 text-sm"><a class="underline" href="/sign-in">{t("signin-link-not-mine")}</a></p>
+        <p class="mt-4 text-sm"><a class="text-primary underline" href="/sign-in">{t("signin-link-not-mine")}</a></p>
     }
     .into_any()
 }

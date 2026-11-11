@@ -145,7 +145,7 @@ fn FormatCard(card: &'static str, ready: bool, page: Page) -> impl IntoView {
         view! {
             <p class="text-xs text-muted-foreground" data-testid="imp-trakt-credit">
                 {use_i18n().t_args("imports-trakt-credit", &[("product", product.into())])}
-                " "<a href="https://trakt.tv" class="underline" rel="noopener">{t("imports-trakt-link")}</a>
+                " "<a href="https://trakt.tv" class="text-primary underline" rel="noopener">{t("imports-trakt-link")}</a>
             </p>
         }
     });

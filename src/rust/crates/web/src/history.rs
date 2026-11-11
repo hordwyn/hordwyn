@@ -202,7 +202,7 @@ pub fn ActivityRow(
     };
     view! {
         <li class=look data-testid="activity-row">
-            <span class="mt-0.5 text-muted-foreground" title=kind.clone()>
+            <span class=ui::cn(&["mt-0.5", crate::tint::group_tint(&row.group).text()]) title=kind.clone()>
                 <Icon name=crate::library::kind_icon(&row.kind)/>
             </span>
             <span class="min-w-0 flex-1">
@@ -408,7 +408,7 @@ pub fn History() -> impl IntoView {
         // the H1 carries a text link to the export (DEC-237)
         <div class="flex flex-wrap items-baseline justify-between gap-x-4">
             <PageTitle text=i18n.t("history-title")/>
-            <a href="/settings/imports#export" class="mb-6 text-sm underline" data-testid="hist-export">
+            <a href="/settings/imports#export" class="mb-6 text-sm text-primary underline" data-testid="hist-export">
                 {i18n.t("history-export")}
             </a>
         </div>
@@ -443,7 +443,7 @@ fn Filters(h: Hist) -> impl IntoView {
                     {move || kinds.get().and_then(Result::ok).map(|k| {
                         let i = use_i18n();
                         let mut options = vec![SegmentedOption::new("all", i.t("kind-group-all"))];
-                        options.extend(k.groups.iter().map(|g| SegmentedOption::new(g.id.clone(), i.t(&g.label_key))));
+                        options.extend(k.groups.iter().map(|g| crate::tint::group_option(&g.id, i.t(&g.label_key))));
                         view! { <Segmented id="hist-group" label=i.t("library-group") value=group options=options/> }
                     })}
                 </Suspense>
@@ -892,7 +892,7 @@ fn Side(h: Hist) -> impl IntoView {
                 })}
             </Suspense>
             <crate::stats_extras::SideCompare/>
-            <a href="/stats" class="text-sm font-medium underline underline-offset-2">{i18n.t("home-all-stats")}</a>
+            <a href="/stats" class="text-sm font-medium text-primary underline underline-offset-2">{i18n.t("home-all-stats")}</a>
         </aside>
     }
 }

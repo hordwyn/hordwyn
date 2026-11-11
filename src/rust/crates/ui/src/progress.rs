@@ -52,7 +52,7 @@ pub fn ProgressBar(
             ])
         >
             <div
-                class="h-full rounded-full bg-foreground transition-[width]"
+                class="h-full rounded-full bg-primary transition-[width]"
                 style:width=move || format!("{}%", percent(value.get(), max))
             ></div>
         </div>

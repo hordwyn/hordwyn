@@ -72,7 +72,7 @@ fn SourcesBody() -> impl IntoView {
                 </Table>
             }
         })}
-        <p class="mt-4 text-sm"><a class="underline" href="/settings/sources#attribution">{t("admin-sources-attribution")}</a></p>
+        <p class="mt-4 text-sm"><a class="text-primary underline" href="/settings/sources#attribution">{t("admin-sources-attribution")}</a></p>
     }
 }
 
@@ -196,7 +196,7 @@ fn SourceCard(s: AdminSourceDto, data: Sources) -> impl IntoView {
             <div class="text-sm">
                 <p class="font-medium">{t("admin-sources-attribution-preview")}</p>
                 <p lang="en" class="text-muted-foreground">{s.attribution.clone()}</p>
-                <a class="underline" href=s.terms_url.clone() rel="noopener">{t("admin-sources-terms")}</a>
+                <a class="text-primary underline" href=s.terms_url.clone() rel="noopener">{t("admin-sources-terms")}</a>
             </div>
         </div>
     }
@@ -262,7 +262,7 @@ pub(crate) fn KeyHowTo(s: AdminSourceDto) -> impl IntoView {
             <ol class="grid list-decimal gap-0.5 pl-5 text-muted-foreground">
                 {guide.steps.iter().map(|k| view! { <li>{t(k)}</li> }).collect_view()}
             </ol>
-            <a class="w-fit underline" href=guide.url rel="noopener noreferrer" target="_blank">{link}</a>
+            <a class="w-fit text-primary underline" href=guide.url rel="noopener noreferrer" target="_blank">{link}</a>
         </section>
     }
     })

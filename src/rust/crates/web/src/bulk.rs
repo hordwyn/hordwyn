@@ -179,7 +179,7 @@ pub fn ListPicker(target: RwSignal<Option<Vec<String>>>, on_done: Callback<()>) 
                             Ok(v) if v.is_empty() => view! {
                                 <p class="text-sm text-muted-foreground">
                                     {t("library-list-none")} " "
-                                    <a href="/lists" class="font-medium underline underline-offset-2">{t("library-list-create")}</a>
+                                    <a href="/lists" class="font-medium text-primary underline underline-offset-2">{t("library-list-create")}</a>
                                 </p>
                             }.into_any(),
                             Ok(v) => view! {
