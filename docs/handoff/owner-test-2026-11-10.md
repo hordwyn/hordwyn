@@ -69,3 +69,9 @@ OT-1..OT-17 in the owner's order and words, then triaged. Nothing here is built 
 | OT-20 | "Shows 0 hours" beside "13 episodes": no TMDB episode runtimes are counted before ot2g; "0 hours" reads as wrong when episodes exist | UX | `time_tiles.rs`, DEC-577 |
 
 Board games: not usable yet (no catalogue source - BGG not built per HUB-7, Wikidata in d2/h1 - and no manual item entry); the play, score and group parts exist.
+
+Owner, 2026-11-11: the Ryot (legacy) import "worked beautifully".
+
+| ID | Owner's finding | Type | Where |
+|---|---|---|---|
+| OT-21 | While an import runs in the background, covers flash hard between the image and a text about "cover"; it stops when the import is done | bug | every catalog/library event refetches the open page; refetched cards re-create their `img` (alt text shows while it reloads); folded into ot1b |

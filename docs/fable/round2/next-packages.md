@@ -255,6 +255,12 @@ Playwright specs green under axe in both themes.
 
 ### ot1b - carry-over of the fix pack (OT-3 steps 1 and 2, OT-2)
 
+- Added 2026-11-11 from the owner (OT-21): covers flash during a background import. Keep
+  card and `img` elements across refetches (keyed lists, same `src` keeps the loaded image),
+  coalesce entity events during an import (one refetch per few seconds, not per item), and a
+  neutral placeholder instead of alt text while a cover loads. Test: Playwright with an import
+  running, the cover `img` of a visible card is not replaced (same element handle).
+
 - Scope: as diagnosed in `docs/fable/round2/bug-diagnosis.md` (search tie-breaks so an
   original ranks above a derivative title; covers in palette rows). Not part of the review
   page; listed so it is not lost. Re-check the ranking again after d2.
