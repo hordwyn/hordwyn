@@ -875,3 +875,8 @@ New last package before the acceptance run, **v1-release** (M):
 
 Build order: v1-ops -> sec0 -> sec1 -> sec2 -> v1-polish -> v1-books -> v1-manual ->
 v1-wikidata -> v1-release -> v1-acceptance (owner, internet-facing instance) -> tag `v1`.
+
+Addendum 3 (2026-11-13, after the rename to hordwyn): v1-release also renames the provider key
+variables from the `KK_` prefix (initials of the former name, e.g. `KK_TMDB_API_KEY`) to a
+neutral prefix that carries no brand (white-label rule 9), in code, `config/.env.example`, CI
+and docs; greenfield rule: no alias for the old names.
