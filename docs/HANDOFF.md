@@ -871,6 +871,18 @@ people entries), OPS-I (which registry), HUB-2 (confirm no revocable licence), S
 the Postgres counters wait), OWN-4 (MangaDex), DATA-R (what is wanted from Steam), and the
 lawyer list for HUB-11. None of them blocks the next package.
 
+### 4.8 Owner rulings 2026-11-12 (v1 cut, after docs/fable/round2/v1-status.md)
+
+- v1 = home instance; board games and books are part of v1 (in addition to movies, shows,
+  video games, podcasts). BGG stays out (HUB-7); board games come from Wikidata (CC0,
+  DEC-192..198) plus manual entry; books from Open Library (docs/connectors/openlibrary.md).
+- OPS-3+4: option a - move the secrets key out of the blob directory, admin banner on the
+  overview until an admin confirms the backup of the key.
+- Covers: loading covers directly from the provider is allowed (hotlinking yes, reverses the
+  stored-only default of DEC-608); one rule for every page.
+- "Include the fixes needed for v1 to run": v1-ops, sec0, v1-polish and whatever blocks a
+  home v1; built with Fable agents only.
+
 ## 5. Action list from the rulings
 
 1. Rulings recorded as DEC-169 onward and applied to design.md and addendum-1.md: done.
