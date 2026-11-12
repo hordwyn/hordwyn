@@ -125,6 +125,9 @@ pub struct StepCtx {
     /// The offline queue (signed-in shell only, WP4-5).
     pub offline: Option<crate::offline::Offline>,
     pub funnel: crate::funnel::Funnel,
+    /// Where an action made away from the page that shows its result is counted
+    /// ([`StepCtx::acted`]).
+    pub own: Option<crate::events::OwnAction>,
 }
 
 impl StepCtx {
@@ -135,6 +138,24 @@ impl StepCtx {
             toasts: use_toasts(),
             offline: use_context::<crate::offline::Offline>(),
             funnel: crate::funnel::Funnel::current(),
+            own: use_context::<crate::events::OwnAction>(),
+        }
+    }
+
+    /// The person's action went through and no page asked to be refreshed for it (the
+    /// palette's quick path, the Undo of its toast): the open page shows it at once instead
+    /// of waiting for the paced event (OT1B-9).
+    pub fn acted(&self) {
+        if let Some(own) = self.own {
+            own.bump();
+        }
+    }
+
+    /// After an action: the caller's refresh, else [`StepCtx::acted`].
+    fn done(&self, on_done: Option<Callback<()>>) {
+        match on_done {
+            Some(cb) => cb.run(()),
+            None => self.acted(),
         }
     }
 
@@ -253,9 +274,7 @@ fn log_step(
                     let said = said_title(&ctx.i18n, verb, title, &[&event]);
                     toast_logged(&ctx, &label, said, vec![event.id], on_done);
                 }
-                if let Some(cb) = on_done {
-                    cb.run(());
-                }
+                ctx.done(on_done);
             }
             Err(e) if crate::offline::network_error(&e) && ctx.offline.is_some() => {
                 let hlc = ctx.offline.map(crate::offline::Offline::stamp);
@@ -338,14 +357,13 @@ pub fn log_run_marker(
 pub fn undo_event(ctx: &StepCtx, event_id: String, on_done: Option<Callback<()>>) {
     let (undone, failed) = (ctx.i18n.t("library-undone"), ctx.i18n.t("error-generic"));
     let toasts = ctx.toasts;
+    let ctx = ctx.clone();
     leptos::task::spawn_local(async move {
         match api::undo_progress(event_id).await {
             Ok(_) => toasts.push(undone, None, ToastVariant::Default),
             Err(_) => toasts.push(failed, None, ToastVariant::Destructive),
         }
-        if let Some(cb) = on_done {
-            cb.run(());
-        }
+        ctx.done(on_done);
     });
 }
 
@@ -354,6 +372,7 @@ pub fn undo_event(ctx: &StepCtx, event_id: String, on_done: Option<Callback<()>>
 pub fn undo_events(ctx: &StepCtx, mut event_ids: Vec<String>, on_done: Option<Callback<()>>) {
     let (undone, failed) = (ctx.i18n.t("library-undone"), ctx.i18n.t("error-generic"));
     let toasts = ctx.toasts;
+    let ctx = ctx.clone();
     leptos::task::spawn_local(async move {
         let mut ok = true;
         event_ids.reverse();
@@ -365,9 +384,7 @@ pub fn undo_events(ctx: &StepCtx, mut event_ids: Vec<String>, on_done: Option<Ca
         } else {
             toasts.push(failed, None, ToastVariant::Destructive);
         }
-        if let Some(cb) = on_done {
-            cb.run(());
-        }
+        ctx.done(on_done);
     });
 }
 
@@ -464,9 +481,7 @@ pub fn toast_logged_added(
                     ctx.toasts
                         .push(ctx.i18n.t("error-generic"), None, ToastVariant::Destructive);
                 }
-                if let Some(cb) = on_done {
-                    cb.run(());
-                }
+                ctx.done(on_done);
             });
         }),
     );
@@ -505,9 +520,7 @@ pub fn toast_added(ctx: &StepCtx, item_id: String, title: String, on_done: Optio
                     Err(_) => ("error-generic", ToastVariant::Destructive),
                 };
                 ctx.toasts.push(ctx.i18n.t(key), None, variant);
-                if let Some(cb) = on_done {
-                    cb.run(());
-                }
+                ctx.done(on_done);
             });
         }),
     );

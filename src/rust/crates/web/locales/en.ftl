@@ -435,6 +435,7 @@ search-label = Search the catalog
 search-placeholder = Title, author, studio...
 search-empty = No results yet.
 search-local = In your instance
+search-library = In your library
 search-waiting = Asking { $sources }...
 
 

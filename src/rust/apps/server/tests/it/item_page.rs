@@ -96,6 +96,7 @@ async fn seed(
             external_ids: Vec::new(),
             attributes,
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();
@@ -472,6 +473,7 @@ async fn an_item_outside_the_library_offers_to_add_it() {
             external_ids: Vec::new(),
             attributes: serde_json::json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();

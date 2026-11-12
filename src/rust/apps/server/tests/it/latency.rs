@@ -58,6 +58,7 @@ impl SlowConnector {
             attributes: serde_json::json!({}),
             images: vec![],
             complete: true,
+            popularity: None,
         }
     }
 }
@@ -128,6 +129,7 @@ async fn pages_never_wait_on_providers() {
             external_ids: vec![ExternalId::new("slow", "1")],
             attributes: serde_json::json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();

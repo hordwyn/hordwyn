@@ -233,6 +233,7 @@ pub async fn search(
     {
         items.retain(|i| kinds.contains(&i.kind));
     }
+    let in_library = hits_in_library(s, a, &ids, &items).await;
     let search_id = uuid::Uuid::now_v7().to_string();
     let pending: Vec<String> = s
         .fanout
@@ -250,10 +251,43 @@ pub async fn search(
     Ok(SearchResponseDto {
         search_id,
         items,
+        in_library,
         pending,
         skipped,
         groups_without_source,
     })
+}
+
+/// The ids of the hits the searcher has in the library, in the order of the hits: one read
+/// by `(user, items)`, none when nothing was found. A failed read names none (the search
+/// still answers).
+async fn hits_in_library(
+    s: &ApiState,
+    a: Actor,
+    ids: &[ItemId],
+    items: &[contracts::CatalogItemDto],
+) -> Vec<String> {
+    if items.is_empty() {
+        return Vec::new();
+    }
+    let mine: HashSet<String> = s
+        .app
+        .repos
+        .library
+        .entries_for(a.user_id, ids)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "library entries of the search hits unreadable");
+            vec![]
+        })
+        .into_iter()
+        .map(|e| e.item_id.0.to_string())
+        .collect();
+    items
+        .iter()
+        .filter(|i| mine.contains(&i.id))
+        .map(|i| i.id.clone())
+        .collect()
 }
 
 /// Ask the connectors in the background; each one's results go to the searching user as a

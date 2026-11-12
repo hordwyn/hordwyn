@@ -2,7 +2,7 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use contracts::{CompanionDto, ImageDto, LibraryRowDto};
+use contracts::{CatalogItemDto, CompanionDto, ImageDto, LibraryRowDto};
 use leptos::prelude::*;
 use leptos_router::NavigateOptions;
 use ui::{
@@ -64,7 +64,15 @@ fn srcset(img: &ImageDto, mime: &str) -> String {
         .join(", ")
 }
 
-/// Cover with an instant placeholder (thumbhash, else the dominant colour).
+/// Cover with an instant placeholder (thumbhash, else the dominant colour, else the muted box).
+/// The `img` paints its alternative text transparent: browsers draw that text in the box
+/// while the picture loads and when it fails, which read as flashing text when covers were
+/// loaded again (OT-21). The text stays the picture's name for assistive technology.
+///
+/// Rule for callers (OT1B-13): show the title as text next to or under every cover. A
+/// picture that fails to load or is blocked leaves an empty box, so a view of covers alone
+/// (a poster wall, a mosaic) would show a sighted person nothing; such a view has to bring
+/// the title back itself (a caption, or the text colour restored when the picture fails).
 #[component]
 pub fn Cover(
     #[prop(into)] title: String,
@@ -113,7 +121,7 @@ pub fn Cover(
                             loading="lazy"
                             decoding="async"
                             referrerpolicy="no-referrer"
-                            class="absolute inset-0 h-full w-full object-cover"
+                            class="absolute inset-0 h-full w-full object-cover text-transparent"
                         />
                     </picture>
                 </div>
@@ -123,13 +131,85 @@ pub fn Cover(
     }
 }
 
+/// What a cover shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoverOf {
+    pub title: String,
+    pub image: Option<ImageDto>,
+    pub square: bool,
+}
+
+impl CoverOf {
+    #[must_use]
+    pub fn of(item: &CatalogItemDto) -> Self {
+        Self {
+            title: crate::i18n::title_text(&item.title),
+            image: item.cover.clone(),
+            square: square_art(&item.kind),
+        }
+    }
+}
+
+/// The cover of a card that outlives the refetches of its page (OT-21): it is rendered again
+/// only when what it shows changes. What keeps the `img` element itself is the card around
+/// it ([`keyed`], the sections of Home): a card that was built afresh for every answer made
+/// a new `img` each time, which showed its placeholder until the picture was painted again;
+/// during an import (an event per item) the covers flashed. The memo here only saves the
+/// work of comparing the cover for every answer: the renderer patches an `img` in place
+/// when its data changes, and a run with the memo bypassed kept every element (review
+/// OT1B-1, mutation run).
+#[component]
+pub fn StableCover(
+    #[prop(into)] of: Signal<Option<CoverOf>>,
+    /// CSS `sizes` hint for `srcset`.
+    sizes: &'static str,
+) -> impl IntoView {
+    let shown = Memo::new(move |_| of.get());
+    move || {
+        shown.get().map(|c| {
+            view! { <Cover title=c.title image=c.image square=c.square sizes=sizes/> }
+        })
+    }
+}
+
+/// Rows keyed by `key`: each key owns one `shell` for as long as it is in `rows`, and the
+/// shell reads its row from a memo that changes only when the row's data does (`None` for
+/// the instant in which the key leaves). The shell keeps what must survive a refetch (the
+/// cover, an open menu) and renders the rest afresh from the memo (OT-21, DEC-398).
+pub fn keyed<T, V>(
+    rows: Signal<Vec<T>>,
+    key: fn(&T) -> String,
+    shell: impl Fn(Memo<Option<T>>) -> V + Clone + Send + Sync + 'static,
+) -> impl IntoView
+where
+    T: Clone + PartialEq + Send + Sync + 'static,
+    V: IntoView + 'static,
+{
+    let by_key = Memo::new(move |_| {
+        rows.with(|v| {
+            v.iter()
+                .map(|r| (key(r), r.clone()))
+                .collect::<std::collections::HashMap<_, _>>()
+        })
+    });
+    let keys = move || rows.with(|v| v.iter().map(key).collect::<Vec<_>>());
+    view! {
+        <For each=keys key=String::clone children=move |k| {
+            let row = Memo::new(move |_| by_key.with(|m| m.get(&k).cloned()));
+            shell(row)
+        }/>
+    }
+}
+
 /// Grid card of a library row (design.md 6.2, 7.3): cover (square for music, podcasts and
 /// board games) with the progress bar on its edge, the next-step pill (a one-click
 /// [`NextStepButton`] while the entry is planned or in progress, else the status word), a
-/// quick menu, title, kind, year, status and tags.
+/// quick menu, title, kind, year, status and tags. The card, its link and its cover stay for
+/// as long as the entry is on the page ([`keyed`]); the parts with handlers are rendered
+/// afresh when the row changes, so they carry the new data (UX1-2).
 #[component]
 pub fn PosterCard(
-    row: LibraryRowDto,
+    row: Memo<Option<LibraryRowDto>>,
     /// Statuses the kind allows ("Mark as ..." in the quick menu).
     #[prop(optional)]
     statuses: Vec<String>,
@@ -153,14 +233,70 @@ pub fn PosterCard(
     let tab =
         Signal::derive(move || tab_stop.map(|s| if s.get() { "0" } else { "-1" }.to_string()));
     let i18n = use_i18n();
+    let (entry, href) = row.with_untracked(|r| {
+        r.as_ref().map_or_else(Default::default, |r| {
+            (r.entry.id.clone(), format!("/items/{}", r.item.id))
+        })
+    });
+    let cover = Signal::derive(move || row.with(|r| r.as_ref().map(|r| CoverOf::of(&r.item))));
+    let title = Memo::new(move |_| {
+        row.with(|r| {
+            r.as_ref()
+                .map(|r| crate::i18n::title_text(&r.item.title))
+                .unwrap_or_default()
+        })
+    });
+    let progress = Memo::new(move |_| {
+        row.with(|r| {
+            let r = r.as_ref()?;
+            r.summary
+                .fraction
+                .zip(progress_text(&i18n, &r.summary, &r.next_step))
+        })
+    });
+    let bar = move || {
+        progress.get().map(|(f, text)| {
+            let value = Signal::derive(move || crate::next_step::percent(f));
+            view! {
+                <ProgressBar label=t("library-progress") value=value value_text=text size=ProgressSize::Thin
+                    class="absolute inset-x-0 bottom-0 rounded-none bg-background/60"/>
+            }
+        })
+    };
+    let renders = StoredValue::new(0u32);
+    view! {
+        <li class="group/card relative flex min-w-0 flex-col gap-1.5" data-testid="library-card" data-entry=entry.clone()>
+            <a href=href id=format!("card-{entry}") tabindex=move || tab.get() class="group flex flex-col gap-1.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <div class="relative">
+                    <StableCover of=cover sizes="(min-width: 768px) 180px, 45vw"/>
+                    {bar}
+                </div>
+                <span class="line-clamp-2 text-sm font-medium group-hover:underline">{move || title.get()}</span>
+            </a>
+            <For each=move || row.get().map(|r| (crate::pages::fresh(renders), r)) key=|(k, _)| *k
+                children=move |(_, r)| view! {
+                    <PosterCardRest row=r statuses=statuses.clone() on_change=on_change on_tags=on_tags on_list=on_list menu_open=menu_open tab=tab/>
+                }/>
+        </li>
+    }
+}
+
+/// The parts of a [`PosterCard`] that act on the entry: the pill, the quick menu, the line of
+/// kind, year and status, the tags.
+#[component]
+fn PosterCardRest(
+    row: LibraryRowDto,
+    statuses: Vec<String>,
+    on_change: Option<Callback<()>>,
+    on_tags: Option<Callback<LibraryRowDto>>,
+    on_list: Option<Callback<LibraryRowDto>>,
+    menu_open: Option<RwSignal<bool>>,
+    tab: Signal<Option<String>>,
+) -> impl IntoView {
     let item = row.item.clone();
-    let href = format!("/items/{}", item.id);
     let kind = crate::i18n::kind_label(&item.kind);
     let status = row.entry.status.clone();
     let status_word = t(&format!("status-{status}"));
-    let square = square_art(&item.kind);
-    let progress = progress_text(&i18n, &row.summary, &row.next_step);
-    let fraction = row.summary.fraction;
     let active = matches!(status.as_str(), "planned" | "in_progress");
     let pill = if active {
         view! {
@@ -170,32 +306,16 @@ pub fn PosterCard(
     } else {
         view! { <span class="inline-flex min-h-7 items-center rounded-full border border-border bg-background/95 px-2.5 text-xs font-semibold text-foreground shadow-sm">{status_word.clone()}</span> }.into_any()
     };
-    let bar = fraction.zip(progress).map(|(f, text)| {
-        let value = Signal::derive(move || crate::next_step::percent(f));
-        view! {
-            <ProgressBar label=t("library-progress") value=value value_text=text size=ProgressSize::Thin
-                class="absolute inset-x-0 bottom-0 rounded-none bg-background/60"/>
-        }
-    });
     view! {
-        <li class="group/card relative flex min-w-0 flex-col gap-1.5" data-testid="library-card" data-entry=row.entry.id.clone()>
-            <a href=href id=format!("card-{}", row.entry.id) tabindex=move || tab.get() class="group flex flex-col gap-1.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                <div class="relative">
-                    <Cover title=crate::i18n::title_text(&item.title) image=item.cover.clone() square=square sizes="(min-width: 768px) 180px, 45vw"/>
-                    {bar}
-                </div>
-                <span class="line-clamp-2 text-sm font-medium group-hover:underline">{crate::i18n::title_text(&item.title)}</span>
-            </a>
-            <div class="absolute left-1.5 top-1.5 flex max-w-[calc(100%-3.5rem)] flex-col items-start gap-1">{pill}</div>
-            <QuickMenu row=row.clone() statuses=statuses on_change=on_change on_tags=on_tags on_list=on_list open=menu_open tabindex=tab
-                class="absolute right-1.5 top-1.5 [@media(hover:hover)]:opacity-0 group-hover/card:opacity-100 focus-within:opacity-100"/>
-            <span class="text-xs text-muted-foreground">
-                {kind}
-                {item.year.map(|y| format!(" - {y}"))}
-                " - " {status_word}
-            </span>
-            <TagBadges tags=row.tags.clone() max=3/>
-        </li>
+        <div class="absolute left-1.5 top-1.5 flex max-w-[calc(100%-3.5rem)] flex-col items-start gap-1">{pill}</div>
+        <QuickMenu row=row.clone() statuses=statuses on_change=on_change on_tags=on_tags on_list=on_list open=menu_open tabindex=tab
+            class="absolute right-1.5 top-1.5 [@media(hover:hover)]:opacity-0 group-hover/card:opacity-100 focus-within:opacity-100"/>
+        <span class="text-xs text-muted-foreground">
+            {kind}
+            {item.year.map(|y| format!(" - {y}"))}
+            " - " {status_word}
+        </span>
+        <TagBadges tags=row.tags.clone() max=3/>
     }
 }
 

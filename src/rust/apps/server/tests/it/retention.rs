@@ -46,6 +46,7 @@ async fn movie(s: &Server, title: &str) -> domain::ids::ItemId {
             external_ids: vec![ExternalId::new("tmdb", title)],
             attributes: serde_json::json!({}),
             cover_url: Some("https://image.tmdb.org/t/p/w780/a.jpg".into()),
+            popularity: None,
         })
         .await
         .unwrap()

@@ -1,5 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
-import { brandValue, contrast, expectNoA11yViolations, expectReflow, hydrated, signUp, importDone, token } from "./helpers";
+import { test, expect, type Locator, type Page } from "@playwright/test";
+import { brandValue, contrast, countEntityEvents, entityEvents, expectNoA11yViolations, expectReflow, hydrated, signUp, importDone, token } from "./helpers";
 
 // UX phase 1 Home, Stats and History (design.md 6.1, 6.6; addendum-1 1.3): Home sections and
 // the activity link, the next step with Undo, Stats tabs with the table equivalent, History
@@ -514,4 +514,99 @@ test("stats at 390 px: the month labels under the columns do not touch", async (
   await page.setViewportSize({ width: 1280, height: 800 });
   const wide = await chart.locator("text").evaluateAll((labels) => labels.filter((l) => l.getBoundingClientRect().width > 0).length);
   expect(wide).toBe(6);
+});
+
+// OT-21: while an import ran in the background the covers flashed between the picture and its
+// alternative text. Every `entity.updated` (one per imported item) refetched the page, and
+// every answer rendered all cards afresh, so every cover was a new `img` several times a
+// second. Now a card and its cover stay while the entry is on the page, the refetches are
+// paced, and a cover never paints its alternative text.
+test("covers stay while an import runs: cards keep their pictures, refetches are paced", async ({ page }) => {
+  test.setTimeout(240_000);
+  await signUp(page, `flash${Date.now()}`, "Flo");
+  const ids = await seed(page);
+  // a planned film with a cover from the source (an `img`); the seeded rows have none
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Search" });
+  await palette.getByRole("combobox").fill("fight club");
+  const option = palette.getByRole("option", { name: /^Fight Club \(1999\)/ }).first();
+  await expect(option).toBeVisible({ timeout: 20_000 });
+  await option.hover();
+  await page.keyboard.press("Control+Enter");
+  const library = async () => (await (await page.request.get("/api/v1/library?limit=100")).json()).items as { item: { id: string; title: string } }[];
+  await expect.poll(async () => (await library()).some((r) => r.item.title === "Fight Club")).toBe(true);
+  const film = (await library()).find((r) => r.item.title === "Fight Club")!.item.id;
+
+  await countEntityEvents(page);
+  let homeCalls = 0;
+  page.on("request", (r) => {
+    if (r.url().includes("/_fn/home")) homeCalls += 1;
+  });
+  await open(page, "/");
+  const upNext = page.getByTestId("up-next-card").filter({ hasText: "Fight Club" });
+  const poster = upNext.locator("img");
+  await expect(poster).toHaveCount(1);
+  // the alternative text is never painted in the box (it stays the picture's name)
+  expect(await poster.evaluate((el) => getComputedStyle(el).color)).toBe("rgba(0, 0, 0, 0)");
+  await expect(poster).toHaveAttribute("alt", "Cover of Fight Club");
+  const show = page.getByTestId("continue-card").filter({ hasText: "Downstream" });
+  await expect(show.getByRole("button", { name: "Mark S1 E2 watched: Downstream" })).toBeVisible();
+  const keep = (l: Locator) => l.evaluate((el) => ((el as HTMLElement).dataset.kept = "1"));
+  const kept = (l: Locator) => l.evaluate((el) => (el as HTMLElement).dataset.kept ?? "replaced");
+  const showCover = show.locator("[role=img]");
+  for (const l of [poster, upNext, show, showCover]) {
+    await keep(l);
+  }
+
+  // an import of 40 films runs; meanwhile the show's own row changes
+  const calls = homeCalls;
+  const events = await entityEvents(page);
+  const started = Date.now();
+  const rows = Array.from({ length: 40 }, (_, n) => ({ source_id: `f${n}`, kind: "movie", title: `Flash Film ${n}`, year: 1990 + n, status: "completed" }));
+  const file = [JSON.stringify({ format: "library-export", version: 1 }), ...rows.map((r) => JSON.stringify(r))].join("\n");
+  const run = await page.request.post("/api/v1/imports?format=generic-jsonl", { data: file, headers: { "content-type": "application/octet-stream" } });
+  expect(run.status()).toBe(202);
+  await log(page, ids["Downstream"], { type: "episode", season: 1, episode: 2 });
+  await importDone(page, (await run.json()).id);
+  // Home follows: the show's next step and the library line
+  await expect(show.getByRole("button", { name: "Mark S1 E3 watched: Downstream" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("totals-line-watch")).toContainText("44 entries", { timeout: 15_000 });
+  const elapsed = Date.now() - started;
+  for (const [l, what] of [
+    [poster, "the film's picture"],
+    [upNext, "the film's card"],
+    [show, "the show's card"],
+    [showCover, "the cover of the show, whose row changed"],
+  ] as const) {
+    expect(await kept(l), what).toBe("1");
+  }
+  // one refetch at once, then one per two seconds while the events keep coming
+  const heard = (await entityEvents(page)) - events;
+  expect(heard, "the import announced its items").toBeGreaterThanOrEqual(20);
+  expect(homeCalls - calls, `${heard} events in ${elapsed} ms`).toBeLessThanOrEqual(2 + Math.ceil(elapsed / 2000));
+  // the counter counts: Home did refetch for the import (a renamed server function would
+  // leave it at 0 and the bound above would hold for any pacing, OT1B-1)
+  expect(homeCalls - calls, "Home refetched").toBeGreaterThanOrEqual(1);
+
+  // the library grid: a card whose row changes keeps its picture too
+  await open(page, "/library");
+  const card = page.getByTestId("library-card").filter({ hasText: "Fight Club" });
+  const picture = card.locator("img");
+  await expect(picture).toHaveCount(1);
+  await keep(picture);
+  await keep(card);
+  expect((await page.request.post(`/api/v1/library/${film}/tags`, { data: { tag: "rainy" } })).ok()).toBeTruthy();
+  await expect(card.getByText("rainy")).toBeVisible({ timeout: 15_000 });
+  expect(await kept(picture), "the picture of a card whose row changed").toBe("1");
+  expect(await kept(card)).toBe("1");
+  // and the card's menu acts on the new row (handlers are rendered afresh, UX1-2): the tag
+  // dialog it opens starts from the row's tags
+  await page.getByRole("button", { name: "Actions for Fight Club" }).click();
+  await page.getByRole("menuitem", { name: "Edit tags" }).click();
+  const tags = page.getByRole("dialog", { name: "Tags for Fight Club" });
+  await expect(tags.getByRole("button", { name: "Remove tag rainy" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(tags).toHaveCount(0);
+  expect(await kept(picture), "the picture after the menu was used").toBe("1");
+  await expectNoA11yViolations(page, "library after a background change");
 });

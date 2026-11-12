@@ -8,10 +8,13 @@
 //! [`PaletteTarget`] makes choosing a result do something else for one opening.
 
 use contracts::admin::{SkippedSourceDto, SourceStatusPageDto};
-use contracts::{CatalogItemDto, SearchResultsEventDto};
+use contracts::{CatalogItemDto, SearchResponseDto, SearchResultsEventDto};
 use leptos::prelude::*;
 use leptos_router::hooks::use_navigate;
-use ui::{Command, CommandHints, CommandItem, Dialog, Segmented, SegmentedOption, StatusDot};
+use ui::{
+    Command, CommandHints, CommandItem, CommandLeading, Dialog, Segmented, SegmentedOption,
+    StatusDot,
+};
 
 use crate::admin_api;
 use crate::admin_state::source_state;
@@ -164,6 +167,7 @@ pub fn idle_items(
         label,
         group: group.to_string(),
         keywords: String::new(),
+        leading: None,
     };
     let recent_group = i18n.t("search-recent");
     let mut out: Vec<CommandItem> = recent
@@ -224,6 +228,8 @@ fn quick(
             Ok(_) => match api::add_to_library(item.id.clone()).await {
                 Ok(_) => {
                     ctx.funnel.logged();
+                    // the page behind the palette shows the new entry at once (OT1B-9)
+                    ctx.acted();
                     toast_added(&ctx, item.id, item.label, None);
                 }
                 Err(e) => error.set(Some(failed(&e))),
@@ -246,6 +252,20 @@ fn scope_group(scope: &str) -> Option<String> {
     (scope != SCOPES[0]).then(|| scope.to_string())
 }
 
+/// The small cover of a result row (OT-2): only a cover this instance has stored, in its
+/// smallest variant (WebP when there is one). A cover known only by its provider address is
+/// not loaded from the palette (DEC-608): the row shows the icon of its kind instead.
+fn thumb(i: &CatalogItemDto) -> Option<String> {
+    let cover = i.cover.as_ref()?;
+    cover
+        .variants
+        .iter()
+        .filter(|v| v.mime == "image/webp")
+        .min_by_key(|v| v.width)
+        .or_else(|| cover.variants.iter().min_by_key(|v| v.width))
+        .map(|v| v.url.clone())
+}
+
 fn to_item(i: &CatalogItemDto, group: &str) -> CommandItem {
     let kind = crate::i18n::kind_label(&i.kind);
     CommandItem {
@@ -256,6 +276,11 @@ fn to_item(i: &CatalogItemDto, group: &str) -> CommandItem {
         },
         group: format!("{group} - {kind}"),
         keywords: i.original_title.clone().unwrap_or_default(),
+        leading: Some(CommandLeading {
+            icon: crate::library::kind_icon(&i.kind),
+            image: thumb(i),
+            square: crate::library_state::square_art(&i.kind),
+        }),
     }
 }
 
@@ -326,29 +351,201 @@ fn filter_as_typed(query: &str, answered: Option<&str>) -> bool {
     query.trim().chars().count() < 2 || answered != Some(query)
 }
 
-/// One source's results join the list (an item already listed stays where it is).
-fn add_results(
-    r: &SearchResultsEventDto,
-    waiting: RwSignal<Vec<String>>,
-    items: RwSignal<Vec<CommandItem>>,
-) {
-    waiting.update(|w| w.retain(|c| c != &r.connector));
-    items.update(|list| {
-        for i in &r.items {
-            if !list.iter().any(|x| x.id == i.id) {
-                list.push(to_item(i, &r.connector));
+/// The source a local copy came from, if this search asks that source: the source of its
+/// title, else of one of its external ids.
+fn asked_source<'a>(i: &'a CatalogItemDto, pending: &[String]) -> Option<&'a str> {
+    let asked = |s: &&str| pending.iter().any(|p| p == s);
+    i.provenance
+        .get("title")
+        .map(String::as_str)
+        .filter(asked)
+        .or_else(|| {
+            i.external_ids
+                .iter()
+                .map(|e| e.namespace.as_str())
+                .find(asked)
+        })
+}
+
+/// Rows with each group in one run, groups in the order of their first row (OT1B-7): the
+/// list draws a heading before every run.
+fn contiguous(rows: Vec<CommandItem>) -> Vec<CommandItem> {
+    let mut groups: Vec<(String, Vec<CommandItem>)> = Vec::new();
+    for row in rows {
+        match groups.iter_mut().find(|(g, _)| *g == row.group) {
+            Some((_, of_group)) => of_group.push(row),
+            None => groups.push((row.group.clone(), vec![row])),
+        }
+    }
+    groups.into_iter().flat_map(|(_, rows)| rows).collect()
+}
+
+/// How long the copies of a source that is being asked are held back for its answer
+/// (OT1B-5). A source that answers within this time lists its titles once, in its own order;
+/// after it the copies are listed in ours and a later answer only adds rows.
+const HOLD_MS: u64 = 700;
+
+/// The rows of a search's own answer (OT-3) and the rows held back. The hits in the
+/// person's library lead, under `library`: the entry is what makes a local hit more relevant
+/// than a source's answer. Every other hit is a copy this instance keeps of an earlier
+/// answer. When its source is asked again it is held for that answer ([`HOLD_MS`]), in the
+/// source's group; else it is listed under `local`, in the order of our own index.
+fn local_rows(
+    r: &SearchResponseDto,
+    library: &str,
+    local: &str,
+) -> (Vec<CommandItem>, Vec<CommandItem>) {
+    let mine = |i: &&CatalogItemDto| r.in_library.contains(&i.id);
+    let mut rows: Vec<CommandItem> = r
+        .items
+        .iter()
+        .filter(mine)
+        .map(|i| to_item(i, library))
+        .collect();
+    let mut held = Vec::new();
+    for i in r.items.iter().filter(|i| !mine(i)) {
+        match asked_source(i, &r.pending) {
+            Some(source) => held.push(to_item(i, source)),
+            None => rows.push(to_item(i, local)),
+        }
+    }
+    (contiguous(rows), held)
+}
+
+/// How many rows from the top must stay where they are when rows join the list (OT1B-5):
+/// everything down to the active row, which is the first row while nothing is chosen.
+/// Enter, Ctrl+Enter and a click take the active row, so it must not change under the person.
+fn pinned(list: &[CommandItem], active: Option<&str>) -> usize {
+    active
+        .and_then(|id| list.iter().position(|r| r.id == id))
+        .map_or(list.len().min(1), |at| at + 1)
+}
+
+/// Rows join the list (OT-3, OT1B-5): a row on screen stays where it is, new rows keep the
+/// order they come in. They go to the end of their group when that is below the `pinned`
+/// rows, else to the end of the list (the group then has a second heading there: a row
+/// under the pointer or the keys does not move for the sake of one heading).
+fn merge(list: &mut Vec<CommandItem>, batch: Vec<CommandItem>, pinned: usize) {
+    let mut fresh: Vec<CommandItem> = Vec::new();
+    for row in batch {
+        if !list.iter().chain(&fresh).any(|x| x.id == row.id) {
+            fresh.push(row);
+        }
+    }
+    while let Some(group) = fresh.first().map(|f| f.group.clone()) {
+        let (of_group, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut fresh)
+            .into_iter()
+            .partition(|f| f.group == group);
+        fresh = rest;
+        let at = list
+            .iter()
+            .rposition(|x| x.group == group)
+            .map(|last| last + 1)
+            .filter(|at| *at >= pinned)
+            .unwrap_or(list.len());
+        list.splice(at..at, of_group);
+    }
+}
+
+/// The copies held back for their sources' answers, and the answers that came while copies
+/// were still held (OT1B-5). Our own answer and the sources' answers become one addition to
+/// the list: each source's titles in its own order, the groups in the order of our own
+/// hits. Without the wait the group of whichever source answered first stood first.
+#[derive(Debug, Default)]
+struct Hold {
+    /// Copies not yet named or released, in the order of our own hits.
+    held: Vec<CommandItem>,
+    /// The groups of the held copies, in the order of our own hits.
+    order: Vec<String>,
+    /// Rows of answers that arrived while copies were held.
+    early: Vec<CommandItem>,
+    /// Rows are being held (until every held group was answered, or [`HOLD_MS`]).
+    open: bool,
+}
+
+impl Hold {
+    fn new(held: Vec<CommandItem>) -> Self {
+        let mut order: Vec<String> = Vec::new();
+        for h in &held {
+            if !order.contains(&h.group) {
+                order.push(h.group.clone());
             }
         }
+        Self {
+            open: !held.is_empty(),
+            held,
+            order,
+            early: Vec::new(),
+        }
+    }
+
+    /// A source's rows arrived: the rows to list now, or `None` while copies of another
+    /// group are still held. The held copies of the groups the answer names follow its rows
+    /// (a source answers once per kind, and the event does not say which kind: an empty or
+    /// failed answer names none, its copies wait for the hold time).
+    fn arrived(&mut self, mut batch: Vec<CommandItem>) -> Option<Vec<CommandItem>> {
+        if !self.open {
+            return Some(batch);
+        }
+        let (named, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.held)
+            .into_iter()
+            .partition(|h| batch.iter().any(|b| b.group == h.group));
+        self.held = rest;
+        // a copy the answer names is the answer's row
+        let unnamed: Vec<CommandItem> = named
+            .into_iter()
+            .filter(|h| !batch.iter().any(|b| b.id == h.id))
+            .collect();
+        batch.extend(unnamed);
+        self.early.extend(batch);
+        self.held.is_empty().then(|| self.release())
+    }
+
+    /// Everything that waited, groups in the order of our own hits, then the groups our
+    /// index did not hit in the order they arrived; copies still held come last in their
+    /// group, in our order.
+    fn release(&mut self) -> Vec<CommandItem> {
+        self.open = false;
+        let mut rows = std::mem::take(&mut self.early);
+        rows.append(&mut self.held);
+        let rank = |r: &CommandItem| {
+            self.order
+                .iter()
+                .position(|g| *g == r.group)
+                .unwrap_or(usize::MAX)
+        };
+        rows.sort_by_key(rank);
+        rows
+    }
+}
+
+/// `batch` joins the list below the active row.
+fn join(s: State, batch: Vec<CommandItem>) {
+    if batch.is_empty() {
+        return;
+    }
+    let active = s.active.get_untracked();
+    s.items.update(|list| {
+        let keep = pinned(list, active.as_deref());
+        merge(list, batch, keep);
     });
 }
 
+/// One source's results join the list: its titles in the order it gave them, then the copies
+/// held for it that it does not name ([`Hold`]).
+fn add_results(r: &SearchResultsEventDto, s: State) {
+    s.waiting.update(|w| w.retain(|c| c != &r.connector));
+    let batch: Vec<CommandItem> = r.items.iter().map(|i| to_item(i, &r.connector)).collect();
+    let mut now = None;
+    s.held.update_value(|hold| now = hold.arrived(batch));
+    if let Some(rows) = now {
+        join(s, rows);
+    }
+}
+
 /// Streamed connector results of the current search join the list as they arrive.
-fn stream_results(
-    events: crate::events::LastEvent,
-    stream: StoredValue<Stream>,
-    waiting: RwSignal<Vec<String>>,
-    items: RwSignal<Vec<CommandItem>>,
-) {
+fn stream_results(events: crate::events::LastEvent, s: State) {
+    let stream = s.stream;
     Effect::new(move |_| {
         let Some((topic, data)) = events.0.get() else {
             return;
@@ -365,7 +562,7 @@ fn stream_results(
         let mut shown = None;
         stream.update_value(|s| shown = s.arrived(r));
         if let Some(r) = shown {
-            add_results(&r, waiting, items);
+            add_results(&r, s);
         }
     });
 }
@@ -414,6 +611,25 @@ struct State {
     stream: StoredValue<Stream>,
     waiting: RwSignal<Vec<String>>,
     asked: RwSignal<Option<Asked>>,
+    /// Copies held back for their source's answer ([`local_rows`], [`Hold`]).
+    held: StoredValue<Hold>,
+    /// The active row, told by the list ([`pinned`]).
+    active: RwSignal<Option<String>>,
+}
+
+impl State {
+    fn new() -> Self {
+        Self {
+            query: RwSignal::new(String::new()),
+            scope: RwSignal::new(SCOPES[0].to_string()),
+            items: RwSignal::new(Vec::<CommandItem>::new()),
+            stream: StoredValue::new(Stream::default()),
+            waiting: RwSignal::new(Vec::<String>::new()),
+            asked: RwSignal::new(None::<Asked>),
+            held: StoredValue::new(Hold::default()),
+            active: RwSignal::new(None::<String>),
+        }
+    }
 }
 
 /// Search 250 ms after the last keystroke or scope change; a newer search wins.
@@ -425,6 +641,8 @@ fn debounced_search(s: State) {
         stream,
         waiting,
         asked,
+        held,
+        ..
     } = s;
     let generation = StoredValue::new(0u64);
     Effect::new(move |_| {
@@ -434,6 +652,7 @@ fn debounced_search(s: State) {
         generation.set_value(g);
         if q.trim().chars().count() < 2 {
             items.set(vec![]);
+            held.set_value(Hold::default());
             stream.update_value(Stream::cleared);
             waiting.set(vec![]);
             asked.set(None);
@@ -454,8 +673,24 @@ fn debounced_search(s: State) {
                         stream.update_value(Stream::failed);
                         return;
                     };
-                    let local = t("search-local");
-                    items.set(r.items.iter().map(|i| to_item(i, &local)).collect());
+                    let (rows, wait) = local_rows(&r, &t("search-library"), &t("search-local"));
+                    items.set(rows);
+                    held.set_value(Hold::new(wait));
+                    // a source that has not answered by then: its copies in our order
+                    set_timeout(
+                        move || {
+                            if generation.try_get_value() == Some(g) {
+                                let mut rest = Vec::new();
+                                held.update_value(|h| {
+                                    if h.open {
+                                        rest = h.release();
+                                    }
+                                });
+                                join(s, rest);
+                            }
+                        },
+                        std::time::Duration::from_millis(HOLD_MS),
+                    );
                     waiting.set(r.pending.clone());
                     asked.set(Some(Asked {
                         query: q,
@@ -467,7 +702,7 @@ fn debounced_search(s: State) {
                     let mut early = Vec::new();
                     stream.update_value(|s| early = s.answered(r.search_id));
                     for e in &early {
-                        add_results(e, waiting, items);
+                        add_results(e, s);
                     }
                 });
             },
@@ -638,14 +873,7 @@ pub fn SearchPalette() -> impl IntoView {
     let scope = expect_context::<PaletteScope>().0;
     let i18n = use_i18n();
     let signed_in = expect_context::<crate::app::ClientConfig>().signed_in;
-    let s = State {
-        query: RwSignal::new(String::new()),
-        scope: RwSignal::new(SCOPES[0].to_string()),
-        items: RwSignal::new(Vec::<CommandItem>::new()),
-        stream: StoredValue::new(Stream::default()),
-        waiting: RwSignal::new(Vec::<String>::new()),
-        asked: RwSignal::new(None::<Asked>),
-    };
+    let s = State::new();
     let State {
         query,
         items,
@@ -656,7 +884,7 @@ pub fn SearchPalette() -> impl IntoView {
     let status = footer_status(open);
     open_on_ctrl_k(open);
     debounced_search(s);
-    stream_results(use_events(), s.stream, waiting, items);
+    stream_results(use_events(), s);
     let recent = recent_on_open(open);
     let (busy, quick_error) = (RwSignal::new(false), RwSignal::new(None::<String>));
     Effect::new(move |_| {
@@ -720,6 +948,7 @@ pub fn SearchPalette() -> impl IntoView {
                 on_secondary=on_secondary
                 hints=hints.clone()
                 filter=filter
+                active_item=s.active
             />
             {move || quick_error.get().map(|e| view! { <p role="alert" class="mt-2 text-sm text-destructive-text">{e}</p> })}
             // the reason card is announced when it appears (UX2-W8): the live region stays put
@@ -1004,5 +1233,315 @@ mod tests {
             let _ = s.arrived(batch("s4", &format!("c{n}")));
         }
         assert_eq!(s.answered("s4".into()).len(), Stream::MAX_HELD);
+    }
+
+    /// Run with the English messages in context (`to_item` names the kind).
+    fn with_en(f: impl FnOnce()) {
+        Owner::new().with(|| {
+            provide_context(std::sync::Arc::new(I18n::new(
+                "en",
+                std::collections::BTreeMap::new(),
+            )));
+            f();
+        });
+    }
+
+    fn dto(id: &str, title: &str, source: &str) -> CatalogItemDto {
+        CatalogItemDto {
+            id: id.into(),
+            kind: "movie".into(),
+            title: title.into(),
+            original_title: None,
+            year: Some(2001),
+            description: None,
+            cover: None,
+            external_ids: vec![contracts::ExternalIdDto {
+                namespace: source.into(),
+                value: id.into(),
+            }],
+            attributes: serde_json::Value::Null,
+            state: "partial".into(),
+            provenance: std::collections::BTreeMap::new(),
+        }
+    }
+
+    fn answer(items: Vec<CatalogItemDto>, mine: &[&str], pending: &[&str]) -> SearchResponseDto {
+        SearchResponseDto {
+            search_id: "s1".into(),
+            items,
+            in_library: mine.iter().map(ToString::to_string).collect(),
+            pending: pending.iter().map(ToString::to_string).collect(),
+            skipped: Vec::new(),
+            groups_without_source: Vec::new(),
+        }
+    }
+
+    fn ids(rows: &[CommandItem]) -> Vec<(&str, &str)> {
+        rows.iter()
+            .map(|r| (r.id.as_str(), r.group.as_str()))
+            .collect()
+    }
+
+    /// OT-3, OT1B-5, OT1B-7: only the person's library leads; the copies this instance keeps
+    /// of a source that is asked wait for its answer, which lists them in the source's order
+    /// ("Harry Potter and the Order of the Homeless" stood above the first film); nothing on
+    /// screen moves when rows join, and each group stands under one heading.
+    #[test]
+    fn library_entries_lead_and_a_source_keeps_its_order() {
+        with_en(library_rows_and_merge);
+    }
+
+    fn just_ids(rows: &[CommandItem]) -> Vec<&str> {
+        rows.iter().map(|r| r.id.as_str()).collect()
+    }
+
+    /// Each group is one run of rows.
+    fn one_heading_per_group(rows: &[CommandItem]) {
+        let mut runs: Vec<&str> = rows.iter().map(|r| r.group.as_str()).collect();
+        runs.dedup();
+        let mut groups = runs.clone();
+        groups.sort_unstable();
+        groups.dedup();
+        assert_eq!(runs.len(), groups.len(), "a group stands twice: {runs:?}");
+    }
+
+    fn library_rows_and_merge() {
+        // the local index ranks the derivative title first; `own` is in the library, `man`
+        // and `note` were typed in by hand (no source), `show` is a copy of a source that is
+        // not asked, `old` is a kept copy the source no longer names
+        let mut show = dto("show", "Harry Potter: The Series", "tvdb");
+        show.kind = "show".into();
+        let r = answer(
+            vec![
+                dto(
+                    "homeless",
+                    "Harry Potter and the Order of the Homeless",
+                    "tmdb",
+                ),
+                dto("man", "Harry Potter (my notes)", "manual"),
+                dto("stone", "Harry Potter and the Philosopher's Stone", "tmdb"),
+                show,
+                dto("own", "Harry Potter and the Goblet of Fire", "tmdb"),
+                dto("note", "Harry Potter night", "manual"),
+                dto("old", "Harry Potter: A History of Magic", "tmdb"),
+            ],
+            &["own"],
+            &["tmdb"],
+        );
+        let (mut list, copies) = local_rows(&r, "In your library", "In your instance");
+        assert_eq!(
+            ids(&list),
+            [
+                ("own", "In your library - Movie"),
+                ("man", "In your instance - Movie"),
+                ("note", "In your instance - Movie"),
+                ("show", "In your instance - Show"),
+            ],
+            "the library leads; the copies of the asked source are not listed yet"
+        );
+        assert_eq!(just_ids(&copies), ["homeless", "stone", "old"]);
+        one_heading_per_group(&list);
+        // the source answers: the first film, a new title, the derivative one, the library's
+        let batch: Vec<CommandItem> = ["stone", "chamber", "homeless", "own"]
+            .iter()
+            .map(|id| to_item(&dto(id, id, "tmdb"), "tmdb"))
+            .collect();
+        let mut hold = Hold::new(copies);
+        let batch = hold
+            .arrived(batch)
+            .expect("the one held group was answered");
+        assert!(!hold.open);
+        let before = list.clone();
+        merge(&mut list, batch, pinned(&before, None));
+        assert_eq!(
+            just_ids(&list),
+            [
+                "own", "man", "note", "show", "stone", "chamber", "homeless", "old"
+            ],
+            "the source's order, then the kept copy it does not name; nothing moved"
+        );
+        assert_eq!(list[..4], before[..], "rows on screen keep their place");
+        one_heading_per_group(&list);
+        // a second source names a row that is on screen: it stays where it is
+        let batch = vec![
+            to_item(&dto("stone", "stone", "tvdb"), "tvdb"),
+            to_item(&dto("hogwarts", "hogwarts", "tvdb"), "tvdb"),
+        ];
+        merge(&mut list, batch, 1);
+        assert_eq!(
+            just_ids(&list),
+            [
+                "own", "man", "note", "show", "stone", "chamber", "homeless", "old", "hogwarts"
+            ]
+        );
+        one_heading_per_group(&list);
+        // a source that is not asked this time gives no group: its copies are "in your instance"
+        let quiet = answer(vec![dto("stone", "Stone", "tmdb")], &[], &[]);
+        let (rows, waiting) = local_rows(&quiet, "L", "In your instance");
+        assert_eq!(rows[0].group, "In your instance - Movie");
+        assert_eq!(waiting.len(), 0);
+    }
+
+    /// OT1B-5: the source was slow, its copies were listed after the hold time in our order;
+    /// its answer then only adds rows, and never above or at the active row.
+    #[test]
+    fn a_late_answer_adds_rows_below_the_active_row() {
+        with_en(late_answers);
+    }
+
+    fn late_answers() {
+        let row = |id: &str, source: &str| to_item(&dto(id, id, source), source);
+        let start = || {
+            vec![
+                row("homeless", "tmdb"),
+                row("stone", "tmdb"),
+                row("b1", "igdb"),
+            ]
+        };
+        let answer = || {
+            vec![
+                row("stone", "tmdb"),
+                row("chamber", "tmdb"),
+                row("homeless", "tmdb"),
+            ]
+        };
+        // nothing chosen: the first row is the active one; the new title goes to the end of
+        // its group, the rows on screen keep their order
+        let mut list = start();
+        let keep = pinned(&list, None);
+        assert_eq!(keep, 1);
+        merge(&mut list, answer(), keep);
+        assert_eq!(just_ids(&list), ["homeless", "stone", "chamber", "b1"]);
+        one_heading_per_group(&list);
+        // the active row is below the group: nothing may be put above it, the new title
+        // goes to the end of the list
+        let mut list = start();
+        let keep = pinned(&list, Some("b1"));
+        assert_eq!(keep, 3);
+        merge(&mut list, answer(), keep);
+        assert_eq!(just_ids(&list), ["homeless", "stone", "b1", "chamber"]);
+        // the active row is the last of the group: the new title follows it directly
+        let mut list = start();
+        let keep = pinned(&list, Some("stone"));
+        merge(&mut list, answer(), keep);
+        assert_eq!(just_ids(&list), ["homeless", "stone", "chamber", "b1"]);
+        // an active item that is not in the list (typed on) and an empty list
+        assert_eq!(pinned(&start(), Some("gone")), 1);
+        assert_eq!(pinned(&[], None), 0);
+    }
+
+    /// OT1B-5: answers that arrive while copies are held are listed together with them, the
+    /// groups in the order of our own hits and not in the order the sources answered.
+    #[test]
+    fn answers_wait_while_copies_are_held_and_keep_the_order_of_our_hits() {
+        with_en(held_answers);
+    }
+
+    fn held_answers() {
+        let row = |id: &str, source: &str, kind: &str| {
+            let mut d = dto(id, id, source);
+            d.kind = kind.into();
+            to_item(&d, source)
+        };
+        // our index: a film first, then a show of the same source
+        let copies = vec![
+            row("stone", "tmdb", "movie"),
+            row("series", "tmdb", "show"),
+            row("homeless", "tmdb", "movie"),
+        ];
+        let mut hold = Hold::new(copies);
+        // a source our index has no copy of answers first, then the shows: both wait
+        assert_eq!(hold.arrived(vec![row("game", "igdb", "video_game")]), None);
+        assert_eq!(hold.arrived(vec![row("other", "tmdb", "show")]), None);
+        // an empty answer names no group
+        assert_eq!(hold.arrived(Vec::new()), None);
+        let rows = hold
+            .arrived(vec![
+                row("chamber", "tmdb", "movie"),
+                row("stone", "tmdb", "movie"),
+            ])
+            .expect("every held group was answered");
+        assert_eq!(
+            just_ids(&rows),
+            ["chamber", "stone", "homeless", "other", "series", "game"],
+            "films first as in our index, each source's order, kept copies after it"
+        );
+        // from then on an answer is listed as it comes
+        assert_eq!(
+            hold.arrived(vec![row("late", "tvdb", "show")])
+                .map(|r| r.len()),
+            Some(1)
+        );
+        // the hold time is over before the films were answered: what waited, in our order
+        let mut hold = Hold::new(vec![
+            row("stone", "tmdb", "movie"),
+            row("series", "tmdb", "show"),
+        ]);
+        assert_eq!(hold.arrived(vec![row("other", "tmdb", "show")]), None);
+        assert_eq!(just_ids(&hold.release()), ["stone", "other", "series"]);
+        // nothing held: nothing waits
+        let mut hold = Hold::new(Vec::new());
+        assert_eq!(
+            hold.arrived(vec![row("a", "tmdb", "movie")])
+                .map(|r| r.len()),
+            Some(1)
+        );
+    }
+
+    /// OT-2: a row shows the cover this instance has stored, in its smallest variant; a cover
+    /// known only by its provider address is not loaded from the palette (DEC-608).
+    #[test]
+    fn to_item_keeps_the_cover() {
+        with_en(covers_of_rows);
+    }
+
+    fn covers_of_rows() {
+        let variant = |url: &str, width: u32, mime: &str| contracts::ImageVariantDto {
+            url: url.into(),
+            width,
+            mime: mime.into(),
+        };
+        let mut stored = dto("a", "Azul", "bgg");
+        stored.kind = "board_game".into();
+        stored.cover = Some(contracts::ImageDto {
+            url: "/assets/h/card.webp".into(),
+            variants: vec![
+                variant("/assets/h/card.webp", 400, "image/webp"),
+                variant("/assets/h/thumb.avif", 200, "image/avif"),
+                variant("/assets/h/thumb.webp", 200, "image/webp"),
+            ],
+            thumbhash: None,
+            dominant_color: None,
+            width: Some(600),
+            height: Some(600),
+        });
+        let row = to_item(&stored, "bgg");
+        assert_eq!(
+            row.leading,
+            Some(CommandLeading {
+                icon: ui::IconName::KindBoardGame,
+                image: Some("/assets/h/thumb.webp".into()),
+                square: true,
+            })
+        );
+        let mut remote = dto("m", "Heat", "tmdb");
+        remote.cover = Some(contracts::ImageDto {
+            url: "https://image.tmdb.org/t/p/w780/heat.jpg".into(),
+            variants: Vec::new(),
+            thumbhash: None,
+            dominant_color: None,
+            width: None,
+            height: None,
+        });
+        let icon_only = Some(CommandLeading {
+            icon: ui::IconName::KindMovie,
+            image: None,
+            square: false,
+        });
+        assert_eq!(to_item(&remote, "tmdb").leading, icon_only);
+        assert_eq!(
+            to_item(&dto("n", "Heat", "tmdb"), "tmdb").leading,
+            icon_only
+        );
     }
 }

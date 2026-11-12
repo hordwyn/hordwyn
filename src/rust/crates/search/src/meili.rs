@@ -67,6 +67,9 @@ impl MeiliIndex {
                 timeout,
             )
             .await?;
+            if name == crate::CATALOG {
+                popularity_rule(&admin, &index, timeout).await?;
+            }
         }
         let key = scoped_key(&admin, prefix).await?;
         Ok(Self {
@@ -112,6 +115,32 @@ impl MeiliIndex {
             .map_err(me)?;
         wait(&self.client, t, self.timeout).await
     }
+}
+
+/// The source's popularity as the last ranking rule of the catalog (DEC-611): it only orders
+/// documents the built-in rules leave equal (same words, typos, proximity, attribute, word
+/// position and exactness), for example two titles that both start with the query. The
+/// server's own list is read and extended, so its built-in rules stay as its version has
+/// them. Every catalog document carries the field as a number (0 when the source gives
+/// none): Meilisearch leaves the order undefined for documents without it.
+const POPULARITY_RULE: &str = "popularity:desc";
+
+async fn popularity_rule(
+    admin: &Client,
+    index: &meilisearch_sdk::indexes::Index,
+    timeout: Duration,
+) -> Result<(), PortError> {
+    let mut rules = index.get_ranking_rules().await.map_err(me)?;
+    if rules.iter().any(|r| r == POPULARITY_RULE) {
+        return Ok(());
+    }
+    rules.push(POPULARITY_RULE.to_string());
+    wait(
+        admin,
+        index.set_ranking_rules(&rules).await.map_err(me)?,
+        timeout,
+    )
+    .await
 }
 
 async fn wait(client: &Client, t: TaskInfo, timeout: Duration) -> Result<(), PortError> {

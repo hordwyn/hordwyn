@@ -235,6 +235,7 @@ async fn library_flow_with_a_companion() {
             external_ids: vec![domain::catalog::ExternalId::new("tmdb", "949")],
             attributes: serde_json::json!({}),
             cover_url: Some("https://image.tmdb.org/t/p/w780/heat.jpg".into()),
+            popularity: None,
         })
         .await
         .unwrap();
@@ -369,6 +370,7 @@ async fn export_then_import_moves_a_library_to_another_account() {
             external_ids: vec![domain::catalog::ExternalId::new("tmdb", "949")],
             attributes: serde_json::json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();
@@ -461,6 +463,7 @@ async fn sharing_and_companion_flows() {
             external_ids: vec![domain::catalog::ExternalId::new("tmdb", "949")],
             attributes: serde_json::json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();
@@ -1017,6 +1020,7 @@ async fn phase1_library_home_history_and_stats() {
         external_ids: vec![domain::catalog::ExternalId::new("test", title)],
         attributes,
         cover_url: None,
+        popularity: None,
     };
     let show = t
         .app
@@ -1430,6 +1434,7 @@ async fn a_play_with_players_scores_and_a_winner() {
         external_ids: vec![domain::catalog::ExternalId::new("test", title)],
         attributes: serde_json::json!({}),
         cover_url: None,
+        popularity: None,
     };
     let game = t
         .app
@@ -1511,6 +1516,7 @@ async fn a_replayed_play_or_watched_with_stores_one_session() {
         external_ids: vec![domain::catalog::ExternalId::new("test", title)],
         attributes: serde_json::json!({}),
         cover_url: None,
+        popularity: None,
     };
     let game = t
         .app
@@ -1583,6 +1589,7 @@ async fn progress_and_plays_refuse_the_future_and_oversized_fields() {
         external_ids: vec![domain::catalog::ExternalId::new("test", title)],
         attributes: serde_json::json!({}),
         cover_url: None,
+        popularity: None,
     };
     let game = t
         .app
@@ -1702,6 +1709,7 @@ async fn a_movie(t: &testkit::TestEnv, title: &str) -> domain::catalog::CatalogI
             external_ids: vec![],
             attributes: serde_json::json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap()
@@ -1852,6 +1860,7 @@ async fn a_show(t: &testkit::TestEnv, title: &str, tmdb: &str, episodes: u32) ->
             external_ids: vec![domain::catalog::ExternalId::new("tmdb", tmdb)],
             attributes: serde_json::json!({"seasons": [{"number": 1, "episode_count": episodes}]}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();
@@ -2080,4 +2089,68 @@ async fn a_rewatch_run_refuses_what_it_could_not_count() {
     let (_, _, p) = call(&app, "GET", &format!("/api/v1/items/{show}/page"), tk, None).await;
     assert_eq!(p["summary"]["rewatch"]["done"], 0);
     assert_eq!(p["progress"].as_array().unwrap().len(), 4);
+}
+
+/// OT-3: the search answer says which local hits are in the searcher's library (the palette
+/// leads with them), and nobody else's entry counts.
+#[tokio::test]
+async fn search_names_the_hits_in_the_searchers_library() {
+    let (s, t) = state();
+    let mk = |title: &str| app::NewCatalogItem {
+        kind: domain::kind::KindId::new("movie").unwrap(),
+        title: title.into(),
+        original_title: None,
+        year: Some(2001),
+        description: None,
+        external_ids: vec![domain::catalog::ExternalId::new("test", title)],
+        attributes: serde_json::json!({}),
+        cover_url: None,
+        popularity: None,
+    };
+    let mut ids = Vec::new();
+    for title in ["Heat", "Heat 2", "Heatwave"] {
+        let item = t.app.upsert_catalog_item(mk(title)).await.unwrap();
+        s.search
+            .upsert(
+                "catalog",
+                vec![app::ports::SearchDoc {
+                    id: item.id.0.to_string(),
+                    owner: None,
+                    fields: serde_json::json!({"title": title, "kind": "movie"}),
+                }],
+            )
+            .await
+            .unwrap();
+        ids.push(item.id.0.to_string());
+    }
+    let app = api::router(s);
+    let token = signed_up(&app).await;
+    let tk = Some(token.as_str());
+    let (st, _, add) = call(
+        &app,
+        "POST",
+        "/api/v1/library",
+        tk,
+        Some(serde_json::json!({"item_id": ids[1]})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{add}");
+    let (st, _, found) = call(&app, "GET", "/api/v1/search?q=heat", tk, None).await;
+    assert_eq!(st, StatusCode::OK, "{found}");
+    assert_eq!(found["items"].as_array().unwrap().len(), 3, "{found}");
+    assert_eq!(found["in_library"], serde_json::json!([ids[1]]), "{found}");
+    // another account has no entry
+    let (_, _, other) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/sign-up",
+        None,
+        Some(serde_json::json!({
+            "username": "ben", "display_name": "Ben", "password": "correct horse battery"
+        })),
+    )
+    .await;
+    let ben = other["token"].as_str().expect("a token").to_string();
+    let (_, _, found) = call(&app, "GET", "/api/v1/search?q=heat", Some(&ben), None).await;
+    assert_eq!(found["in_library"], serde_json::json!([]), "{found}");
 }

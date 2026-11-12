@@ -388,6 +388,7 @@ impl CatalogRepo for MemStore {
         item.original_title = None;
         item.attributes = serde_json::json!({});
         item.cover_url = None;
+        item.popularity = None;
         item.provenance.clear();
         item.state = domain::catalog::EntityState::Stub;
         item.fetched_at = None;

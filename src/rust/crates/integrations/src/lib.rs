@@ -514,6 +514,7 @@ impl Integrations {
                 external_ids: external.clone(),
                 attributes: serde_json::json!({}),
                 cover_url: None,
+                popularity: None,
             })
             .await?;
         if item.needs_refresh(self.app.clock.now()) {

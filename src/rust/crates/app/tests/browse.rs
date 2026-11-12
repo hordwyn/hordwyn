@@ -30,6 +30,7 @@ async fn item_with(
             external_ids: vec![ExternalId::new("test", title)],
             attributes,
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap()
@@ -389,6 +390,7 @@ async fn keyset_pages_walk_every_order() {
                 external_ids: vec![ExternalId::new("test", title)],
                 attributes: serde_json::json!({}),
                 cover_url: None,
+                popularity: None,
             })
             .await
             .unwrap();

@@ -121,6 +121,7 @@ impl T {
                 external_ids: Vec::new(),
                 attributes: json!({}),
                 cover_url: None,
+                popularity: None,
             })
             .await
             .unwrap();

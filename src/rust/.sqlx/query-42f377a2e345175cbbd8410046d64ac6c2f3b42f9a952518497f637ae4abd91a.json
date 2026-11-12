@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, kind, title, original_title, year, description, cover_asset, attributes,\n                    state, fetched_at, fresh_until, cover_url, provenance\n             FROM catalog_items WHERE id = $1",
+  "query": "SELECT id, kind, title, original_title, year, description, cover_asset, attributes,\n                    state, fetched_at, fresh_until, cover_url, provenance, popularity\n             FROM catalog_items WHERE id = ANY($1)",
   "describe": {
     "columns": [
       {
@@ -145,11 +145,22 @@
             "name": "provenance"
           }
         }
+      },
+      {
+        "ordinal": 13,
+        "name": "popularity",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "catalog_items",
+            "name": "popularity"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "UuidArray"
       ]
     },
     "nullable": [
@@ -165,8 +176,9 @@
       true,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "b2e0533c2939e81875f08521ac9eafb3303d7764bdfc7301a724d3b15e229c6e"
+  "hash": "42f377a2e345175cbbd8410046d64ac6c2f3b42f9a952518497f637ae4abd91a"
 }

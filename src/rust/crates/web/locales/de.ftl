@@ -435,6 +435,7 @@ search-label = Katalog durchsuchen
 search-placeholder = Titel, Autorin, Studio...
 search-empty = Noch keine Treffer.
 search-local = In deiner Instanz
+search-library = In deiner Bibliothek
 search-waiting = Frage { $sources } an...
 
 

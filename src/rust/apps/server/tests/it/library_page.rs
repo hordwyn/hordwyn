@@ -101,6 +101,7 @@ async fn seed(
                 serde_json::json!({})
             },
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();

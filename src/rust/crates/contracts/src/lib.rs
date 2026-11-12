@@ -181,6 +181,10 @@ pub struct SearchResponseDto {
     pub search_id: String,
     /// Local results, answered without waiting for any provider.
     pub items: Vec<CatalogItemDto>,
+    /// Ids of the local results that are in the searcher's library, in the order of `items`
+    /// (OT-3: a client leads with them).
+    #[serde(default)]
+    pub in_library: Vec<String>,
     /// Connectors queried in the background.
     pub pending: Vec<String>,
     /// Sources that would serve the kinds but were skipped, with the reason (design.md 4.4:

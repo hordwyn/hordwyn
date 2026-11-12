@@ -50,7 +50,7 @@ pub use card::{Card, CardContent, CardDescription, CardFooter, CardHeader, CardT
 pub use chip::{Chip, Segmented, SegmentedMode, SegmentedOption};
 pub use class::{cn, cva, slug};
 pub use combobox::Combobox;
-pub use command::{Command, CommandHints, CommandItem};
+pub use command::{Command, CommandHints, CommandItem, CommandLeading};
 pub use copy::{CopyField, KeyHint};
 pub use datagrid::{Column, DataGrid};
 pub use dialog::{Dialog, DialogWidth, FormDialog, Sheet, SheetSide};

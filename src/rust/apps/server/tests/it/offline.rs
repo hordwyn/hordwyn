@@ -105,6 +105,7 @@ async fn signed_in_with_a_show() -> (axum::Router, Server, String, String) {
             external_ids: Vec::new(),
             attributes: json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap()
@@ -316,6 +317,7 @@ async fn a_completed_show(app: &axum::Router, srv: &Server, cookie: &str) -> Str
             external_ids: Vec::new(),
             attributes: json!({"seasons": [{"number": 1, "episode_count": 2}]}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap()

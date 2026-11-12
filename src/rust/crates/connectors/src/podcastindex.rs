@@ -203,6 +203,7 @@ fn snapshot(f: Feed, complete: bool) -> Snapshot {
             .into_iter()
             .collect(),
         complete,
+        popularity: None,
     }
 }
 

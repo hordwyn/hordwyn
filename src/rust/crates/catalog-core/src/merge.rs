@@ -36,6 +36,8 @@ pub struct Merged {
     pub cover_url: Option<String>,
     /// `field -> connector`, attribute fields as `attributes.<name>`.
     pub provenance: BTreeMap<String, String>,
+    /// From the first connector in priority order that gives one.
+    pub popularity: Option<f64>,
 }
 
 fn is_empty(v: &Value) -> bool {
@@ -85,6 +87,11 @@ pub fn merge(snapshots: &[Snapshot], priority: &FieldPriority) -> Option<Merged>
     })
     .and_then(|v| v.as_str().map(String::from));
 
+    let popularity = pick("popularity", &|s| {
+        s.popularity.map_or(Value::Null, Value::from)
+    })
+    .and_then(|v| v.as_f64());
+
     let mut keys: Vec<String> = snapshots
         .iter()
         .filter_map(|s| s.attributes.as_object())
@@ -118,6 +125,7 @@ pub fn merge(snapshots: &[Snapshot], priority: &FieldPriority) -> Option<Merged>
         external_ids,
         cover_url,
         provenance,
+        popularity,
     })
 }
 
@@ -138,6 +146,7 @@ mod tests {
             attributes: attrs,
             images: vec![],
             complete: true,
+            popularity: None,
         }
     }
 

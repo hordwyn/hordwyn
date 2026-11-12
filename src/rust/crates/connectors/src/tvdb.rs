@@ -339,6 +339,7 @@ impl Search for Tvdb {
                     attributes: serde_json::to_value(attributes).unwrap_or_default(),
                     images: cover(h.image_url),
                     complete: false,
+                    popularity: None,
                 })
             })
             .collect())
@@ -404,6 +405,7 @@ impl Details for Tvdb {
             attributes: serde_json::to_value(attributes).unwrap_or_default(),
             images: cover(s.image),
             complete: true,
+            popularity: None,
         })
     }
 }

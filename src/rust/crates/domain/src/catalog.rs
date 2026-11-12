@@ -52,6 +52,11 @@ pub struct CatalogItem {
     pub state: EntityState,
     pub fetched_at: Option<Timestamp>,
     pub fresh_until: Option<Timestamp>,
+    /// How well known the item is at its source (TMDB: the number of ratings, `vote_count`),
+    /// when a source says so. Only a tie-break of the search order among titles the title
+    /// rules do not tell apart; values of different sources are not comparable (DEC-611).
+    #[serde(default)]
+    pub popularity: Option<f64>,
 }
 
 /// When one episode of a show was released (WP4-7): number, air date and runtime only, no
@@ -121,6 +126,7 @@ mod tests {
             state,
             fetched_at: None,
             fresh_until,
+            popularity: None,
         }
     }
 

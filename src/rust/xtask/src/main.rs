@@ -139,6 +139,23 @@ fn ci() -> Result<()> {
             &[],
         )
     })?;
+    // covers and keyed rows of the web crate in a browser (OT1B-12)
+    step("test-wasm-web", || {
+        cargo(
+            &[
+                "test",
+                "-p",
+                "web",
+                "--target",
+                "wasm32-unknown-unknown",
+                "--features",
+                "hydrate",
+                "--test",
+                "wasm",
+            ],
+            &[],
+        )
+    })?;
     println!("xtask ci: all green");
     Ok(())
 }

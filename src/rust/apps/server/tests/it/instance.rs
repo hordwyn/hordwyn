@@ -192,6 +192,7 @@ async fn movie(t: &T, title: &str) -> String {
             external_ids: Vec::new(),
             attributes: json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap()

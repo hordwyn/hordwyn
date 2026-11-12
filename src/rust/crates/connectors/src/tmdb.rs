@@ -144,6 +144,8 @@ struct Hit {
     poster_path: Option<String>,
     backdrop_path: Option<String>,
     original_language: Option<String>,
+    /// The number of ratings: how well known the title is (DEC-611).
+    vote_count: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -164,6 +166,7 @@ struct MovieDetails {
     imdb_id: Option<String>,
     poster_path: Option<String>,
     backdrop_path: Option<String>,
+    vote_count: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -204,6 +207,7 @@ struct ShowDetails {
     original_language: Option<String>,
     poster_path: Option<String>,
     backdrop_path: Option<String>,
+    vote_count: Option<u32>,
 }
 
 fn snake(s: &str) -> String {
@@ -263,6 +267,7 @@ impl Search for Tmdb {
                     attributes,
                     images: self.images(h.poster_path.as_deref(), h.backdrop_path.as_deref()),
                     complete: false,
+                    popularity: h.vote_count.map(f64::from),
                 }
             })
             .collect())
@@ -295,6 +300,7 @@ impl Details for Tmdb {
                 description: non_empty(m.overview),
                 images: self.images(m.poster_path.as_deref(), m.backdrop_path.as_deref()),
                 complete: true,
+                popularity: m.vote_count.map(f64::from),
             })
         } else {
             let s: ShowDetails = get_json(ctx, ID, "details", &url, self.headers()?).await?;
@@ -325,6 +331,7 @@ impl Details for Tmdb {
                 description: non_empty(s.overview),
                 images: self.images(s.poster_path.as_deref(), s.backdrop_path.as_deref()),
                 complete: true,
+                popularity: s.vote_count.map(f64::from),
             })
         }
     }

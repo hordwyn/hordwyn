@@ -270,6 +270,7 @@ async fn an_unmatched_row_is_matched_by_hand_and_imported() {
             external_ids: Vec::new(),
             attributes: json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();
@@ -285,6 +286,7 @@ async fn an_unmatched_row_is_matched_by_hand_and_imported() {
             external_ids: Vec::new(),
             attributes: json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();
@@ -446,6 +448,7 @@ async fn another_users_run_and_match_are_refused_and_a_huge_file_too() {
             external_ids: Vec::new(),
             attributes: json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();

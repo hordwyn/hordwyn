@@ -200,6 +200,7 @@ impl Igdb {
             description: non_empty(g.summary.clone()),
             attributes: serde_json::to_value(attributes).unwrap_or_default(),
             complete,
+            popularity: None,
         }
     }
 }

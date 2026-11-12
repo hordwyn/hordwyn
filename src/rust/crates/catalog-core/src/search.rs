@@ -103,6 +103,7 @@ pub fn new_item(s: &Snapshot) -> Option<NewCatalogItem> {
             .iter()
             .find(|i| i.kind == ImageKind::Cover)
             .map(|i| i.url.clone()),
+        popularity: s.popularity,
     })
 }
 

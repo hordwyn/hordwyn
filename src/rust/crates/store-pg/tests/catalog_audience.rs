@@ -19,6 +19,7 @@ fn refresh(title: &str) -> CatalogRefresh {
         cover_url: None,
         provenance: std::collections::BTreeMap::new(),
         fresh_for_secs: 60,
+        popularity: None,
     }
 }
 

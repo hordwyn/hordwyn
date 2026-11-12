@@ -214,6 +214,7 @@ async fn user_supplied_ids_do_not_change_shared_items() {
         external_ids: ids,
         attributes: serde_json::json!({}),
         cover_url: Some("https://evil.example/x.jpg".into()),
+        popularity: None,
     };
     // an import row claims the real item also has someone else's tmdb id
     let found = env

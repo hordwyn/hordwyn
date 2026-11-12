@@ -485,6 +485,7 @@ impl Importer {
                 external_ids: external_ids.to_vec(),
                 attributes: serde_json::json!({}),
                 cover_url: None,
+                popularity: None,
             })
             .await?;
         // details come later, from the connectors, in the import lane

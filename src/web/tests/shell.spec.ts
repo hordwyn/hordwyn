@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
 import { addPerson, contrast, expectNoA11yViolations, hydrated, importDone, PASSWORD, requestLink, signUp, token } from "./helpers";
 
 // UX phase 0 review (docs/reviews/2026-11-06-ux0-review.md): the real shell signed in, in
@@ -578,4 +579,83 @@ test("palette: rows of the previous query are filtered by the new text until its
   await box.fill("fight clu");
   await expect.poll(() => asked).toBe(2);
   await expect(palette.getByRole("option", { name: /^Fight Club \(1999\)/ }).first()).toBeVisible();
+});
+
+// OT-3 and OT-2. Every hit of every search is kept as a catalog copy, and the palette listed
+// those copies first, in the order of our own text score, with a source's answer only added
+// below them: from the second search on, a derivative title could stand above the original
+// the source names first. Now only the person's library leads; a source's answer orders its
+// group. Each result row leads with a box: the cover when this instance has stored it, else
+// the icon of the kind (a cover known only by its provider address is not loaded, DEC-608).
+test("palette: the library leads, a source's answer keeps its order, rows lead with a cover box", async ({ page }) => {
+  test.setTimeout(120_000);
+  const fixture = JSON.parse(readFileSync(`${__dirname}/../../rust/crates/connectors/fixtures/tmdb/search-movie.json`, "utf8"));
+  const answer: string[] = fixture.body.results.map((r: { title: string; release_date?: string }) =>
+    r.release_date ? `${r.title} (${r.release_date.slice(0, 4)})` : r.title,
+  );
+  await signUp(page, `rank${Date.now()}`, "Rank Tester");
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Search" });
+  const box = palette.getByRole("combobox");
+  /** The labels of the rows under each group heading, in order. */
+  const groups = () =>
+    palette.getByRole("listbox").evaluate((list) => {
+      const out: [string, string[]][] = [];
+      for (const li of Array.from(list.children)) {
+        if (li.getAttribute("role") === "option") {
+          out[out.length - 1]?.[1].push(li.querySelector("span.min-w-0")?.textContent ?? "");
+        } else {
+          out.push([li.textContent ?? "", []]);
+        }
+      }
+      return out;
+    });
+  const of = (all: [string, string[]][], heading: string) => all.filter(([h]) => h === heading).flatMap(([, rows]) => rows);
+  const settled = async () => {
+    await expect(palette.getByRole("option", { name: /^Fight Club \(1999\)/ }).first()).toBeVisible({ timeout: 20_000 });
+    await expect(palette.getByText(/^Asking /)).toHaveCount(0, { timeout: 20_000 });
+  };
+
+  // the first search stores the source's hits; wait until our own index answers with them
+  await box.fill("fight club");
+  await settled();
+  await expect
+    .poll(async () => (await (await page.request.get("/api/v1/search?q=fight%20club&kind=movie")).json()).items.length, { timeout: 30_000 })
+    .toBeGreaterThanOrEqual(answer.length);
+  // the second search finds the kept copies first, then the source answers
+  await box.fill("");
+  await expect(palette.getByRole("option", { name: "Go to Lists" })).toBeVisible();
+  await box.fill("fight club");
+  await settled();
+  let all = await groups();
+  expect(of(all, "tmdb - Movie").slice(0, answer.length), "the source's order").toEqual(answer);
+  expect(of(all, "In your library - Movie")).toEqual([]);
+
+  // rows lead with a box of one size; none loads a picture from the provider
+  const options = palette.getByRole("option");
+  const leading = options.locator("[data-leading]");
+  await expect.poll(() => leading.count()).toBe(await options.count());
+  await expect(leading.locator("svg").first()).toBeVisible();
+  expect(await leading.locator("img").evaluateAll((imgs) => imgs.map((i) => i.getAttribute("src")).filter((s) => !s?.startsWith("/assets/")))).toEqual([]);
+  const heights = await options.evaluateAll((rows) => rows.slice(1, 6).map((r) => Math.round(r.getBoundingClientRect().height)));
+  expect(new Set(heights).size, `row heights ${heights}`).toBe(1);
+  const lefts = await options.evaluateAll((rows) => rows.slice(0, 6).map((r) => Math.round(r.querySelector("span.min-w-0")!.getBoundingClientRect().left)));
+  expect(new Set(lefts).size, `label starts ${lefts}`).toBe(1);
+  await expect(options.first()).toHaveAccessibleName(/^Fight Club \(1999\)/);
+  await expectNoA11yViolations(page, "palette with result rows");
+
+  // a title in the library leads the list under its own heading and leaves the source's group
+  const mine = answer[5];
+  const row = palette.getByRole("option", { name: mine }).first();
+  await row.hover();
+  await page.keyboard.press("Control+Enter");
+  await expect(page.locator("[role=status][aria-live] > div").filter({ hasText: "Added to your library as Planned" })).toBeVisible();
+  await box.fill("");
+  await expect(palette.getByRole("option", { name: "Go to Lists" })).toBeVisible();
+  await box.fill("fight club");
+  await settled();
+  await expect.poll(async () => of(await groups(), "In your library - Movie")).toEqual([mine]);
+  all = await groups();
+  expect(all[0][0]).toBe("In your library - Movie");
+  expect(of(all, "tmdb - Movie").slice(0, answer.length - 1)).toEqual(answer.filter((t) => t !== mine));
 });

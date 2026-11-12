@@ -29,6 +29,7 @@ async fn totals_per_group_and_series_per_month_and_year() {
             external_ids: vec![ExternalId::new("test", "heat")],
             attributes: serde_json::json!({"runtime_minutes": 170}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();
@@ -142,6 +143,7 @@ async fn totals_per_kind_add_up_to_the_hero_figure() {
         external_ids: vec![ExternalId::new("test", title)],
         attributes,
         cover_url: None,
+        popularity: None,
     };
     let movie = env
         .app

@@ -63,6 +63,7 @@ async fn dummy_kind_works_end_to_end_through_app() {
             external_ids: vec![],
             attributes: serde_json::json!({"vintage": 2016}),
             cover_url: None,
+            popularity: None,
         })
         .await;
     assert!(bad.is_err(), "grape is required by the typed attributes");
@@ -78,6 +79,7 @@ async fn dummy_kind_works_end_to_end_through_app() {
             external_ids: vec![ExternalId::new("cellar", "b-16")],
             attributes: serde_json::json!({"grape": "Nebbiolo", "vintage": 2016}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();

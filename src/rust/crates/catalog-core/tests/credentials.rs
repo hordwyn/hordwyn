@@ -151,6 +151,7 @@ impl catalog_core::Details for DetailsSpy {
             attributes: serde_json::json!({}),
             images: vec![],
             complete: true,
+            popularity: None,
         })
     }
 }
@@ -197,6 +198,7 @@ async fn a_disabled_source_is_not_asked_for_details() {
             external_ids: vec![domain::catalog::ExternalId::new("tmdb", "949")],
             attributes: serde_json::json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();

@@ -142,6 +142,7 @@ async fn command_selects_active_option_with_enter() {
                 label: (*t).into(),
                 group: "g".into(),
                 keywords: String::new(),
+                leading: None,
             })
             .collect::<Vec<_>>()
     });
@@ -163,6 +164,94 @@ async fn command_selects_active_option_with_enter() {
     key(&input, "Enter");
     settle().await;
     assert_eq!(chosen.get_untracked(), "Arrival");
+}
+
+/// OT1B-8 and OT1B-5: rows that stay in the list keep their elements when rows are added
+/// (their covers are not loaded again), the active mark follows its item, and the caller is
+/// told which item is active.
+#[wasm_bindgen_test]
+async fn command_rows_keep_their_elements_when_the_list_grows() {
+    let q = RwSignal::new(String::new());
+    let titles = RwSignal::new(vec!["Heat", "Ronin"]);
+    let active = RwSignal::new(None::<String>);
+    let items = Signal::derive(move || {
+        titles
+            .get()
+            .iter()
+            .map(|t| CommandItem {
+                id: t.to_lowercase(),
+                label: (*t).into(),
+                group: if *t == "Alien" { "new" } else { "g" }.into(),
+                keywords: String::new(),
+                leading: Some(CommandLeading {
+                    icon: IconName::KindMovie,
+                    image: Some(format!("/assets/{t}/thumb.webp")),
+                    square: false,
+                }),
+            })
+            .collect::<Vec<_>>()
+    });
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <Command id="w-cmd-keep" label="S" placeholder="p" empty_label="none" items=items query=q
+                active_item=active on_select=Callback::new(|_: CommandItem| ())/>
+        }
+    });
+    settle().await;
+    assert_eq!(
+        active.get_untracked().as_deref(),
+        Some("heat"),
+        "the first row"
+    );
+    let input = el("w-cmd-keep");
+    key(&input, "ArrowDown");
+    settle().await;
+    assert_eq!(
+        input.get_attribute("aria-activedescendant").as_deref(),
+        Some("w-cmd-keep-opt-ronin")
+    );
+    assert_eq!(active.get_untracked().as_deref(), Some("ronin"));
+    for id in ["w-cmd-keep-opt-heat", "w-cmd-keep-opt-ronin"] {
+        let img = el(id).query_selector("img").unwrap().expect("a cover");
+        img.set_attribute("data-kept", "1").unwrap();
+    }
+    // rows arrive: one in a new group at the end, one between the two
+    titles.set(vec!["Heat", "Brazil", "Ronin", "Alien"]);
+    settle().await;
+    for id in ["w-cmd-keep-opt-heat", "w-cmd-keep-opt-ronin"] {
+        let img = el(id).query_selector("img").unwrap().expect("a cover");
+        assert!(
+            img.has_attribute("data-kept"),
+            "{id} kept its picture element"
+        );
+    }
+    assert_eq!(
+        el("w-cmd-keep-opt-ronin")
+            .get_attribute("aria-selected")
+            .as_deref(),
+        Some("true"),
+        "the chosen item is still the active row"
+    );
+    assert_eq!(
+        el("w-cmd-keep-opt-brazil")
+            .get_attribute("aria-selected")
+            .as_deref(),
+        Some("false")
+    );
+    assert_eq!(active.get_untracked().as_deref(), Some("ronin"));
+    assert_eq!(
+        input.get_attribute("aria-activedescendant").as_deref(),
+        Some("w-cmd-keep-opt-ronin")
+    );
+    // the order on screen is the order of the list, each group under one heading
+    let list = el("w-cmd-keep-list");
+    let text = list.text_content().unwrap_or_default();
+    let at = |word: &str| {
+        text.find(word)
+            .unwrap_or_else(|| panic!("{word} in {text}"))
+    };
+    assert!(at("Heat") < at("Brazil") && at("Brazil") < at("Ronin") && at("Ronin") < at("new"));
+    assert!(at("new") < at("Alien"));
 }
 
 #[wasm_bindgen_test]
@@ -699,6 +788,7 @@ async fn command_ctrl_enter_runs_the_secondary_action_and_the_active_row_shows_h
                 label: (*t).into(),
                 group: "g".into(),
                 keywords: String::new(),
+                leading: None,
             })
             .collect::<Vec<_>>()
     });
@@ -774,6 +864,7 @@ fn command_items(titles: &[&str]) -> Vec<CommandItem> {
             label: (*t).into(),
             group: "g".into(),
             keywords: String::new(),
+            leading: None,
         })
         .collect()
 }
@@ -953,5 +1044,60 @@ async fn command_scrolls_the_kept_active_option_into_view_when_the_list_is_repla
         top >= list.scroll_top() - 1
             && top + row.offset_height() <= list.scroll_top() + list.client_height() + 1,
         "the active row is not in view"
+    );
+}
+
+/// OT-2: a row can lead with a small cover or an icon. Both are decoration: the option's
+/// accessible text stays the label, and a row without one has no slot.
+#[wasm_bindgen_test]
+async fn command_option_renders_its_leading_slot() {
+    let q = RwSignal::new(String::new());
+    let items = Signal::derive(|| {
+        let mut rows = command_items(&["Heat", "Azul", "Lists"]);
+        rows[0].leading = Some(CommandLeading {
+            icon: IconName::KindMovie,
+            image: Some("/assets/abc/thumb.webp".into()),
+            square: false,
+        });
+        rows[1].leading = Some(CommandLeading {
+            icon: IconName::KindBoardGame,
+            image: None,
+            square: true,
+        });
+        rows
+    });
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <Command id="w-cmd5" label="S" placeholder="p" empty_label="none" items=items query=q
+                on_select=Callback::new(|_: CommandItem| ())/>
+        }
+    });
+    settle().await;
+    let heat = el("w-cmd5-opt-heat");
+    let slot = heat.first_element_child().expect("a slot");
+    assert!(slot.has_attribute("data-leading"), "the slot leads the row");
+    assert_eq!(slot.get_attribute("aria-hidden").as_deref(), Some("true"));
+    let img = slot.query_selector("img").unwrap().expect("the cover");
+    assert_eq!(
+        img.get_attribute("src").as_deref(),
+        Some("/assets/abc/thumb.webp")
+    );
+    assert_eq!(img.get_attribute("alt").as_deref(), Some(""));
+    assert_eq!(
+        img.get_attribute("referrerpolicy").as_deref(),
+        Some("no-referrer")
+    );
+    // the icon stays under the picture: it shows while the picture loads and when it fails
+    assert!(slot.query_selector("svg").unwrap().is_some());
+    assert_eq!(heat.text_content().unwrap_or_default().trim(), "Heat");
+    let azul = el("w-cmd5-opt-azul");
+    let slot = azul.first_element_child().expect("a slot");
+    assert!(slot.query_selector("img").unwrap().is_none());
+    assert!(slot.query_selector("svg").unwrap().is_some());
+    assert_eq!(azul.text_content().unwrap_or_default().trim(), "Azul");
+    let lists = el("w-cmd5-opt-lists");
+    assert!(
+        lists.query_selector("[data-leading]").unwrap().is_none(),
+        "no slot without a leading"
     );
 }

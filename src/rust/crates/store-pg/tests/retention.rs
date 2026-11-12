@@ -18,6 +18,7 @@ fn show(title: &str, ns: &str) -> NewCatalogItem {
         external_ids: vec![ExternalId::new(ns, title)],
         attributes: serde_json::json!({"seasons": [{"number": 1, "episode_count": 1}]}),
         cover_url: Some("https://image.example/a.jpg".into()),
+        popularity: Some(1200.0),
     }
 }
 
@@ -32,7 +33,13 @@ fn refresh() -> CatalogRefresh {
         cover_url: None,
         provenance: std::collections::BTreeMap::new(),
         fresh_for_secs: 60,
+        popularity: Some(1500.0),
     }
+}
+
+/// The stored popularity of an item (OT1B-3).
+async fn popularity(app: &app::App, id: domain::ids::ItemId) -> Option<f64> {
+    app.catalog_item(id).await.unwrap().popularity
 }
 
 #[tokio::test]
@@ -76,7 +83,9 @@ async fn provider_data_is_stamped_found_and_purged_on_postgres() {
         clock: std::sync::Arc::new(clock),
         ..app.clone()
     };
+    assert_eq!(popularity(app, a.id).await, Some(1200.0), "stored");
     later.apply_catalog_refresh(a.id, refresh()).await.unwrap();
+    assert_eq!(popularity(app, a.id).await, Some(1500.0), "refreshed");
     assert_eq!(
         app.stale_provider_data(&ns, t0 + Duration::days(11), 10)
             .await
@@ -108,6 +117,7 @@ async fn provider_data_is_stamped_found_and_purged_on_postgres() {
     let purged = app.catalog_item(a.id).await.unwrap();
     assert!(purged.title_unavailable());
     assert_eq!(purged.year, None);
+    assert_eq!(purged.popularity, None, "it is the source's data too");
     assert_eq!(
         purged.external_ids,
         vec![ExternalId::new("tmdb", "Harbour")]

@@ -681,6 +681,7 @@ fn table_heads_are_column_headers_and_command_rows_are_touch_sized() {
                 label: "Heat".into(),
                 group: "Movies".into(),
                 keywords: String::new(),
+                leading: None,
             }]
         });
         view! { <Command id="cmd" label="Search" placeholder="Type" empty_label="Nothing" items=items query=q on_select=Callback::new(|_| ())/> }

@@ -48,13 +48,20 @@ fn text_of(v: &Value) -> String {
 }
 
 /// Searchable text per weight class: A = first searchable attribute (title), B = second,
-/// C = the rest.
+/// C = the rest. A second attribute that only repeats the first (an original title equal to
+/// the title) is left out: it doubled the text score of exactly those documents (OT1B-3).
 fn weighted(index: &str, fields: &Value) -> [String; 3] {
     let attrs = searchable(index);
     let get = |a: &str| fields.get(a).map(text_of).unwrap_or_default();
+    let first = attrs.first().map(|a| get(a)).unwrap_or_default();
+    let second = attrs
+        .get(1)
+        .map(|a| get(a))
+        .filter(|s| s.trim().to_lowercase() != first.trim().to_lowercase())
+        .unwrap_or_default();
     [
-        attrs.first().map(|a| get(a)).unwrap_or_default(),
-        attrs.get(1).map(|a| get(a)).unwrap_or_default(),
+        first,
+        second,
         attrs
             .iter()
             .skip(2)
@@ -119,20 +126,44 @@ impl SearchIndex for PgSearch {
         );
         let limit = i64::try_from(q.limit.clamp(1, 100)).unwrap_or(20);
         // Words first, typos second (Meilisearch's order of ranking rules: words, typo):
-        // documents holding the words or the text rank by `ts_rank` + `similarity`; only when
-        // they do not fill the page are the closest misspellings added (`word_similarity`, so
-        // a typo in a long title still matches). The typo scan is skipped (one-time filter)
-        // when the page is full; it was the costly part under load (DEC-493).
+        // documents holding the words or the text come first; only when they do not fill the
+        // page are the closest misspellings added (`word_similarity`, so a typo in a long
+        // title still matches). The typo scan is skipped (one-time filter) when the page is
+        // full; it was the costly part under load (DEC-493). Among the documents holding the
+        // words the title decides before the text score (OT-3): the title that is the query,
+        // then titles that start with it, then the source's popularity when the document
+        // has one (the tie-break between "Harry Potter and the Philosopher's Stone" and a
+        // derivative title, DEC-611), then `ts_rank` + `similarity`, which alone ranked by
+        // how short the text is and how often it repeats the words. One leading article of
+        // the title (en: the, a, an; de: der, die, das, ein, eine) is skipped for both title
+        // rules, so "The Avengers" is the title for "avengers" (DEC-612); the title as
+        // written is compared too, so "The Thing" is still the title for "the thing". The two
+        // `OFFSET 0` keep the lower-cased title and its form without the article computed
+        // once per matching row (measured, DEC-611). `popularity` is written by the indexer
+        // only, as a number or null.
+        let title = searchable(&q.index).first().copied().unwrap_or_default();
         let rows = sqlx::query!(
             r#"WITH exact AS (
-                   SELECT id, fields, ts_rank(tsv, query) + similarity(body, $3) AS score
-                   FROM search_docs, websearch_to_tsquery('simple', $3) AS query
-                   WHERE index_name = $1
-                     AND ($2::uuid IS NULL OR owner_id = $2)
-                     AND (SELECT bool_and(fields ->> f.key = f.value)
-                          FROM jsonb_each_text($4::jsonb) AS f) IS NOT FALSE
-                     AND ($3 = '' OR tsv @@ query OR body ILIKE '%' || $3 || '%')
-                   ORDER BY score DESC, id
+                   SELECT id, fields, score, pop,
+                          (raw = lower($3) OR bare = lower($3)) AS whole,
+                          (starts_with(raw, lower($3)) OR starts_with(bare, lower($3))) AS lead
+                   FROM (SELECT id, fields, score, pop, raw,
+                                regexp_replace(raw, '^(the|a|an|der|die|das|ein|eine) ', '')
+                                    AS bare
+                         FROM (SELECT id, fields,
+                                      ts_rank(tsv, query) + similarity(body, $3) AS score,
+                                      lower(fields ->> $6) AS raw,
+                                      (fields ->> 'popularity')::float8 AS pop
+                               FROM search_docs, websearch_to_tsquery('simple', $3) AS query
+                               WHERE index_name = $1
+                                 AND ($2::uuid IS NULL OR owner_id = $2)
+                                 AND (SELECT bool_and(fields ->> f.key = f.value)
+                                      FROM jsonb_each_text($4::jsonb) AS f) IS NOT FALSE
+                                 AND ($3 = '' OR tsv @@ query OR body ILIKE '%' || $3 || '%')
+                               OFFSET 0) AS matched
+                         OFFSET 0) AS titled
+                   ORDER BY whole DESC NULLS LAST, lead DESC NULLS LAST, pop DESC NULLS LAST,
+                            score DESC, id
                    LIMIT $5),
                typos AS (
                    SELECT id, fields, word_similarity($3, body) AS score
@@ -148,15 +179,18 @@ impl SearchIndex for PgSearch {
                    ORDER BY score DESC, id
                    LIMIT $5)
                SELECT id AS "id!", fields AS "fields!"
-               FROM (SELECT id, fields, 0 AS phase, score FROM exact
-                     UNION ALL SELECT id, fields, 1, score FROM typos) AS hits
-               ORDER BY phase, score DESC, id
+               FROM (SELECT id, fields, 0 AS phase, score, whole, lead, pop FROM exact
+                     UNION ALL
+                     SELECT id, fields, 1, score, false, false, NULL::float8 FROM typos) AS hits
+               ORDER BY phase, whole DESC NULLS LAST, lead DESC NULLS LAST, pop DESC NULLS LAST,
+                        score DESC, id
                LIMIT $5"#,
             q.index,
             owner,
             q.text.trim(),
             filter,
-            limit
+            limit,
+            title
         )
         .fetch_all(&self.pool)
         .await

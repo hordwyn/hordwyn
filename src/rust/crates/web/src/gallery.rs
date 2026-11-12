@@ -79,24 +79,28 @@ pub fn Gallery() -> impl IntoView {
                 label: "The Matrix (1999)".into(),
                 group: "Movies".into(),
                 keywords: "wachowski".into(),
+                leading: None,
             },
             CommandItem {
                 id: "m-550".into(),
                 label: "Fight Club (1999)".into(),
                 group: "Movies".into(),
                 keywords: String::new(),
+                leading: None,
             },
             CommandItem {
                 id: "b-1".into(),
                 label: "Dune".into(),
                 group: "Books".into(),
                 keywords: "herbert".into(),
+                leading: None,
             },
             CommandItem {
                 id: "g-azul".into(),
                 label: "Azul".into(),
                 group: "Board games".into(),
                 keywords: "tiles".into(),
+                leading: None,
             },
         ]
     });

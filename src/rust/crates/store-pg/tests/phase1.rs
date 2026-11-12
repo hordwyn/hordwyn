@@ -29,6 +29,7 @@ async fn item(
         external_ids: vec![ExternalId::new("test", title)],
         attributes,
         cover_url: None,
+        popularity: None,
     })
     .await
     .unwrap()

@@ -17,7 +17,6 @@ use ui::{
 
 use crate::api;
 use crate::bulk::{BulkBar, ListPick, ListPicker, Selection};
-use crate::events::use_events;
 use crate::i18n::{kind_label, t, use_i18n};
 use crate::library_state::{
     Filter, LibraryState, PAGE_SIZE, SORTS, View, kind_chips, nearest_status, sort_label_key,
@@ -155,15 +154,8 @@ pub fn Library() -> impl IntoView {
         edit_tags: Callback::new(move |r| editing.set(Some(r))),
     };
     remember_group(state, replace);
-    let events = use_events();
-    let on_event = crate::offline::refresh_when_online(refresh);
-    Effect::new(move |_| {
-        if let Some((topic, _)) = events.0.get()
-            && topic == "entity.updated"
-        {
-            on_event.run(());
-        }
-    });
+    // paced: an import announces every item it writes (OT-21)
+    crate::events::refresh_on_updates(crate::offline::refresh_when_online(refresh));
     slash_focuses_the_filter();
     let known = Signal::derive(move || {
         tags.get()
@@ -1049,9 +1041,13 @@ fn Grid(lib: Lib, rows: Signal<Vec<LibraryRowDto>>) -> impl IntoView {
     };
     view! {
         <ul class=GRID aria-label=label node_ref=grid on:focusin=follow>
-            {keyed_rows(rows, move |row, open| {
-                let statuses = lib.statuses_of(&row.item.kind);
-                let id = row.entry.id.clone();
+            // a card and its cover stay while the entry is on the page (OT-21)
+            {crate::widgets::keyed(rows, |r: &LibraryRowDto| r.entry.id.clone(), move |row| {
+                let open = RwSignal::new(false);
+                let (id, kind) = row.with_untracked(|r| {
+                    r.as_ref().map_or_else(Default::default, |r| (r.entry.id.clone(), r.item.kind.clone()))
+                });
+                let statuses = lib.statuses_of(&kind);
                 let tab_stop = Signal::derive(move || active.with(|a| a.as_deref() == Some(id.as_str())));
                 view! { <PosterCard row=row statuses=statuses on_change=lib.refresh on_tags=lib.edit_tags on_list=pick_one() menu_open=open tab_stop=tab_stop/> }
             })}

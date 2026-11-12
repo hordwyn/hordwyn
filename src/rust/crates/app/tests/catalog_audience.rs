@@ -22,6 +22,7 @@ fn refresh(title: &str) -> CatalogRefresh {
         cover_url: None,
         provenance: std::collections::BTreeMap::new(),
         fresh_for_secs: 60,
+        popularity: None,
     }
 }
 
@@ -62,6 +63,7 @@ async fn import(env: &TestEnv, actor: domain::user::Actor, title: &str) -> Catal
             external_ids: vec![ExternalId::new("test", title)],
             attributes: serde_json::json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();
@@ -203,6 +205,67 @@ async fn an_open_item_page_hears_about_its_item_for_a_while() {
     assert_eq!(audiences(&env, item.id), Vec::<Vec<UserId>>::new());
 }
 
+/// OT1B-3: a search result brings the source's popularity with it; a kept copy without one
+/// gets it from the next search, a stored value is left to the refresh (no write per search).
+#[tokio::test]
+async fn a_search_result_fills_a_missing_popularity_and_keeps_a_stored_one() {
+    let env = TestEnv::new();
+    let hit = |popularity: Option<f64>| NewCatalogItem {
+        kind: KindId::new("movie").unwrap(),
+        title: "Harry Potter and the Philosopher's Stone".into(),
+        original_title: None,
+        year: Some(2001),
+        description: None,
+        external_ids: vec![ExternalId::new("tmdb", "671")],
+        attributes: serde_json::json!({}),
+        cover_url: None,
+        popularity,
+    };
+    let kept = env.app.ensure_catalog_item(hit(None)).await.unwrap();
+    assert_eq!(kept.popularity, None);
+    let again = env
+        .app
+        .ensure_catalog_item(hit(Some(28000.0)))
+        .await
+        .unwrap();
+    assert_eq!((again.id, again.popularity), (kept.id, Some(28000.0)));
+    assert_eq!(
+        env.app.catalog_item(kept.id).await.unwrap().popularity,
+        Some(28000.0)
+    );
+    let third = env
+        .app
+        .ensure_catalog_item(hit(Some(28003.0)))
+        .await
+        .unwrap();
+    assert_eq!(third.popularity, Some(28000.0), "left to the refresh");
+    let fresh = env
+        .app
+        .ensure_catalog_item(NewCatalogItem {
+            external_ids: vec![ExternalId::new("tmdb", "672")],
+            ..hit(Some(21000.0))
+        })
+        .await
+        .unwrap();
+    assert_eq!(fresh.popularity, Some(21000.0), "a new item has it at once");
+    let merged = env
+        .app
+        .upsert_catalog_item(hit(Some(28100.0)))
+        .await
+        .unwrap();
+    assert_eq!(
+        merged.popularity,
+        Some(28100.0),
+        "connector data replaces it"
+    );
+    let kept = env.app.upsert_catalog_item(hit(None)).await.unwrap();
+    assert_eq!(
+        kept.popularity,
+        Some(28100.0),
+        "an answer without one keeps it"
+    );
+}
+
 /// A connector search result: inserted as a partial item nobody refers to yet.
 async fn search_result(env: &TestEnv, kind: &str, title: &str) -> CatalogItem {
     env.app
@@ -215,6 +278,7 @@ async fn search_result(env: &TestEnv, kind: &str, title: &str) -> CatalogItem {
             external_ids: vec![ExternalId::new("test", title)],
             attributes: serde_json::json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap()

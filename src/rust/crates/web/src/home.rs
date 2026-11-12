@@ -21,13 +21,11 @@ use crate::api;
 use crate::charts::{
     Bar, BarList, Column, ColumnChart, Measure, bucket_label, fill_months, fill_years, measures_led,
 };
-use crate::events::use_events;
 use crate::history::ActivityRow;
 use crate::i18n::{I18n, kind_label, t, use_i18n};
-use crate::library_state::square_art;
 use crate::next_step::{NextStepButton, percent, progress_text};
-use crate::pages::{PageTitle, error_text, go, needs_sign_in};
-use crate::widgets::Cover;
+use crate::pages::{PageTitle, error_text, fresh, go, needs_sign_in};
+use crate::widgets::{CoverOf, StableCover, keyed};
 
 /// A count in the locale's digits.
 #[allow(clippy::cast_precision_loss)] // counts stay far below 2^52
@@ -67,15 +65,8 @@ fn SignedInHome() -> impl IntoView {
     let data = Resource::new(|| (), |()| api::home());
     let shown = StoredValue::new(Shown::default());
     let refresh = Callback::new(move |()| data.refetch());
-    let events = use_events();
-    let on_event = crate::offline::refresh_when_online(refresh);
-    Effect::new(move |_| {
-        if let Some((topic, _)) = events.0.get()
-            && topic == "entity.updated"
-        {
-            on_event.run(());
-        }
-    });
+    // paced: an import announces every item it writes (OT-21)
+    crate::events::refresh_on_updates(crate::offline::refresh_when_online(refresh));
     let title = i18n.t_args(
         "home-greeting",
         &[("name", cfg.display_name.clone().into())],
@@ -101,16 +92,40 @@ fn SignedInHome() -> impl IntoView {
                     </Alert>
                 }.into_any(),
                 Ok(home) if home.library_total == 0 => view! { <HomeEmpty/> }.into_any(),
-                Ok(home) => view! { <HomeSections home=home refresh=refresh/> }.into_any(),
+                Ok(first) => {
+                    let home = latest_home(data, first);
+                    view! { <HomeSections home=home refresh=refresh/> }.into_any()
+                }
             }/>
         </Transition>
     }
 }
 
-/// What Home shows of its answers. Each new answer renders Home afresh (its handlers carry the
-/// new data, UX1-2), but a refetch with the same answer keeps the render, so a background refresh
-/// (any catalog change on the instance is announced to every page) leaves the focus where J/K
-/// put it and the next step under the pointer. A refetch that never reached the server (offline,
+/// The latest answer with rows, for the sections on screen (they outlive refetches, OT-21). In
+/// the browser it follows the resource and keeps the last one while an error or an empty
+/// library is the answer (the view is replaced then, or the answer never reached the server);
+/// on the server nothing refetches, so it is the first answer (a second resource read under
+/// the Transition made the server panic now and then, DEC-398).
+fn latest_home(data: Resource<Result<HomeDto, ServerFnError>>, first: HomeDto) -> Memo<HomeDto> {
+    #[cfg(feature = "hydrate")]
+    let home = Memo::new(move |prev: Option<&HomeDto>| match data.get() {
+        Some(Ok(h)) if h.library_total > 0 => h,
+        _ => prev.cloned().unwrap_or_else(|| first.clone()),
+    });
+    #[cfg(not(feature = "hydrate"))]
+    let home = {
+        let _ = data;
+        Memo::new(move |_| first.clone())
+    };
+    home
+}
+
+/// What Home shows of its answers. The sections stay on screen from one answer with rows to
+/// the next: their cards are keyed, so a card whose row did not change keeps its focus, its
+/// open menu and its cover, and a changed row renders its acting parts afresh (handlers with
+/// the new data, UX1-2; OT-21: every answer used to render all of Home afresh, and during an
+/// import every cover was loaded again several times a second). An error, the empty library
+/// and the way back from them render afresh. A refetch that never reached the server (offline,
 /// the connection dropped) keeps the last answer instead of "Home could not be loaded" (DEC-486).
 #[derive(Default)]
 struct Shown {
@@ -133,8 +148,10 @@ impl Shown {
         if let Ok(home) = &answer {
             self.good = Some(home.clone());
         }
+        let rows = |a: &Result<HomeDto, ServerFnError>| matches!(a, Ok(h) if h.library_total > 0);
         let key = match &self.last {
             Some((same, key)) if *same == answer => *key,
+            Some((was, key)) if rows(was) && rows(&answer) => *key,
             Some((_, key)) => key.wrapping_add(1),
             None => 0,
         };
@@ -191,40 +208,43 @@ fn Section(
 }
 
 #[component]
-fn HomeSections(home: HomeDto, refresh: Callback<()>) -> impl IntoView {
-    let i18n = use_i18n();
-    let HomeDto {
-        continue_rows,
-        up_next,
-        activity,
-        stats,
-        ..
-    } = home;
+fn HomeSections(home: Memo<HomeDto>, refresh: Callback<()>) -> impl IntoView {
+    let continue_rows = Memo::new(move |_| home.with(|h| h.continue_rows.clone()));
+    let up_next = Memo::new(move |_| home.with(|h| h.up_next.clone()));
+    let activity = Memo::new(move |_| home.with(|h| h.activity.rows.clone()));
+    let stats = Memo::new(move |_| home.with(|h| h.stats.clone()));
+    let any_continue = move || continue_rows.with(|r| !r.is_empty());
+    let any_up_next = move || up_next.with(|r| !r.is_empty());
+    let any_activity = move || activity.with(|r| !r.is_empty());
+    // rows and stats that changed are rendered afresh, not rebuilt in place (UX1-2)
+    let renders = StoredValue::new(0u32);
     view! {
         <div class="flex flex-col gap-10">
-            {(!continue_rows.is_empty()).then(|| view! {
-                <Section id="hm-continue" title=i18n.t("home-continue") link=("/library?status=in_progress", i18n.t("home-all-in-progress"))>
+            <Show when=any_continue>
+                <Section id="hm-continue" title=t("home-continue") link=("/library?status=in_progress", t("home-all-in-progress"))>
                     <ul class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                        {continue_rows.into_iter().map(|row| view! { <ContinueCard row=row on_done=refresh/> }).collect_view()}
+                        {keyed(continue_rows.into(), |r: &LibraryRowDto| r.entry.id.clone(), move |row| view! { <ContinueCard row=row on_done=refresh/> })}
                     </ul>
                 </Section>
-            })}
-            {(!up_next.is_empty()).then(|| view! {
-                <Section id="hm-up-next" title=i18n.t("home-up-next") link=("/library?status=planned", i18n.t("home-all-planned"))>
+            </Show>
+            <Show when=any_up_next>
+                <Section id="hm-up-next" title=t("home-up-next") link=("/library?status=planned", t("home-all-planned"))>
                     <ul class="-mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-2">
-                        {up_next.into_iter().map(|u| view! { <UpNextCard up=u/> }).collect_view()}
+                        {keyed(up_next.into(), |u: &UpNextDto| u.row.entry.id.clone(), |up| view! { <UpNextCard up=up/> })}
                     </ul>
                 </Section>
-            })}
-            {(!activity.rows.is_empty()).then(|| view! {
-                <Section id="hm-activity" title=i18n.t("home-activity") link=("/history", i18n.t("home-all-history"))>
+            </Show>
+            <Show when=any_activity>
+                <Section id="hm-activity" title=t("home-activity") link=("/history", t("home-all-history"))>
                     <ul class="flex flex-col gap-2">
-                        {activity.rows.into_iter().map(|row| view! { <ActivityRow row=row dated=true on_change=refresh/> }).collect_view()}
+                        <For each=move || Some((fresh(renders), activity.get())) key=|(k, _)| *k
+                            children=move |(_, rows)| rows.into_iter().map(|row| view! { <ActivityRow row=row dated=true on_change=refresh/> }).collect_view()/>
                     </ul>
                 </Section>
-            })}
-            <Section id="hm-stats" title=i18n.t("home-stats") link=("/stats", i18n.t("home-all-stats"))>
-                <HomeStats stats=stats/>
+            </Show>
+            <Section id="hm-stats" title=t("home-stats") link=("/stats", t("home-all-stats"))>
+                <For each=move || Some((fresh(renders), stats.get())) key=|(k, _)| *k
+                    children=move |(_, stats)| view! { <HomeStats stats=stats/> }/>
             </Section>
         </div>
     }
@@ -284,9 +304,32 @@ fn move_continue(_: isize) -> bool {
     false
 }
 
-/// An in-progress entry: small cover, title, progress in words and as a bar, one button.
+/// An in-progress entry: small cover, title, progress in words and as a bar, one button. The
+/// card and its cover stay while the entry is listed; the rest is rendered afresh when the row
+/// changes (OT-21).
 #[component]
-fn ContinueCard(row: LibraryRowDto, on_done: Callback<()>) -> impl IntoView {
+fn ContinueCard(row: Memo<Option<LibraryRowDto>>, on_done: Callback<()>) -> impl IntoView {
+    let href = row.with_untracked(|r| {
+        r.as_ref()
+            .map(|r| format!("/items/{}", r.item.id))
+            .unwrap_or_default()
+    });
+    let cover = Signal::derive(move || row.with(|r| r.as_ref().map(|r| CoverOf::of(&r.item))));
+    let renders = StoredValue::new(0u32);
+    view! {
+        <li class="flex gap-3 rounded-xl border border-border p-3" data-testid="continue-card" data-continue-card="">
+            <a href=href class="w-14 shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" tabindex="-1" aria-hidden="true">
+                <StableCover of=cover sizes="56px"/>
+            </a>
+            <For each=move || row.get().map(|r| (fresh(renders), r)) key=|(k, _)| *k
+                children=move |(_, r)| view! { <ContinueBody row=r on_done=on_done/> }/>
+        </li>
+    }
+}
+
+/// The words and the button of a [`ContinueCard`].
+#[component]
+fn ContinueBody(row: LibraryRowDto, on_done: Callback<()>) -> impl IntoView {
     let i18n = use_i18n();
     let item = row.item.clone();
     let progress = progress_text(&i18n, &row.summary, &row.next_step);
@@ -299,36 +342,51 @@ fn ContinueCard(row: LibraryRowDto, on_done: Callback<()>) -> impl IntoView {
         None => kind_label(&item.kind),
     };
     view! {
-        <li class="flex gap-3 rounded-xl border border-border p-3" data-testid="continue-card" data-continue-card="">
-            <a href=format!("/items/{}", item.id) class="w-14 shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" tabindex="-1" aria-hidden="true">
-                <Cover title=crate::i18n::title_text(&item.title) image=item.cover.clone() square=square_art(&item.kind) sizes="56px"/>
-            </a>
-            <div class="flex min-w-0 flex-1 flex-col gap-1.5">
-                <a href=format!("/items/{}", item.id) data-title="" class="truncate font-medium hover:underline">{crate::i18n::title_text(&item.title)}</a>
-                <span class="text-xs text-muted-foreground">{meta}</span>
-                {bar}
-                <div class="mt-auto">
-                    <NextStepButton item_id=item.id.clone() title=crate::i18n::title_text(&item.title) step=row.next_step.clone() on_done=on_done/>
-                </div>
+        <div class="flex min-w-0 flex-1 flex-col gap-1.5">
+            <a href=format!("/items/{}", item.id) data-title="" class="truncate font-medium hover:underline">{crate::i18n::title_text(&item.title)}</a>
+            <span class="text-xs text-muted-foreground">{meta}</span>
+            {bar}
+            <div class="mt-auto">
+                <NextStepButton item_id=item.id.clone() title=crate::i18n::title_text(&item.title) step=row.next_step.clone() on_done=on_done/>
             </div>
-        </li>
+        </div>
     }
 }
 
+/// A planned entry. Nothing on it acts, so its words follow the row and the card stays.
 #[component]
-fn UpNextCard(up: UpNextDto) -> impl IntoView {
-    let item = up.row.item;
-    let reason = match up.reason.as_str() {
-        "next_in_series" => t("home-reason-next-in-series"),
-        _ => t("home-reason-planned"),
+fn UpNextCard(up: Memo<Option<UpNextDto>>) -> impl IntoView {
+    let href = up.with_untracked(|u| {
+        u.as_ref()
+            .map(|u| format!("/items/{}", u.row.item.id))
+            .unwrap_or_default()
+    });
+    let cover = Signal::derive(move || up.with(|u| u.as_ref().map(|u| CoverOf::of(&u.row.item))));
+    let title = move || {
+        up.with(|u| {
+            u.as_ref()
+                .map(|u| crate::i18n::title_text(&u.row.item.title))
+                .unwrap_or_default()
+        })
+    };
+    let meta = move || {
+        up.with(|u| {
+            u.as_ref().map(|u| {
+                let reason = match u.reason.as_str() {
+                    "next_in_series" => t("home-reason-next-in-series"),
+                    _ => t("home-reason-planned"),
+                };
+                format!("{} - {reason}", kind_label(&u.row.item.kind))
+            })
+        })
     };
     view! {
         <li class="w-28 shrink-0 snap-start sm:w-32" data-testid="up-next-card">
-            <a href=format!("/items/{}", item.id) class="group flex flex-col gap-1.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                <Cover title=crate::i18n::title_text(&item.title) image=item.cover.clone() square=square_art(&item.kind) sizes="128px"/>
-                <span class="line-clamp-2 text-sm font-medium group-hover:underline">{crate::i18n::title_text(&item.title)}</span>
+            <a href=href class="group flex flex-col gap-1.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <StableCover of=cover sizes="128px"/>
+                <span class="line-clamp-2 text-sm font-medium group-hover:underline">{title}</span>
             </a>
-            <span class="text-xs text-muted-foreground">{kind_label(&item.kind)} " - " {reason}</span>
+            <span class="text-xs text-muted-foreground">{meta}</span>
         </li>
     }
 }
@@ -909,9 +967,11 @@ mod tests {
     }
 
     #[test]
-    fn a_refetch_renders_afresh_only_for_a_new_answer_and_offline_keeps_the_last_one() {
+    fn the_sections_outlive_answers_with_rows_and_offline_keeps_the_last_one() {
         // J/K lost the focus and the next step was detached when every refetch rendered Home
-        // afresh; offline, a failed refetch replaced Home with "Home could not be loaded"
+        // afresh; offline, a failed refetch replaced Home with "Home could not be loaded";
+        // OT-21: during an import every answer differs, and rendering Home afresh for each
+        // loaded every cover again
         let mut shown = Shown::default();
         let (first, r) = shown.next(Ok(answer(2)));
         assert_eq!(r, Ok(answer(2)));
@@ -925,11 +985,15 @@ mod tests {
             "offline: the last answer stays"
         );
         let (changed, r) = shown.next(Ok(answer(3)));
-        assert_ne!(
+        assert_eq!(
             changed, first,
-            "a new answer renders afresh (handlers with the new data)"
+            "a new answer with rows goes to the sections on screen (keyed cards)"
         );
         assert_eq!(r, Ok(answer(3)));
+        let (empty, _) = shown.next(Ok(answer(0)));
+        assert_ne!(empty, changed, "the empty library is another view");
+        let (changed, _) = shown.next(Ok(answer(3)));
+        assert_ne!(changed, empty, "and so is the way back");
         let refused = ServerFnError::ServerError("unauthorized".into());
         let (key, r) = shown.next(Err(refused.clone()));
         assert_ne!(key, changed);

@@ -167,6 +167,9 @@ impl Indexer {
                             "description": i.description,
                             "kind": i.kind.as_str(),
                             "year": i.year,
+                            // always a number: Meilisearch leaves the order of documents
+                            // without the attribute of a custom ranking rule undefined
+                            "popularity": i.popularity.unwrap_or(0.0),
                         }),
                     },
                 ),

@@ -21,6 +21,20 @@ pub struct CommandItem {
     pub group: String,
     /// Extra words that match the query.
     pub keywords: String,
+    /// What leads the row; `None` for a row of text only.
+    pub leading: Option<CommandLeading>,
+}
+
+/// The picture that leads a row (OT-2): an icon in a muted box, with a small cover over it when
+/// there is one. The box has one size per shape and the slot one width, so labels line up; the
+/// icon shows while the cover loads and when it fails. Decoration only: the label names the row.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CommandLeading {
+    pub icon: IconName,
+    /// URL of a small cover.
+    pub image: Option<String>,
+    /// Square art (albums, board game boxes) instead of a 2:3 poster.
+    pub square: bool,
 }
 
 /// The key hints the active row shows (design.md 6.4): the keys and what they do. An empty
@@ -54,12 +68,41 @@ fn matches(item: &CommandItem, q: &str) -> bool {
         || item.keywords.to_lowercase().contains(&q)
 }
 
-/// The active option: the item chosen by key or pointer (`None`: the first row) and where it
-/// is in the list on screen.
+/// The active option: the item chosen by key or pointer (`None`: the first row), where it
+/// is in the list on screen and which item that is.
 #[derive(Clone, Copy)]
 struct Active {
     item: RwSignal<Option<String>>,
     index: Memo<usize>,
+    id: Memo<Option<String>>,
+}
+
+/// What makes a row the same row from one list to the next (OT1B-8): its item, what it shows
+/// and whether its group's heading stands before it. A row whose key stays keeps its
+/// elements, so its cover is not loaded and painted again for every batch of results.
+type RowKey = (String, String, Option<String>, Option<CommandLeading>);
+
+fn row_key((item, heading): &(CommandItem, Option<String>)) -> RowKey {
+    (
+        item.id.clone(),
+        item.label.clone(),
+        heading.clone(),
+        item.leading.clone(),
+    )
+}
+
+/// The rows on screen with their headings: a heading stands before the first row of each run
+/// of one group.
+fn rows(items: &[CommandItem]) -> Vec<(CommandItem, Option<String>)> {
+    let mut last_group: Option<&str> = None;
+    items
+        .iter()
+        .map(|item| {
+            let heading = (last_group != Some(item.group.as_str())).then(|| item.group.clone());
+            last_group = Some(item.group.as_str());
+            (item.clone(), heading)
+        })
+        .collect()
 }
 
 /// The element id of an item's option.
@@ -173,6 +216,10 @@ pub fn Command(
     /// typed text.
     #[prop(into, optional)]
     filter: Option<Signal<bool>>,
+    /// Told which item is active (the first row while nothing is chosen), for a caller that
+    /// adds rows while the list is open and must not move that row (OT1B-5).
+    #[prop(optional)]
+    active_item: Option<RwSignal<Option<String>>>,
     #[prop(into, optional)] class: MaybeProp<String>,
 ) -> impl IntoView {
     let chosen = RwSignal::new(None::<String>);
@@ -202,10 +249,15 @@ pub fn Command(
                 .unwrap_or(0)
         })
     });
+    let active_id = Memo::new(move |_| filtered.with(|f| f.get(index.get()).map(|i| i.id.clone())));
     let active = Active {
         item: chosen,
         index,
+        id: active_id,
     };
+    if let Some(out) = active_item {
+        Effect::new(move |_| out.set(active_id.get()));
+    }
     let prefix = id.clone();
     let option_id: StoredValue<OptionId> = StoredValue::new(Box::new(move |item_id: &str| {
         format!("{prefix}-opt-{}", slug(item_id))
@@ -243,16 +295,15 @@ pub fn Command(
                 <Show when=move || filtered.with(Vec::is_empty) && !empty_label.with(String::is_empty)>
                     <li role="presentation" class="py-6 text-center text-sm text-muted-foreground">{move || empty_label.get()}</li>
                 </Show>
-                {move || {
-                    let mut last_group = String::new();
-                    filtered.get().into_iter().enumerate().map(|(i, item)| {
-                        let heading = (item.group != last_group).then(|| item.group.clone());
-                        last_group.clone_from(&item.group);
+                <For
+                    each=move || filtered.with(|f| rows(f))
+                    key=row_key
+                    children=move |(item, heading): (CommandItem, Option<String>)| {
                         let id = option_id.with_value(|o| o(&item.id));
                         let hints = hints.get_value();
-                        view! { <CommandOption item=item index=i id=id heading=heading active=active on_select=on_select hints=hints/> }
-                    }).collect_view()
-                }}
+                        view! { <CommandOption item=item id=id heading=heading active=active on_select=on_select hints=hints/> }
+                    }
+                />
             </ul>
         </div>
     }
@@ -264,16 +315,19 @@ pub fn Command(
 #[component]
 fn CommandOption(
     item: CommandItem,
-    index: usize,
     id: String,
     heading: Option<String>,
     active: Active,
     on_select: Callback<CommandItem>,
     hints: Option<CommandHints>,
 ) -> impl IntoView {
-    let selected = move || active.index.get() == index;
+    // by item, not by position: the row keeps its elements while rows are added around it
+    let own = item.id.clone();
+    let selected = Memo::new(move |_| active.id.with(|a| a.as_deref() == Some(own.as_str())));
+    let selected = move || selected.get();
     let label = item.label.clone();
     let hovered = item.id.clone();
+    let item_leading = item.leading.clone();
     let hint = move || {
         let h = hints.clone().filter(|_| selected())?;
         let second = h.secondary.get();
@@ -301,9 +355,27 @@ fn CommandOption(
                 if selected() { "bg-accent text-accent-foreground outline-2 -outline-offset-2 outline-ring" } else { "" },
             ])
         >
+            {item_leading.map(|l| view! { <Leading leading=l/> })}
             <span class="min-w-0">{label}</span>
             {hint}
         </li>
+    }
+}
+
+/// The leading slot of an option: 2.5 rem wide whatever the shape of the box in it.
+#[component]
+fn Leading(leading: CommandLeading) -> impl IntoView {
+    let shape = if leading.square { "w-10" } else { "w-7" };
+    view! {
+        <span data-leading="" aria-hidden="true" class="mr-3 flex w-10 shrink-0 justify-center">
+            <span class=cn(&["relative flex h-10 items-center justify-center overflow-hidden rounded-sm bg-muted text-muted-foreground", shape])>
+                <Icon name=leading.icon/>
+                {leading.image.map(|src| view! {
+                    <img src=src alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"
+                        class="absolute inset-0 h-full w-full object-cover"/>
+                })}
+            </span>
+        </span>
     }
 }
 
@@ -318,10 +390,40 @@ mod tests {
             label: "The Matrix".into(),
             group: "g".into(),
             keywords: "1999 wachowski".into(),
+            leading: None,
         };
         assert!(matches(&i, "matrix"));
         assert!(matches(&i, "WACHOW"));
         assert!(matches(&i, ""));
         assert!(!matches(&i, "alien"));
+    }
+
+    /// OT1B-7 seen from the list: a heading stands before every run of one group, so a
+    /// caller that keeps a group together gets one heading for it.
+    #[test]
+    fn a_heading_leads_each_run_of_a_group() {
+        let item = |id: &str, group: &str| CommandItem {
+            id: id.into(),
+            label: id.into(),
+            group: group.into(),
+            keywords: String::new(),
+            leading: None,
+        };
+        let list = [
+            item("a", "g1"),
+            item("b", "g1"),
+            item("c", "g2"),
+            item("d", "g1"),
+        ];
+        let headings: Vec<Option<String>> = rows(&list).into_iter().map(|(_, h)| h).collect();
+        assert_eq!(
+            headings,
+            [
+                Some("g1".to_string()),
+                None,
+                Some("g2".to_string()),
+                Some("g1".to_string())
+            ]
+        );
     }
 }

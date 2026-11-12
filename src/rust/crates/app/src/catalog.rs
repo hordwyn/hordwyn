@@ -19,6 +19,8 @@ pub struct NewCatalogItem {
     pub attributes: serde_json::Value,
     /// Provider cover URL (redirect fallback, registered as an asset by the refresh job).
     pub cover_url: Option<String>,
+    /// See `CatalogItem::popularity`.
+    pub popularity: Option<f64>,
 }
 
 impl App {
@@ -108,6 +110,8 @@ pub struct CatalogRefresh {
     pub provenance: std::collections::BTreeMap<String, String>,
     /// Seconds until the item is considered stale again.
     pub fresh_for_secs: i64,
+    /// See `CatalogItem::popularity`; `None` keeps the stored value.
+    pub popularity: Option<f64>,
 }
 
 impl App {
@@ -140,6 +144,7 @@ impl App {
         item.year = refresh.year.or(item.year);
         item.description = refresh.description.or(item.description);
         item.cover_url = refresh.cover_url.or(item.cover_url);
+        item.popularity = refresh.popularity.or(item.popularity);
         for ext in refresh.external_ids {
             if !item.external_ids.contains(&ext) {
                 item.external_ids.push(ext);
@@ -309,6 +314,7 @@ impl App {
             state: EntityState::Partial,
             fetched_at: None,
             fresh_until: None,
+            popularity: new.popularity,
         };
         // A concurrent call may claim one of the ids between the lookup and the insert; the
         // insert then writes nothing and names the winner, which is updated instead.
@@ -355,6 +361,15 @@ impl App {
                     item.cover_url = new.cover_url;
                     changed = true;
                 }
+                // a kept copy from before the value was read gets it; a stored one is left
+                // to the refresh, so a search writes nothing for it (DEC-611)
+                if item.popularity.is_none()
+                    && new.popularity.is_some()
+                    && !item.title_unavailable()
+                {
+                    item.popularity = new.popularity;
+                    changed = true;
+                }
                 if changed {
                     self.repos.catalog.upsert(&item).await?;
                 }
@@ -380,6 +395,7 @@ impl App {
             }
         }
         item.cover_url = new.cover_url.or(item.cover_url);
+        item.popularity = new.popularity.or(item.popularity);
         self.repos.catalog.upsert(&item).await?;
         self.publish_item(item.id).await;
         Ok(item)

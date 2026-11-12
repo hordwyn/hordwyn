@@ -29,6 +29,7 @@ pub async fn item(app: &App, kind: &str, title: &str) -> CatalogItem {
         external_ids: vec![ExternalId::new("test", title)],
         attributes: serde_json::json!({}),
         cover_url: None,
+        popularity: None,
     })
     .await
     .unwrap()

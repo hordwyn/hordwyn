@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, kind, title, original_title, year, description, cover_asset, attributes,\n                    state, fetched_at, fresh_until, cover_url, provenance\n             FROM catalog_items WHERE id = ANY($1)",
+  "query": "SELECT c.id, c.kind, c.title, c.original_title, c.year, c.description, c.cover_asset,\n                    c.attributes, c.state, c.fetched_at, c.fresh_until, c.cover_url, c.provenance,\n                    c.popularity\n             FROM external_ids e JOIN catalog_items c ON c.id = e.item_id\n             WHERE e.kind = $1 AND e.namespace = $2 AND e.value = $3",
   "describe": {
     "columns": [
       {
@@ -145,11 +145,24 @@
             "name": "provenance"
           }
         }
+      },
+      {
+        "ordinal": 13,
+        "name": "popularity",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "catalog_items",
+            "name": "popularity"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "UuidArray"
+        "Text",
+        "Text",
+        "Text"
       ]
     },
     "nullable": [
@@ -165,8 +178,9 @@
       true,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "a4bcbc588cc84ea2d66689b98f02a00b06921d5e650f3a8626c3fa8f12de9a45"
+  "hash": "7436e4ef7cc82c6546e5f7ed94101c8a11db321929b22d1d7719407745b16780"
 }

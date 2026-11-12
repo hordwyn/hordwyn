@@ -251,6 +251,7 @@ async fn matching_while_the_import_runs_is_refused() {
                 external_ids: vec![],
                 attributes: serde_json::json!({}),
                 cover_url: None,
+                popularity: None,
             })
             .await
             .unwrap();

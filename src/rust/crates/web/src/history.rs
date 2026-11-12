@@ -15,7 +15,6 @@ use ui::{
 };
 
 use crate::api;
-use crate::events::use_events;
 use crate::history_state::{
     Day, DayGroup, HISTORY_PAGE, HistoryState, day_heading, group_by_day, side_counts,
 };
@@ -422,15 +421,8 @@ pub fn History() -> impl IntoView {
         }
         first.refetch();
     });
-    let events = use_events();
-    let on_event = crate::offline::refresh_when_online(refresh);
-    Effect::new(move |_| {
-        if let Some((topic, _)) = events.0.get()
-            && topic == "entity.updated"
-        {
-            on_event.run(());
-        }
-    });
+    // paced: an import announces every item it writes (OT-21)
+    crate::events::refresh_on_updates(crate::offline::refresh_when_online(refresh));
     let h = Hist {
         state,
         go: go_cb,

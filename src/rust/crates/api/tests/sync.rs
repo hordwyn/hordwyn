@@ -67,6 +67,7 @@ async fn offline_clients_converge_and_replays_are_no_ops() {
             external_ids: vec![],
             attributes: serde_json::json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();

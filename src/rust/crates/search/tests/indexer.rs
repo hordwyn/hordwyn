@@ -69,6 +69,7 @@ async fn outbox_rows_become_documents_per_user() {
             external_ids: vec![ExternalId::new("tmdb", "949")],
             attributes: serde_json::json!({}),
             cover_url: None,
+            popularity: Some(5400.0),
         })
         .await
         .unwrap();
@@ -85,6 +86,10 @@ async fn outbox_rows_become_documents_per_user() {
 
     let hits = index.search(q("catalog", "robbery", b)).await.unwrap();
     assert_eq!(hits.len(), 1, "catalog is shared");
+    assert_eq!(
+        hits[0].fields["popularity"], 5400.0,
+        "the document carries the source's popularity (OT1B-3)"
+    );
     let lib_a = index.search(q("library", "dad", a)).await.unwrap();
     assert_eq!(lib_a.len(), 1);
     assert_eq!(lib_a[0].fields["title"], "Heat");

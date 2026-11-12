@@ -36,6 +36,14 @@ check back: `UPDATE sessions SET coop_outcome = NULL WHERE coop_outcome = 'none'
 `ALTER TABLE sessions DROP CONSTRAINT sessions_coop_outcome_check, ADD CONSTRAINT
 sessions_coop_outcome_check CHECK (coop_outcome IN ('won', 'lost'));`. Those plays then read
 as competitive plays without a winner.
+
+|`0033_catalog_popularity`
+|Additive (one nullable column). The search order uses the new value as a tie-break, and
+every catalog search document now carries a `popularity` number (0 when the source gives
+none). Run `cli reindex` once after the upgrade so the documents written before it carry
+the field too: on Meilisearch the order among documents without the field is not defined
+by its ranking rules. Titles kept from earlier searches get their value the next time
+their source names or refreshes them; until then they rank as before.
 |===
 
 == Backup

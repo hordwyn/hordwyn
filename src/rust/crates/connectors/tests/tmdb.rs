@@ -45,6 +45,11 @@ async fn search_movies() {
     assert_eq!(first.external_ids, vec![ExternalId::new("tmdb", "550")]);
     assert!(!first.complete);
     assert_eq!(
+        first.popularity,
+        Some(26279.0),
+        "the number of ratings (vote_count) of the search answer"
+    );
+    assert_eq!(
         first
             .images
             .iter()
@@ -78,6 +83,7 @@ async fn movie_details_have_valid_typed_attributes() {
     );
     assert_eq!(s.attributes["runtime_minutes"], 121);
     assert_eq!(s.attributes["genres"][0], "Adventure");
+    assert_eq!(s.popularity, Some(22061.0), "vote_count of the details");
     let kinds = kinds::Registry::with_builtins();
     kinds
         .validate_attributes(&KindId::new("movie").unwrap(), &s.attributes)
@@ -98,6 +104,7 @@ async fn show_search_and_details() {
         .await
         .unwrap();
     assert_eq!(hits[0].title, "Breaking Bad");
+    assert_eq!(hits[0].popularity, Some(11536.0));
     assert_eq!(hits[0].year, Some(2008));
 
     let req = DetailsRequest {
@@ -109,6 +116,7 @@ async fn show_search_and_details() {
         .await
         .unwrap();
     assert_eq!(s.title, "Game of Thrones");
+    assert_eq!(s.popularity, Some(21390.0));
     assert_eq!(
         s.attributes["seasons"][1],
         serde_json::json!({"number": 1, "episode_count": 10, "air_date": "2011-04-17"}),
@@ -176,6 +184,7 @@ async fn refresh_turns_a_stub_into_a_full_item() {
             external_ids: vec![ExternalId::new("tmdb", "11")],
             attributes: serde_json::json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap();
@@ -353,6 +362,7 @@ async fn show_stub(env: &TestEnv) -> domain::catalog::CatalogItem {
             external_ids: vec![ExternalId::new("tmdb", "1399")],
             attributes: serde_json::json!({}),
             cover_url: None,
+            popularity: None,
         })
         .await
         .unwrap()

@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH exact AS (\n                   SELECT id, fields, score, pop,\n                          (raw = lower($3) OR bare = lower($3)) AS whole,\n                          (starts_with(raw, lower($3)) OR starts_with(bare, lower($3))) AS lead\n                   FROM (SELECT id, fields, score, pop, raw,\n                                regexp_replace(raw, '^(the|a|an|der|die|das|ein|eine) ', '')\n                                    AS bare\n                         FROM (SELECT id, fields,\n                                      ts_rank(tsv, query) + similarity(body, $3) AS score,\n                                      lower(fields ->> $6) AS raw,\n                                      (fields ->> 'popularity')::float8 AS pop\n                               FROM search_docs, websearch_to_tsquery('simple', $3) AS query\n                               WHERE index_name = $1\n                                 AND ($2::uuid IS NULL OR owner_id = $2)\n                                 AND (SELECT bool_and(fields ->> f.key = f.value)\n                                      FROM jsonb_each_text($4::jsonb) AS f) IS NOT FALSE\n                                 AND ($3 = '' OR tsv @@ query OR body ILIKE '%' || $3 || '%')\n                               OFFSET 0) AS matched\n                         OFFSET 0) AS titled\n                   ORDER BY whole DESC NULLS LAST, lead DESC NULLS LAST, pop DESC NULLS LAST,\n                            score DESC, id\n                   LIMIT $5),\n               typos AS (\n                   SELECT id, fields, word_similarity($3, body) AS score\n                   FROM search_docs\n                   WHERE (SELECT count(*) FROM exact) < $5\n                     AND $3 <> ''\n                     AND index_name = $1\n                     AND ($2::uuid IS NULL OR owner_id = $2)\n                     AND (SELECT bool_and(fields ->> f.key = f.value)\n                          FROM jsonb_each_text($4::jsonb) AS f) IS NOT FALSE\n                     AND $3 <% body\n                     AND id NOT IN (SELECT id FROM exact)\n                   ORDER BY score DESC, id\n                   LIMIT $5)\n               SELECT id AS \"id!\", fields AS \"fields!\"\n               FROM (SELECT id, fields, 0 AS phase, score, whole, lead, pop FROM exact\n                     UNION ALL\n                     SELECT id, fields, 1, score, false, false, NULL::float8 FROM typos) AS hits\n               ORDER BY phase, whole DESC NULLS LAST, lead DESC NULLS LAST, pop DESC NULLS LAST,\n                        score DESC, id\n               LIMIT $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "fields!",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Jsonb",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "d8cf2c366196caa5f9a41a2bdad289fe3f0764456128e5102a5aa31084fa23ee"
+}

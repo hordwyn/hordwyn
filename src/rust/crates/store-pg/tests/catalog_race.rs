@@ -19,6 +19,7 @@ fn show(title: &str) -> NewCatalogItem {
         external_ids: vec![ExternalId::new("tmdb", "1399")],
         attributes: serde_json::json!({}),
         cover_url: None,
+        popularity: None,
     }
 }
 

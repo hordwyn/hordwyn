@@ -118,6 +118,10 @@ pub struct Snapshot {
     pub attributes: serde_json::Value,
     pub images: Vec<ImageRef>,
     pub complete: bool,
+    /// How well known the item is at this source, when its answer says so (see
+    /// `domain::catalog::CatalogItem::popularity`).
+    #[serde(default)]
+    pub popularity: Option<f64>,
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq, Serialize, Deserialize)]

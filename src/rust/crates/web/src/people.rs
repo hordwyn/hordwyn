@@ -13,23 +13,17 @@ use ui::{
 };
 
 use crate::api;
-use crate::events::use_events;
 use crate::i18n::{I18n, t, use_i18n};
 use crate::pages::PageTitle;
 use crate::people_dialogs::{MergePair, PersonDialogs, Ui};
 use crate::rest;
 use crate::settings::{Lead, Outcome, kept, loaded};
 
-/// Refetch on any `entity.updated` event (people, sessions and links change elsewhere).
+/// Refetch for `entity.updated` events (people, sessions and links change elsewhere), paced
+/// like Home and Library: an import announces every item it writes, and People, a person's
+/// page and the list pages refetched and rendered again for each of them (OT1B-11).
 pub(crate) fn refetch_on_update(refetch: impl Fn() + Send + Sync + 'static) {
-    let events = use_events();
-    Effect::new(move |_| {
-        if let Some((topic, _)) = events.0.get()
-            && topic == "entity.updated"
-        {
-            refetch();
-        }
-    });
+    crate::events::refresh_on_updates(Callback::new(move |()| refetch()));
 }
 
 /// Win rate in whole percent, `None` before the first decided play.

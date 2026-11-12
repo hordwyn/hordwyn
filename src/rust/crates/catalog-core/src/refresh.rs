@@ -69,6 +69,7 @@ pub async fn refresh_item(
                         cover_url: m.cover_url,
                         provenance: m.provenance,
                         fresh_for_secs: FRESH_FOR_SECS,
+                        popularity: m.popularity,
                     },
                 )
                 .await?;

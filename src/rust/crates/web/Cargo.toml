@@ -52,3 +52,8 @@ hydrate = ["leptos/hydrate", "dep:console_error_panic_hook", "dep:wasm-bindgen",
 csr = ["leptos/csr"]
 # dev-only component gallery at /dev/gallery
 gallery = []
+
+# Browser tests of the page widgets (`tests/wasm.rs`, run with `--target wasm32-unknown-unknown
+# --features hydrate --test wasm`; the runner is set in `.cargo/config.toml`).
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test.workspace = true

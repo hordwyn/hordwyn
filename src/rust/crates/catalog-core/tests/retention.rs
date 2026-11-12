@@ -77,6 +77,7 @@ async fn movie(env: &TestEnv, title: &str, ns: &str) -> ItemId {
             external_ids: vec![ExternalId::new(ns, title)],
             attributes: serde_json::json!({"genres": ["x"]}),
             cover_url: Some(format!("https://image.example/{title}.jpg")),
+            popularity: None,
         })
         .await
         .unwrap()
@@ -156,6 +157,7 @@ async fn old_data_is_refreshed_while_the_source_can_answer() {
                 cover_url: None,
                 provenance: std::collections::BTreeMap::new(),
                 fresh_for_secs: 60,
+                popularity: None,
             },
         )
         .await
@@ -402,6 +404,7 @@ async fn a_purge_keeps_the_persons_own_data_and_refetches_once_tmdb_is_usable() 
                 cover_url: None,
                 provenance: std::collections::BTreeMap::new(),
                 fresh_for_secs: 60,
+                popularity: None,
             },
         )
         .await

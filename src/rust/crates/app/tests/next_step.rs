@@ -42,6 +42,7 @@ fn item(kind: &str, attributes: serde_json::Value) -> CatalogItem {
         state: EntityState::Full,
         fetched_at: None,
         fresh_until: None,
+        popularity: None,
     }
 }
 
