@@ -820,3 +820,22 @@ None blocks a package; each has a default that is built unless the owner says ot
   `wip/fable-reviews` were searched for the Wikidata search and seed parts only and
   otherwise used through next-packages.md, the owner's answers and
   attribution-and-connectors.md B1: nothing of the hub is in v1.
+
+## Addendum 2026-11-12: v1 is internet-facing (owner ruling, HANDOFF 4.8)
+
+The owner will host v1 for themselves, reachable from the internet; there is no existing
+instance to upgrade. Build order after v1-ops therefore becomes:
+
+1. sec0 (as specified above)
+2. sec1 - security headers and CSP (SEC-1, next-packages.md "sec1"); the CSP must allow the
+   provider image hosts used for covers (DEC-640), and archive.org redirects for Open Library
+   covers (v1-plan B9)
+3. sec2 - sign-in throttling and outbound confinement (SEC-5 and the rest of next-packages.md
+   "sec2"); per-process counters (one web process is the supported shape, OPS-12); the
+   confinement must allow the cover hosts and the connectors' API hosts
+4. v1-polish, v1-books, v1-manual, v1-wikidata (as specified above)
+5. v1-acceptance on the owner's internet-facing instance (add: TLS at the proxy, headers seen
+   from outside, sign-in throttling, a backup and a restore rehearsal)
+
+sec3 (account deletion) and sec4 (session cap) stay after v1 while the owner is the only user;
+they become blockers before anyone else gets an account.

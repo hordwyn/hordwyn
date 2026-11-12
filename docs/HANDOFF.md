@@ -882,6 +882,11 @@ lawyer list for HUB-11. None of them blocks the next package.
   stored-only default of DEC-608); one rule for every page.
 - "Include the fixes needed for v1 to run": v1-ops, sec0, v1-polish and whatever blocks a
   home v1; built with Fable agents only.
+- 2026-11-12 later: the owner has no productive instance yet (only local throwaway tests). v1 means
+  the owner hosts it for themselves, reachable from the internet. So the internet blockers of
+  v1-status.md (b) are in v1: sec0, sec1 (headers, CSP that allows the provider covers) and sec2
+  (throttling, outbound confinement; per-process counters, one web process). The upgrade path
+  from an older build is not needed for the owner.
 
 ## 5. Action list from the rulings
 
