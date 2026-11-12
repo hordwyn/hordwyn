@@ -296,6 +296,11 @@ impl AdminBackend for WebAdmin {
         admin::rewrap(&self.0, a).await.map_err(err)
     }
 
+    async fn confirm_key_backup(&self, token: &str) -> BResult<()> {
+        let c = self.caller(token).await?;
+        admin::confirm_key_backup(&self.0, c).await.map_err(err)
+    }
+
     async fn audit(&self, token: &str, q: AuditQueryDto) -> BResult<AuditPageDto> {
         let a = self.actor(token).await?;
         admin::audit_log(&self.0, a, q).await.map_err(err)

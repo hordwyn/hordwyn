@@ -290,6 +290,20 @@ pub struct AdminOverviewDto {
     pub hosting: String,
     /// Shown in hosted mode until every source has a licence record.
     pub hosted_banner: bool,
+    /// Set while no admin has confirmed the backup of the active secrets key (OPS-4): the
+    /// overview shows the reminder.
+    #[serde(default)]
+    pub key_backup: Option<KeyBackupDto>,
+}
+
+/// The secrets key an admin is asked to back up.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct KeyBackupDto {
+    /// The active key version.
+    pub version: u16,
+    /// Path of the key file; `None` when the keys come from the environment.
+    pub key_file: Option<String>,
 }
 
 /// Admin > Users.

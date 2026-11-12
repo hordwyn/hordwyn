@@ -83,11 +83,55 @@ pub async fn connect_with_retry(
     }
 }
 
-/// Apply pending migrations.
+/// One migration of the embedded set that the database has not applied yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingMigration {
+    pub version: i64,
+    /// The file name without the version (`secrets key backup`).
+    pub description: String,
+}
+
+/// The migrations [`migrate`] would apply, in order, without changing anything (not even
+/// the bookkeeping table of a database that was never migrated): the dry run of
+/// `cli migrate --dry-run` and the list the server logs before it migrates (OPS-6).
+///
+/// # Errors
+/// Database errors.
+pub async fn pending_migrations(pool: &PgPool) -> Result<Vec<PendingMigration>, sqlx::Error> {
+    // read-only on purpose: sqlx's own listing first creates its bookkeeping table
+    let applied: Vec<i64> =
+        match sqlx::query_scalar("SELECT version FROM _sqlx_migrations WHERE success")
+            .fetch_all(pool)
+            .await
+        {
+            Ok(v) => v,
+            // undefined_table: this database was never migrated
+            Err(sqlx::Error::Database(e)) if e.code().as_deref() == Some("42P01") => Vec::new(),
+            Err(e) => return Err(e),
+        };
+    Ok(MIGRATOR
+        .iter()
+        .filter(|m| !m.migration_type.is_down_migration() && !applied.contains(&m.version))
+        .map(|m| PendingMigration {
+            version: m.version,
+            description: m.description.to_string(),
+        })
+        .collect())
+}
+
+/// Apply pending migrations, naming each in the log before it runs.
 ///
 /// # Errors
 /// If a migration fails.
 pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
+    match pending_migrations(pool).await {
+        Ok(pending) => {
+            for m in &pending {
+                tracing::info!(version = m.version, name = %m.description, "applying database migration");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "could not list the pending database migrations"),
+    }
     MIGRATOR.run(pool).await
 }
 

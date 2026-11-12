@@ -1,0 +1,15 @@
+# The optional RustFS service (compose.s3.yml) with the podman override (compose.podman.yml):
+# same network namespace, so the app uses APP__STORAGE__S3__ENDPOINT=http://127.0.0.1:9000.
+#   docker compose --env-file config/.env -f src/docker/compose.yml -f src/docker/compose.s3.yml \
+#     -f src/docker/compose.podman.yml -f src/docker/compose.podman.s3.yml up -d
+services:
+  s3:
+    network_mode: "service:postgres"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  s3-init:
+    network_mode: "service:postgres"
+    environment:
+      S3_ENDPOINT: "http://127.0.0.1:9000"

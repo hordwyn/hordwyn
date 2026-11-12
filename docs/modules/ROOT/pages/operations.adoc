@@ -14,13 +14,202 @@ tool as `cli [--config <file>] <command>`; both read the same configuration (fil
 indexer. Run as many as you like; jobs are claimed with `FOR UPDATE SKIP LOCKED`.
 |===
 
-Every process applies pending database migrations at start-up (`cli migrate` does the same
-on demand).
+The supported shape is *one web process plus any number of workers*: either one `--role=all`
+process (the compose default), or one `--role=web` process with one or more `--role=worker`
+processes. Never run two web processes (`all` or `web`): live updates of a `--role=all`
+process stay inside it, and the sign-in throttle and the data sources' rate limits are
+counted per process. `database.max_connections` (default 20) is per process too.
+
+Every process applies pending database migrations at start-up and logs each one before it
+runs (`cli migrate` does the same on demand; `cli migrate --dry-run` lists what would run
+and changes nothing).
+
+== The admin tool in a container
+
+The image holds `cli` next to `server`. The commands of this page are written for the
+compose file of the repository; with this helper they stay short:
+
+[source,shell]
+----
+dc() { docker compose --env-file config/.env -f src/docker/compose.yml "$@"; }
+dc exec app cli help
+----
+
+`dc exec app cli ...` runs in the running application container. `dc run --rm --no-deps
+--entrypoint cli app ...` runs the tool of a freshly built image without starting the
+server (used before an upgrade and during a restore).
+
+== Upgrade
+
+An instance that was installed before the release with migration `0034_secrets_key_backup`
+follows "Coming from a build before 0034" (the next section) once: its first four steps
+run before the steps here.
+
+. Take the backup of the Backup section first, at least the database dump. It is the only
+  way back: an older build refuses to start on a database a newer build has migrated.
+. Get the new version and build it: `git pull`, then `dc build` (without a service name:
+  there is one image, and every container of the project runs it).
+. See what it will do to the database (nothing is changed):
++
+[source,shell]
+----
+dc run --rm --no-deps --entrypoint cli app migrate --dry-run
+----
++
+This is the only command to run from the new image while the old containers are still up.
+`cli storage report` and `cli storage evict` of a new image stop with a message until its
+server has started once on the volume (they would otherwise have to move the blob
+directory under the running old server).
+. Start it: `dc up -d`. Every container is replaced, the web process and the workers
+  together: all of them must run the same image, because two builds can disagree about
+  where the blobs are (as this release and the one before it do). If you start worker
+  containers by another route than this compose file, stop them before this step and start
+  them from the new image. The migrations run before the port opens; `dc logs -f app` shows
+  each one and then `listening`.
+. Read the upgrade notes below for the migrations that ran; run `dc exec app cli reindex`
+  when a note asks for it.
+. Check: sign in, open a title, search for one. Browsers ask the server before they reuse
+  the application bundle (`/pkg` is sent with `Cache-Control: no-cache`), so nobody needs a
+  hard reload after an upgrade.
+
+The way back is its own section, "Going back".
+
+== Coming from a build before 0034
+
+Once, for an instance that was installed before the release that brought migration
+`0034_secrets_key_backup` (your checkout is such a build while it has no file
+`src/docker/compose.s3.yml`). That release changed three things for a running instance, and
+each one stops the upgrade when it is skipped:
+
+* The compose file has no default passwords any more and reads them from `config/.env`,
+  which every command of this page needs. But an existing database keeps its password.
+* The application port is published on `127.0.0.1` only, no longer on every interface.
+* The blobs moved from `/data` to `/data/blobs`, so the upload backup of the Backup section
+  does not fit the old image.
+
+Steps 1 to 4 run on the checkout you have, BEFORE `git pull`, while the instance is up.
+
+. Create the environment file if you have none:
++
+[source,shell]
+----
+test -f config/.env || cp config/.env.example config/.env
+chmod 600 config/.env
+----
+. Write the two passwords the instance runs with into it. Ask the running container (use
+  the compose command you started it with, without `--env-file`):
++
+[source,shell]
+----
+docker compose -f src/docker/compose.yml exec app \
+  printenv APP__DATABASE__URL APP__SEARCH__MEILI_MASTER_KEY
+# postgres://app:<database password>@postgres:5432/app
+# <search master key>
+----
++
+An instance that was started without setting anything prints the defaults of the old
+compose file, `app` and `change-me-please-32-bytes-minimum`. Then `config/.env` gets:
++
+[source,shell]
+----
+POSTGRES_PASSWORD=app
+MEILI_MASTER_KEY=change-me-please-32-bytes-minimum
+----
++
+(your own values if the container printed others). Do not generate a new database password
+at this point, whatever the comment in `config/.env.example` suggests for a new
+installation: an existing database keeps its password. The postgres image applies
+`POSTGRES_PASSWORD` only when it creates an empty data directory; a new value in the file
+changes what the application sends, not what the database expects, and the application then
+restarts in a loop with `password authentication failed for user "app"`. Changing the
+password is step 8.
+. If your reverse proxy runs on another machine, or people open `http://<host>:3000`
+  directly, set `APP_PUBLISH_ADDR` in `config/.env` to this host's LAN address (for example
+  `APP_PUBLISH_ADDR=192.168.1.20`); otherwise they get "connection refused" after the
+  upgrade. With the proxy on the same host there is nothing to set.
+. Take the backup with the paths of the old image (the uploads are in `/data/up` there):
++
+[source,shell]
+----
+dc() { docker compose --env-file config/.env -f src/docker/compose.yml "$@"; }
+mkdir -p backup && chmod 700 backup
+dc exec -T postgres pg_dump -Fc -U app app > backup/app-$(date +%F).dump
+dc exec -T app cat /data/secrets.key > backup/secrets.key && chmod 600 backup/secrets.key
+# "No such file or directory": nobody has imported a file yet, there is nothing to save
+dc exec -T app tar -C /data -cf - up > backup/up-$(date +%F).tar
+# check as in the Backup section
+dc exec -T postgres pg_restore --list < backup/app-$(date +%F).dump | grep -c 'TABLE DATA'
+grep -c '^v[0-9]*:' backup/secrets.key
+----
+. Now `git pull`, and go on with Upgrade, step 2 (`dc build`, the dry run, `dc up -d`).
+  `config/.env.example` has new optional keys; none of them is needed for the upgrade.
+. The first start of the new image moves the blob directories (see "Blob directory of
+  earlier images"; one log line per directory) and applies the migrations. `dc ps` shows
+  the three services healthy. If the application restarts with `password authentication
+  failed`, `POSTGRES_PASSWORD` in `config/.env` is not the password of step 2: correct it
+  and run `dc up -d` again; nothing is lost.
+. Admin > Overview shows "Back up the secrets key": you copied the key in step 4, so confirm
+  it. From now on the Backup section applies as written (the uploads are in
+  `/data/blobs/up`). The image has a new name; `docker image rm tracker-app` removes the old
+  one.
+. Optional, afterwards: change the database password inside the initialized volume, then in
+  the file, in this order:
++
+[source,shell]
+----
+dc stop app                       # and the workers, if you run any
+dc exec postgres psql -U app -d app -c "ALTER USER app PASSWORD 'NEWPASSWORD'"
+# set POSTGRES_PASSWORD=NEWPASSWORD in config/.env (letters and digits only), then
+dc up -d
+----
++
+The search master key can be changed too: set a new `MEILI_MASTER_KEY` (16 bytes or more)
+and run `dc up -d`; the application looks its own search key up with the master key at
+every start.
+
+== Going back
+
+To the version you ran before an upgrade, with the dump taken before it. Everything entered
+after that dump is lost.
+
+. Stop the application: `dc stop app` (and the workers, if you run any). Postgres stays up.
+. Restore the dump into an empty database. Do not restore over the migrated one:
+  the `clean` option of `pg_restore` drops only what the dump contains, so a table a newer
+  migration created would stay and break the next upgrade.
++
+[source,shell]
+----
+dc exec -T postgres dropdb -U app --force --if-exists --maintenance-db=postgres app
+dc exec -T postgres createdb -U app --maintenance-db=postgres app
+dc exec -T postgres pg_restore --no-owner -U app -d app < backup/app-<date>.dump
+----
+. Only when you go back to a build from before `0034_secrets_key_backup`: that image
+  expects the blobs directly in `/data`. Move the directories back (with the image you
+  still have, before you build the old one):
++
+[source,shell]
+----
+dc run --rm --no-deps --entrypoint sh app -c \
+  'for d in up img http orig; do
+     if [ -d /data/blobs/$d ] && [ ! -e /data/$d ]; then mv /data/blobs/$d /data/$d; fi
+   done; ls /data /data/blobs'
+----
++
+Without this the old build finds no stored import file, fetches every picture again, and
+the bytes under `/data/blobs` stay on the volume uncounted. The secrets key does not move.
+. Check out and build the version you came from, and start it: `git checkout <version>`,
+  `dc build`, `dc up -d`. `config/.env` stays as it is.
+. The search index may still list titles added after the dump; with a build that has the
+  admin tool in the image, `dc exec app cli reindex --clear` rebuilds it.
+
+Without a dump, a single migration can be reversed by hand where its upgrade note says how;
+then start the older build on the same database.
 
 == Upgrade notes
 
 Going back to an older build is done by restoring the database dump taken before the
-upgrade (see Backup), not by starting the older binary on the migrated database.
+upgrade (see "Going back"), not by starting the older binary on the migrated database. Where
+a row names a manual reverse, that is the way for someone who has no dump.
 
 [cols="1,4"]
 |===
@@ -44,22 +233,224 @@ none). Run `cli reindex` once after the upgrade so the documents written before 
 the field too: on Meilisearch the order among documents without the field is not defined
 by its ranking rules. Titles kept from earlier searches get their value the next time
 their source names or refreshes them; until then they rank as before.
+
+|`0034_secrets_key_backup`
+|Additive (one nullable column). After the upgrade Admin > Overview shows "Back up the
+secrets key" once, until an administrator confirms the backup. The same release moves the
+blob directory of the container image (see "Blob directory of earlier images"), so going
+back to the build before it also needs the directories moved back ("Going back", step 3).
+An instance installed before this release upgrades by "Coming from a build before 0034".
+To go back without a restore, stop the application and remove the column and the
+migration's record: `ALTER TABLE secrets_keys DROP COLUMN backup_confirmed_at;`, then
+`DELETE FROM _sqlx_migrations WHERE version = 34;` (both with `dc exec postgres psql -U app
+-d app -c "..."`). The confirmations are lost, nothing else. Audit rows of the kind
+"Secrets key backup confirmed" stay in the table.
 |===
 
 == Backup
 
-Postgres is the source of truth. Back up:
+Postgres is the source of truth. What holds state:
 
-* the Postgres database (`pg_dump -Fc`), which includes the job queue, the outbox, the
-  storage index and all user data;
-* user uploads in the blob store: objects under `up/` (fs backend: `<fs_root>/up/`). Image
-  variants (`img/`) and cached provider responses (`http/`) are derived data and are
-  regenerated on demand after a restore;
-* the brand directory if you changed it;
-* the secrets key file (`secrets.key`, see below). The database dump and the key file are
-  one backup unit: a dump restored without its key yields locked secrets.
+[cols="2,3,2"]
+|===
+|What |Where (compose) |Back up?
 
-Meilisearch does not need a backup: after a restore run `cli reindex --clear`.
+|the database: accounts, libraries, history, settings, jobs, the storage index, encrypted
+secrets
+|volume `pg-data`
+|yes, every time
+
+|the secrets key
+|`/data/secrets.key` in the volume `app-data`
+|yes, once and after every key rotation; keep it with the dumps
+
+|import files (what people hand in for an import)
+|`/data/blobs/up` in `app-data`
+|yes
+
+|image variants, kept original images (`storage.keep_originals`) and cached provider
+responses
+|`/data/blobs/img`, `/data/blobs/orig`, `/data/blobs/http`
+|no, fetched and generated again on demand
+
+|the search indexes
+|volume `meili-data`
+|no, rebuilt with `cli reindex --clear`
+
+|the brand directory and `config/.env`
+|the checkout
+|if you changed them
+|===
+
+Every picture the application stores today comes from a data source and can be fetched
+again, which is why `img` and `orig` are not in the backup. No page uploads a picture yet;
+when one does, this table changes with it.
+
+The dump and the key file are one backup unit: a dump restored without its key has locked
+secrets (data-source keys, notification secrets, authenticators), and nothing can
+regenerate the key. The key file is outside the blob directory on purpose: copying or
+emptying `/data/blobs` never touches it.
+
+The backup runs while the application is in use:
+
+[source,shell]
+----
+mkdir -p backup && chmod 700 backup
+
+# 1. the database (one consistent snapshot, compressed)
+dc exec -T postgres pg_dump -Fc -U app app > backup/app-$(date +%F).dump
+
+# 2. the secrets key (unchanged until a rotation)
+dc exec -T app cat /data/secrets.key > backup/secrets.key
+chmod 600 backup/secrets.key
+
+# 3. the import files ("No such file or directory" while nobody has imported a file)
+dc exec -T app tar -C /data/blobs -cf - up > backup/up-$(date +%F).tar
+
+# check: the dump lists its tables, the key has one line per version, the archive reads
+dc exec -T postgres pg_restore --list < backup/app-$(date +%F).dump | grep -c 'TABLE DATA'
+grep -c '^v[0-9]*:' backup/secrets.key
+tar -tf backup/up-$(date +%F).tar | head -3
+----
+
+Keep the last seven daily dumps and one per month, off the host. Rehearse one restore after
+the installation and after each larger upgrade ("Restore rehearsal beside the live
+instance"): an untested backup is a hope.
+
+With the S3 backend step 3 is a copy of the `up/` prefix of the bucket with your S3 tool.
+
+== Restore
+
+Into an empty instance: a new host, or a second compose project beside the live one (see
+"Restore rehearsal beside the live instance"; do that before you ever need this section).
+The order matters: the key must be in place before the application starts for the first
+time, otherwise it generates a new one and the restored secrets stay locked.
+
+. Check out the version the dump was taken with (or a newer one) and put `config/.env`
+  back. Build the image and start only the services; `--wait` returns when their health
+  checks pass (on a fresh volume Postgres initializes and restarts once first):
++
+[source,shell]
+----
+dc build
+dc up -d --wait postgres meilisearch
+----
+. Put the key into the `app-data` volume, owned by the application's user:
++
+[source,shell]
+----
+dc run --rm --no-deps -T --user 0 --entrypoint sh app -c \
+  'cat > /data/secrets.key && chown app /data/secrets.key && chmod 600 /data/secrets.key' \
+  < backup/secrets.key
+----
+. Restore the database into an empty one (created anew, so nothing of an earlier start is
+  left in it):
++
+[source,shell]
+----
+dc exec -T postgres dropdb -U app --force --if-exists --maintenance-db=postgres app
+dc exec -T postgres createdb -U app --maintenance-db=postgres app
+dc exec -T postgres pg_restore --no-owner -U app -d app < backup/app-<date>.dump
+----
+. Restore the import files (skip it without an archive; an archive taken from an image
+  before `0034_secrets_key_backup` unpacks the same way):
++
+[source,shell]
+----
+dc run --rm --no-deps -T --entrypoint sh app -c \
+  'mkdir -p /data/blobs && tar -C /data/blobs -xf -' < backup/up-<date>.tar
+----
+. Start the application: `dc up -d`. It migrates the database forward if the image is newer
+  than the dump.
+. Rebuild the search indexes: `dc exec app cli reindex --clear`.
+. Check:
++
+[source,shell]
+----
+dc exec app cli secrets status     # no version says NOT LOADED
+----
++
+then sign in, open a title with a cover (the picture is fetched again), search for it, and
+open Admin > Data sources: the keys are shown as set, not as locked.
+
+If the application was started before the key was restored, stop it (`dc stop app`), delete
+the generated `/data/secrets.key`, and continue with step 2. While the database holds
+encrypted values and no key file exists, the server refuses to start and names the file.
+
+== Restore rehearsal beside the live instance
+
+A backup that was never restored is not known to work, and the place to find that out is a
+second copy, not the instance you use. Never remove the volumes of the live instance to try
+a restore. The rehearsal runs as a second compose project on the same host: its own
+containers, network and volumes (all prefixed `tracker-restore`), its own image name and
+its own host port, from the same checkout and the same `config/.env`.
+
+[source,shell]
+----
+dcr() {
+  APP_PUBLISH_ADDR=127.0.0.1 APP_PUBLISH_PORT=3001 APP_ROLE=web \
+  APP_IMAGE=localhost/tracker-restore-app:local \
+  docker compose -p tracker-restore --env-file config/.env -f src/docker/compose.yml "$@"
+}
+dcr build
+----
+
+`-p` replaces the project name of the compose file; variables set in the shell win over
+the ones in `config/.env`. `APP_ROLE=web` starts the copy without background work: a second
+worker on a copy of your data would send every due notification a second time and ask the
+data sources again. So in the rehearsal the search index is not rebuilt and covers are not
+fetched; both are regenerated data, not part of the backup.
+
+. Run steps 1 to 5 of Restore with `dcr` in place of `dc` (skip step 6).
+. Check the copy:
++
+[source,shell]
+----
+dcr ps                                             # three services, all healthy
+curl -fsS http://127.0.0.1:3001/healthz
+dcr exec app cli secrets status                    # no version says NOT LOADED
+dcr exec -T postgres psql -U app -d app -c 'SELECT count(*) FROM users'
+----
++
+The last line is the number of accounts of the live instance at the time of the dump. To
+look at the pages, open `http://127.0.0.1:3001` in a browser on the host (from another
+machine: `ssh -L 3001:127.0.0.1:3001 <host>`), sign in and open Admin > Data sources: the
+keys are shown as set, not as locked. If the sign-in page simply comes back, the browser
+dropped the session cookie because the copy is reached over plain HTTP; the four commands
+above are the check then.
+. Remove the copy, its volumes included, and its image:
++
+[source,shell]
+----
+dcr down -v
+docker image rm localhost/tracker-restore-app:local
+----
+
+`dcr down -v` removes only what belongs to the project `tracker-restore`. The live instance
+is not stopped or changed at any point.
+
+== Blob directory of earlier images
+
+Images built before the secrets key was separated from the blobs kept the blob store
+directly in `/data`, next to (and around) `/data/secrets.key`. The image now uses
+`/data/blobs` and sets `storage.fs_legacy_root` (`APP__STORAGE__FS_LEGACY_ROOT=/data`): at
+start the server moves the directories `up`, `img`, `http` and `orig` from `/data` into
+`/data/blobs` (a rename inside the volume, logged once per directory) when `/data/blobs`
+does not have them yet. Nothing has to be done by hand, the key file stays where it is, and
+the volume layout of an existing instance keeps working with the new image.
+
+Only the server moves them. The storage commands of the admin tool (`cli storage report`,
+`cli storage evict`) stop with the directories in the message while the move is still to
+come: a container of the earlier image may still be writing there. For the same reason all
+containers on the volume must run the same image during and after the move; a worker left
+on the earlier image would keep writing to `/data` while the web process reads
+`/data/blobs`.
+
+If the move fails (for example `/data/blobs` is a different mount), the server stops with
+the two paths in the message; move the four directories yourself, or keep the old layout
+by setting `APP__STORAGE__FS_ROOT=/data` (then the key stays inside the blob directory,
+which is what this change removes). Outside the image the setting is empty and nothing is
+moved. To go back to an earlier image, see "Going back".
 
 == Secrets at rest
 
@@ -72,14 +463,15 @@ recovery codes are hashed, not encrypted.
 Where the key comes from, first match wins:
 
 . the key file `secrets.key_file` (`APP__SECRETS__KEY_FILE`, default `data/secrets.key`; the
-  container image uses `/data/secrets.key`): one key per line, `v<n>:<base64 of 32 bytes>`,
+  container image uses `/data/secrets.key`, next to the blob directory `/data/blobs`): one key per line, `v<n>:<base64 of 32 bytes>`,
   newest first;
 . `APP__SECRETS__KEYS`: the same lines joined with `,`. Environment variables can leak through
   process listings and crash dumps, so the file is the recommended path; docker and podman
   secrets mount as files.
 
 On the first start without either, the server generates `v1`, writes the file with mode 0600
-and logs one line. If the database already holds encrypted values but no key is found, the
+and logs one line. Admin > Overview then shows "Back up the secrets key" until an administrator
+confirms the backup (asked again for each new key version; recorded in the audit log). If the database already holds encrypted values but no key is found, the
 server refuses to start and names the file and the variable: restore the key file. A value
 whose key version is not loaded (or that fails to decrypt) is shown as locked; it is never
 deleted, and it unlocks when the right key is back. With the in-memory storage backend (tests,
@@ -89,8 +481,11 @@ demos) and no key configured a temporary key is used.
 
 Rotate every two years or when staff changes (the admin overview reminds after two years):
 
-. generate 32 random bytes, for example `head -c 32 /dev/urandom | base64`;
-. add `v2:<base64>` as the first line of the key file (keep the `v1` line) and restart;
+. `cli secrets rotate` adds a new active key to the key file (by hand: generate 32 random
+  bytes, for example `head -c 32 /dev/urandom | base64`, and add `v2:<base64>` as the first
+  line of the key file, keeping the `v1` line);
+. reload the keys with SIGHUP (`dc kill -s HUP app`) or restart, and back up the key file
+  again (Admin > Overview asks for it);
 . Admin > Security: "Re-encrypt now" re-wraps every value with `v2` (a nightly job does the
   same while values are left on an old version); the page shows the rows per version;
 . when no value uses `v1` any more, the page marks it removable: delete the line yourself once
@@ -130,9 +525,9 @@ xref:storage-budget.adoc[storage budget].
 == S3 storage with compose
 
 The compose file uses the `fs` storage backend by default. For an S3 backend it ships an
-optional RustFS service (Apache-2.0) in the profile `s3`; a one-shot `s3-init` service
-creates the bucket `assets`. Set `S3_ACCESS_KEY` and `S3_SECRET_KEY` in `config/.env`, point
-the app at the service there and start with the profile:
+optional RustFS service (Apache-2.0) in a second file, `compose.s3.yml`; a one-shot `s3-init`
+service creates the bucket `assets`. Set `S3_ACCESS_KEY` and `S3_SECRET_KEY` in `config/.env`
+(required, no defaults), point the app at the service there and start with both files:
 
 [source,shell]
 ----
@@ -145,10 +540,11 @@ APP__STORAGE__S3__BUCKET=assets
 APP__STORAGE__S3__ACCESS_KEY_ID=...       # same as S3_ACCESS_KEY
 APP__STORAGE__S3__SECRET_ACCESS_KEY=...   # same as S3_SECRET_KEY
 
-docker compose -f src/docker/compose.yml --profile s3 up
+docker compose --env-file config/.env -f src/docker/compose.yml -f src/docker/compose.s3.yml up -d
 ----
 
-With the podman override below the endpoint is `http://127.0.0.1:9000`. Any other
+With the podman override below add `compose.podman.s3.yml` as well; the endpoint is then
+`http://127.0.0.1:9000`. Any other
 S3-compatible service works the same way through the `APP__STORAGE__S3__*` settings.
 
 == API
@@ -179,4 +575,4 @@ override of the passt profile (`signal (receive) peer=podman,`), reload it with
 
 If container DNS still does not work, start with the override that needs no DNS (the three
 containers share one network namespace and talk over 127.0.0.1):
-`docker compose -f src/docker/compose.yml -f src/docker/compose.podman.yml up`.
+`docker compose --env-file config/.env -f src/docker/compose.yml -f src/docker/compose.podman.yml up -d`.

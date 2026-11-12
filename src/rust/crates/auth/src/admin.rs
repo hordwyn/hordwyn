@@ -255,6 +255,17 @@ pub trait AdminStore: Send + Sync {
         versions: &[u16],
         at: DateTime<Utc>,
     ) -> Result<(), PortError>;
+    /// When an admin confirmed the backup of this key version (OPS-4, DEC-620); `None`
+    /// until then.
+    async fn key_backup_confirmed(&self, version: u16) -> Result<Option<DateTime<Utc>>, PortError>;
+    /// Record the confirmation of this key version's backup with its audit row, in one
+    /// transaction. Returns `false` (and writes nothing) when it was confirmed before.
+    async fn confirm_key_backup(
+        &self,
+        version: u16,
+        at: DateTime<Utc>,
+        audit: &AuditEntry,
+    ) -> Result<bool, PortError>;
 
     /// Is the database reachable (overview health row)?
     async fn ping(&self) -> Result<(), PortError>;
@@ -308,6 +319,7 @@ struct MemState {
     creds: Vec<(StoredCredential, BTreeMap<String, String>)>,
     licences: BTreeMap<String, LicenceRecord>,
     keys: BTreeMap<u16, DateTime<Utc>>,
+    key_backups: BTreeMap<u16, DateTime<Utc>>,
     switches: BTreeMap<String, bool>,
     mail_password: Option<String>,
     probes: BTreeMap<String, ProbeRow>,
@@ -536,6 +548,26 @@ impl AdminStore for MemAdminStore {
             s.keys.entry(*v).or_insert(at);
         }
         Ok(())
+    }
+
+    async fn key_backup_confirmed(&self, version: u16) -> Result<Option<DateTime<Utc>>, PortError> {
+        Ok(self.s().key_backups.get(&version).copied())
+    }
+
+    async fn confirm_key_backup(
+        &self,
+        version: u16,
+        at: DateTime<Utc>,
+        audit: &AuditEntry,
+    ) -> Result<bool, PortError> {
+        let mut s = self.s();
+        if s.key_backups.contains_key(&version) {
+            return Ok(false);
+        }
+        s.keys.entry(version).or_insert(at);
+        s.key_backups.insert(version, at);
+        s.audit.push(audit.clone());
+        Ok(true)
     }
 
     async fn ping(&self) -> Result<(), PortError> {

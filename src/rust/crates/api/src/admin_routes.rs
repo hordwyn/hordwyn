@@ -65,6 +65,7 @@ pub(crate) fn routes() -> OpenApiRouter<ApiState> {
         .routes(routes!(brand))
         .routes(routes!(security))
         .routes(routes!(rewrap))
+        .routes(routes!(confirm_key_backup))
         .routes(routes!(audit))
         .routes(routes!(audit_csv))
 }
@@ -483,6 +484,15 @@ async fn security(State(s): State<ApiState>, Authed(a): Authed) -> ApiResult<Jso
     responses((status = 200, body = RewrapDto)))]
 async fn rewrap(State(s): State<ApiState>, Authed(a): Authed) -> ApiResult<Json<RewrapDto>> {
     Ok(Json(admin::rewrap(&s, a).await?))
+}
+
+/// "I have backed up the key": record that the active secrets key is backed up (fresh
+/// proof). The overview's reminder goes away until the next key version.
+#[utoipa::path(post, path = "/admin/secrets/backup-confirmed", tag = "admin",
+    responses((status = 204), (status = 403, body = ErrorDto)))]
+async fn confirm_key_backup(State(s): State<ApiState>, t: AuthedToken) -> ApiResult<StatusCode> {
+    admin::confirm_key_backup(&s, caller(&t)).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize, IntoParams)]

@@ -110,7 +110,7 @@ user-written template; no Jellyfin polling and no Radarr/Sonarr (GPL docs, DEC-1
   subagents (owner instruction, DEC-051); M04, M05, M07 and M08 were therefore
   self-reviewed.
 * S3 tests run against RustFS locally (`cargo xtask services up`) and in GitLab CI; compose
-  has an optional RustFS profile `s3` (DEC-202, replacing versitygw of DEC-056).
+  has an optional RustFS file `compose.s3.yml` (a profile until DEC-621) (DEC-202, replacing versitygw of DEC-056).
 * i18n uses Fluent (DEC-090).
 * Six of ten M09 connectors are not implemented (DEC-106..108, DEC-116).
 * Connectors still hold provider secrets (DEC-115).

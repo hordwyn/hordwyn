@@ -5,6 +5,7 @@ pub mod arch;
 pub mod e2e_log;
 pub mod load;
 pub mod locales;
+pub mod ops;
 pub mod record;
 pub mod services;
 pub mod whitelabel;

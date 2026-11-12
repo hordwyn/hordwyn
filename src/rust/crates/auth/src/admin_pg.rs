@@ -626,6 +626,46 @@ impl AdminStore for PgAdminStore {
         Ok(())
     }
 
+    async fn key_backup_confirmed(&self, version: u16) -> Result<Option<DateTime<Utc>>, PortError> {
+        Ok(sqlx::query_scalar!(
+            "SELECT backup_confirmed_at FROM secrets_keys WHERE version = $1",
+            i32::from(version)
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(pe)?
+        .flatten())
+    }
+
+    async fn confirm_key_backup(
+        &self,
+        version: u16,
+        at: DateTime<Utc>,
+        audit: &AuditEntry,
+    ) -> Result<bool, PortError> {
+        let mut tx = self.pool.begin().await.map_err(pe)?;
+        // the row exists for every loaded version (start-up, reload); the upsert covers a
+        // version first seen here
+        let changed = sqlx::query!(
+            "INSERT INTO secrets_keys (version, first_seen_at, backup_confirmed_at)
+             VALUES ($1, $2, $2)
+             ON CONFLICT (version) DO UPDATE SET backup_confirmed_at = $2
+             WHERE secrets_keys.backup_confirmed_at IS NULL",
+            i32::from(version),
+            at
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(pe)?
+        .rows_affected()
+            > 0;
+        if changed {
+            insert_audit(&mut tx, audit).await?;
+        }
+        tx.commit().await.map_err(pe)?;
+        Ok(changed)
+    }
+
     async fn ping(&self) -> Result<(), PortError> {
         sqlx::query_scalar!(r#"SELECT 1 AS "one!""#)
             .fetch_one(&self.pool)

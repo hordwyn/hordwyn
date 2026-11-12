@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::backend::prefix;
 use crate::budget::{BudgetError, NewObject, ReadOutcome, StorageBudget, WriteOutcome};
 use crate::config::{FetchPriority, Format, Variant};
 use crate::image::{PipelineConfig, Processed, process};
@@ -183,8 +184,18 @@ fn lane_for(p: FetchPriority) -> Lane {
     }
 }
 
+/// Key of a kept original (`storage.keep_originals`).
+fn original_key(hash: &str) -> String {
+    format!("{}/{hash}", prefix::ORIGINAL)
+}
+
 fn object_key(hash: &str, variant: Variant, format: Format) -> String {
-    format!("img/{hash}/{}.{}", variant.as_str(), format.ext())
+    format!(
+        "{}/{hash}/{}.{}",
+        prefix::IMAGE,
+        variant.as_str(),
+        format.ext()
+    )
 }
 
 pub struct AssetService {
@@ -386,7 +397,7 @@ impl AssetService {
         if self.budget.config().keep_originals
             && let Some(orig) = original
         {
-            let _ = write(format!("orig/{}", p.hash), ObjectClass::Original, orig).await?;
+            let _ = write(original_key(&p.hash), ObjectClass::Original, orig).await?;
         }
         a.hash = Some(p.hash.clone());
         a.width = Some(p.width);
@@ -399,6 +410,12 @@ impl AssetService {
     }
 
     /// Store a user upload (pinned, counted against the uploader's quota).
+    ///
+    /// No page calls this yet. Its variants are written under `img/` like fetched pictures,
+    /// and the backup of the operations page covers only `up/` (pictures from data sources
+    /// can be fetched again, an upload cannot). Before this gets a caller, either key
+    /// uploads under [`prefix::UPLOAD`] or change the backup table and the runbook (review
+    /// V1OPS-6, DEC-645).
     ///
     /// # Errors
     /// Quota exceeded, storage full, or an undecodable image.
@@ -544,7 +561,7 @@ impl AssetService {
             .iter()
             .flat_map(|v| Format::ALL.iter().map(|f| object_key(&hash, *v, *f)))
             .collect();
-        keys.push(format!("orig/{hash}"));
+        keys.push(original_key(&hash));
         self.budget.remove(&keys).await?;
         Ok(())
     }

@@ -17,11 +17,12 @@ use crate::settings::loaded;
 const PAGE: u32 = 100;
 
 /// The actions the filter offers (the audited set of addendum-1 3.4).
-const ACTIONS: [&str; 19] = [
+const ACTIONS: [&str; 20] = [
     "setting.changed",
     "secret.replaced",
     "secret.cleared",
     "secrets.rewrapped",
+    "secrets.backup_confirmed",
     "role.changed",
     "user.disabled",
     "user.enabled",

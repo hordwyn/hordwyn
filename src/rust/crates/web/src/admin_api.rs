@@ -375,6 +375,13 @@ pub async fn rewrap_secrets() -> Result<RewrapDto, ServerFnError> {
     a.rewrap(&t).await.map_err(server::code)
 }
 
+/// "I have backed up the key" on Admin > Overview (needs a fresh proof: `reauth_required`).
+#[server(prefix = "/_fn")]
+pub async fn confirm_key_backup() -> Result<(), ServerFnError> {
+    let (a, t) = server::admin_token().await?;
+    a.confirm_key_backup(&t).await.map_err(server::code)
+}
+
 #[server(prefix = "/_fn", input = Json)]
 pub async fn audit_log(query: AuditQueryDto) -> Result<AuditPageDto, ServerFnError> {
     let (a, t) = server::admin_token().await?;

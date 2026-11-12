@@ -1,0 +1,141 @@
+= Behind a reverse proxy
+
+The application speaks plain HTTP on port 3000 and expects a reverse proxy that terminates
+TLS in front of it. Compose publishes the port on `127.0.0.1` only
+(xref:install.adoc[Install and first run]).
+
+== What the application needs
+
+[cols="2,4"]
+|===
+|Setting |Value
+
+|`APP__SERVER__PUBLIC_URL`
+|The external address with its scheme, `https://tracker.example.org`, no path.
+
+|`APP__SERVER__TRUSTED_PROXIES`
+|The address the proxy connects from, as a list: `["127.0.0.1"]` does not fit a container
+(the application sees the compose network's gateway); use the compose network, for example
+`["172.16.0.0/12"]`, or the proxy host's address. Only then `X-Forwarded-For` is believed.
+
+|`APP__AUTH__SECURE_COOKIES`
+|Stays `true` (the default) behind TLS.
+|===
+
+What the proxy must do:
+
+* pass the `Host` header unchanged (the cross-site request check compares the browser's
+  `Origin` with the public URL and with `Host`);
+* set `X-Forwarded-For` (the visitor's address in the audit log) and `X-Forwarded-Proto`;
+* not buffer the event stream `/api/v1/events` (server-sent events: live updates, search
+  results as they arrive) and not cut it after a short idle time;
+* allow request bodies of 64 MiB (import uploads; everything else stays under 2 MiB);
+* compress responses if you want compression: the application sends none itself.
+
+== Security headers
+
+Until the application sends them itself (planned with its content security policy), set
+these at the proxy:
+
+[cols="2,3"]
+|===
+|Header |Value
+
+|`Strict-Transport-Security` |`max-age=31536000` (add `includeSubDomains` only if every
+subdomain is served over HTTPS)
+|`X-Content-Type-Options` |`nosniff`
+|`X-Frame-Options` |`DENY`
+|`Referrer-Policy` |`strict-origin-when-cross-origin`
+|`Content-Security-Policy` |`frame-ancestors 'none'` and nothing more: a stricter policy
+set at the proxy breaks the pages, because their inline scripts need a per-response nonce
+that only the application can give.
+|===
+
+== Caddy
+
+[source]
+----
+tracker.example.org {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Content-Security-Policy "frame-ancestors 'none'"
+    }
+    reverse_proxy 127.0.0.1:3000
+}
+----
+
+Caddy passes `Host` through, sets `X-Forwarded-For`, `X-Forwarded-Proto` and
+`X-Forwarded-Host`, and flushes `text/event-stream` responses immediately, so the event
+stream needs no extra line (Caddy documentation, `reverse_proxy`, read 2026-11-12:
+https://caddyserver.com/docs/caddyfile/directives/reverse_proxy). Its documentation names no
+default limit for request bodies.
+
+== nginx
+
+[source]
+----
+server {
+    listen 443 ssl;
+    http2 on;                 # nginx 1.25.1 or newer. Older (Debian 12 ships 1.22): delete
+                              # this line and write "listen 443 ssl http2;" above
+    server_name tracker.example.org;
+    # ssl_certificate and ssl_certificate_key as on your host
+
+    client_max_body_size 64m;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy "frame-ancestors 'none'" always;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # live updates: no buffering, no short read timeout
+    location /api/v1/events {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+    }
+}
+----
+
+`$http_host` is the `Host` header as the browser sent it, with the port if there is one.
+`$host` drops the port; for an instance reached on another port than 443 the cross-site
+request check can then no longer fall back on comparing `Origin` with `Host`, and every
+form answers 403 until `APP__SERVER__PUBLIC_URL` is exactly right. The `http2` directive
+exists since nginx 1.25.1 (https://nginx.org/en/docs/http/ngx_http_v2_module.html#http2);
+`nginx -t` of an older version refuses it as an unknown directive.
+
+`add_header` in a `location` block replaces the ones of the `server` block: if you add a
+header inside a location, repeat the five there.
+
+== Check
+
+. `curl -sI https://tracker.example.org/healthz` answers `200` and shows the five headers.
+. Sign in from another machine. A sign-in page that comes back without a message means the
+  session cookie was dropped: the public URL is not HTTPS while secure cookies are on.
+. A `403 cross-site request refused` on every form means the proxy rewrites `Host` or
+  `APP__SERVER__PUBLIC_URL` is not the address in the browser.
+. Open the same title in two browser windows and log it in one: the other updates without
+  a reload. If it does not, the proxy buffers the event stream.
+. Admin > Audit log shows your own address, not the proxy's.
+
+The snippets were written from the Caddy and nginx documentation and were not run on the
+project's build host.

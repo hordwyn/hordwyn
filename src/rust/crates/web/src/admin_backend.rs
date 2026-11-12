@@ -104,6 +104,8 @@ pub trait AdminBackend: Send + Sync {
     async fn brand(&self, token: &str) -> BResult<BrandCardDto>;
     async fn security(&self, token: &str) -> BResult<SecurityDto>;
     async fn rewrap(&self, token: &str) -> BResult<RewrapDto>;
+    /// "I have backed up the key" on the overview (gated, OPS-4).
+    async fn confirm_key_backup(&self, token: &str) -> BResult<()>;
     async fn audit(&self, token: &str, q: AuditQueryDto) -> BResult<AuditPageDto>;
 
     // phase 3 (WP3-4): sign-in pages, linked sign-ins, Instance and Sign-in and SSO

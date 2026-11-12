@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT backup_confirmed_at FROM secrets_keys WHERE version = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "backup_confirmed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "secrets_keys",
+            "name": "backup_confirmed_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "9cda44bfbc46ca7acb83133cb4372a07b45736cf987195c7a3c977b5737eafdc"
+}

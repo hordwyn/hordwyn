@@ -2,16 +2,17 @@
 //! (dot + word + one line + at most one action), recent admin actions, recent sign-ups
 //! and the brand card.
 
-use contracts::admin::{AdminUserDto, BrandCardDto, HealthRowDto};
+use contracts::admin::{AdminOverviewDto, AdminUserDto, BrandCardDto, HealthRowDto, KeyBackupDto};
 use fluent_bundle::FluentValue;
 use leptos::prelude::*;
-use ui::{Alert, AlertRole, AlertVariant, StatusDot};
+use ui::{Alert, AlertRole, AlertVariant, Button, StatusDot};
 
 use super::{AdminFrame, Attention, AuditTable};
 use crate::admin_api;
 use crate::admin_state::health_state;
 use crate::i18n::{I18n, t, use_i18n};
-use crate::settings::loaded;
+use crate::reauth::{gated, use_reauth};
+use crate::settings::{Outcome, loaded};
 
 #[component]
 pub fn Overview() -> impl IntoView {
@@ -113,12 +114,23 @@ fn health_action(id: &str) -> Option<&'static str> {
     }
 }
 
+/// The block that says "Recorded" after the key backup was confirmed. It takes the focus
+/// then: the reminder and its button, which had the focus, leave the page (review V1OPS-8,
+/// WCAG 2.4.3).
+const BACKUP_OUTCOME: &str = "adm-key-backup-outcome";
+/// The same block once it shows its message (it is hidden while empty and cannot take the
+/// focus then).
+const BACKUP_OUTCOME_SHOWN: &str = "#adm-key-backup-outcome:not(:empty)";
+
 #[component]
 fn OverviewBody() -> impl IntoView {
     let data = Resource::new(|| (), |()| admin_api::admin_overview());
     let users = Resource::new(|| (), |()| admin_api::admin_users());
+    // outlives the refetch that removes the reminder: "recorded" is said where it was
+    let backup_message = RwSignal::new(None::<Result<String, String>>);
     view! {
-        {loaded(data, |o| {
+        <div id=BACKUP_OUTCOME tabindex="-1" class="mb-6 max-w-3xl empty:hidden"><Outcome message=backup_message/></div>
+        {loaded(data, move |o| {
             let attention: Vec<HealthRowDto> = o.health.iter().filter(|h| o.attention.contains(&h.id)).cloned().collect();
             let title = use_i18n().t_args("admin-overview-attention", &[("count", attention.len().into())]);
             view! {
@@ -134,6 +146,7 @@ fn OverviewBody() -> impl IntoView {
                         </ul>
                     </Attention>
                 })}
+                {o.key_backup.clone().map(|k| view! { <KeyBackup k=k data=data message=backup_message/> })}
                 {o.hosted_banner.then(|| view! {
                     <Alert variant=AlertVariant::Info role=AlertRole::None class="mb-6 max-w-3xl">
                         {t("admin-overview-hosted")} " " <a class="underline" href="/admin/sources">{t("admin-nav-sources")}</a>
@@ -163,6 +176,55 @@ fn OverviewBody() -> impl IntoView {
             <h2 id="adm-signups-h" class="mb-3 text-lg font-semibold">{t("admin-overview-signups")}</h2>
             {loaded(users, |list| view! { <RecentSignups users=list/> })}
         </section>
+    }
+}
+
+/// The reminder to back up the secrets key (OPS-4, DEC-620): shown until an admin confirms
+/// the backup of the active key version. Without the key a database backup cannot open the
+/// stored secrets, and nothing regenerates it. The confirmation is a gated action.
+#[component]
+fn KeyBackup(
+    k: KeyBackupDto,
+    data: Resource<Result<AdminOverviewDto, ServerFnError>>,
+    message: RwSignal<Option<Result<String, String>>>,
+) -> impl IntoView {
+    let i18n = use_i18n();
+    let reauth = use_reauth();
+    let busy = RwSignal::new(false);
+    let location = match &k.key_file {
+        Some(path) => i18n.t_args("admin-key-backup-file", &[("path", path.clone().into())]),
+        None => i18n.t("admin-key-backup-env"),
+    };
+    let confirm = move |_| {
+        let texts = i18n.clone();
+        gated(
+            reauth,
+            busy,
+            admin_api::confirm_key_backup,
+            Callback::new(move |r: Result<(), String>| {
+                let recorded = r.is_ok();
+                message.set(Some(r.map(|()| texts.t("admin-key-backup-confirmed"))));
+                data.refetch();
+                if recorded {
+                    // the refetch removes the reminder and the button that has the focus
+                    crate::keyboard::when_present(BACKUP_OUTCOME_SHOWN, || {
+                        let _ = crate::keyboard::focus(BACKUP_OUTCOME_SHOWN);
+                    });
+                }
+            }),
+        );
+    };
+    view! {
+        <div data-testid="key-backup">
+            <Alert variant=AlertVariant::Warning role=AlertRole::None class="mb-6 max-w-3xl"
+                title=t("admin-key-backup-title")
+                actions=move || view! {
+                    <Button loading=busy on:click=confirm.clone()>{t("admin-key-backup-confirm")}</Button>
+                }>
+                <p>{t("admin-key-backup-body")}</p>
+                <p class="mt-1 break-all">{location}</p>
+            </Alert>
+        </div>
     }
 }
 

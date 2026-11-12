@@ -92,3 +92,84 @@ mod tests {
         assert_ne!(ids.hash_token(&a), a);
     }
 }
+
+/// What an operator should hear at start-up about how the instance is reachable (SEC-6,
+/// OPS-2); empty when nothing is odd. `public_url` and `bind` are the `server` settings,
+/// `secure_cookies` the effective cookie setting.
+///
+/// - Plain HTTP at the public URL while the server listens beyond loopback: sign-in data
+///   travels unencrypted unless a TLS proxy is in front.
+/// - Secure cookies with a plain-HTTP public URL that is not this machine: browsers drop
+///   the session cookie, nobody can sign in.
+#[must_use]
+pub fn exposure_warnings(public_url: &str, bind: &str, secure_cookies: bool) -> Vec<&'static str> {
+    let Ok(url) = url::Url::parse(public_url) else {
+        return Vec::new();
+    };
+    if url.scheme() != "http" {
+        return Vec::new();
+    }
+    let local = |host: &str| {
+        host == "localhost"
+            || host
+                .trim_matches(['[', ']'])
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback())
+    };
+    let mut out = Vec::new();
+    let listens_beyond = bind
+        .parse::<std::net::SocketAddr>()
+        .is_ok_and(|a| !a.ip().is_loopback());
+    if listens_beyond {
+        out.push(
+            "server.public_url is plain HTTP and the server listens beyond loopback: put a \
+             reverse proxy with TLS in front and set APP__SERVER__PUBLIC_URL to its https address",
+        );
+    }
+    if secure_cookies && !url.host_str().is_some_and(local) {
+        out.push(
+            "auth.secure_cookies is on but server.public_url is plain HTTP: browsers will not \
+             send the session cookie and nobody can sign in; use https, or set \
+             APP__AUTH__SECURE_COOKIES=false for a test on a trusted network",
+        );
+    }
+    out
+}
+
+#[cfg(test)]
+mod exposure_tests {
+    use super::exposure_warnings;
+
+    #[test]
+    fn https_or_loopback_is_quiet() {
+        assert_eq!(
+            exposure_warnings("https://tracker.example.org", "0.0.0.0:3000", true).len(),
+            0
+        );
+        assert_eq!(
+            exposure_warnings("http://localhost:3000", "127.0.0.1:3000", true).len(),
+            0
+        );
+        assert_eq!(
+            exposure_warnings("http://localhost:3000", "[::1]:3000", false).len(),
+            0
+        );
+    }
+
+    #[test]
+    fn plain_http_beyond_loopback_is_named() {
+        // the compose default before PUBLIC_URL is set: only the first warning (the cookie
+        // works on localhost)
+        let w = exposure_warnings("http://localhost:3000", "0.0.0.0:3000", true);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("plain HTTP"), "{w:?}");
+        // a LAN test over http with secure cookies: nobody can sign in
+        let w = exposure_warnings("http://192.168.1.20:3000", "0.0.0.0:3000", true);
+        assert_eq!(w.len(), 2, "{w:?}");
+        assert!(w[1].contains("secure_cookies"), "{w:?}");
+        let w = exposure_warnings("http://192.168.1.20:3000", "0.0.0.0:3000", false);
+        assert_eq!(w.len(), 1, "{w:?}");
+        // an unparsable setting is not this function's business
+        assert_eq!(exposure_warnings("nonsense", "nonsense", true).len(), 0);
+    }
+}

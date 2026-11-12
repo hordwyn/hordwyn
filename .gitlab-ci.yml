@@ -160,7 +160,8 @@ leptos-build:
 
 docker-image:
   # The runner is not privileged, so no docker-in-docker; kaniko builds without a daemon
-  # (DEC-042). The image is built and checked, not pushed.
+  # (DEC-042). The image is built and checked, not pushed. The build is also the check that
+  # the image contains the admin CLI: the runtime stage runs `cli help` (OPS-1, DEC-618).
   stage: build
   image:
     name: gcr.io/kaniko-project/executor:v1.24.0-debug

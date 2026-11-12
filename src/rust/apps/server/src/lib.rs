@@ -818,6 +818,7 @@ impl Server {
                 web::shell,
             ))
             .with_state(options.clone())
+            .layer(axum::middleware::from_fn(pkg_no_cache))
             // inner: runs after the session is resolved (signed-in visits pass untouched)
             .layer(axum::middleware::from_fn_with_state(
                 SsoPages {
@@ -832,6 +833,45 @@ impl Server {
             ));
         let pages = self.guarded(pages);
         self.base_router().merge(pages)
+    }
+}
+
+/// `Cache-Control: no-cache` on the bundle under `/pkg` (OPS-8, DEC-623): `app.js`,
+/// `app.wasm` and `app.css` keep their names across releases, so a browser has to ask
+/// before it reuses its copy; otherwise the pages of a new release are hydrated by the old
+/// bundle until a hard reload.
+///
+/// "Ask first" must not mean "download again", and the Leptos file handler does not pass
+/// the request's headers on to the file service, so it never answers a conditional request
+/// itself (seen: `200` with the whole file for a matching `If-Modified-Since`). Hence a
+/// request whose `If-Modified-Since` is exactly the `Last-Modified` of the file gets an
+/// empty `304` here. Exactly, not "not newer than": browsers send back the value they were
+/// given, and a release whose files carry an older date still replaces the cached one.
+async fn pkg_no_cache(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    if !req.uri().path().starts_with("/pkg/") {
+        return next.run(req).await;
+    }
+    let since = req.headers().get(header::IF_MODIFIED_SINCE).cloned();
+    let mut resp = next.run(req).await;
+    if !resp.headers().contains_key(header::CACHE_CONTROL) {
+        resp.headers_mut().insert(
+            header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-cache"),
+        );
+    }
+    let stamp = resp.headers().get(header::LAST_MODIFIED).cloned();
+    match (since, stamp) {
+        (Some(since), Some(stamp)) if resp.status() == StatusCode::OK && since == stamp => {
+            let cache = resp.headers().get(header::CACHE_CONTROL).cloned();
+            let mut not_modified = StatusCode::NOT_MODIFIED.into_response();
+            let headers = not_modified.headers_mut();
+            headers.insert(header::LAST_MODIFIED, stamp);
+            if let Some(cache) = cache {
+                headers.insert(header::CACHE_CONTROL, cache);
+            }
+            not_modified
+        }
+        _ => resp,
     }
 }
 

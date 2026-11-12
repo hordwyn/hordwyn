@@ -118,6 +118,17 @@ async fn run() -> anyhow::Result<()> {
     });
 
     if role.runs_web() {
+        let secure = server.api.admin.as_ref().map_or(
+            server.config.auth.secure_cookies,
+            api::admin::AdminApi::secure_cookies,
+        );
+        for warning in server::infra::exposure_warnings(
+            &server.config.server.public_url,
+            &server.config.server.bind,
+            secure,
+        ) {
+            tracing::warn!("{warning}");
+        }
         let conf = get_configuration(None).context("leptos configuration")?;
         let mut options = conf.leptos_options;
         options.site_addr = server.config.server.bind.parse().context("server.bind")?;

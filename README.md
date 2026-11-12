@@ -9,8 +9,18 @@ Status: under construction. See `docs/design/DESIGN.md` (spec) and `docs/DECISIO
 ## Quick start
 
 ```sh
-docker compose -f src/docker/compose.yml up
+cp config/.env.example config/.env   # set POSTGRES_PASSWORD and MEILI_MASTER_KEY (no defaults)
+docker compose --env-file config/.env -f src/docker/compose.yml up -d --build
 ```
+
+The app listens on `127.0.0.1:3000`; put a reverse proxy with TLS in front of it. First run,
+reverse proxy, backup and restore: `docs/modules/ROOT/pages/install.adoc`,
+`reverse-proxy.adoc` and `operations.adoc`. Back up the secrets key (`/data/secrets.key`)
+together with the database.
+
+Upgrading an instance that is already running: `operations.adoc`, "Upgrade". An instance
+installed before the compose file required its passwords follows "Coming from a build before
+0034" there first (an existing database keeps its password; do not generate a new one).
 
 ## Development
 

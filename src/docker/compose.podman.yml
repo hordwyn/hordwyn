@@ -1,12 +1,13 @@
 # Override for rootless podman when container DNS does not work (DEC-168):
-#   docker compose -f src/docker/compose.yml -f src/docker/compose.podman.yml up
+#   docker compose --env-file config/.env -f src/docker/compose.yml -f src/docker/compose.podman.yml up -d
 # The app and Meilisearch join the Postgres container's network namespace, so all three
 # talk over 127.0.0.1 and no container names have to be resolved. Port 3000 is published
-# on the shared namespace (the postgres service owns it).
+# on the shared namespace (the postgres service owns it), on 127.0.0.1 unless
+# APP_PUBLISH_ADDR says otherwise, on host port 3000 unless APP_PUBLISH_PORT does.
 services:
   postgres:
     ports:
-      - "3000:3000"
+      - "${APP_PUBLISH_ADDR:-127.0.0.1}:${APP_PUBLISH_PORT:-3000}:3000"
 
   meilisearch:
     network_mode: "service:postgres"
@@ -18,18 +19,5 @@ services:
     network_mode: "service:postgres"
     ports: !reset []
     environment:
-      APP__DATABASE__URL: "postgres://app:${POSTGRES_PASSWORD:-app}@127.0.0.1:5432/app"
+      APP__DATABASE__URL: "postgres://app:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in config/.env}@127.0.0.1:5432/app"
       APP__SEARCH__MEILI_URL: "http://127.0.0.1:7700"
-
-  # Optional RustFS (profile s3): same namespace, so the app uses
-  # APP__STORAGE__S3__ENDPOINT=http://127.0.0.1:9000 with this override.
-  s3:
-    network_mode: "service:postgres"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  s3-init:
-    network_mode: "service:postgres"
-    environment:
-      S3_ENDPOINT: "http://127.0.0.1:9000"

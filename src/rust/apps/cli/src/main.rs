@@ -14,7 +14,8 @@ use anyhow::{Context, Result, bail};
 
 const USAGE: &str = "usage: cli [--config <file>] <command>
 
-  migrate                          apply database migrations
+  migrate [--dry-run]              apply database migrations (--dry-run: list the pending
+                                   ones, nothing is changed)
   storage report [--dry-run] [--json]
                                    storage usage, limits, S3 counters and what eviction
                                    would remove now (--dry-run: nothing is changed)
@@ -32,7 +33,7 @@ const USAGE: &str = "usage: cli [--config <file>] <command>
 
 #[derive(Debug, PartialEq, Eq)]
 enum Cmd {
-    Migrate,
+    Migrate { dry_run: bool },
     StorageReport { json: bool },
     StorageEvict,
     Reindex { clear: bool },
@@ -83,8 +84,10 @@ fn parse(args: &[String]) -> Result<Args> {
     };
     let cmd = match words.as_slice() {
         ["migrate"] => {
-            known(&[])?;
-            Cmd::Migrate
+            known(&["--dry-run"])?;
+            Cmd::Migrate {
+                dry_run: flags.contains(&"--dry-run"),
+            }
         }
         ["storage", "report"] => {
             known(&["--dry-run", "--json"])?;
@@ -243,7 +246,21 @@ async fn run(args: Args) -> Result<()> {
         .await
         .context("connect to the database")?;
     match args.cmd {
-        Cmd::Migrate => {
+        Cmd::Migrate { dry_run: true } => {
+            let pending = store_pg::pending_migrations(&pool).await?;
+            if pending.is_empty() {
+                println!("no pending migrations");
+            } else {
+                println!(
+                    "pending migrations ({}), nothing was changed:",
+                    pending.len()
+                );
+                for m in pending {
+                    println!("  {:04} {}", m.version, m.description);
+                }
+            }
+        }
+        Cmd::Migrate { dry_run: false } => {
             store_pg::migrate(&pool).await?;
             println!("migrations applied");
         }
@@ -425,7 +442,27 @@ async fn clear_indexes(cfg: &config::AppConfig, pool: &sqlx::PgPool) -> Result<(
     Ok(())
 }
 
+/// The storage commands never move the blob directories of an earlier layout (review
+/// V1OPS-5, DEC-643): only a start of the server does. While such directories are still to
+/// be moved a server of the earlier image may be running on the volume, and moving them away
+/// under it would split the store between two roots. So the command stops and says so.
+fn refuse_pending_move(storage: &assets::StorageConfig) -> Result<()> {
+    let pending = assets::legacy_dirs_pending(storage);
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let dirs: Vec<String> = pending.iter().map(|p| p.display().to_string()).collect();
+    bail!(
+        "the blob directories {} are still in the earlier layout (storage.fs_legacy_root) and \
+         only the server moves them into {}: start the server of this build first, with every \
+         container of an earlier build stopped. Nothing was changed.",
+        dirs.join(", "),
+        storage.fs_root
+    )
+}
+
 fn budget(cfg: &config::AppConfig, pool: &sqlx::PgPool) -> Result<assets::StorageBudget> {
+    refuse_pending_move(&cfg.storage)?;
     Ok(assets::StorageBudget::open(
         cfg.storage.clone(),
         Arc::new(assets::pg::PgObjectIndex::new(pool.clone())),
@@ -461,7 +498,12 @@ mod tests {
             p("storage report --json").unwrap().cmd,
             Cmd::StorageReport { json: true }
         );
-        assert_eq!(p("migrate").unwrap().cmd, Cmd::Migrate);
+        assert_eq!(p("migrate").unwrap().cmd, Cmd::Migrate { dry_run: false });
+        assert_eq!(
+            p("migrate --dry-run").unwrap().cmd,
+            Cmd::Migrate { dry_run: true }
+        );
+        assert!(p("migrate --clear").is_err());
         assert_eq!(
             p("reindex --clear").unwrap().cmd,
             Cmd::Reindex { clear: true }
@@ -497,5 +539,33 @@ mod tests {
         assert_eq!(human(0), "0.0 B");
         assert_eq!(human(1536), "1.5 KiB");
         assert_eq!(human(20 << 30), "20.0 GiB");
+    }
+
+    /// Review V1OPS-5: `storage report` and `storage evict` of a new image, run while the
+    /// blob directories still lie in the earlier root (an older server may be writing
+    /// there), stop with the directories in the message and move nothing.
+    #[test]
+    fn storage_commands_refuse_to_move_the_earlier_blob_directories() {
+        let data = std::env::temp_dir().join(format!("cli-layout-{}", std::process::id()));
+        std::fs::create_dir_all(data.join("img")).unwrap();
+        let storage = assets::StorageConfig {
+            backend: assets::Backend::Fs,
+            fs_root: data.join("blobs").display().to_string(),
+            fs_legacy_root: Some(data.display().to_string()),
+            ..assets::StorageConfig::default()
+        };
+        let refused = refuse_pending_move(&storage).unwrap_err().to_string();
+        assert!(
+            refused.contains(&data.join("img").display().to_string()),
+            "{refused}"
+        );
+        assert!(refused.contains("start the server"), "{refused}");
+        assert!(data.join("img").is_dir(), "nothing moved");
+        assert!(!data.join("blobs").exists(), "nothing created");
+        // once the server has moved them (or on a fresh volume) the commands run
+        std::fs::create_dir_all(data.join("blobs")).unwrap();
+        std::fs::rename(data.join("img"), data.join("blobs/img")).unwrap();
+        refuse_pending_move(&storage).unwrap();
+        std::fs::remove_dir_all(&data).unwrap();
     }
 }

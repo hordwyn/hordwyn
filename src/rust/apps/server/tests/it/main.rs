@@ -25,6 +25,7 @@ mod member_pin;
 mod notifications;
 mod offline;
 mod oidc;
+mod ops;
 mod phase1_fns;
 mod retention;
 mod setup_page;

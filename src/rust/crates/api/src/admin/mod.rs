@@ -22,7 +22,7 @@ use chrono::{DateTime, Duration, Utc};
 use contracts::admin::{
     AdminInviteCreatedDto, AdminInviteDto, AdminOverviewDto, AdminUserDto, AuditEntryDto,
     AuditPageDto, AuditQueryDto, BrandCardDto, CronDto, EvictionDto, FailedJobDto, HealthRowDto,
-    InstanceSettingsDto, KeyVersionDto, LaneCountsDto, NewAdminInviteDto, RewrapDto,
+    InstanceSettingsDto, KeyBackupDto, KeyVersionDto, LaneCountsDto, NewAdminInviteDto, RewrapDto,
     SecretsStatusDto, SecurityDto, SettingDto, SettingsPatchDto, StorageJobsDto,
 };
 use domain::ids::UserId;
@@ -1339,6 +1339,51 @@ pub async fn rewrap(s: &ApiState, actor: Actor) -> ApiResult<RewrapDto> {
     Ok(r)
 }
 
+/// The key an admin still has to confirm the backup of (OPS-4, DEC-620): the active
+/// version, unless it is confirmed or the key is the temporary one of a test harness.
+async fn key_backup_due(a: &AdminApi) -> ApiResult<Option<KeyBackupDto>> {
+    if a.keys.source == "ephemeral" {
+        return Ok(None);
+    }
+    let version = a.keys.active();
+    if a.store
+        .key_backup_confirmed(version)
+        .await
+        .map_err(pe)?
+        .is_some()
+    {
+        return Ok(None);
+    }
+    Ok(Some(KeyBackupDto {
+        version,
+        key_file: (a.keys.source != "env").then(|| a.keys.key_file.clone()),
+    }))
+}
+
+/// "I have backed up the key" on Admin > Overview (gated, audited with the key version and
+/// the proof method; never the key). Confirming twice is no error and writes one audit row.
+///
+/// # Errors
+/// Not an admin, `reauth_required`, storage errors.
+pub async fn confirm_key_backup(s: &ApiState, c: Caller<'_>) -> ApiResult<()> {
+    require_admin(c.actor)?;
+    let a = admin(s)?;
+    // the gate comes first, also for the temporary key of test harnesses (nothing to
+    // record there): the page behaves the same on every instance (review V1OPS-8)
+    fresh(s, c).await?;
+    if a.keys.source == "ephemeral" {
+        return Ok(());
+    }
+    let version = a.keys.active();
+    let detail = json!({"key_version": version, "proof": proof(s, c.token).await});
+    let e = entry(s, Some(c.actor), "secrets.backup_confirmed", None, detail).await;
+    a.store
+        .confirm_key_backup(version, s.app.clock.now(), &e)
+        .await
+        .map_err(pe)?;
+    Ok(())
+}
+
 /// Key versions that still encrypt at least one stored value.
 ///
 /// # Errors
@@ -1736,7 +1781,9 @@ pub async fn overview(s: &ApiState, actor: Actor) -> ApiResult<AdminOverviewDto>
         .map(audit_dto)
         .collect();
     let hosted_banner = a.hosted() && sources::licence_missing(s).await?;
+    let key_backup = key_backup_due(a).await?;
     Ok(AdminOverviewDto {
+        key_backup,
         health,
         attention,
         recent,

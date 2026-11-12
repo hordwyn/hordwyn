@@ -17,7 +17,7 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::backend::{BackendError, RawStore};
+use crate::backend::{BackendError, RawStore, prefix};
 use crate::config::{Backend, ByteSize, FetchPriority, StorageConfig};
 use crate::index::{ObjectClass, ObjectIndex, OpCounts, StoredObject, Tier, Usage};
 
@@ -586,9 +586,10 @@ fn classify(key: &str) -> NewObject {
         asset: None,
         priority: FetchPriority::Catalog,
     };
-    if key.starts_with("http/") {
+    let (top, rest) = key.split_once('/').unwrap_or(("", key));
+    if top == prefix::HTTP {
         obj.class = ObjectClass::HttpCache;
-    } else if let Some(rest) = key.strip_prefix("up/") {
+    } else if top == prefix::UPLOAD {
         obj.class = ObjectClass::Upload;
         obj.tier = Tier::Pinned;
         obj.priority = FetchPriority::Visible;

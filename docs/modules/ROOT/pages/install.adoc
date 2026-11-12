@@ -1,0 +1,124 @@
+= Install and first run
+
+The supported way to run a home instance is the compose file of the repository: the
+application, Postgres and Meilisearch on one host, the application published on
+`127.0.0.1:3000`, a reverse proxy with TLS in front of it
+(xref:reverse-proxy.adoc[Behind a reverse proxy]). `docker compose` and `podman compose` take
+the same commands.
+
+This page is for a new installation. An instance that is already running is upgraded by
+xref:operations.adoc#_upgrade[Operations, Upgrade].
+
+== Supported shape
+
+One web process plus any number of workers. The compose file starts one process that does
+both (`--role=all`), which is right for a home instance. Background work can move into
+`--role=worker` processes (a commented `worker` service is in the compose file); there is
+always exactly one web process (`--role=all` or `--role=web`). Two web processes are not
+supported: live updates and the sign-in throttle are kept per web process. See
+xref:operations.adoc#_roles[Roles].
+
+== The environment file
+
+[source,shell]
+----
+cp config/.env.example config/.env
+chmod 600 config/.env
+----
+
+`config/.env` is git-ignored. Compose reads it for its own variables (`--env-file`) and
+hands it to the application container. Set these before the first start:
+
+[cols="2,1,4"]
+|===
+|Key |Needed |What
+
+|`POSTGRES_PASSWORD`
+|always
+|Password of the database user. There is no default: compose refuses to start without it.
+Letters and digits only, because it becomes part of the database URL, for example
+`openssl rand -hex 24`. This is for a new installation: an existing database keeps its
+password (the variable is applied when the empty data directory is created), so for an
+instance that is already running write the password it has, see
+xref:operations.adoc#_coming_from_a_build_before_0034[Coming from a build before 0034].
+
+|`MEILI_MASTER_KEY`
+|always
+|Master key of the search service, 16 bytes or more, no default. For example
+`openssl rand -hex 24`.
+
+|`APP__SERVER__PUBLIC_URL`
+|behind a proxy
+|The address people open, as their browser sees it: `https://tracker.example.org`. Used for
+links in emails, single sign-on redirects, share links and the cross-site request check.
+The default `http://localhost:3000` only fits a browser on the host itself.
+
+|`APP__SERVER__TRUSTED_PROXIES`
+|behind a proxy
+|The proxy's address or network as a list: `["192.168.1.10"]` or `["172.16.0.0/12"]`.
+Without it the audit log records the proxy's address instead of the visitor's.
+
+|`APP__AUTH__SECURE_COOKIES`
+|plain HTTP only
+|Leave it empty (`true`) with HTTPS at the public URL. Over plain HTTP from another machine
+the browser drops the session cookie and nobody can sign in: set `false` for such a test on
+a LAN, and never on an instance reachable from the internet.
+
+|`APP_PUBLISH_ADDR`
+|proxy on another host
+|Host address compose publishes port 3000 on, default `127.0.0.1`. Set the host's LAN
+address when the reverse proxy runs on another machine.
+|===
+
+Data-source keys (TMDB, IGDB, ...) can stay empty: the setup wizard asks for them and
+stores them encrypted.
+
+== Start
+
+[source,shell]
+----
+docker compose --env-file config/.env -f src/docker/compose.yml up -d --build
+docker compose --env-file config/.env -f src/docker/compose.yml ps      # all three "healthy"
+docker compose --env-file config/.env -f src/docker/compose.yml logs app
+----
+
+The first start builds the image (about 8 GB of memory with the default two compile jobs;
+set `CARGO_BUILD_JOBS=1` in `config/.env` on a smaller host), applies the database
+migrations and generates the secrets key `/data/secrets.key` in the `app-data` volume. The
+application answers on `http://127.0.0.1:3000/healthz` when it is ready.
+
+Open the public URL. The first account is created in the setup wizard and becomes the
+administrator.
+
+== Back up the secrets key now
+
+Data-source keys, notification secrets and authenticator seeds are stored encrypted with the
+key in `/data/secrets.key`. A database backup without this file cannot open them, and
+nothing can regenerate it. Copy it out once, right after the first start, and keep it with
+your database backups, not next to the cached images:
+
+[source,shell]
+----
+docker compose --env-file config/.env -f src/docker/compose.yml exec -T app \
+  cat /data/secrets.key > secrets.key
+chmod 600 secrets.key
+----
+
+Admin > Overview shows a reminder until an administrator confirms that the key is backed
+up; the reminder returns after a key rotation. The full backup and restore procedure is in
+xref:operations.adoc#_backup[Operations].
+
+== The admin tool
+
+The image contains the admin tool `cli` next to the server:
+
+[source,shell]
+----
+docker compose --env-file config/.env -f src/docker/compose.yml exec app cli help
+----
+
+== Not verified on the build host
+
+The build host of this project has no container runtime. The compose files, the image
+definition and the commands on this page were checked by reading and by tests that parse
+the files; the image build runs in CI. Report what does not match your host.

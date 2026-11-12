@@ -1,8 +1,28 @@
-# Quick start: docker compose -f src/docker/compose.yml up
+# Quick start (see the "Install and first run" page of the docs):
+#   cp config/.env.example config/.env     # set POSTGRES_PASSWORD and MEILI_MASTER_KEY
+#   docker compose --env-file config/.env -f src/docker/compose.yml up -d
+# There are no default passwords: compose refuses to start until both are set (SEC-6).
+# The app is published on 127.0.0.1:3000 only; put a reverse proxy with TLS in front of it
+# ("Behind a reverse proxy" in the docs), or set APP_PUBLISH_ADDR to a LAN address.
+# An instance started with the compose file before these rules existed (default passwords,
+# port 3000 on every interface): see "Coming from a build before 0034" on the Operations page
+# BEFORE the first `up` with this file; an existing database keeps its password.
+#
+# Supported shape (OPS-12): ONE web process plus any number of workers. The default below is
+# one process doing both (`--role=all`). Never start a second `--role=all` or a second
+# `--role=web` process: events and sign-in throttles are per web process. To move the
+# background work out of the web process, see the commented `worker` service.
+#
+# A second copy beside this one (restore rehearsal): another project name (`-p`), another
+# host port (APP_PUBLISH_PORT) and another image name (APP_IMAGE); see "Restore rehearsal
+# beside the live instance" on the Operations page.
 name: tracker
 
 services:
   app:
+    # Every container of the project runs this one image (the worker below does not build
+    # its own): two builds on one volume would disagree about the blob directory.
+    image: "${APP_IMAGE:-localhost/tracker-app:local}"
     build:
       context: ../..
       dockerfile: src/docker/Dockerfile
@@ -10,16 +30,20 @@ services:
         # parallel compile jobs in the image build; 1 on hosts with less than 8 GB free
         CARGO_BUILD_JOBS: "${CARGO_BUILD_JOBS:-2}"
     restart: unless-stopped
+    # longer than jobs.shutdown_grace_secs (20 s): running jobs finish before SIGKILL (OPS-7)
+    stop_grace_period: 30s
+    # all (default): web and background work in one process; web: beside `worker` services
+    command: ["--role=${APP_ROLE:-all}"]
     environment:
-      APP__DATABASE__URL: "postgres://app:${POSTGRES_PASSWORD:-app}@postgres:5432/app"
+      APP__DATABASE__URL: "postgres://app:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in config/.env}@postgres:5432/app"
       APP__SEARCH__MEILI_URL: "http://meilisearch:7700"
-      APP__SEARCH__MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:-change-me-please-32-bytes-minimum}"
+      APP__SEARCH__MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY in config/.env (16 bytes or more)}"
       APP__SERVER__BIND: "0.0.0.0:3000"
     env_file:
       - path: ../../config/.env
         required: false
     ports:
-      - "3000:3000"
+      - "${APP_PUBLISH_ADDR:-127.0.0.1}:${APP_PUBLISH_PORT:-3000}:3000"
     volumes:
       - app-data:/data
     depends_on:
@@ -32,13 +56,43 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+      # migrations and the first source probes run before the port opens
+      start_period: 60s
+
+  # Optional: background work in its own process. Then run the app as the web process only
+  # (set APP_ROLE=web in config/.env) and uncomment this service;
+  # scale it with `--scale worker=2`. Keep exactly one web process. The worker serves no
+  # port, so it has no healthcheck (it is seen through Admin > Overview, row "Jobs"). It runs
+  # the image the `app` service builds: build with `build` (or `up --build`) before `up`,
+  # and replace web process and workers together at an upgrade.
+  # worker:
+  #   image: "${APP_IMAGE:-localhost/tracker-app:local}"
+  #   pull_policy: never
+  #   command: ["--role=worker"]
+  #   restart: unless-stopped
+  #   stop_grace_period: 30s
+  #   environment:
+  #     APP__DATABASE__URL: "postgres://app:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in config/.env}@postgres:5432/app"
+  #     APP__SEARCH__MEILI_URL: "http://meilisearch:7700"
+  #     APP__SEARCH__MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY in config/.env (16 bytes or more)}"
+  #   env_file:
+  #     - path: ../../config/.env
+  #       required: false
+  #   volumes:
+  #     - app-data:/data
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     meilisearch:
+  #       condition: service_healthy
 
   postgres:
     image: postgres:18.6-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: app
       POSTGRES_USER: app
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-app}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in config/.env}"
     volumes:
       - pg-data:/var/lib/postgresql
     healthcheck:
@@ -49,8 +103,9 @@ services:
 
   meilisearch:
     image: getmeili/meilisearch:v1.56.1
+    restart: unless-stopped
     environment:
-      MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:-change-me-please-32-bytes-minimum}"
+      MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY in config/.env (16 bytes or more)}"
       MEILI_ENV: production
       MEILI_NO_ANALYTICS: "true"
     volumes:
@@ -61,58 +116,11 @@ services:
       timeout: 3s
       retries: 20
 
-  # Optional S3-compatible storage: RustFS (Apache-2.0, DEC-008, DEC-202). Not started by
-  # default and not a dependency of the app (the app uses the fs backend unless told
-  # otherwise). Start it with
-  #   docker compose -f src/docker/compose.yml --profile s3 up
-  # and point the app at it in config/.env:
-  #   APP__STORAGE__BACKEND=s3
-  #   APP__STORAGE__S3__ENDPOINT=http://s3:9000
-  #   APP__STORAGE__S3__BUCKET=assets
-  #   APP__STORAGE__S3__REGION=us-east-1
-  #   APP__STORAGE__S3__ACCESS_KEY_ID=<same as S3_ACCESS_KEY>
-  #   APP__STORAGE__S3__SECRET_ACCESS_KEY=<same as S3_SECRET_KEY>
-  s3:
-    image: rustfs/rustfs:1.0.4
-    profiles: [s3]
-    restart: unless-stopped
-    environment:
-      RUSTFS_ACCESS_KEY: "${S3_ACCESS_KEY:-change-me}"
-      RUSTFS_SECRET_KEY: "${S3_SECRET_KEY:-change-me-please}"
-      RUSTFS_CONSOLE_ENABLE: "false"
-      RUSTFS_REGION: "us-east-1"
-    volumes:
-      - s3-data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health"]
-      interval: 3s
-      timeout: 3s
-      retries: 20
-
-  # One-shot: creates the bucket with the rc client shipped in the RustFS image.
-  s3-init:
-    image: rustfs/rustfs:1.0.4
-    profiles: [s3]
-    restart: "no"
-    depends_on:
-      s3:
-        condition: service_healthy
-    environment:
-      S3_ENDPOINT: "http://s3:9000"
-      S3_ACCESS_KEY: "${S3_ACCESS_KEY:-change-me}"
-      S3_SECRET_KEY: "${S3_SECRET_KEY:-change-me-please}"
-      # rc keeps its alias file under $HOME
-      HOME: "/tmp"
-      S3_BUCKET: "assets"
-    entrypoint:
-      - sh
-      - -c
-      - >-
-        rc alias set local "$$S3_ENDPOINT" "$$S3_ACCESS_KEY" "$$S3_SECRET_KEY" &&
-        rc bucket create "local/$$S3_BUCKET" --ignore-existing
+  # Optional S3-compatible storage (RustFS): a file of its own, compose.s3.yml, because its
+  # credentials are required variables too and compose checks them for every service of a
+  # file, started or not.
 
 volumes:
   app-data:
   pg-data:
   meili-data:
-  s3-data:

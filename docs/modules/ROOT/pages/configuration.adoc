@@ -170,6 +170,7 @@ The `storage` section of the configuration (D-8).
 |`backend` |`APP__STORAGE__BACKEND` |`fs` \| `s3` \| `memory` |`"fs"` |
 |`fetch_policy` |`APP__STORAGE__FETCH_POLICY` |`lazy` \| `library` \| `eager` |`"library"` |Which images get bytes ahead of being requested (D-8).
 |`formats` |`APP__STORAGE__FORMATS` |list of `avif` \| `webp` |`["avif", "webp"]` |
+|`fs_legacy_root` |`APP__STORAGE__FS_LEGACY_ROOT` |string |- |fs only: the blob root of an earlier layout. At start the server moves its directories `up`, `img`, `http` and `orig` into `fs_root` unless `fs_root` has them already (the container image sets `/data`: its blobs used to lie around the secrets key). The admin CLI never moves them: its storage commands refuse to run until the server has.
 |`fs_root` |`APP__STORAGE__FS_ROOT` |string |`"data/blobs"` |Root directory of the fs backend.
 |`high_watermark` |`APP__STORAGE__HIGH_WATERMARK` |number |`0.9` |Start evicting above this fraction of the cap.
 |`http_cache_max_bytes` |`APP__STORAGE__HTTP_CACHE_MAX_BYTES` |string |`"2GiB"` |Limit for raw provider responses kept by the HTTP cache.

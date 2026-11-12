@@ -2,6 +2,8 @@
 * xref:architecture.adoc[Architecture]
 * xref:provider-pipeline.adoc[Provider pipeline]
 * xref:storage-budget.adoc[Storage budget]
+* xref:install.adoc[Install and first run]
+* xref:reverse-proxy.adoc[Behind a reverse proxy]
 * xref:configuration.adoc[Configuration reference]
 * xref:operations.adoc[Operations]
 * xref:white-labelling.adoc[White-labelling]

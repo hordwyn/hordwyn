@@ -130,6 +130,53 @@ test("a gated change asks to confirm it is you and is retried once confirmed", a
   await expect(page.getByRole("radio", { name: "Anyone" })).toBeDisabled();
 });
 
+// Review V1OPS-8 (WCAG 2.4.3): confirming the key backup removes the reminder and the button
+// that had the focus; the focus goes to the "Recorded" message, not back to the document.
+// The e2e server runs on a temporary key and has no reminder of its own, so the overview
+// the browser fetches says one is due until the confirmation went through; the gate, the
+// dialog and the confirmation are the server's.
+test("Overview: after the key backup is confirmed the focus is on the confirmation", async ({ page }) => {
+  await signIn(page, REAUTH_ADMIN);
+  await visit(page, "/admin/instance");
+  let confirmed = false;
+  await page.route("**/_fn/admin_overview*", async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    if (!confirmed) json.key_backup = { version: 1, key_file: "/data/secrets.key" };
+    await route.fulfill({ response, json });
+  });
+  await page.route("**/_fn/confirm_key_backup*", async (route) => {
+    const response = await route.fetch();
+    if (response.ok()) confirmed = true;
+    await route.fulfill({ response });
+  });
+  const nav = page.getByRole("navigation", { name: "Settings" }).getByRole("list", { name: "Instance (admin)" });
+  await nav.getByRole("link", { name: "Overview" }).click();
+  const banner = page.getByTestId("key-backup");
+  await expect(banner).toContainText("Key file on the server: /data/secrets.key");
+  ageSessions(REAUTH_ADMIN);
+  await banner.getByRole("button", { name: "I have backed up the key" }).focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
+  await expect(dialog.getByLabel("Password")).toBeFocused();
+  await dialog.getByLabel("Password").fill(PASSWORD);
+  await page.keyboard.press("Enter");
+  await expect(dialog).toHaveCount(0);
+  await expect(banner).toHaveCount(0);
+  const outcome = page.locator("#adm-key-backup-outcome");
+  await expect(outcome).toHaveText("Recorded. This reminder returns when a new key is added.");
+  await expect(outcome).toBeFocused();
+  // the next Tab goes on from the message, not from the top of the page
+  await page.keyboard.press("Tab");
+  const after = await page.evaluate(() => {
+    const from = document.getElementById("adm-key-backup-outcome");
+    const at = document.activeElement;
+    return !!from && !!at && (from.compareDocumentPosition(at) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  });
+  expect(after, "Tab continues after the message").toBe(true);
+  await expectNoA11yViolations(page, "overview after the key backup confirmation");
+});
+
 test("invites: the link is shown once, then the invite is revoked; the self guard", async ({ page }) => {
   await signIn(page, ADMIN);
   await visit(page, "/admin/users");

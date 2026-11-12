@@ -381,6 +381,11 @@ pub struct StorageConfig {
     pub backend: Backend,
     /// Root directory of the fs backend.
     pub fs_root: String,
+    /// fs only: the blob root of an earlier layout. At start the server moves its directories
+    /// `up`, `img`, `http` and `orig` into `fs_root` unless `fs_root` has them already (the
+    /// container image sets `/data`: its blobs used to lie around the secrets key). The admin
+    /// CLI never moves them: its storage commands refuse to run until the server has.
+    pub fs_legacy_root: Option<String>,
     /// Hard cap for all stored bytes (pinned and cache tier).
     #[schemars(with = "String")]
     pub max_total_bytes: ByteSize,
@@ -412,6 +417,7 @@ impl Default for StorageConfig {
         Self {
             backend: Backend::Fs,
             fs_root: "data/blobs".into(),
+            fs_legacy_root: None,
             max_total_bytes: ByteSize::gib(20),
             high_watermark: 0.90,
             low_watermark: 0.75,
