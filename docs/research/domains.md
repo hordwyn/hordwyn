@@ -429,3 +429,12 @@ domain ("shelfcommons"): the hub lives at `hub.hordwyn.org`. Conditions: the hub
 configuration value (no hard-coded domain, rule 9), and the hub origin is fixed before the hub
 launches (after v1), because peer signatures bind to it. Domains to register (owner): hordwyn.org,
 plus hordwyn.de / .eu / .dev as defensive registrations.
+
+## Owner registration 2026-11-13
+
+The owner registered **hordwyn.com** and **hordwyn.de**. Plan from now on: the project site lives
+at `https://hordwyn.com` (`hordwyn.de` redirects to it), the hub at `hub.hordwyn.com`, the
+staging hub at `staging.hub.hordwyn.com` or `hub-staging.hordwyn.com` (decide when the hub is
+built). This replaces hordwyn.org in the note above; .org/.eu/.dev stay optional defensive
+registrations. The brand's `support_url` stays empty until the site exists; it is not the
+operator contact that connectors send (that is the per-instance setting from v1-books).
