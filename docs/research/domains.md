@@ -421,3 +421,11 @@ Repository context
 - `config/brand/default/brand.toml`, `docs/HANDOFF.md` (rule 9, 4.7, 4.8),
   `docs/fable/round2/owner-answers-2026-11-10.md` (HUB-0, HUB-1, HUB-4, HUB-13),
   `git show wip/fable-reviews:docs/fable/hub-design.md` (3.4, 9)
+
+## Owner decision 2026-11-12
+
+The product is named hordwyn (docs/research/names.md). The owner rejects a separate hub
+domain ("shelfcommons"): the hub lives at `hub.hordwyn.org`. Conditions: the hub URL stays a
+configuration value (no hard-coded domain, rule 9), and the hub origin is fixed before the hub
+launches (after v1), because peer signatures bind to it. Domains to register (owner): hordwyn.org,
+plus hordwyn.de / .eu / .dev as defensive registrations.
