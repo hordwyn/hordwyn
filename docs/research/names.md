@@ -375,3 +375,10 @@ Repository
   `docs/HANDOFF.md`, `docs/design/DESIGN.md`, `docs/design/KICKOFF.md`,
   `docs/handoff/agent-briefs/rules.md`, `docs/handoff/fable-briefs/`, `src/docker/compose.yml`,
   `.gitlab-ci.yml`, `docs/research/domains.md`
+
+## 10. Round 2 (owner feedback)
+
+Date checked: 2026-11-12. Status: IN PROGRESS (candidate pool being checked; table follows).
+
+Owner feedback on round 1 (samanunga, skemtan, couthie, kithshelf): "They're not bad but
+also not really hitting the sweet spot."

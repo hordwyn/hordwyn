@@ -194,6 +194,18 @@ fn status_of(e: &IntegrationError) -> u16 {
     }
 }
 
+/// The error text a call leaves on its card and in the event for the user's open pages.
+/// A storage failure is named as the sender is told it, without the storage text
+/// (SEC-9); the detail is logged where the call is answered (`api::hooks`).
+fn card_error(e: &IntegrationError) -> String {
+    match e {
+        IntegrationError::Port(_) | IntegrationError::App(AppError::Repo(_)) => {
+            "internal error".into()
+        }
+        _ => e.to_string(),
+    }
+}
+
 fn field_of(e: &IntegrationError) -> Option<String> {
     match e {
         IntegrationError::Refused { field, .. } => field.clone(),
@@ -389,7 +401,7 @@ impl Integrations {
         let record = CallRecord {
             at,
             status: result.as_ref().map_or_else(status_of, |_| 200),
-            error: result.as_ref().err().map(ToString::to_string),
+            error: result.as_ref().err().map(card_error),
             field: result.as_ref().err().and_then(field_of),
             payload,
             item: result.as_ref().ok().map(|r| LastItem {
@@ -451,7 +463,7 @@ impl Integrations {
         let record = CallRecord {
             at,
             status: checked.as_ref().map_or_else(status_of, |_| 200),
-            error: checked.as_ref().err().map(ToString::to_string),
+            error: checked.as_ref().err().map(card_error),
             field: checked.as_ref().err().and_then(field_of),
             payload: None,
             item: checked.as_ref().ok().and_then(|t| t.matched.clone()),
@@ -584,5 +596,32 @@ impl Integrations {
             event_id: event.id.0,
             title: label,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use app::ports::RepoError;
+
+    use super::*;
+
+    /// sec0 (SEC-9): the card shows its owner the same generic text the sender gets for a
+    /// failure of ours, and still says what is wrong with a refused call.
+    #[test]
+    fn the_card_keeps_no_storage_error_text() {
+        let sql = "error returned from database: relation \"progress_events\" does not exist";
+        for e in [
+            IntegrationError::Port(PortError(sql.into())),
+            IntegrationError::App(AppError::Repo(RepoError::Backend(sql.into()))),
+        ] {
+            assert_eq!(status_of(&e), 500);
+            assert_eq!(card_error(&e), "internal error");
+        }
+        let refused = rule("year", "year: must be between 1870 and 2100");
+        assert_eq!(card_error(&refused), "year: must be between 1870 and 2100");
+        assert_eq!(
+            card_error(&IntegrationError::App(AppError::NotFound("item"))),
+            "item not found"
+        );
     }
 }

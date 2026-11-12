@@ -833,6 +833,8 @@ instance to upgrade. Build order after v1-ops therefore becomes:
 3. sec2 - sign-in throttling and outbound confinement (SEC-5 and the rest of next-packages.md
    "sec2"); per-process counters (one web process is the supported shape, OPS-12); the
    confinement must allow the cover hosts and the connectors' API hosts
+   - also from sec0 (DEC-653): a read timeout for request bodies and collecting the body only
+     for `/_fn/` (stalled chunked bodies must not pin memory without a session)
 4. v1-polish, v1-books, v1-manual, v1-wikidata (as specified above)
 5. v1-acceptance on the owner's internet-facing instance (add: TLS at the proxy, headers seen
    from outside, sign-in throttling, a backup and a restore rehearsal)

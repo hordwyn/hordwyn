@@ -17,7 +17,7 @@ pub mod template;
 
 pub use bridge::AdminBridge;
 pub use deliver::{Deliverer, Message, Notifier, SendError};
-pub use engine::{Engine, INBOX_TOPIC};
+pub use engine::{DELIVERY_TOPIC, Engine, INBOX_TOPIC};
 pub use store::{MemNotifyStore, NotifyStore};
 
 /// Job sending one delivery (`{"delivery_id": ...}`).

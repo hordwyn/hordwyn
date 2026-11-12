@@ -28,6 +28,7 @@ config.workspace = true
 contracts.workspace = true
 connectors.workspace = true
 domain.workspace = true
+futures.workspace = true
 getrandom.workspace = true
 jobs.workspace = true
 integrations = { workspace = true, features = ["pg"] }
@@ -67,7 +68,6 @@ all-connectors = ["tmdb", "igdb", "podcastindex", "tvdb"]
 [dev-dependencies]
 totp-rs.workspace = true
 wiremock.workspace = true
-futures.workspace = true
 reqwest = { workspace = true, features = ["json", "stream"] }
 serde_json.workspace = true
 testkit.workspace = true

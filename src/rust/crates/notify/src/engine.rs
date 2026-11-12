@@ -22,6 +22,9 @@ use crate::{DELIVER_JOB, DIGEST_JOB};
 
 /// Topic of the realtime event for a new inbox item.
 pub const INBOX_TOPIC: &str = "notification.new";
+/// Topic of the realtime event for a delivery whose outcome was written (its log row and the
+/// health of its channel changed); payload `{"channel_id": ...}`.
+pub const DELIVERY_TOPIC: &str = "notification.delivery";
 
 pub struct Engine {
     store: Arc<dyn NotifyStore>,
@@ -61,6 +64,19 @@ impl Engine {
             brand,
             templates: RwLock::new(Arc::new(templates)),
         }
+    }
+
+    /// Publish [`DELIVERY_TOPIC`] to `user`: the outcome of a delivery to `channel` was
+    /// written.
+    pub(crate) async fn delivery_changed(&self, user: UserId, channel: uuid::Uuid) {
+        self.events
+            .publish(AppEvent {
+                topic: DELIVERY_TOPIC.into(),
+                entity: None,
+                audience: vec![user],
+                payload: serde_json::json!({ "channel_id": channel }),
+            })
+            .await;
     }
 
     #[must_use]

@@ -38,7 +38,7 @@ use catalog_core::search::SearchFanout;
 
 pub use error::ApiError;
 pub use extract::{Authed, AuthedToken, session_token};
-pub use routes::router;
+pub use routes::{IMPORT_BODY_LIMIT, JSON_BODY_LIMIT, router};
 pub use sso_routes::{
     AutoRedirect, SIGNED_OUT_PATH, auto_redirect, password_sign_in, sign_out_location, with_body,
 };

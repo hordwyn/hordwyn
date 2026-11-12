@@ -89,6 +89,12 @@ impl Deliverer {
             .map_err(|e| e.to_string())
     }
 
+    /// Tell the open pages of the channel's owner that an outcome was written: the log row
+    /// and the health of the channel changed ([`crate::DELIVERY_TOPIC`]).
+    async fn announce(&self, d: &Delivery) {
+        self.engine.delivery_changed(d.user, d.channel).await;
+    }
+
     async fn disable(&self, channel: Uuid) -> Result<(), String> {
         let store = self.engine.store();
         if let Some(mut c) = store.channel(channel).await.map_err(|e| e.to_string())? {
@@ -139,7 +145,9 @@ impl Deliverer {
         let Some(channel) = channel.filter(|c| c.enabled) else {
             d.state = DeliveryState::Suppressed;
             d.last_error = Some("channel disabled or deleted".into());
-            return self.save(&d).await;
+            self.save(&d).await?;
+            self.announce(&d).await;
+            return Ok(());
         };
         let m = Message {
             id: d.id,
@@ -151,7 +159,10 @@ impl Deliverer {
         };
         d.attempts += 1;
         let result = self.notifier.send(&channel.config, &m).await;
-        self.finish(&mut d, result, self.clock.now()).await
+        let finished = self.finish(&mut d, result, self.clock.now()).await;
+        // also for an attempt that is retried: the log shows it
+        self.announce(&d).await;
+        finished
     }
 
     async fn finish(
@@ -203,6 +214,7 @@ impl Deliverer {
                 d.last_error = Some("channel disabled or deleted".into());
                 self.save(d).await?;
             }
+            self.announce(&items[0]).await;
             return Ok(());
         };
         let locale = self
@@ -240,6 +252,8 @@ impl Deliverer {
                 retry = Some(e);
             }
         }
+        // one announcement for the whole digest
+        self.announce(&items[0]).await;
         retry.map_or(Ok(()), Err)
     }
 }

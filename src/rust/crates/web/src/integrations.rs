@@ -109,6 +109,7 @@ pub fn Integrations() -> impl IntoView {
             }),
         }
     });
+    crate::events::refresh_when_lagged(Callback::new(move |()| data.refetch()));
     let open = move || {
         created.set(None);
         waiting.set(Waiting::Listening);

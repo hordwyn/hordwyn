@@ -12,6 +12,7 @@ mod admin;
 mod admin_fns;
 mod admin_pages;
 mod auth_pages;
+mod body_limit;
 mod brand;
 mod cli;
 mod home_page;

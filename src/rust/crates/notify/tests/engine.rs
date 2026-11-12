@@ -11,8 +11,8 @@ use notify::model::{
     Channel, ChannelConfig, DeliveryMode, DeliveryState, Filter, QuietHours, Subscription, Targets,
 };
 use notify::{
-    DELIVER_JOB, DIGEST_JOB, Deliverer, Engine, MemNotifyStore, Message, Notifier, NotifyStore,
-    SendError,
+    DELIVER_JOB, DELIVERY_TOPIC, DIGEST_JOB, Deliverer, Engine, MemNotifyStore, Message, Notifier,
+    NotifyStore, SendError,
 };
 use testkit::{FixedClock, MemJobs, RecordingEvents, SeqIds};
 
@@ -36,6 +36,7 @@ struct Env {
     store: Arc<MemNotifyStore>,
     jobs: Arc<MemJobs>,
     clock: Arc<FixedClock>,
+    events: Arc<RecordingEvents>,
     engine: Arc<Engine>,
     deliverer: Deliverer,
     channel: Arc<FakeChannel>,
@@ -46,10 +47,11 @@ fn env() -> Env {
     let store = Arc::new(MemNotifyStore::default());
     let jobs = Arc::new(MemJobs::default());
     let clock = Arc::new(FixedClock::default());
+    let events = Arc::new(RecordingEvents::default());
     let engine = Arc::new(Engine::new(
         store.clone(),
         jobs.clone(),
-        Arc::new(RecordingEvents::default()),
+        events.clone(),
         clock.clone(),
         Arc::new(SeqIds::default()),
         "Shelf",
@@ -68,6 +70,7 @@ fn env() -> Env {
         store,
         jobs,
         clock,
+        events,
         engine,
         deliverer,
         channel,
@@ -441,5 +444,73 @@ async fn texts_follow_the_recipients_language() {
     assert_eq!(
         inbox[0].body,
         "1,200 entries imported, 0 rows with problems."
+    );
+}
+
+/// What the outcome of a delivery changes on an open page (its log row, the health of its
+/// channel) is announced to the channel's owner when it is written: every attempt of a single
+/// delivery, a digest once for all it sent.
+#[tokio::test]
+async fn a_written_outcome_is_announced_to_the_channels_owner() {
+    let e = env();
+    let ch = e.channel("phone").await;
+    e.subscribe("release.*", DeliveryMode::Immediate, |_| {})
+        .await;
+    e.channel.answers.lock().unwrap().extend([
+        Err(SendError::Retry("503".into())),
+        Err(SendError::Permanent("refused".into())),
+    ]);
+    e.engine.emit(e.episode(1)).await;
+    let announced = || {
+        e.events
+            .all()
+            .into_iter()
+            .filter(|ev| ev.topic == DELIVERY_TOPIC)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(announced().len(), 0, "nothing was tried yet");
+    let id: uuid::Uuid = e.jobs.jobs()[0].payload["delivery_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(e.deliverer.deliver(id).await.is_err(), "the job retries");
+    assert_eq!(announced().len(), 1, "the failed attempt shows in the log");
+    e.deliverer.deliver(id).await.unwrap();
+    let seen = announced();
+    assert_eq!(seen.len(), 2, "failed for good");
+    assert_eq!(seen[1].audience, vec![e.user]);
+    assert_eq!(seen[1].payload["channel_id"], ch.to_string());
+    assert_eq!(
+        e.store.delivery(id).await.unwrap().unwrap().state,
+        DeliveryState::Failed
+    );
+    // already settled: nothing is written, nothing announced
+    e.deliverer.deliver(id).await.unwrap();
+    assert_eq!(announced().len(), 2);
+
+    // a digest of three is one announcement
+    let digest = env();
+    digest.channel("mail").await;
+    digest
+        .subscribe(
+            "release.episode",
+            DeliveryMode::Digest {
+                cron: "0 8 * * *".into(),
+            },
+            |_| {},
+        )
+        .await;
+    for n in 1..=3 {
+        digest.engine.emit(digest.episode(n)).await;
+    }
+    digest.clock.advance(Duration::days(2));
+    digest.run_due().await;
+    assert_eq!(digest.sent().len(), 1, "one digest message");
+    let topics = digest.events.topics();
+    assert_eq!(
+        topics.iter().filter(|t| *t == DELIVERY_TOPIC).count(),
+        1,
+        "{topics:?}"
     );
 }

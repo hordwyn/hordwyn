@@ -28,12 +28,6 @@ fn api(s: &ApiState) -> ApiResult<&NotifyApi> {
     })
 }
 
-// Takes the error by value so it can be passed to `map_err` directly.
-#[allow(clippy::needless_pass_by_value)]
-fn port(e: app::ports::PortError) -> ApiError {
-    ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.0)
-}
-
 fn invalid(field: &str, e: impl std::fmt::Display) -> ApiError {
     ApiError::new(
         StatusCode::UNPROCESSABLE_ENTITY,
@@ -94,7 +88,7 @@ pub async fn unread_count(s: &ApiState, a: Actor) -> ApiResult<u32> {
         .store()
         .count_unread(a.user_id)
         .await
-        .map_err(port)
+        .map_err(ApiError::from)
 }
 
 /// # Errors
@@ -107,7 +101,7 @@ pub async fn inbox(s: &ApiState, a: Actor) -> ApiResult<Vec<InboxItemDto>> {
         .store()
         .inbox(a.user_id, INBOX_LIMIT)
         .await
-        .map_err(port)?
+        .map_err(ApiError::from)?
         .iter()
         .map(|i| inbox_dto(i, zone))
         .collect())
@@ -121,7 +115,7 @@ pub async fn mark_read(s: &ApiState, a: Actor, id: &str) -> ApiResult<()> {
         .store()
         .mark_read(a.user_id, parse_id(id, |u| u)?, s.app.clock.now())
         .await
-        .map_err(port)
+        .map_err(ApiError::from)
 }
 
 /// Mark every unread inbox row of the caller read ("Mark all read", design.md 6.8); how
@@ -135,7 +129,7 @@ pub async fn mark_all_read(s: &ApiState, a: Actor) -> ApiResult<u32> {
         .store()
         .mark_all_read(a.user_id, s.app.clock.now())
         .await
-        .map_err(port)
+        .map_err(ApiError::from)
 }
 
 /// Health of a channel from its latest delivery that was not suppressed (design.md 6.8).
@@ -180,11 +174,14 @@ fn channel_dto(c: &Channel, secret: Option<String>, latest: Option<&Delivery>) -
 /// Notifications disabled, storage errors.
 pub async fn channels(s: &ApiState, a: Actor) -> ApiResult<Vec<ChannelDto>> {
     let store = api(s)?.engine.store();
-    let latest = store.latest_deliveries(a.user_id).await.map_err(port)?;
+    let latest = store
+        .latest_deliveries(a.user_id)
+        .await
+        .map_err(ApiError::from)?;
     Ok(store
         .channels(a.user_id)
         .await
-        .map_err(port)?
+        .map_err(ApiError::from)?
         .iter()
         .map(|c| channel_dto(c, None, latest.iter().find(|d| d.channel == c.id)))
         .collect())
@@ -228,7 +225,7 @@ pub async fn create_channel(s: &ApiState, a: Actor, b: NewChannelDto) -> ApiResu
         .store()
         .put_channel(&channel)
         .await
-        .map_err(port)?;
+        .map_err(ApiError::from)?;
     Ok(channel_dto(&channel, shown, None))
 }
 
@@ -238,7 +235,7 @@ async fn own_channel(na: &NotifyApi, a: Actor, id: &str) -> ApiResult<Channel> {
         .store()
         .channel(parse_id(id, |u| u)?)
         .await
-        .map_err(port)?
+        .map_err(ApiError::from)?
         .ok_or_else(|| not_found("channel"))?;
     if c.user == a.user_id {
         Ok(c)
@@ -266,13 +263,13 @@ pub async fn update_channel(
         .store()
         .put_channel(&channel)
         .await
-        .map_err(port)?;
+        .map_err(ApiError::from)?;
     let latest = na
         .engine
         .store()
         .latest_deliveries(a.user_id)
         .await
-        .map_err(port)?;
+        .map_err(ApiError::from)?;
     Ok(channel_dto(
         &channel,
         None,
@@ -285,7 +282,11 @@ pub async fn update_channel(
 pub async fn delete_channel(s: &ApiState, a: Actor, id: &str) -> ApiResult<()> {
     let na = api(s)?;
     let c = own_channel(na, a, id).await?;
-    na.engine.store().delete_channel(c.id).await.map_err(port)
+    na.engine
+        .store()
+        .delete_channel(c.id)
+        .await
+        .map_err(ApiError::from)
 }
 
 /// Send a test message now.
@@ -328,11 +329,18 @@ pub async fn subscriptions(s: &ApiState, a: Actor) -> ApiResult<Vec<Subscription
     let mut out: Vec<_> = store
         .subscriptions(a.user_id)
         .await
-        .map_err(port)?
+        .map_err(ApiError::from)?
         .iter()
         .map(sub_dto)
         .collect();
-    out.extend(store.defaults().await.map_err(port)?.iter().map(sub_dto));
+    out.extend(
+        store
+            .defaults()
+            .await
+            .map_err(ApiError::from)?
+            .iter()
+            .map(sub_dto),
+    );
     Ok(out)
 }
 
@@ -408,7 +416,7 @@ pub async fn put_subscription(
             let old = store
                 .subscription(id)
                 .await
-                .map_err(port)?
+                .map_err(ApiError::from)?
                 .ok_or_else(|| not_found("subscription"))?;
             if old.user != user {
                 return Err(not_found("subscription"));
@@ -418,7 +426,7 @@ pub async fn put_subscription(
         None => s.app.ids.new_id(),
     };
     let sub = parse_sub(b, id, user)?;
-    store.put_subscription(&sub).await.map_err(port)?;
+    store.put_subscription(&sub).await.map_err(ApiError::from)?;
     Ok(sub_dto(&sub))
 }
 
@@ -431,7 +439,7 @@ pub async fn delete_subscription(s: &ApiState, a: Actor, id: &str) -> ApiResult<
     let sub = store
         .subscription(id)
         .await
-        .map_err(port)?
+        .map_err(ApiError::from)?
         .ok_or_else(|| not_found("subscription"))?;
     let allowed = match sub.user {
         Some(u) => u == a.user_id,
@@ -440,7 +448,7 @@ pub async fn delete_subscription(s: &ApiState, a: Actor, id: &str) -> ApiResult<
     if !allowed {
         return Err(not_found("subscription"));
     }
-    store.delete_subscription(id).await.map_err(port)
+    store.delete_subscription(id).await.map_err(ApiError::from)
 }
 
 fn delivery_dto(d: &Delivery, zone: app::time_zone::Tz) -> DeliveryDto {
@@ -472,7 +480,7 @@ pub async fn deliveries(s: &ApiState, a: Actor) -> ApiResult<Vec<DeliveryDto>> {
         .store()
         .deliveries(a.user_id, INBOX_LIMIT)
         .await
-        .map_err(port)?
+        .map_err(ApiError::from)?
         .iter()
         .map(|d| delivery_dto(d, zone))
         .collect())
@@ -487,7 +495,12 @@ pub async fn templates(s: &ApiState, a: Actor) -> ApiResult<Vec<TemplateOverride
         return Err(forbidden());
     }
     let na = api(s)?;
-    let o = na.engine.store().template_overrides().await.map_err(port)?;
+    let o = na
+        .engine
+        .store()
+        .template_overrides()
+        .await
+        .map_err(ApiError::from)?;
     Ok(o.into_iter()
         .flat_map(|(locale, keys)| {
             keys.into_iter()
@@ -516,8 +529,8 @@ pub async fn set_template(s: &ApiState, a: Actor, b: TemplateOverrideDto) -> Api
         .store()
         .set_template_override(&b.locale, &b.key, b.text.as_deref())
         .await
-        .map_err(port)?;
-    na.engine.reload_templates().await.map_err(port)
+        .map_err(ApiError::from)?;
+    na.engine.reload_templates().await.map_err(ApiError::from)
 }
 
 /// The notifications page in one call.
@@ -546,7 +559,7 @@ pub async fn instance_defaults(s: &ApiState) -> ApiResult<Vec<SubscriptionDto>> 
         .store()
         .defaults()
         .await
-        .map_err(port)?
+        .map_err(ApiError::from)?
         .iter()
         .map(sub_dto)
         .collect())

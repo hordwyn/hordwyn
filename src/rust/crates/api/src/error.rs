@@ -36,6 +36,18 @@ impl ApiError {
         self
     }
 
+    /// A failure of ours: the detail goes to the log with the request id (the `x-request-id`
+    /// of the answer), the caller gets the generic 500 without it (SEC-9).
+    fn internal(what: &'static str, detail: &dyn std::fmt::Display) -> Self {
+        let request_id = crate::request_meta::current().map(|m| m.request_id);
+        tracing::error!(error = %detail, request_id = request_id.as_deref(), "{what}");
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal",
+            "internal error",
+        )
+    }
+
     #[must_use]
     pub fn unauthorized() -> Self {
         Self::new(StatusCode::UNAUTHORIZED, "unauthorized", "sign in first")
@@ -84,14 +96,7 @@ impl From<AppError> for ApiError {
             AppError::Domain(d) => {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid", d.to_string())
             }
-            AppError::Repo(r) => {
-                tracing::error!(error = %r, "storage error");
-                Self::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "internal",
-                    "internal error",
-                )
-            }
+            AppError::Repo(r) => Self::internal("storage error", &r),
         }
     }
 }
@@ -127,23 +132,13 @@ impl From<AuthError> for ApiError {
         if let AuthError::App(a) = e {
             return a.into();
         }
-        tracing::error!(error = %msg, "auth error");
-        Self::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal",
-            "internal error",
-        )
+        Self::internal("auth error", &msg)
     }
 }
 
 impl From<app::ports::PortError> for ApiError {
     fn from(e: app::ports::PortError) -> Self {
-        tracing::error!(error = %e, "port error");
-        Self::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal",
-            "internal error",
-        )
+        Self::internal("port error", &e)
     }
 }
 

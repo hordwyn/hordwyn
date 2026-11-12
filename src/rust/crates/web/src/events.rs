@@ -9,16 +9,32 @@ pub struct LastEvent(pub RwSignal<Option<(String, String)>>);
 
 /// Topics the page listens to (browser only).
 #[cfg_attr(not(feature = "hydrate"), allow(dead_code))]
-pub const TOPICS: [&str; 6] = [
+pub const TOPICS: [&str; 8] = [
     "entity.updated",
     "search.results",
     "job.progress",
     "import.progress",
     // a new inbox row (the notifications page refetches)
     "notification.new",
+    // the outcome of a delivery was written (its log row, the health of its channel)
+    "notification.delivery",
     // a call attributed to one of the user's senders (Settings > Integrations, design.md 5.9)
     "integration.call",
+    // sent in place of events this page was too slow to take (see [`LAGGED`])
+    LAGGED,
 ];
+
+/// The server sends this in place of the events a slow reader missed (`realtime::events_for`).
+/// Any of them may have concerned the page that is shown, so every page that follows events
+/// reads its data again, paced like any other change from elsewhere (SEC0-9).
+pub const LAGGED: &str = "stream.lagged";
+
+/// Does an event of `topic` ask a page that follows `topics` to read again? Its own topics,
+/// and [`LAGGED`] for every page.
+#[must_use]
+pub fn concerns(topics: &[&str], topic: &str) -> bool {
+    topic == LAGGED || topics.contains(&topic)
+}
 
 /// Counts the person's own actions that happen away from the page that shows their result
 /// (the palette's Ctrl+Enter over an open Library, the Undo of its toast): such a page shows
@@ -34,17 +50,29 @@ impl OwnAction {
     }
 }
 
-/// Provide [`LastEvent`] and [`OwnAction`] and, in the browser, connect the event stream.
+/// Counts how often the event stream opened: once after a page load, and again after every
+/// reconnect. Whatever was published before an opening never reaches this page, so a page
+/// that must not show an older state than the server's reads again when the count moves
+/// ([`refresh_on_topics`]).
+#[derive(Clone, Copy)]
+pub struct StreamOpens(pub RwSignal<u32>);
+
+/// Provide [`LastEvent`], [`OwnAction`] and [`StreamOpens`] and, in the browser, connect the
+/// event stream.
 pub fn provide_events() {
     let last = LastEvent(RwSignal::new(None));
+    let opens = StreamOpens(RwSignal::new(0));
     provide_context(last);
+    provide_context(opens);
     provide_context(OwnAction(RwSignal::new(0)));
     #[cfg(feature = "hydrate")]
-    connect(last);
+    connect(last, opens);
+    #[cfg(not(feature = "hydrate"))]
+    let _ = opens;
 }
 
 #[cfg(feature = "hydrate")]
-fn connect(last: LastEvent) {
+fn connect(last: LastEvent, opens: StreamOpens) {
     use wasm_bindgen::JsCast;
     use wasm_bindgen::closure::Closure;
 
@@ -61,6 +89,11 @@ fn connect(last: LastEvent) {
         // the page lives as long as the event source: keep the handler alive
         cb.forget();
     }
+    let opened = Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
+        let _ = opens.0.try_update(|n| *n += 1);
+    });
+    let _ = es.add_event_listener_with_callback("open", opened.as_ref().unchecked_ref());
+    opened.forget();
     // keep the connection object alive for the page's lifetime
     std::mem::forget(es);
 }
@@ -140,37 +173,31 @@ impl Pace {
     }
 }
 
-/// Run `refresh` for the `entity.updated` events of this page, paced by [`Pace`], and at
-/// once for the person's own actions made elsewhere ([`OwnAction`]). For pages whose every
-/// row would be looked at again (Home, Library, History, People, a person, the lists); a page
-/// of one entity filters the events itself. The event that was the last one when the page
-/// was built is not counted: the page has just loaded, and counting it started a quiet time
-/// that made the first real change late (OT1B-9).
-pub fn refresh_on_updates(refresh: Callback<()>) {
-    let events = use_events();
-    let pace = StoredValue::new(Pace::default());
-    let alive = StoredValue::new(());
-    if let Some(own) = use_context::<OwnAction>() {
-        Effect::new(move |seen: Option<u64>| {
-            let n = own.0.get();
-            if seen.is_some_and(|s| s != n) {
-                pace.update_value(|p| p.own(crate::keyboard::now_ms()));
-                refresh.run(());
-            }
-            n
-        });
+/// One page's paced refetch: [`Pace`] on the browser's clock, and the scheduled refetch is
+/// dropped when the page is gone by then.
+#[derive(Clone, Copy)]
+struct Paced {
+    pace: StoredValue<Pace>,
+    alive: StoredValue<()>,
+    refresh: Callback<()>,
+}
+
+impl Paced {
+    fn new(refresh: Callback<()>) -> Self {
+        Self {
+            pace: StoredValue::new(Pace::default()),
+            alive: StoredValue::new(()),
+            refresh,
+        }
     }
-    Effect::new(move |built: Option<()>| {
-        let event = events.0.get();
-        if built.is_none() {
-            return;
-        }
-        let Some((topic, _)) = event else {
-            return;
-        };
-        if topic != "entity.updated" {
-            return;
-        }
+
+    /// Something changed elsewhere: refetch now or at the end of the quiet time.
+    fn changed(self) {
+        let Self {
+            pace,
+            alive,
+            refresh,
+        } = self;
         let mut step = Refetch::Scheduled;
         pace.update_value(|p| step = p.event(crate::keyboard::now_ms()));
         match step {
@@ -187,7 +214,81 @@ pub fn refresh_on_updates(refresh: Callback<()>) {
             ),
             Refetch::Scheduled => {}
         }
-    });
+    }
+
+    /// Run [`Self::changed`] for the events of `topics` and when events were missed
+    /// ([`LAGGED`]). The event that was the last one
+    /// when the page was built is not counted: the page has just loaded, and counting it
+    /// started a quiet time that made the first real change late (OT1B-9).
+    fn on_topics(self, topics: &'static [&'static str]) {
+        let events = use_events();
+        Effect::new(move |built: Option<()>| {
+            let event = events.0.get();
+            if built.is_none() {
+                return;
+            }
+            if event.is_some_and(|(topic, _)| concerns(topics, &topic)) {
+                self.changed();
+            }
+        });
+    }
+}
+
+/// Run `refresh`, paced by [`Pace`], when the event stream says that events were missed
+/// ([`LAGGED`]). For a page that follows its own topic by hand (an import's progress, the
+/// calls of an integration) and would otherwise show an older state until the next event.
+pub fn refresh_when_lagged(refresh: Callback<()>) {
+    Paced::new(refresh).on_topics(&[]);
+}
+
+/// Run `refresh` for the `entity.updated` events of this page, paced by [`Pace`], and at
+/// once for the person's own actions made elsewhere ([`OwnAction`]). For pages whose every
+/// row would be looked at again (Home, Library, History, People, a person, the lists); a page
+/// of one entity filters the events itself.
+pub fn refresh_on_updates(refresh: Callback<()>) {
+    let paced = Paced::new(refresh);
+    if let Some(own) = use_context::<OwnAction>() {
+        Effect::new(move |seen: Option<u64>| {
+            let n = own.0.get();
+            if seen.is_some_and(|s| s != n) {
+                paced
+                    .pace
+                    .update_value(|p| p.own(crate::keyboard::now_ms()));
+                refresh.run(());
+            }
+            n
+        });
+    }
+    paced.on_topics(&["entity.updated"]);
+}
+
+/// Run `refresh` for the events of `topics`, paced by [`Pace`], and whenever the event
+/// stream has opened since the page last read its data. For a page whose state is written
+/// by the server on its own time (a delivery that finishes, sec0): what was written between
+/// a read and the next opening of the stream is announced to nobody, so without another
+/// read the page kept showing the older state until it was loaded again.
+///
+/// `read_at` is the number of openings ([`StreamOpens`], read untracked) when the page's
+/// latest read began; the page writes it there. Data that came with the page from the server was read
+/// before any opening (0), so a freshly loaded page reads once more when its stream opens;
+/// a page reached by a link inside the app reads with the stream open and only once.
+pub fn refresh_on_topics(
+    topics: &'static [&'static str],
+    read_at: StoredValue<u32>,
+    refresh: Callback<()>,
+) {
+    let paced = Paced::new(refresh);
+    if let Some(opens) = use_context::<StreamOpens>() {
+        Effect::new(move |_| {
+            let n = opens.0.get();
+            if n > read_at.get_value() {
+                // the read that follows begins now, or at the end of the quiet time
+                read_at.set_value(n);
+                paced.changed();
+            }
+        });
+    }
+    paced.on_topics(topics);
 }
 
 #[cfg(test)]
@@ -216,6 +317,17 @@ mod tests {
         // long after the burst a change shows at once again
         assert_eq!(p.event(10_000.0), Refetch::Now);
         assert_eq!(p.event(12_000.0), Refetch::Now, "the quiet time is over");
+    }
+
+    /// SEC0-9: a page reads again for its own topics and, whatever it follows, when the
+    /// stream says that events were missed.
+    #[test]
+    fn a_lagging_stream_concerns_every_page() {
+        assert!(concerns(&["entity.updated"], "entity.updated"));
+        assert!(!concerns(&["entity.updated"], "notification.new"));
+        assert!(concerns(&["entity.updated"], LAGGED));
+        assert!(concerns(&[], LAGGED));
+        assert!(TOPICS.contains(&LAGGED), "the page listens to it");
     }
 
     /// OT1B-9: the page refetched for the person's own action; the event that announces

@@ -2154,3 +2154,213 @@ async fn search_names_the_hits_in_the_searchers_library() {
     let (_, _, found) = call(&app, "GET", "/api/v1/search?q=heat", Some(&ben), None).await;
     assert_eq!(found["in_library"], serde_json::json!([]), "{found}");
 }
+
+/// An integration store whose every call fails with the text of a database error.
+struct BrokenIntegrationStore;
+
+const STORE_FAILURE: &str = "error returned from database: relation \"integrations\" does not \
+                             exist at postgres://app@db.internal:5432/app";
+
+#[async_trait::async_trait]
+impl integrations::IntegrationStore for BrokenIntegrationStore {
+    async fn insert(&self, _: &integrations::Integration) -> Result<(), app::ports::PortError> {
+        Err(app::ports::PortError(STORE_FAILURE.into()))
+    }
+    async fn by_token_hash(
+        &self,
+        _: &str,
+    ) -> Result<Option<integrations::Integration>, app::ports::PortError> {
+        Err(app::ports::PortError(STORE_FAILURE.into()))
+    }
+    async fn by_user(
+        &self,
+        _: domain::ids::UserId,
+    ) -> Result<Vec<integrations::Integration>, app::ports::PortError> {
+        Err(app::ports::PortError(STORE_FAILURE.into()))
+    }
+    async fn delete(&self, _: uuid::Uuid) -> Result<(), app::ports::PortError> {
+        Err(app::ports::PortError(STORE_FAILURE.into()))
+    }
+    async fn touch(
+        &self,
+        _: uuid::Uuid,
+        _: &integrations::CallRecord,
+    ) -> Result<(), app::ports::PortError> {
+        Err(app::ports::PortError(STORE_FAILURE.into()))
+    }
+}
+
+/// sec0 (SEC-9): a webhook sender whose call meets a storage failure gets the generic 500,
+/// not the store's message; the same for the member's own integration routes.
+#[tokio::test]
+async fn a_storage_failure_behind_the_webhook_answers_with_the_generic_text() {
+    let (mut s, t) = state();
+    s.integrations = Some(Arc::new(integrations::Integrations::new(
+        t.app.clone(),
+        Arc::new(BrokenIntegrationStore),
+    )));
+    let app = api::router(s);
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/hooks/watched")
+        .header(header::AUTHORIZATION, "Bearer itk_anything")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            serde_json::json!({"kind": "movie", "title": "Heat", "year": 1995}).to_string(),
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["code"], "internal", "{text}");
+    assert_eq!(json["message"], "internal error", "{text}");
+    for leaked in ["relation", "database", "postgres", "db.internal"] {
+        assert!(!text.contains(leaked), "{leaked} in the answer: {text}");
+    }
+
+    let token = signed_up(&app).await;
+    let (status, _, body) = call(&app, "GET", "/api/v1/integrations", Some(&token), None).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(body["message"], "internal error", "{body}");
+}
+
+/// A notification store whose every call fails with the text of a database error.
+struct BrokenNotifyStore;
+
+const NOTIFY_FAILURE: &str = "notifications db: error returned from database: relation \
+                              \"notify_channels\" does not exist at postgres://app@db.internal";
+
+/// Every method of the store, failing.
+macro_rules! broken {
+    ($($name:ident($($arg:ty),*) -> $out:ty;)*) => {
+        #[async_trait::async_trait]
+        impl notify::NotifyStore for BrokenNotifyStore {
+            $(async fn $name(&self $(, _: $arg)*) -> notify::store::StoreResult<$out> {
+                Err(app::ports::PortError(NOTIFY_FAILURE.into()))
+            })*
+        }
+    };
+}
+
+type At = chrono::DateTime<chrono::Utc>;
+type User = domain::ids::UserId;
+
+broken! {
+    admins() -> Vec<User>;
+    user_locale(User) -> Option<String>;
+    channels(User) -> Vec<notify::model::Channel>;
+    channel(uuid::Uuid) -> Option<notify::model::Channel>;
+    put_channel(&notify::model::Channel) -> ();
+    delete_channel(uuid::Uuid) -> ();
+    subscriptions(User) -> Vec<notify::model::Subscription>;
+    defaults() -> Vec<notify::model::Subscription>;
+    subscription(uuid::Uuid) -> Option<notify::model::Subscription>;
+    put_subscription(&notify::model::Subscription) -> ();
+    delete_subscription(uuid::Uuid) -> ();
+    insert_inbox(&notify::model::InboxItem) -> bool;
+    inbox(User, u32) -> Vec<notify::model::InboxItem>;
+    count_unread(User) -> u32;
+    mark_read(User, uuid::Uuid, At) -> ();
+    mark_all_read(User, At) -> u32;
+    insert_delivery(&notify::model::Delivery) -> bool;
+    delivery(uuid::Uuid) -> Option<notify::model::Delivery>;
+    update_delivery(&notify::model::Delivery) -> ();
+    deliveries(User, u32) -> Vec<notify::model::Delivery>;
+    latest_deliveries(User) -> Vec<notify::model::Delivery>;
+    due_digest(uuid::Uuid, At) -> Vec<notify::model::Delivery>;
+    count_since(uuid::Uuid, &str, At) -> u32;
+    template_overrides() -> notify::template::Overrides;
+    set_template_override(&str, &str, Option<&str>) -> ();
+}
+
+/// Review of sec0 (SEC0-1): the notifications routes answer a storage failure with the
+/// generic 500 as well; the store's text reaches no member, whatever the route.
+#[tokio::test]
+async fn a_storage_failure_behind_the_notifications_routes_answers_with_the_generic_text() {
+    let (mut s, t) = state();
+    let engine = Arc::new(notify::Engine::new(
+        Arc::new(BrokenNotifyStore),
+        t.jobs.clone(),
+        t.events.clone(),
+        t.clock.clone(),
+        t.ids.clone(),
+        "Shelf",
+        "en",
+        notify::template::Overrides::new(),
+    ));
+    let deliverer = Arc::new(notify::Deliverer::new(
+        engine.clone(),
+        Arc::new(notify::channels::Channels::default()),
+        t.clock.clone(),
+        "https://shelf.example.org",
+        3,
+    ));
+    s.notify = Some(api::NotifyApi {
+        engine,
+        deliverer,
+        web_push_key: None,
+    });
+    let app = api::router(s);
+    let token = signed_up(&app).await;
+    let channel = serde_json::json!({
+        "name": "Phone",
+        "config": {"kind": "ntfy", "server": "https://ntfy.sh", "topic": "t", "token": null},
+        "enabled": true,
+    });
+    let rule = serde_json::json!({"event": "social.link_request", "targets": {"type": "all"}});
+    let none = uuid::Uuid::nil();
+    let routes = [
+        ("GET", "/api/v1/notifications/inbox".to_string(), None),
+        (
+            "POST",
+            "/api/v1/notifications/inbox/read-all".to_string(),
+            None,
+        ),
+        (
+            "POST",
+            format!("/api/v1/notifications/inbox/{none}/read"),
+            None,
+        ),
+        ("GET", "/api/v1/notifications/channels".to_string(), None),
+        (
+            "POST",
+            "/api/v1/notifications/channels".to_string(),
+            Some(channel),
+        ),
+        (
+            "DELETE",
+            format!("/api/v1/notifications/channels/{none}"),
+            None,
+        ),
+        (
+            "GET",
+            "/api/v1/notifications/subscriptions".to_string(),
+            None,
+        ),
+        (
+            "PUT",
+            "/api/v1/notifications/subscriptions".to_string(),
+            Some(rule),
+        ),
+        ("GET", "/api/v1/notifications/deliveries".to_string(), None),
+    ];
+    for (method, path, body) in routes {
+        let (status, _, body) = call(&app, method, &path, Some(&token), body).await;
+        let text = body.to_string();
+        assert_eq!(
+            status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{method} {path}: {text}"
+        );
+        assert_eq!(body["code"], "internal", "{method} {path}: {text}");
+        assert_eq!(body["message"], "internal error", "{method} {path}: {text}");
+        for leaked in ["relation", "database", "notify_channels", "db.internal"] {
+            assert!(
+                !text.contains(leaked),
+                "{method} {path}: {leaked} in {text}"
+            );
+        }
+    }
+}

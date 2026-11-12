@@ -45,9 +45,8 @@ impl From<IntegrationError> for ApiError {
                 Self::new(StatusCode::NOT_FOUND, "not_found", "integration not found")
             }
             IntegrationError::App(e) => e.into(),
-            IntegrationError::Port(e) => {
-                Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.0)
-            }
+            // the store's text goes to the log, the sender gets the generic 500 (SEC-9)
+            IntegrationError::Port(e) => e.into(),
         }
     }
 }

@@ -102,8 +102,9 @@ pub fn ItemPage() -> impl IntoView {
     let events = use_events();
     Effect::new(move |_| {
         if let Some((topic, payload)) = events.0.get()
-            && topic == "entity.updated"
-            && mentions(&payload, &id())
+            // missed events may have been about this item (SEC0-9)
+            && (topic == crate::events::LAGGED
+                || (topic == "entity.updated" && mentions(&payload, &id())))
         {
             refetch();
         }

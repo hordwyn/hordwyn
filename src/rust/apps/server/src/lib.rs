@@ -830,10 +830,61 @@ impl Server {
             .layer(axum::middleware::from_fn_with_state(
                 self.web_backend(),
                 web::backend::resolve_shell_session,
-            ));
+            ))
+            // runs before the session is resolved: nothing is looked up for a refused body
+            .layer(axum::middleware::from_fn(body_limit));
         let pages = self.guarded(pages);
         self.base_router().merge(pages)
     }
+}
+
+/// The body limit of server functions, pages and every path without a route (SEC-2): at
+/// most [`api::JSON_BODY_LIMIT`] bytes, as for a JSON request to the REST API (the import
+/// upload goes through REST and keeps its own limit). A request that declares more is
+/// answered `413` before anything of its body is read; one that declares no length is read
+/// up to the limit and then answered `413`.
+///
+/// The body is read here, not behind a `DefaultBodyLimit`: the server-function handler
+/// takes the request as it is, and what it does with a body that is too long (a `500` with
+/// the reader's error text, after reading up to axum's built-in default) is the business of
+/// a library, not a rule of this server. No server function or page reads its body as a
+/// stream, so nothing is lost by collecting it first.
+async fn body_limit(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    use futures::StreamExt;
+
+    const LIMIT: usize = api::JSON_BODY_LIMIT;
+    let too_large = || {
+        api::ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "too_large",
+            "the request body is too large",
+        )
+        .into_response()
+    };
+    let declared = req
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok());
+    if declared.is_some_and(|n| usize::try_from(n).map_or(true, |n| n > LIMIT)) {
+        return too_large();
+    }
+    let (parts, body) = req.into_parts();
+    let mut pieces = body.into_data_stream();
+    let mut read = Vec::new();
+    while let Some(piece) = pieces.next().await {
+        let Ok(piece) = piece else {
+            // the sender broke off or sent a malformed body
+            return api::ApiError::bad_request("the request body could not be read")
+                .into_response();
+        };
+        if read.len() + piece.len() > LIMIT {
+            return too_large();
+        }
+        read.extend_from_slice(&piece);
+    }
+    let req = axum::extract::Request::from_parts(parts, axum::body::Body::from(read));
+    next.run(req).await
 }
 
 /// `Cache-Control: no-cache` on the bundle under `/pkg` (OPS-8, DEC-623): `app.js`,

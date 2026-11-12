@@ -4,7 +4,7 @@
 //! their constraints as hints and errors on leaving a field, secrets as password fields, then
 //! "Add and send a test".
 
-use contracts::{ChannelDto, NotificationPageDto};
+use contracts::{ChannelDto, ChannelHealthDto};
 use leptos::prelude::*;
 use serde_json::{Value, json};
 use ui::{
@@ -168,16 +168,13 @@ fn summary(c: &ChannelDto) -> String {
 }
 
 /// Health of a channel as a dot and words.
-fn health(c: &ChannelDto) -> (StatusState, String) {
-    let i18n = use_i18n();
+fn health(h: &ChannelHealthDto, i18n: &crate::i18n::I18n) -> (StatusState, String) {
     let when = || {
-        c.health
-            .at
-            .as_deref()
+        h.at.as_deref()
             .map(|a| i18n.datetime(a))
             .unwrap_or_default()
     };
-    match c.health.state.as_str() {
+    match h.state.as_str() {
         "working" => (
             StatusState::Ok,
             i18n.t_args("notify-health-working", &[("when", when().into())]),
@@ -209,45 +206,57 @@ async fn run_test(state: NotifyState, id: String) {
 }
 
 #[component]
-pub fn Channels(p: NotificationPageDto, state: NotifyState) -> impl IntoView {
+pub fn Channels(state: NotifyState) -> impl IntoView {
     let test = Action::new(move |id: &String| run_test(state, id.clone()));
     let remove = Action::new(move |id: &String| {
         let path = format!("/notifications/channels/{id}");
         async move {
             let _ = rest::send("DELETE", &path, None).await;
-            state.data.refetch();
+            state.refresh();
         }
     });
+    // the cards are keyed by the channel and read what a later read changed on it in
+    // place: a card that is being edited keeps its form, and the form below is never built
+    // anew (SEC0-3)
+    let channels = Memo::new(move |_| state.page.with(|p| p.channels.clone()));
+    let none = Memo::new(move |_| channels.with(Vec::is_empty));
     view! {
         <div class="mt-4 grid max-w-3xl gap-4 pb-[var(--tab-bar-height)]">
             <p class="text-sm text-muted-foreground">{t("notify-channels-lead")}</p>
-            {(!p.channels.is_empty()).then(|| view! {
+            <Show when=move || !none.get()>
                 <ul class="grid gap-3" aria-label=t("notify-channels")>
-                    {p.channels.into_iter().map(|c| view! { <ChannelCard c=c state=state test=test remove=remove/> }).collect_view()}
+                    <For each=move || channels.get() key=|c| c.id.clone()
+                        children=move |c| view! {
+                            <ChannelCard first=c channels=channels state=state test=test remove=remove/>
+                        }/>
                 </ul>
-            })}
+            </Show>
             <AddChannel state=state test=test/>
         </div>
     }
 }
 
+/// One channel. `first` is the channel as it was when its card was built; `channels` is
+/// what the latest read says, and everything the card shows follows it in place.
 #[component]
 fn ChannelCard(
-    c: ChannelDto,
+    first: ChannelDto,
+    channels: Memo<Vec<ChannelDto>>,
     state: NotifyState,
     test: Action<String, ()>,
     remove: Action<String, ()>,
 ) -> impl IntoView {
     let i18n = use_i18n();
-    let (dot, words) = health(&c);
-    let id = StoredValue::new(c.id.clone());
-    let name = c.name.clone();
+    let id = StoredValue::new(first.id.clone());
+    let card_id = format!("nf-ch-{}", first.id);
+    let now = Memo::new(move |_| {
+        channels
+            .with(|all| all.iter().find(|c| c.id == first.id).cloned())
+            .unwrap_or_else(|| first.clone())
+    });
+    let name = Memo::new(move |_| now.with(|c| c.name.clone()));
     let confirm = RwSignal::new(false);
     let editing = RwSignal::new(false);
-    let edit_c = c.clone();
-    let testing = Signal::derive(move || {
-        test.pending().get() && test.input().get().as_deref() == Some(id.get_value().as_str())
-    });
     let result = move || state.tests.with(|m| m.get(&id.get_value()).cloned());
     let secret = move || {
         state
@@ -256,29 +265,11 @@ fn ChannelCard(
             .filter(|(cid, _)| *cid == id.get_value())
             .map(|(_, s)| s)
     };
-    let failing = (c.health.state == "failing").then(|| c.health.error.clone().unwrap_or_default());
-    let card_id = format!("nf-ch-{}", c.id);
+    let delete_title =
+        Signal::derive(move || i18n.t_args("notify-delete-title", &[("name", name.get().into())]));
     view! {
-        <li class="grid gap-3 rounded-xl border border-border bg-card p-4 shadow-elevation-1" data-testid=card_id.clone()>
-            <div class="flex flex-wrap items-start justify-between gap-2">
-                <div class="min-w-0">
-                    <h3 class="font-semibold">{c.name.clone()}</h3>
-                    <p class="break-words text-sm text-muted-foreground">
-                        {t(&format!("notify-kind-{}", c.kind))}
-                        {let s = summary(&c); (!s.is_empty()).then(|| format!(" - {s}"))}
-                    </p>
-                </div>
-                <div class="flex items-center gap-2">
-                    {(!c.enabled).then(|| view! { <Badge variant=BadgeVariant::Destructive>{t("notify-disabled")}</Badge> })}
-                    <StatusDot state=dot label=words/>
-                </div>
-            </div>
-            {failing.map(|e| view! {
-                <Alert variant=AlertVariant::Destructive role=AlertRole::None title=t("notify-failing-title")>
-                    <span lang="en" class="break-words">{e}</span>
-                    " "{t("notify-failing-hint")}
-                </Alert>
-            })}
+        <li class="grid gap-3 rounded-xl border border-border bg-card p-4 shadow-elevation-1" data-testid=card_id>
+            <CardHead now=now/>
             {move || secret().map(|s| view! {
                 <div class="grid gap-1">
                     <label class="text-sm font-medium" for="nf-secret">{t("notify-secret-label")}</label>
@@ -294,33 +285,92 @@ fn ChannelCard(
                     </Alert>
                 }.into_any(),
             })}
-            // one size per card footer and no filled button (OT-12)
-            {
-                let named = |key: &str| i18n.t_args(key, &[("name", name.clone().into())]);
-                let (test_label, edit_label, delete_label) = (named("notify-test-named"), named("notify-edit-named"), named("notify-delete-named"));
-                view! {
-            <CardActions>
-                <Button size=ButtonSize::Sm variant=ButtonVariant::Outline loading=testing
-                    attr:aria-label=test_label
-                    on:click=move |_| { test.dispatch(id.get_value()); }>{t("notify-test")}</Button>
-                <Button size=ButtonSize::Sm variant=ButtonVariant::Outline
-                    attr:aria-label=edit_label
-                    attr:aria-expanded=move || if editing.get() { "true" } else { "false" }
-                    on:click=move |_| editing.update(|e| *e = !*e)>{t("notify-edit")}</Button>
-                <Button size=ButtonSize::Sm variant=ButtonVariant::Outline
-                    attr:aria-label=delete_label
-                    on:click=move |_| confirm.set(true)>{t("notify-delete")}</Button>
-            </CardActions>
-                }
-            }
+            <CardFooter id=id name=name test=test editing=editing confirm=confirm/>
             <Show when=move || editing.get()>
-                <EditChannel c=edit_c.clone() state=state editing=editing/>
+                // the form starts from the channel as it is when "Edit" is pressed
+                <EditChannel c=now.get_untracked() state=state editing=editing/>
             </Show>
-            <crate::admin::ConfirmDialog open=confirm
-                title=i18n.t_args("notify-delete-title", &[("name", name.clone().into())])
+            <crate::admin::ConfirmDialog open=confirm title=delete_title
                 body=t("notify-delete-body") confirm=t("notify-delete")
                 on_confirm=Callback::new(move |()| { remove.dispatch(id.get_value()); })/>
         </li>
+    }
+}
+
+/// The head of a card: name, type and target, and the health, which follows a delivery
+/// that finishes while the page is open (the page's live region says the change).
+#[component]
+fn CardHead(now: Memo<ChannelDto>) -> impl IntoView {
+    let i18n = use_i18n();
+    let shown = Memo::new(move |_| now.with(|c| health(&c.health, &i18n)));
+    let dot = Signal::derive(move || shown.get().0);
+    let words = Signal::derive(move || shown.get().1);
+    let failing = Memo::new(move |_| {
+        now.with(|c| {
+            (c.health.state == "failing").then(|| c.health.error.clone().unwrap_or_default())
+        })
+    });
+    let enabled = Memo::new(move |_| now.with(|c| c.enabled));
+    let what = Memo::new(move |_| {
+        now.with(|c| {
+            let (kind, s) = (t(&format!("notify-kind-{}", c.kind)), summary(c));
+            if s.is_empty() {
+                kind
+            } else {
+                format!("{kind} - {s}")
+            }
+        })
+    });
+    view! {
+        <div class="flex flex-wrap items-start justify-between gap-2">
+            <div class="min-w-0">
+                <h3 class="font-semibold">{move || now.with(|c| c.name.clone())}</h3>
+                <p class="break-words text-sm text-muted-foreground">{move || what.get()}</p>
+            </div>
+            <div class="flex items-center gap-2">
+                {move || (!enabled.get()).then(|| view! { <Badge variant=BadgeVariant::Destructive>{t("notify-disabled")}</Badge> })}
+                <StatusDot state=dot label=words/>
+            </div>
+        </div>
+        {move || failing.get().map(|e| view! {
+            <Alert variant=AlertVariant::Destructive role=AlertRole::None title=t("notify-failing-title")>
+                <span lang="en" class="break-words">{e}</span>
+                " "{t("notify-failing-hint")}
+            </Alert>
+        })}
+    }
+}
+
+/// The actions of a card: one size per card footer and no filled button (OT-12).
+#[component]
+fn CardFooter(
+    id: StoredValue<String>,
+    name: Memo<String>,
+    test: Action<String, ()>,
+    editing: RwSignal<bool>,
+    confirm: RwSignal<bool>,
+) -> impl IntoView {
+    let i18n = use_i18n();
+    let testing = Signal::derive(move || {
+        test.pending().get() && test.input().get().as_deref() == Some(id.get_value().as_str())
+    });
+    let named = move |key: &'static str| {
+        let i18n = i18n.clone();
+        move || i18n.t_args(key, &[("name", name.get().into())])
+    };
+    view! {
+        <CardActions>
+            <Button size=ButtonSize::Sm variant=ButtonVariant::Outline loading=testing
+                attr:aria-label=named("notify-test-named")
+                on:click=move |_| { test.dispatch(id.get_value()); }>{t("notify-test")}</Button>
+            <Button size=ButtonSize::Sm variant=ButtonVariant::Outline
+                attr:aria-label=named("notify-edit-named")
+                attr:aria-expanded=move || if editing.get() { "true" } else { "false" }
+                on:click=move |_| editing.update(|e| *e = !*e)>{t("notify-edit")}</Button>
+            <Button size=ButtonSize::Sm variant=ButtonVariant::Outline
+                attr:aria-label=named("notify-delete-named")
+                on:click=move |_| confirm.set(true)>{t("notify-delete")}</Button>
+        </CardActions>
     }
 }
 
@@ -401,7 +451,7 @@ fn EditChannel(c: ChannelDto, state: NotifyState, editing: RwSignal<bool>) -> im
             match rest::call_dto::<ChannelDto>("PUT", &path, Some(body)).await {
                 Ok(_) => {
                     editing.set(false);
-                    state.data.refetch();
+                    state.refresh();
                 }
                 Err(e) => failed.set(Some(notify_error(&e.code))),
             }
@@ -487,7 +537,7 @@ fn AddChannel(state: NotifyState, test: Action<String, ()>) -> impl IntoView {
                         state.secret.set(Some((c.id.clone(), s)));
                     }
                     run_test(state, c.id.clone()).await;
-                    state.data.refetch();
+                    state.refresh();
                 }
                 Ok(None) => failed.set(Some(t("error-generic"))),
                 Err(e) => failed.set(Some(notify_error(&e.code))),

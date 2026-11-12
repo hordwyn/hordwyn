@@ -1087,7 +1087,11 @@ async fn export(
 // ---------------------------------------------------------------- events
 
 /// Server-Sent Events for the signed-in user: `entity.updated`, `job.progress`,
-/// `import.progress`, `search.results`, and `admin.*` for admins.
+/// `import.progress`, `search.results`, `notification.new` (a new inbox row),
+/// `notification.delivery` (the outcome of a delivery to one of the user's channels was
+/// written), `integration.call` (a call by one of the user's integrations), and `admin.*`
+/// for admins. A client that reads too slowly gets `stream.lagged` in place of the events
+/// it missed and should read its data again.
 #[utoipa::path(get, path = "/events", tag = "events",
     responses((status = 200, content_type = "text/event-stream", body = String)))]
 async fn events(State(s): State<ApiState>, Authed(a): Authed) -> impl IntoResponse {

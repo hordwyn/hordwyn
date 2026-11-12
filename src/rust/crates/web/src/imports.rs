@@ -89,6 +89,7 @@ pub fn SettingsImports() -> impl IntoView {
             data.refetch();
         }
     });
+    crate::events::refresh_when_lagged(Callback::new(move |()| data.refetch()));
     view! {
         <SettingsLayout>
             <PageTitle text=t("imports-title")/>

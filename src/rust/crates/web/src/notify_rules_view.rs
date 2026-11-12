@@ -5,7 +5,7 @@
 //! subscription) are listed below the matrix, with "Add a rule for one list, item or person".
 //! The logic is in [`crate::notify_rules`].
 
-use contracts::{ChannelDto, CompanionDto, ListDto, NotificationPageDto, SubscriptionDto};
+use contracts::{ChannelDto, CompanionDto, ListDto, SubscriptionDto};
 use leptos::prelude::*;
 use serde_json::json;
 use ui::{
@@ -16,7 +16,7 @@ use ui::{
 
 use crate::api;
 use crate::i18n::{t, use_i18n};
-use crate::notifications::{NotifyState, event_label, notify_error, when_label};
+use crate::notifications::{NotifyState, event_label, frames, notify_error, when_label};
 use crate::notify_rules::{RuleRow, filtered, is_new, rows, suggested_off, toggled};
 use crate::rest;
 use crate::settings::kept;
@@ -50,7 +50,7 @@ fn save(state: NotifyState, error: RwSignal<Option<String>>) -> Action<Vec<Subsc
                     break;
                 }
             }
-            state.data.refetch();
+            state.refresh();
         }
     })
 }
@@ -64,21 +64,40 @@ fn section(event: &str) -> String {
     }
 }
 
-#[component]
-pub fn Rules(p: NotificationPageDto, state: NotifyState) -> impl IntoView {
-    let all = rows(&p.events, &p.subscriptions);
-    let own: Vec<SubscriptionDto> = p
-        .subscriptions
+/// What the rules are built from: the events, the rules and the channels without their
+/// health. A later read that changes none of them (a new inbox row, a finished delivery)
+/// leaves the matrix and the form below it as they are (SEC0-3).
+type Base = (
+    Vec<contracts::EventTypeDto>,
+    Vec<SubscriptionDto>,
+    Vec<ChannelDto>,
+);
+
+fn own_rules(subscriptions: &[SubscriptionDto]) -> Vec<SubscriptionDto> {
+    subscriptions
         .iter()
         .filter(|s| !s.instance_default)
         .cloned()
-        .collect();
+        .collect()
+}
+
+#[component]
+pub fn Rules(state: NotifyState) -> impl IntoView {
+    let base: Memo<Base> = Memo::new(move |_| {
+        state.page.with(|p| {
+            (
+                p.events.clone(),
+                p.subscriptions.clone(),
+                frames(&p.channels),
+            )
+        })
+    });
     let error = RwSignal::new(None::<String>);
     let offer = kept("nf-offer", || None::<Offer>);
     let save = save(state, error);
-    let ctx = StoredValue::new((all.clone(), p.channels.clone(), own.clone()));
     let toggle = Callback::new(move |(row, channel, on): (usize, usize, bool)| {
-        let (rows, channels, own) = ctx.get_value();
+        let (events, subscriptions, channels) = base.get_untracked();
+        let (rows, own) = (rows(&events, &subscriptions), own_rules(&subscriptions));
         let (Some(r), Some(c)) = (rows.get(row), channels.get(channel)) else {
             return;
         };
@@ -103,28 +122,33 @@ pub fn Rules(p: NotificationPageDto, state: NotifyState) -> impl IntoView {
             return;
         };
         offer.set(None);
-        let (rows, channels, _) = ctx.get_value();
+        let (events, subscriptions, channels) = base.get_untracked();
         let mut subs = vec![o.first.clone()];
         if all_of_them {
             subs.extend(
-                rows.iter()
+                rows(&events, &subscriptions)
+                    .iter()
                     .filter(|r| o.events.contains(&r.event))
                     .map(|r| toggled(r, &channels, &o.channel, true, &zone())),
             );
         }
         save.dispatch(subs);
     });
-    let filtered_rules: Vec<SubscriptionDto> = own.into_iter().filter(filtered).collect();
     view! {
         <div class="mt-4 grid gap-4 pb-[var(--tab-bar-height)]">
             <p class="text-sm text-muted-foreground">{t("notify-rules-lead")}</p>
-            {p.channels.is_empty().then(|| view! {
+            {move || base.with(|(_, _, channels)| channels.is_empty()).then(|| view! {
                 <Alert variant=AlertVariant::Info role=AlertRole::None>{t("notify-rules-no-channels")}</Alert>
             })}
             {move || offer.get().map(|o| view! { <OfferPrompt o=o answer=answer/> })}
             {move || error.get().map(|e| view! { <Alert variant=AlertVariant::Destructive role=AlertRole::Alert>{e}</Alert> })}
-            <Matrix rows=all channels=p.channels.clone() toggle=toggle busy=Signal::from(save.pending())/>
-            <FilteredRules rules=filtered_rules p=p state=state/>
+            {move || {
+                let (events, subscriptions, channels) = base.get();
+                view! {
+                    <Matrix rows=rows(&events, &subscriptions) channels=channels toggle=toggle busy=Signal::from(save.pending())/>
+                }
+            }}
+            <FilteredRules base=base state=state/>
         </div>
     }
 }
@@ -329,11 +353,7 @@ fn filter_label(s: &SubscriptionDto, lists: &[ListDto], people: &[CompanionDto])
 }
 
 #[component]
-fn FilteredRules(
-    rules: Vec<SubscriptionDto>,
-    p: NotificationPageDto,
-    state: NotifyState,
-) -> impl IntoView {
+fn FilteredRules(base: Memo<Base>, state: NotifyState) -> impl IntoView {
     let picks = Resource::new(
         || (),
         |()| async {
@@ -346,41 +366,47 @@ fn FilteredRules(
         let path = format!("/notifications/subscriptions/{id}");
         async move {
             let _ = rest::send("DELETE", &path, None).await;
-            state.data.refetch();
+            state.refresh();
         }
     });
-    let channels = p.channels.clone();
     view! {
         <section class="grid gap-3" aria-labelledby="nf-filtered">
             <h3 id="nf-filtered" class="font-semibold">{t("notify-filtered")}</h3>
             <Suspense fallback=|| ()>
                 {move || picks.get().map(|r| {
                     let (lists, people) = r.unwrap_or_default();
-                    let rules = rules.clone();
-                    let channels = channels.clone();
-                    let events = p.events.clone();
+                    // the form is built once (the events do not change while the page is
+                    // open); the list above it follows the rules in place
+                    let events = base.with_untracked(|(events, _, _)| events.clone());
+                    let (names, persons) = (lists.clone(), people.clone());
                     view! {
-                        {rules.is_empty().then(|| view! { <p class="text-sm text-muted-foreground">{t("notify-filtered-empty")}</p> })}
-                        <ul class="grid gap-2" aria-labelledby="nf-filtered">
-                            {rules.into_iter().map(|s| {
-                                let id = s.id.clone().unwrap_or_default();
-                                let what = filter_label(&s, &lists, &people);
-                                let to = targets_label(&s, &channels);
-                                let label = event_label(&s.event);
-                                let del = use_i18n().t_args("notify-delete-named", &[("name", label.clone().into())]);
-                                view! {
-                                    <li class="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2 text-sm">
-                                        <span class="min-w-0 flex-1">
-                                            <span class="font-medium">{label}</span>
-                                            " - "{what}" - "{when_label(&s)}" - "{to}
-                                        </span>
-                                        <Button size=ButtonSize::Sm variant=ButtonVariant::Ghost attr:aria-label=del
-                                            on:click=move |_| { remove.dispatch(id.clone()); }>{t("notify-delete")}</Button>
-                                    </li>
-                                }
-                            }).collect_view()}
-                        </ul>
-                        <AddFiltered events=events lists=lists people=people channels=channels state=state/>
+                        {move || base.with(|(_, subscriptions, channels)| {
+                            let rules: Vec<SubscriptionDto> =
+                                own_rules(subscriptions).into_iter().filter(filtered).collect();
+                            view! {
+                                {rules.is_empty().then(|| view! { <p class="text-sm text-muted-foreground">{t("notify-filtered-empty")}</p> })}
+                                <ul class="grid gap-2" aria-labelledby="nf-filtered">
+                                    {rules.into_iter().map(|s| {
+                                        let id = s.id.clone().unwrap_or_default();
+                                        let what = filter_label(&s, &names, &persons);
+                                        let to = targets_label(&s, channels);
+                                        let label = event_label(&s.event);
+                                        let del = use_i18n().t_args("notify-delete-named", &[("name", label.clone().into())]);
+                                        view! {
+                                            <li class="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2 text-sm">
+                                                <span class="min-w-0 flex-1">
+                                                    <span class="font-medium">{label}</span>
+                                                    " - "{what}" - "{when_label(&s)}" - "{to}
+                                                </span>
+                                                <Button size=ButtonSize::Sm variant=ButtonVariant::Ghost attr:aria-label=del
+                                                    on:click=move |_| { remove.dispatch(id.clone()); }>{t("notify-delete")}</Button>
+                                            </li>
+                                        }
+                                    }).collect_view()}
+                                </ul>
+                            }
+                        })}
+                        <AddFiltered events=events lists=lists people=people base=base state=state/>
                     }
                 })}
             </Suspense>
@@ -467,7 +493,7 @@ fn AddFiltered(
     events: Vec<contracts::EventTypeDto>,
     lists: Vec<ListDto>,
     people: Vec<CompanionDto>,
-    channels: Vec<ChannelDto>,
+    base: Memo<Base>,
     state: NotifyState,
 ) -> impl IntoView {
     let event = RwSignal::new(events.first().map(|e| e.id.clone()).unwrap_or_default());
@@ -483,8 +509,16 @@ fn AddFiltered(
     let i18n = use_i18n();
     let subjects = RwSignal::new(subject_options(&i18n, &lists, &people));
     let pick_item = item_pick(subject, subjects);
-    let mut targets = vec![opt("", t("notify-all-channels"))];
-    targets.extend(channels.iter().map(|c| opt(&c.id, c.name.clone())));
+    // the channels as the latest read has them: a channel added while the form is open
+    // can be chosen without the form being built anew
+    let all_channels = t("notify-all-channels");
+    let targets = Signal::derive(move || {
+        let mut targets = vec![opt("", all_channels.clone())];
+        base.with(|(_, _, channels)| {
+            targets.extend(channels.iter().map(|c| opt(&c.id, c.name.clone())));
+        });
+        targets
+    });
     let modes = vec![
         opt("immediate", t("notify-mode-immediate")),
         opt("digest", t("notify-mode-digest")),
@@ -519,7 +553,9 @@ fn AddFiltered(
             match rest::send("PUT", "/notifications/subscriptions", Some(body)).await {
                 Ok(()) => {
                     error.set(None);
-                    state.data.refetch();
+                    // the form stays as it is; only its subject is asked for again
+                    subject.set(String::new());
+                    state.refresh();
                 }
                 Err(e) => error.set(Some(notify_error(&api::error_code(&e)))),
             }
@@ -539,7 +575,7 @@ fn AddFiltered(
                     <Icon name=IconName::Search/> {t("notify-filter-pick-item")}
                 </Button>
                 <FormField id="nf-r-target" label=t("notify-channel")>
-                    <Select id="nf-r-target" value=target options=Signal::derive(move || targets.clone())/>
+                    <Select id="nf-r-target" value=target options=targets/>
                 </FormField>
                 <FormField id="nf-r-mode" label=t("notify-mode")>
                     <Select id="nf-r-mode" value=mode options=Signal::derive(move || modes.clone())/>

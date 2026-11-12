@@ -6,7 +6,9 @@
 
 use std::collections::HashMap;
 
-use contracts::{InboxItemDto, NotificationPageDto, SubscriptionDto};
+use contracts::{
+    ChannelDto, ChannelHealthDto, DeliveryDto, InboxItemDto, NotificationPageDto, SubscriptionDto,
+};
 use leptos::prelude::*;
 use ui::{
     Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, EmptyState, IconName, Table, TableBody,
@@ -14,7 +16,6 @@ use ui::{
 };
 
 use crate::api;
-use crate::events::use_events;
 use crate::history_state::{Day, DayGroup, DayLabel, day_heading};
 use crate::i18n::{t, use_i18n};
 use crate::pages::PageTitle;
@@ -113,69 +114,219 @@ fn first_tab(p: &NotificationPageDto) -> String {
     }
 }
 
-/// Page-level state that outlives a refetch.
+/// The channels without what a delivery changes on them (the health) and without a secret
+/// that is shown once: what the rules are built from, so that a finished delivery does not
+/// build them anew.
+pub(crate) fn frames(channels: &[ChannelDto]) -> Vec<ChannelDto> {
+    channels
+        .iter()
+        .map(|c| ChannelDto {
+            secret: None,
+            health: ChannelHealthDto::default(),
+            ..c.clone()
+        })
+        .collect()
+}
+
+/// What a later read changed in the health of the channels that are shown: `(name, failing)`
+/// for each channel whose last delivery now failed or now got through. It is said in the
+/// page's live region, because the card changes on its own (WCAG 4.1.3). A channel that is
+/// new, or that only waits, says nothing.
+pub(crate) fn health_news(shown: &[ChannelDto], fresh: &[ChannelDto]) -> Vec<(String, bool)> {
+    fresh
+        .iter()
+        .filter_map(|c| {
+            let before = shown.iter().find(|s| s.id == c.id)?;
+            let failing = match c.health.state.as_str() {
+                "failing" => true,
+                "working" => false,
+                _ => return None,
+            };
+            (before.health.state != c.health.state).then(|| (c.name.clone(), failing))
+        })
+        .collect()
+}
+
+/// The state of the page. The page is built once; every later read (after a change made on
+/// it, for a new inbox row, for a finished delivery, when the event stream has opened) is
+/// shown in place through [`Self::page`], so a form someone is filling in, an unfolded error
+/// and the focus stay where they are.
 #[derive(Clone, Copy)]
 pub(crate) struct NotifyState {
-    pub data: Resource<Result<NotificationPageDto, ServerFnError>>,
+    /// What the page shows: the read that began last among those that were answered.
+    pub page: RwSignal<NotificationPageDto>,
     /// The last "Send test" result per channel id: `Err` carries the channel's answer.
     pub tests: RwSignal<HashMap<String, Result<(), String>>>,
     /// A generated webhook signing secret, shown once on its card: `(channel id, secret)`.
     pub secret: RwSignal<Option<(String, String)>>,
     pub tab: RwSignal<String>,
+    /// The sentence of the live region: what a later read changed in a channel's health.
+    pub news: RwSignal<String>,
+    /// Reads are numbered as they begin; `shown` is the number of the one on the page. Of
+    /// two answers the one whose read began later is shown.
+    reads: StoredValue<u64>,
+    shown: StoredValue<Option<u64>>,
+    /// How often the event stream had opened when the latest read began (0 for the data
+    /// that came with the page from the server).
+    read_at: StoredValue<u32>,
+    opens: Option<crate::events::StreamOpens>,
+    i18n: StoredValue<std::sync::Arc<crate::i18n::I18n>>,
+}
+
+impl NotifyState {
+    fn new() -> Self {
+        Self {
+            page: RwSignal::new(NotificationPageDto {
+                inbox: Vec::new(),
+                channels: Vec::new(),
+                subscriptions: Vec::new(),
+                events: Vec::new(),
+                deliveries: Vec::new(),
+            }),
+            tests: RwSignal::new(HashMap::new()),
+            secret: RwSignal::new(None),
+            tab: RwSignal::new(String::new()),
+            news: RwSignal::new(String::new()),
+            reads: StoredValue::new(0),
+            shown: StoredValue::new(None),
+            read_at: StoredValue::new(0),
+            opens: use_context(),
+            i18n: StoredValue::new(use_i18n()),
+        }
+    }
+
+    /// A read begins: its number (`None`: the page is gone).
+    fn begin(self) -> Option<u64> {
+        let n = self.reads.try_update_value(|n| {
+            *n += 1;
+            *n
+        })?;
+        let opens = self
+            .opens
+            .and_then(|o| o.0.try_get_untracked())
+            .unwrap_or(0);
+        self.read_at.try_update_value(|at| *at = opens);
+        Some(n)
+    }
+
+    /// Read `n` was answered with `fresh`: show it, unless a read that began later is shown
+    /// already. The first answer also chooses the tab; a later one says what it changed in
+    /// the health of a channel.
+    fn show(self, n: u64, fresh: NotificationPageDto) {
+        let Some(shown) = self.shown.try_get_value() else {
+            return;
+        };
+        if shown.is_some_and(|s| s >= n) {
+            return;
+        }
+        self.shown.set_value(Some(n));
+        if shown.is_some() {
+            let news = self
+                .page
+                .with_untracked(|p| health_news(&p.channels, &fresh.channels));
+            if !news.is_empty() {
+                let said = self.i18n.with_value(|i| {
+                    let say = |(name, failing): &(String, bool)| {
+                        let key = if *failing {
+                            "notify-live-failing"
+                        } else {
+                            "notify-live-working"
+                        };
+                        i.t_args(key, &[("channel", name.clone().into())])
+                    };
+                    news.iter().map(say).collect::<Vec<_>>().join(" ")
+                });
+                self.news.set(said);
+            }
+        }
+        if self.tab.with_untracked(String::is_empty) {
+            self.tab.set(first_tab(&fresh));
+        }
+        if self.page.with_untracked(|p| *p != fresh) {
+            self.page.set(fresh);
+        }
+    }
+
+    /// Read the page again and show the answer in place. An answer that fails changes
+    /// nothing: the next change or announcement reads again.
+    pub fn refresh(self) {
+        leptos::task::spawn_local(async move {
+            let Some(n) = self.begin() else {
+                return;
+            };
+            if let Ok(fresh) = api::notifications().await {
+                self.show(n, fresh);
+            }
+        });
+    }
 }
 
 #[component]
 pub fn Notifications() -> impl IntoView {
-    let data = Resource::new(|| (), |()| api::notifications());
-    let events = use_events();
-    Effect::new(move |_| {
-        if let Some((topic, _)) = events.0.get()
-            && topic == "notification.new"
-        {
-            data.refetch();
-        }
-    });
-    let state = NotifyState {
-        data,
-        tests: RwSignal::new(HashMap::new()),
-        secret: RwSignal::new(None),
-        tab: RwSignal::new(String::new()),
-    };
+    let state = NotifyState::new();
+    // the number of the read the page's resource began (0: its data came with the page)
+    let page_read = StoredValue::new(0_u64);
+    let data = Resource::new(
+        || (),
+        move |()| {
+            page_read.set_value(state.begin().unwrap_or(0));
+            api::notifications()
+        },
+    );
+    // An inbox row and the outcome of a delivery are written by the server on its own time
+    // (the outcome by the worker, after the inbox row was announced), and what is written
+    // between the read of a freshly loaded page and the opening of its event stream is
+    // announced to nobody. All of it is read again here, paced, and shown in place.
+    crate::events::refresh_on_topics(
+        &["notification.new", "notification.delivery"],
+        state.read_at,
+        Callback::new(move |()| state.refresh()),
+    );
     view! {
         <PageTitle text=t("notify-title")/>
         <Lead text=t("notify-lead")/>
-        {loaded(data, move |p| view! { <Page p=p state=state/> })}
+        // says what changed on its own while the page is open (WCAG 4.1.3); not an alert,
+        // and not the card's own text, which is also there on a normal page load
+        <p role="status" class="sr-only" data-testid="nf-live">{move || state.news.get()}</p>
+        {loaded(data, move |p| {
+            state.show(page_read.get_value(), p);
+            view! { <Page state=state/> }
+        })}
     }
 }
 
 #[component]
-fn Page(p: NotificationPageDto, state: NotifyState) -> impl IntoView {
-    // the tab is page state: a refetch (a new inbox row, a saved rule) keeps it
-    if state.tab.get_untracked().is_empty() {
-        state.tab.set(first_tab(&p));
-    }
-    let unread = p.inbox.iter().filter(|i| !i.read).count();
+fn Page(state: NotifyState) -> impl IntoView {
+    let unread = Memo::new(move |_| {
+        state
+            .page
+            .with(|p| p.inbox.iter().filter(|i| !i.read).count())
+    });
     let i18n = use_i18n();
-    let unread_text = i18n.t_args("shell-unread", &[("count", unread.into())]);
-    let (p1, p2, p3, p4) = (p.clone(), p.clone(), p.clone(), p);
     view! {
         <Tabs id="nf" active=state.tab>
             <TabsList label=t("notify-tabs") class="max-w-full justify-start overflow-x-auto">
                 <TabsTrigger value="inbox">
                     {t("notify-inbox")}
-                    {(unread > 0).then(|| view! {
-                        <span class="ml-1.5 rounded-full bg-muted px-1.5 text-xs" aria-hidden="true">{unread}</span>
-                        <span class="sr-only">{format!(", {unread_text}")}</span>
-                    })}
+                    {move || {
+                        let n = unread.get();
+                        (n > 0).then(|| {
+                            let text = i18n.t_args("shell-unread", &[("count", n.into())]);
+                            view! {
+                                <span class="ml-1.5 rounded-full bg-muted px-1.5 text-xs" aria-hidden="true">{n}</span>
+                                <span class="sr-only">{format!(", {text}")}</span>
+                            }
+                        })
+                    }}
                 </TabsTrigger>
                 <TabsTrigger value="channels">{t("notify-channels")}</TabsTrigger>
                 <TabsTrigger value="rules">{t("notify-rules")}</TabsTrigger>
                 <TabsTrigger value="log">{t("notify-log")}</TabsTrigger>
             </TabsList>
-            <TabsContent value="inbox"><Inbox p=p1.clone() state=state/></TabsContent>
-            <TabsContent value="channels"><Channels p=p2.clone() state=state/></TabsContent>
-            <TabsContent value="rules"><Rules p=p3.clone() state=state/></TabsContent>
-            <TabsContent value="log"><Log p=p4.clone()/></TabsContent>
+            <TabsContent value="inbox"><Inbox state=state/></TabsContent>
+            <TabsContent value="channels"><Channels state=state/></TabsContent>
+            <TabsContent value="rules"><Rules state=state/></TabsContent>
+            <TabsContent value="log"><Log state=state/></TabsContent>
         </Tabs>
     }
 }
@@ -204,60 +355,90 @@ fn by_day(rows: Vec<InboxItemDto>, today: Day) -> Vec<(Day, DayLabel, Vec<InboxI
     groups
 }
 
+type Days = Vec<(Day, DayLabel, Vec<InboxItemDto>)>;
+
 #[component]
-fn Inbox(p: NotificationPageDto, state: NotifyState) -> impl IntoView {
-    let unread = p.inbox.iter().any(|i| !i.read);
+fn Inbox(state: NotifyState) -> impl IntoView {
     let failed = RwSignal::new(false);
     let all_read = Action::new(move |(): &()| async move {
         let r = rest::send("POST", "/notifications/inbox/read-all", None).await;
         failed.set(r.is_err());
-        state.data.refetch();
+        state.refresh();
     });
     let read = Action::new(move |id: &String| {
         let path = format!("/notifications/inbox/{id}/read");
         async move {
             let _ = rest::send("POST", &path, None).await;
-            state.data.refetch();
+            state.refresh();
         }
     });
-    if p.inbox.is_empty() {
-        return view! {
-            <EmptyState title=t("notify-inbox-empty") icon=IconName::Inbox level=2
-                body=t("notify-inbox-empty-body")
-                primary=move || view! {
-                    <Button variant=ButtonVariant::Outline on:click=move |_| state.tab.set("channels".into())>
-                        {t("notify-add-channel")}
-                    </Button>
-                }/>
-        }
-        .into_any();
-    }
-    let i18n = use_i18n();
-    let groups = by_day(p.inbox, crate::history::today());
+    let days: Memo<Days> = Memo::new(move |_| {
+        state
+            .page
+            .with(|p| by_day(p.inbox.clone(), crate::history::today()))
+    });
+    let none = Memo::new(move |_| days.with(Vec::is_empty));
+    let unread = Memo::new(move |_| state.page.with(|p| p.inbox.iter().any(|i| !i.read)));
     view! {
-        <div class="mt-4 grid max-w-2xl gap-6 pb-[var(--tab-bar-height)]">
-            {unread.then(|| view! {
-                <div class="flex flex-wrap items-center justify-end gap-2">
-                    {move || failed.get().then(|| view! { <p role="alert" class="text-sm text-destructive-text">{t("error-generic")}</p> })}
-                    <Button variant=ButtonVariant::Outline size=ButtonSize::Sm loading=all_read.pending()
-                        on:click=move |_| { all_read.dispatch(()); }>{t("notify-mark-all-read")}</Button>
+        {move || if none.get() {
+            view! {
+                <EmptyState title=t("notify-inbox-empty") icon=IconName::Inbox level=2
+                    body=t("notify-inbox-empty-body")
+                    primary=move || view! {
+                        <Button variant=ButtonVariant::Outline on:click=move |_| state.tab.set("channels".into())>
+                            {t("notify-add-channel")}
+                        </Button>
+                    }/>
+            }
+            .into_any()
+        } else {
+            view! {
+                <div class="mt-4 grid max-w-2xl gap-6 pb-[var(--tab-bar-height)]">
+                    {move || unread.get().then(|| view! {
+                        <div class="flex flex-wrap items-center justify-end gap-2">
+                            {move || failed.get().then(|| view! { <p role="alert" class="text-sm text-destructive-text">{t("error-generic")}</p> })}
+                            <Button variant=ButtonVariant::Outline size=ButtonSize::Sm loading=all_read.pending()
+                                on:click=move |_| { all_read.dispatch(()); }>{t("notify-mark-all-read")}</Button>
+                        </div>
+                    })}
+                    <InboxDays days=days read=read/>
                 </div>
-            })}
-            {groups.into_iter().map(|(day, label, rows)| {
+            }
+            .into_any()
+        }}
+    }
+}
+
+/// The days of the inbox and their rows, each keyed: a row that arrives or is marked read
+/// changes that row only, the others keep their nodes (and the focus on one of them).
+#[component]
+fn InboxDays(days: Memo<Days>, read: Action<String, ()>) -> impl IntoView {
+    let i18n = use_i18n();
+    view! {
+        <For each=move || days.get()
+            key=|(day, label, _)| format!("{}{label:?}", day.iso())
+            children=move |(day, label, _)| {
                 let heading = day_heading(&i18n, &DayGroup { day, label, rows: Vec::new() });
                 let id = format!("nf-day-{}", day.iso());
+                let rows = Memo::new(move |_| {
+                    days.with(|all| {
+                        all.iter()
+                            .find(|(d, _, _)| *d == day)
+                            .map(|(_, _, rows)| rows.clone())
+                            .unwrap_or_default()
+                    })
+                });
                 view! {
                     <section aria-labelledby=id.clone()>
                         <h2 id=id.clone() class="mb-2 text-sm font-medium text-muted-foreground">{heading}</h2>
                         <ul class="grid gap-1" aria-labelledby=id.clone()>
-                            {rows.into_iter().map(|i| view! { <InboxRow i=i read=read/> }).collect_view()}
+                            <For each=move || rows.get() key=|i| (i.id.clone(), i.read)
+                                children=move |i| view! { <InboxRow i=i read=read/> }/>
                         </ul>
                     </section>
                 }
-            }).collect_view()}
-        </div>
+            }/>
     }
-    .into_any()
 }
 
 #[component]
@@ -296,64 +477,99 @@ fn InboxRow(i: InboxItemDto, read: Action<String, ()>) -> impl IntoView {
 }
 
 #[component]
-fn Log(p: NotificationPageDto) -> impl IntoView {
-    if p.deliveries.is_empty() {
-        return view! { <p class="mt-4 text-sm text-muted-foreground">{t("notify-log-empty")}</p> }
-            .into_any();
-    }
-    let i18n = use_i18n();
-    let channels = p.channels;
+fn Log(state: NotifyState) -> impl IntoView {
+    // the rows follow every later read in place, keyed by the delivery: a row keeps its
+    // nodes while its state changes, so an unfolded error stays unfolded and the focus
+    // stays on it (SEC0-5)
+    let rows = Memo::new(move |_| state.page.with(|p| p.deliveries.clone()));
+    let none = Memo::new(move |_| rows.with(Vec::is_empty));
     view! {
-        <div class="mt-4 pb-[var(--tab-bar-height)]">
-            <Table stacked=true attr:data-testid="nf-log">
-                <caption class="sr-only">{t("notify-log")}</caption>
-                <TableHeader>
-                    <TableRow>
-                        <TableHead>{t("notify-log-when")}</TableHead>
-                        <TableHead>{t("notify-event")}</TableHead>
-                        <TableHead>{t("notify-channel")}</TableHead>
-                        <TableHead>{t("notify-log-state")}</TableHead>
-                    </TableRow>
-                </TableHeader>
-                <TableBody>
-                    {p.deliveries.into_iter().map(|d| {
-                        let when = match (Day::parse(&d.local_day), clock(&i18n, &d.local_time)) {
-                            (Some(day), Some(time)) => format!("{} {time}", i18n.date(&day.iso())),
-                            _ => i18n.datetime(&d.created_at),
-                        };
-                        let channel = channels.iter().find(|c| c.id == d.channel_id)
-                            .map_or_else(|| t("notify-channel-gone"), |c| c.name.clone());
-                        let variant = match d.state.as_str() {
-                            "failed" => BadgeVariant::Destructive,
-                            "sent" => BadgeVariant::Success,
-                            _ => BadgeVariant::Secondary,
-                        };
-                        view! {
-                            <TableRow>
-                                <TableCell label=t("notify-log-when") class="whitespace-nowrap max-[40rem]:whitespace-normal">{when}</TableCell>
-                                <TableCell label=t("notify-event")>
-                                    <span class="block">{event_label(&d.event)}</span>
-                                    <span class="block text-xs text-muted-foreground">{d.title.clone()}</span>
-                                </TableCell>
-                                <TableCell label=t("notify-channel")>{channel}</TableCell>
-                                <TableCell label=t("notify-log-state")>
-                                    <Badge variant=variant>{t(&format!("notify-state-{}", d.state))}</Badge>
-                                    // what the channel answered, as it said it (not translated)
-                                    {d.last_error.clone().map(|e| view! {
-                                        <details class="mt-1 text-xs">
-                                            <summary class="cursor-pointer">{t("notify-log-show-error")}</summary>
-                                            <p lang="en" class="mt-1 max-w-sm break-words text-destructive-text">{e}</p>
-                                        </details>
-                                    })}
-                                </TableCell>
-                            </TableRow>
-                        }
-                    }).collect_view()}
-                </TableBody>
-            </Table>
-        </div>
+        <Show when=move || !none.get()
+            fallback=|| view! { <p class="mt-4 text-sm text-muted-foreground">{t("notify-log-empty")}</p> }>
+            <div class="mt-4 pb-[var(--tab-bar-height)]">
+                <Table stacked=true attr:data-testid="nf-log">
+                    <caption class="sr-only">{t("notify-log")}</caption>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>{t("notify-log-when")}</TableHead>
+                            <TableHead>{t("notify-event")}</TableHead>
+                            <TableHead>{t("notify-channel")}</TableHead>
+                            <TableHead>{t("notify-log-state")}</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        <For each=move || rows.get() key=|d| d.id.clone()
+                            children=move |d| view! { <LogRow first=d rows=rows state=state/> }/>
+                    </TableBody>
+                </Table>
+            </div>
+        </Show>
     }
-    .into_any()
+}
+
+/// One delivery. `first` is the row as it was when it joined the log; what an attempt
+/// changes (its state, the error) is read from `rows` and changes inside the same nodes.
+#[component]
+fn LogRow(first: DeliveryDto, rows: Memo<Vec<DeliveryDto>>, state: NotifyState) -> impl IntoView {
+    let i18n = use_i18n();
+    let when = match (
+        Day::parse(&first.local_day),
+        clock(&i18n, &first.local_time),
+    ) {
+        (Some(day), Some(time)) => format!("{} {time}", i18n.date(&day.iso())),
+        _ => i18n.datetime(&first.created_at),
+    };
+    let (id, event, title) = (first.id.clone(), first.event.clone(), first.title.clone());
+    let channel_id = first.channel_id.clone();
+    // the name of its channel if that still exists
+    let channel = Memo::new(move |_| {
+        state.page.with(|p| {
+            p.channels
+                .iter()
+                .find(|c| c.id == channel_id)
+                .map(|c| c.name.clone())
+        })
+    });
+    let now = Memo::new(move |_| {
+        rows.with(|all| all.iter().find(|d| d.id == first.id).cloned())
+            .unwrap_or_else(|| first.clone())
+    });
+    let outcome = Memo::new(move |_| now.with(|d| d.state.clone()));
+    let error = Memo::new(move |_| now.with(|d| d.last_error.clone()));
+    view! {
+        // the id names the row for a reader that looks at it twice: the log follows
+        // deliveries that finish while it is shown, so a row's place in it is not fixed
+        <TableRow attr:data-delivery=id>
+            <TableCell label=t("notify-log-when") class="whitespace-nowrap max-[40rem]:whitespace-normal">{when}</TableCell>
+            <TableCell label=t("notify-event")>
+                <span class="block">{event_label(&event)}</span>
+                <span class="block text-xs text-muted-foreground">{title}</span>
+            </TableCell>
+            <TableCell label=t("notify-channel")>
+                {move || channel.get().unwrap_or_else(|| t("notify-channel-gone"))}
+            </TableCell>
+            <TableCell label=t("notify-log-state")>
+                {move || {
+                    let state = outcome.get();
+                    let variant = match state.as_str() {
+                        "failed" => BadgeVariant::Destructive,
+                        "sent" => BadgeVariant::Success,
+                        _ => BadgeVariant::Secondary,
+                    };
+                    view! { <Badge variant=variant>{t(&format!("notify-state-{state}"))}</Badge> }
+                }}
+                // what the channel answered, as it said it (not translated)
+                <Show when=move || error.with(Option::is_some)>
+                    <details class="mt-1 text-xs">
+                        <summary class="cursor-pointer">{t("notify-log-show-error")}</summary>
+                        <p lang="en" class="mt-1 max-w-sm break-words text-destructive-text">
+                            {move || error.get().unwrap_or_default()}
+                        </p>
+                    </details>
+                </Show>
+            </TableCell>
+        </TableRow>
+    }
 }
 
 #[cfg(test)]
@@ -396,6 +612,63 @@ mod tests {
                 (DayLabel::Date { same_year: false }, 1),
             ]
         );
+    }
+
+    fn channel(id: &str, state: &str) -> ChannelDto {
+        ChannelDto {
+            id: id.into(),
+            name: format!("Channel {id}"),
+            kind: "webhook".into(),
+            enabled: true,
+            config: serde_json::json!({"url": "https://hooks.example.org/in"}),
+            secret: Some("shown once".into()),
+            health: ChannelHealthDto {
+                state: state.into(),
+                at: None,
+                error: (state == "failing").then(|| "refused".to_string()),
+            },
+        }
+    }
+
+    /// SEC0-2: a later read says which channel's last delivery now failed or now got
+    /// through; a state that did not change, a channel that only waits and a channel that
+    /// is new say nothing.
+    #[test]
+    fn a_later_read_says_whose_health_changed() {
+        let shown = [
+            channel("a", "never"),
+            channel("b", "failing"),
+            channel("c", "working"),
+            channel("d", "never"),
+        ];
+        let fresh = [
+            channel("a", "failing"),
+            channel("b", "working"),
+            channel("c", "working"),
+            channel("d", "waiting"),
+            channel("e", "failing"),
+        ];
+        assert_eq!(
+            health_news(&shown, &fresh),
+            vec![
+                ("Channel a".to_string(), true),
+                ("Channel b".to_string(), false)
+            ]
+        );
+        assert_eq!(health_news(&shown, &shown).len(), 0);
+    }
+
+    /// SEC0-3: the rules are built from the channels without their health, so a delivery
+    /// that finishes does not build the matrix anew under someone using it.
+    #[test]
+    fn the_rules_do_not_see_what_a_delivery_changes() {
+        let before = [channel("a", "never")];
+        let after = [channel("a", "failing")];
+        assert_eq!(frames(&before), frames(&after));
+        assert_eq!(frames(&after)[0].secret, None);
+        let mut renamed = channel("a", "never");
+        renamed.name = "Phone".into();
+        assert_ne!(frames(&before), frames(&[renamed]));
     }
 
     #[test]

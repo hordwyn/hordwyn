@@ -105,7 +105,12 @@ test("channels, rules with the defaults offer, the log and the inbox", async ({ 
       await tab(page, "Log");
       await expect(page.getByTestId("nf-log").getByText("Failed").first()).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 30_000 });
-    const failed = page.getByTestId("nf-log").getByRole("row").filter({ hasText: "Failed" }).first();
+    // the log follows the second delivery when that fails next (sec0): the row is named by
+    // its delivery, not by its place among the failed ones
+    const delivery = await page.getByTestId("nf-log").getByRole("row").filter({ hasText: "Failed" }).first().getAttribute("data-delivery");
+    expect(delivery).toBeTruthy();
+    const failed = page.getByTestId("nf-log").locator(`[data-delivery="${delivery}"]`);
+    await expect(failed).toContainText("Failed");
     await expect(failed).toContainText("Link request");
     await failed.getByText("Show the error").click();
     await expect(failed.locator("details p")).toBeVisible();
@@ -144,6 +149,9 @@ test("a channel is edited in place keeping its secret; a rule for one item (DEC-
   const { id: importId } = await started.json();
   await page.goto(PAGE);
   await hydrated(page);
+  // the import started above may have finished already: its "Import finished" is unread
+  // then and the page opens on the inbox (sec0: seen once in ten runs)
+  await tab(page, "Channels");
 
   await addChannel(page, "ntfy", "Phone", { "Server URL": "http://127.0.0.1:9", Topic: "first-topic", "Access token (optional)": "tk_secret" });
   const phone = card(page, "Phone");
@@ -217,5 +225,175 @@ test("the actions of a channel card share one size and none is filled", async ({
   await page.setViewportSize({ width: 390, height: 800 });
   for (const action of actions) {
     expect((await action.boundingBox())!.height).toBe(40);
+  }
+});
+
+// sec0: the open page and a delivery that the worker finishes on its own time. The first
+// test above once failed at "Last delivery failed": its page was read after the first of two
+// deliveries had failed and before the second one, and nothing told the page about the second.
+
+/** Pia with the webhook "Automation" that gets "Link request"; the page is left on Rules. */
+async function ruledChannel(page: Page, user: string) {
+  await signUp(page, user, "Pia");
+  await page.goto(PAGE);
+  await hydrated(page);
+  await addChannel(page, "Webhook (signed)", "Automation", { URL: "http://127.0.0.1:9/in" });
+  await expect(card(page, "Automation").getByRole("alert")).toContainText("The test was not delivered");
+  await tab(page, "Rules");
+  await cell(page, "Link request", "Automation").click();
+  await expect(cell(page, "Link request", "Automation")).toHaveAttribute("aria-checked", "true");
+}
+
+/** Max asks `user` to confirm a person; resolves once the delivery to "Automation" has failed on the server. */
+async function failedDelivery(page: Page, max: Page, stamp: number, user: string) {
+  await signUp(max, `nmax${stamp}`, "Max");
+  await max.goto("/people");
+  await hydrated(max);
+  await addPerson(max, "P.");
+  await requestLink(max, "P.", user);
+  await expect
+    .poll(
+      async () => {
+        const channels = await (await page.request.get("/api/v1/notifications/channels")).json();
+        return channels.find((c: { name: string }) => c.name === "Automation")?.health?.state;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe("failing");
+}
+
+test("a delivery that fails while the page is open shows on its channel without a reload", async ({ page, browser }) => {
+  test.setTimeout(90_000);
+  const stamp = Date.now();
+  const user = `nlive${stamp}`;
+  const other = await browser.newContext();
+  try {
+    await ruledChannel(page, user);
+    // a fresh tab, so that no answer of the page above is taken for one of this page: when
+    // its event stream has opened, the page reads once more (the test below); that read is
+    // done before any read is kept back here
+    page = await page.context().newPage();
+    const readOnOpening = page.waitForResponse((r) => r.url().includes("/_fn/notifications"));
+    await page.goto(PAGE);
+    await hydrated(page);
+    await readOnOpening;
+    const automation = card(page, "Automation");
+    await expect(automation.getByText("Never used")).toBeVisible();
+    await page.getByLabel("Name", { exact: true }).fill("Half typed");
+    // the read that the new inbox row asks for is kept back, so it cannot be the one that
+    // shows the outcome: only the announcement of the delivery can bring the card up to date
+    let release = () => {};
+    const kept = new Promise<void>((r) => (release = r));
+    let held = 0;
+    await page.route("**/_fn/notifications*", async (route) => {
+      if (held === 0) {
+        held += 1;
+        await kept;
+      }
+      await route.continue();
+    });
+    await failedDelivery(page, await other.newPage(), stamp, user);
+    await expect(automation.getByText(/^Last delivery failed/)).toBeVisible();
+    expect(held).toBe(1);
+    // the card changed on its own: the page's polite live region says so (SEC0-2)
+    await expect(page.getByRole("status").filter({ hasText: "Automation" })).toHaveText("Automation: the last delivery failed");
+    // shown in place: the page was not built anew, the form keeps what was typed
+    await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Half typed");
+    release();
+    await expect(page.getByRole("tab", { name: /^Inbox/ })).toContainText("1 unread");
+    await expect(automation.getByText(/^Last delivery failed/)).toBeVisible();
+  } finally {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await other.close();
+  }
+});
+
+test("a delivery that failed before the page's event stream opened shows once it opens", async ({ page, browser }) => {
+  test.setTimeout(90_000);
+  const stamp = Date.now();
+  const user = `ngap${stamp}`;
+  const other = await browser.newContext();
+  try {
+    await ruledChannel(page, user);
+    // the page is read, then its event stream is kept from opening until the delivery has
+    // failed: the page hears neither of the inbox row nor of the delivery
+    let open = () => {};
+    const opened = new Promise<void>((r) => (open = r));
+    await page.route("**/api/v1/events", async (route) => {
+      await opened;
+      await route.continue();
+    });
+    await page.goto(PAGE);
+    await hydrated(page);
+    const automation = card(page, "Automation");
+    await expect(automation.getByText("Never used")).toBeVisible();
+    await failedDelivery(page, await other.newPage(), stamp, user);
+    await expect(automation.getByText("Never used")).toBeVisible();
+    open();
+    await expect(automation.getByText(/^Last delivery failed/)).toBeVisible();
+  } finally {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await other.close();
+  }
+});
+
+// Review of sec0 (SEC0-3): the page is built once and every later read is shown in place. A
+// new inbox row or a save on the page once built the whole page anew, which emptied a form
+// that someone was filling in and dropped the focus.
+test("an open form keeps its text and the focus when an inbox row arrives and after a save on the page", async ({ page, browser }) => {
+  test.setTimeout(90_000);
+  const stamp = Date.now();
+  const user = `nform${stamp}`;
+  const other = await browser.newContext();
+  try {
+    await signUp(page, user, "Pia");
+    await page.goto(PAGE);
+    await hydrated(page);
+    await addChannel(page, "Webhook (signed)", "Automation", { URL: "http://127.0.0.1:9/in" });
+    const automation = card(page, "Automation");
+    await expect(automation.getByRole("alert")).toContainText("The test was not delivered");
+
+    // an edit form half changed, and a new channel half typed with the focus in its name
+    await automation.getByRole("button", { name: "Edit Automation" }).click();
+    const edited = automation.getByLabel("Name", { exact: true });
+    await edited.fill("Robot");
+    const add = page.getByRole("region", { name: "Add a channel" });
+    await add.getByRole("radio", { name: "Gotify" }).click();
+    const server = add.getByLabel("Server URL", { exact: true });
+    await server.fill("https://half.example.org");
+    const name = add.getByLabel("Name", { exact: true });
+    await name.fill("Half typed");
+    await expect(name).toBeFocused();
+
+    // a new inbox row arrives: the tab counts it, the forms and the focus are untouched
+    const max = await other.newPage();
+    await signUp(max, `nmax${stamp}`, "Max");
+    await max.goto("/people");
+    await hydrated(max);
+    await addPerson(max, "P.");
+    await requestLink(max, "P.", user);
+    await expect(page.getByRole("tab", { name: /^Inbox/ })).toContainText("1 unread");
+    await expect(name).toHaveValue("Half typed");
+    await expect(name).toBeFocused();
+    await expect(add.getByRole("radio", { name: "Gotify" })).toBeChecked();
+    await expect(server).toHaveValue("https://half.example.org");
+    await expect(edited).toHaveValue("Robot");
+
+    // a save on the page: the card takes the new name in place, the other form stays
+    await automation.getByRole("button", { name: "Save" }).click();
+    await expect(card(page, "Robot")).toBeVisible();
+    await expect(card(page, "Robot").getByRole("button", { name: "Edit Robot" })).toBeVisible();
+    await expect(name).toHaveValue("Half typed");
+    await expect(server).toHaveValue("https://half.example.org");
+    await expect(add.getByRole("radio", { name: "Gotify" })).toBeChecked();
+
+    // and marking the row read, from the inbox
+    await tab(page, /^Inbox/);
+    await page.getByRole("button", { name: "Mark all read" }).click();
+    await expect(page.getByRole("button", { name: "Mark all read" })).toHaveCount(0);
+    await tab(page, "Channels");
+    await expect(name).toHaveValue("Half typed");
+  } finally {
+    await other.close();
   }
 });
