@@ -839,3 +839,37 @@ instance to upgrade. Build order after v1-ops therefore becomes:
 
 sec3 (account deletion) and sec4 (session cap) stay after v1 while the owner is the only user;
 they become blockers before anyone else gets an account.
+
+## Addendum 2 (2026-11-12): greenfield until v1, release process from v1 on
+
+Owner: nothing is live anywhere; until the `v1` tag that both agree on, everything is
+greenfield. From `v1` on every public release tag needs release notes, a changelog, upgrade docs
+and preferably a staging environment to test the upgrade against.
+
+Rules until v1:
+- No compatibility code or docs for pre-v1 builds or data. Packages do not add upgrade notes for
+  pre-v1 states; migrations may be changed freely until the squash.
+
+New last package before the acceptance run, **v1-release** (M):
+1. Remove pre-v1 shims: the blob move from the old layout (`storage.fs_legacy_root`, v1-ops
+   DEC-619/643) unless a fresh install needs it, the "Coming from a build before 0034" section,
+   the one-way note for 0032 and the reindex note for ot1b, the pre-0034 sentences in
+   `.env.example`, install.adoc, README.md and compose.yml.
+2. Squash all migrations into one baseline `0001_v1_baseline.sql` (OWN-9 a); keep the sqlx
+   offline data consistent; a test that a fresh database from the baseline equals the schema
+   built from the old chain (compare `pg_dump --schema-only`), run once before the old files go.
+3. `CHANGELOG.md` (Keep a Changelog format, cite the URL) with a v1 entry summarising what v1
+   covers; a release notes template (`docs/modules/ROOT/pages/releases/`) with sections
+   highlights, upgrade steps (routine + release-specific), known issues, rollback.
+4. Upgrade docs: the routine procedure in operations.adoc plus a per-release page; a
+   "Staging" page: a second compose project on the same host (as the restore rehearsal), a
+   production backup restored into it, upgrade staging first, checklist, then production.
+5. `cargo xtask upgrade-test <previous-tag>`: builds the previous tag's schema and seed data in
+   a local Postgres database (from `git show <tag>:...` migrations or a stored fixture of the
+   tag's schema), runs the current migrations and a read-back smoke over the main repos; added
+   to CI for tags after v1 (before v1 there is no previous tag: the command skips with a message).
+6. Release checklist in docs/HANDOFF.md section 1 (changelog, notes, upgrade-test green, staging
+   upgrade done by the owner, tag, push).
+
+Build order: v1-ops -> sec0 -> sec1 -> sec2 -> v1-polish -> v1-books -> v1-manual ->
+v1-wikidata -> v1-release -> v1-acceptance (owner, internet-facing instance) -> tag `v1`.

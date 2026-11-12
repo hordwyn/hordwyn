@@ -887,6 +887,12 @@ lawyer list for HUB-11. None of them blocks the next package.
   v1-status.md (b) are in v1: sec0, sec1 (headers, CSP that allows the provider covers) and sec2
   (throttling, outbound confinement; per-process counters, one web process). The upgrade path
   from an older build is not needed for the owner.
+- 2026-11-12, owner: NOTHING is live anywhere; we are greenfielding until both owner and orchestrator
+  agree on the `v1` tag; then the owner puts it into production. From `v1` on, every public
+  release tag needs a sane upgrade path: release notes, a changelog, upgrade docs and preferably
+  a staging environment to test the upgrade against. Consequences: no compatibility shims or
+  upgrade notes for pre-v1 builds; migrations squashed into one v1 baseline (OWN-9 a) as the
+  last code step; package v1-release (see v1-plan.md addendum 2) before the acceptance run.
 
 ## 5. Action list from the rulings
 
