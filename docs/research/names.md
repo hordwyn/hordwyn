@@ -580,3 +580,316 @@ Collisions (names in 10.2)
 - Web searches "NAME app OR software OR company": heimwist, heimbod, samkund, gabaur,
   kefli, gledi, tenlach, heimgart, mitiwist, thattr, muoza: no product of the same name;
   near names only (HeimSync, Heima, Heimgard Smart, Keflo AI, GLED App, Tenli)
+
+## 11. Round 3 (open brief)
+
+Date checked: 2026-11-12 (every lookup in this section). Research only: nothing was
+registered, nobody was contacted, no code was changed, nothing was built.
+
+Owner feedback after round 2: "Heimwist sounds okay. Hordwyn also good." For this round:
+"Do not force it to only turn up with old words. It can be anything. Acronyms that make
+sense. Something that sounds nice. I just found kith cool because of its relation to
+language and literacy. But it's no requirement for a name."
+
+### 11.1 Short answer
+
+1. **heimwist passes the deep check with nothing found**: every domain, namespace and
+   store checked is free, no product, no company. It stays the first choice.
+2. **hordwyn has a problem that round 2 did not see.** A product called **Hoardwyn**
+   ("The campaign companion for tabletop RPGs: loot, shops, maps and dice", made in Munich,
+   paid plans) is live at `hoardwyn.com` (registered 2026-10-03; `hoardwyn.de` is
+   registered too). Same sound, software, tabletop gaming, Germany. `hordwyn` and `hordwynn`
+   themselves are free everywhere, but the name would be the later, sound-alike one in a
+   neighbouring field. Not recommended any more; details in 11.2.
+3. The open round produced three names worth the owner's attention: **lusimus** (Latin,
+   "we have played", from a poem about an idle day with a friend and a writing tablet),
+   **philothek** (an old name for the album amicorum, the "book of friends"; reads like
+   Bibliothek and Mediathek) and **dallytally** (playful English: a tally of dallying).
+   **spelwyn** is offered as a same-style replacement for hordwyn.
+4. Honest acronyms exist (SHEAF, ROOST, ASTOLAT, 11.3 group D), but every one that is also
+   a real word is long registered. They work as a tagline or as part of a compound
+   (`roostkeep`, `sheaflog`), not as a bare name.
+
+### 11.2 Deep check: heimwist, hordwyn, hordwynn
+
+Method as in sections 2 and 4. `.org` was confirmed by registry RDAP (404) early in the
+session; later the `.org` registry answered HTTP 429 (rate limit), so repeat lookups rest on
+NXDOMAIN only. `.eu` by port-43 WHOIS at whois.eu.
+
+| Check | heimwist | hordwyn | hordwynn |
+|---|---|---|---|
+| .org | free (RDAP 404, NXDOMAIN) | free | free |
+| .com | free (RDAP 404, NXDOMAIN) | free | free |
+| .de | free (DENIC RDAP 404) | free | free |
+| .eu | free (WHOIS "AVAILABLE") | free | free |
+| .dev, .app | free (Google Registry RDAP 404) | free | free |
+| .net; .io .at .ch | free (.net RDAP 404; the others NXDOMAIN only) | free | free |
+| GitHub user/org | free (404) | free | free |
+| GitHub repositories with the name | 0 | 0 | 0 |
+| crates.io (name and search) | free, 0 hits | free, 0 hits | free, 0 hits |
+| npm (name, `@name` scope, search) | free, 0 hits | free, 0 hits | free, 0 hits |
+| Docker Hub (user, org, repository search) | free, 0 hits | free, 0 hits | free, 0 hits |
+| PyPI | free | free | free |
+| Codeberg | free | free | free |
+| GitLab | 302 sign-in redirect, group search empty: probably free | same | same |
+| App Store US | no such name (8 loose matches on "Heim...": Heidelapp, Fernzugriff Heim AG ...) | 0 results | 1 unrelated result ("ThyEden") |
+| App Store DE | 0 results | 0 results | 0 results |
+| Google Play | not checked by script (section 2) | same | same |
+| Web search | no product, company or mark; engines offer "Heimweh", "Heimwehr", "Heimatwerk" instead | no product of this spelling; **but see Hoardwyn below** | same |
+| Trade marks | registers not queryable by script; web search shows no mark | web search shows no HORDWYN mark; near marks HORDR, HORDZ (US filings, other words) | same |
+
+**The Hoardwyn finding.** Spelling variants were checked because an English speaker who
+hears "hordwyn" writes "hoardwyn" or "hoardwin":
+
+- `hoardwyn.com`: registered 2026-10-03 (registrar http.net Internet GmbH, name servers
+  hosting.de). Live product "Hoardwyn": web app for tabletop role-playing groups, tracks the
+  party's money and items, shops, maps, shared dice roller; headline "Your table's hoard,
+  kept straight."; free plan plus paid plans from 3.99 EUR per month; "made by" a named
+  individual in Munich, with an imprint page. `hoardwyn.de` is registered as well;
+  `hoardwyn.org`, `.dev`, `.app` are not. No App Store app, no GitHub account of that name.
+- `hoardwin.com`: registered 2009, a computer service company in Taiwan; unrelated.
+- `hoardwyn` and `hordwyn` are the same word when spoken. The other product is software,
+  for game groups, sold from Germany, and was public first. That is the same pattern as the
+  kithkeep collision (domains.md section 3), with a closer field (tabletop gaming) and a
+  closer market (Germany). Whether it is a legal conflict is for a lawyer; as a practical
+  matter the name would share its sound and its search results from day one.
+- Related: `heimwyn.com` was registered on 2026-11-10 (two days before this check), and
+  `ethelwyn.com`, `wynfold.com`, `wynkeep.com`, `ordstir.com`, `ludwyn.com` in 2026. Names
+  on "-wyn" are being bought this year. `heimwist.com` should not be left for long.
+
+**Pronunciation and readings.**
+
+| | heimwist | hordwyn / hordwynn |
+|---|---|---|
+| German speaker | HEIM-vist, as written. "Heim" is understood at once. | HORT-vin or HORT-vuen ("y" is read as "ue" by some). "Hort" is a living German word (treasure hoard; also after-school care). |
+| English speaker | HIME-wist (English w) or, once told, HIME-vist. Some will read "heem". | HORD-win. Sounds like a name (Godwin, Bronwyn). |
+| Written down after hearing | German: correct. English, after the German pronunciation: "himevist", "heimvist" (`heimvist.com` and `.de` are unregistered and could be redirected). | "hoardwyn" (the other product), "hordwin" (`.com`, `.de` unregistered), "hoardwin". The double-n dictionary form `hordwynn` is guessed by nobody. |
+| Other readings | "Heim" alone also means an institution in German (care home); "-wist" rhymes with "Zwist" (quarrel) and "Mist" (muck), so "Heimzwist" is the obvious pun. English "wist" is the old past tense of "to wit" (knew), and one letter from "whist", a card game: both harmless. Search engines autocorrect to "Heimweh" until the name has its own results. | "hord" is a homophone of "horde" and "hoard"; "hoarder" has a clinical sense in English. Nothing worse found. |
+| A letter in the name | - | Old English `wynn` is "joy, delight" and also the name of the rune and letter for /w/ (Wiktionary, "wynn"): a small link to letters and literacy. |
+
+Result: **heimwist: clean on every check.** **hordwyn: all its own namespaces are free, but
+it is a sound-alike of a live German tabletop product; treat as taken in practice** unless
+the owner decides, with advice, that the fields are far enough apart.
+
+Manual trade mark searches for the owner (10 minutes, free; registers cannot be read by
+script, section 2). In TMview (https://www.tmdn.org/tmview/), DPMAregister
+(https://register.dpma.de/DPMAregister/marke/basis) and USPTO
+(https://tmsearch.uspto.gov/), Nice classes 9, 41, 42:
+
+- `heimwist`, and the near forms `heimvist`, `heimwis*`, `heimwi*` (wildcard), `heimwest`;
+- `hordwyn`, `hordwynn`, `hoardwyn`, `hordwin`, `hoardwin`, `hordw*`, `hoardw*`;
+- in TMview also switch on the phonetic / fuzzy option for `heimwist` and `hoardwyn`;
+- for the names in 11.5: `lusimus`, `philothek`, `philotheca`, `spelwyn`, `dallytally`,
+  `tallydally`.
+
+### 11.3 The open round
+
+Quick checks as in round 2: `.org` and `.com` by registry RDAP plus NS lookup over DNS over
+HTTPS; iTunes Search API, US and DE storefronts; GitHub user and repository-name search;
+crates.io and npm name; one web search for the upper names. About 480 names went through
+the `.org`/`.com` check; the table has the 26 that are worth reading. F = no registration
+found, T = registered (year of the `.com` registration). Verdict words as in 10.1.
+Source keys in 11.8.
+
+Group A: real words, any language. Group B: language, letters, reading, record-keeping.
+Group C: invented or coined. Group D: acronyms and backronyms. Group E: playful compounds.
+
+| # | Grp | Name | Meaning or origin (source) | Say it | Why it fits | .org / .com | Collision check | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| 1 | A/B | **lusimus** | Latin, "we played, we have played" (perfect of `ludere`). Catullus 50, lines 1-2: "Hesterno, Licini, die otiosi / multum lusimus in meis tabellis": yesterday, at leisure, we played a great deal on my writing tablets [CAT] | LOO-si-mus; German LU-si-mus | Four product ideas in two lines of a real poem: leisure (otiosi), play (lusimus), with a friend (Licinius), written down (tabellis). The "we" is in the grammar. Sounds like a name, spelled as heard | F / F; also .de .eu .dev .app .net free | App Store: none. GitHub: **user `Lusimus` exists** (0 repos, since 2021), one repo "Lusimus-Simulator" (3 stars). crates, npm, PyPI, Docker Hub, Codeberg free. Web: none (near names Luminus, Lumibus) | clean (GitHub org name would need a variant) |
+| 2 | A/B | **philothek** | "Philothek" / Latin `philotheca`: one of the historical names of the album amicorum or Stammbuch, the book in which students and travellers from about 1545 collected entries from friends [AA, PH]. Greek philos (friend) + theke (case, store), as in Bibliothek (reading of the parts is mine, not from a dictionary) | German fi-lo-TEEK, like Bibliothek; English FIL-o-tek | A book of friends that is also a "-thek": German says Bibliothek, Mediathek, Ludothek for exactly the collections this product keeps. People and record in one word | F / F; .eu .dev .app .net free; **.de registered, "for sale" page** | App Store: none. GitHub, crates, npm, PyPI, Docker Hub, Codeberg: free. Web: none (near names BiThek, Philotax). Philotheca is also a plant genus (general knowledge) | clean (no .de) |
+| 3 | E | **dallytally** | dally: "to waste time in trivial activities ... to while away" [WK dally] + tally | DAL-ee-TAL-ee | Says what the statistics page is: a tally of the hours pleasantly wasted. Rhymes, cannot be misspelled in English, does not take itself seriously | F / F; also .de .eu .dev .app .net free | App Store: no "DallyTally"; **near name "TallyDally"**, an iPhone daily planner (one developer). `tallydally.com` registered 2021. GitHub: one empty repo `EdwardduPlesses/DallyTally`. "dally" also has a flirting sense in English; German ears hear "dalli, dalli" (hurry up) | clean, with a near neighbour |
+| 4 | C | **spelwyn** | Coined from Old English `spell` ("story; news; prose") + `wynn` ("joy, delight"; also the name of the letter and rune for w) [WK spell, wynn]. Built like hordwynn; not an attested compound | SPEL-win | Same shape and sound as hordwyn, without the Hoardwyn neighbour: story-joy. "Spell" is also a stretch of time ("sit a spell") and what one does with letters | F / F; also .de .eu .dev .app .net free | App Store: none. GitHub, crates, npm, PyPI, Docker Hub, Codeberg: free. Web: none | clean |
+| 5 | A | **weilchen** | German, diminutive of Weile: "a little while" [WK Weilchen] | VILE-khen | "Bleib noch ein Weilchen": the time spent, named kindly. English speakers cannot say the "ch" | F / F | App Store: none. GitHub: user `weilchen` exists | clean |
+| 6 | A | **mitsamt** | German preposition: "together with" [WK mitsamt] | mit-ZAMT | The "with whom" as a single everyday word; contains "mit" and the root of "zusammen" and of round 1's samanunga | F / F | App Store: none. GitHub: free. Web: no product. A preposition is a weak mark and awkward in a German sentence ("mitsamt Mitsamt") | clean |
+| 7 | A | **selbander** | German, obsolete: "zu zweit miteinander" (the two of us together); selb + ander (second); selbdritt = as a party of three. Example: "dann schritten wir beide, Vater und Sohn, selbander hinaus" (Tucholsky) [DW] | zelp-AN-der | A word that counts the company: exactly the "with whom" field. Old, German, and nobody uses it | F / F (`selbdritt` also F / F) | App Store: none. GitHub: free | clean |
+| 8 | A | **samkvam** | Swedish `samkvaem` (neut.): "gathering socially, socializing" [WK samkvaem] | SAHM-kvem | The get-together after the meeting; "sam-" again | F / F | **GitHub organisation `samkvam` = "Samkvaem Online"** (samkvam.online, 4 repos, since 2024). App Store: none | minor neighbour |
+| 9 | A | **danran** | Japanese `danran`: "sitting together in a circle; happy circle; harmony" [JI] | DAHN-rahn | The family circle in the evening, in six letters, the same in English and German | F / T (2004) | App Store: no app of the name (Japanese children's apps match loosely). GitHub: user exists, 62 repo hits (user names) | minor neighbour |
+| 10 | A/B | whilom | English, archaic: "at some time in the past; once upon a time", from Old English `hwilum`, dative plural of "while" [WK whilom]. The word Chaucer opens tales with (general knowledge) | WHY-lum | "Once upon a time" and "while" in one old word: stories and time spent | F / T (2005) | **iOS app "Whilom: Country Days Tracker"** (bundle `com.whilom.app`, released 2026-09-21, US and DE storefronts): a tracker of the same name. GitHub user and 7 repos | minor neighbour; in practice taken |
+| 11 | B | **bokstaf** | Old Norse `bokstafr`: "a letter of the alphabet", book + staff; borrowed from Old English `bocstaef`; Swedish bokstav, German Buchstabe [WK bokstafr] | BOOK-staff | The plainest "letters and literacy" word there is, and readable in English, German and every Nordic language. Says nothing about people or play | F / F | App Store: none (Scandinavian spelling apps match loosely). GitHub: free | clean |
+| 12 | B | **kerbstock** | German Kerbstock = Kerbholz: the tally stick; notched, then split lengthwise so that each of the two parties keeps a matching half [KH] | KERB-shtock | The oldest shared record: a count that two people each hold a copy of. Weak point: "etwas auf dem Kerbholz haben" means to have something on one's record | F / F (`kerbholz` T / T, 2025) | App Store: none. GitHub: free | clean |
+| 13 | B | **lipumusi** | toki pona `lipu` ("written text or document, e.g. book, website, clay tablet") + `musi` ("fun, game, entertainment, art, play") [LK]; "lipu musi" = a book of fun | LEE-poo-MOO-see | A constructed language built from about 130 words gives the product description in two of them. Same pronunciation everywhere. Sounds childlike | F / F (`musilipu` also F / F) | App Store: none. GitHub: free | clean |
+| 14 | B | rakontaro | Esperanto, regular formation: `rakonto` ("that which someone tells") + `-ar-` (a collection) = a collection of stories. `rakonto` is a headword in the Reta Vortaro, `rakontaro` is not [RV] | ra-kon-TAH-ro | Language-made-for-everyone, and the meaning is right for a catalogue. Four syllables | F / F | App Store: none. GitHub: free | clean |
+| 15 | C | **samwyn** | Coined: "sam-" (together; round 1) + Old English `wynn` (joy) | SAM-win | Together-joy; sounds like a hobbit. Not a real word | F / F | App Store: 0 results. **GitHub user `samwyn` exists** | clean (GitHub variant needed) |
+| 16 | C | hordling | Coined: hord + "-ling" (as in nestling, foundling): a little hoard, or the hoard's child | HORD-ling | Keeps what the owner liked in hordwyn, moves away from Hoardwyn by ear | F (NXDOMAIN only) / F | GitHub user `Hordling` exists; App Store near names "HOrdle", "Hoerdle" | clean |
+| 17 | C/D | luleva | Syllable acronym of four Latin verbs in the first person: LUdo (I play), LEgo (I read), Video (I see), Audio (I hear) | loo-LAY-va | Pure sound first, and the expansion is the feature list. Looks like a cosmetics brand | F / T (2025) | GitHub user exists. App Store: none. Note: `levalu`, `valelu`, `tavelu`, `ludavi`, `lirune` were all registered in `.com` in 2025-2026: short vowel-rich coinages are bought in bulk | minor neighbour |
+| 18 | D | SHEAF | "Self-Hosted Entertainment Archive for Friends (and Family)". A sheaf is "any collection of things bound together" [WK sheaf]: gathered grain, or a sheaf of papers | sheef | The best honest backronym found: every word of the expansion is true of the product, and the word itself means a gathered bundle | T / T (1997) | **Crowded**: App Store "Sheaf - Plural System Tracker", several "Sheaf" PDF apps; crates.io and npm `sheaf` exist; 531 GitHub repos. `sheaflog`, `homesheaf`, `sheafstead` are F / F | taken (usable as tagline or compound) |
+| 19 | D/E | **roostkeep** | ROOST = "Record Of Our Shared Time"; a roost is where birds gather for the night; + keep | ROOST-keep | Honest expansion (shared time is what is recorded) and a home picture, and it keeps the "keep" of the current codename | F / F (`roost` T / T, 1997; "Roost" apps in the App Store) | App Store: no "roostkeep". GitHub: free | clean |
+| 20 | D | ASTOLAT | "A Self-hosted Tracker Of Leisure And Time", letter for letter. Astolat is the town of Elaine, the "lily maid of Astolat", in Arthurian legend; Tennyson's "Shalott" is the same name [AS] | AS-to-lat | A literary name whose letters happen to state the product. The story itself is about someone alone, which is the wrong half | T (delegated) / T (2004) | GitHub organisation "Astolat Web Solutions" (since 2013) | taken |
+| 21 | D | GALORE | "Games, Albums, Literature, On-screen: Record of Entertainment". "Galore" (in abundance) is a loanword from Irish (general knowledge) | ga-LOR | Cheerful, and a loanword for a product that lends | T / T (1998) | App Store app "galore"; npm `galore`; `vim-galore` (18,000 stars) | taken |
+| 22 | E | **whilaway** | From "to while away (the time)" | WILE-a-way | English for what round 1's skemtan and German Kurzweil mean: making the time pass pleasantly | F / F (`whileaway` T / T) | App Store: none. GitHub: free. Web: none. Spelling is not guessable (whileaway, wileaway) | clean |
+| 23 | E | talemoot | tale + moot (a meeting; round 1's control was shelfmoot) | TALE-moot | A meeting about stories: closer to the hub than to the tracker | F (NXDOMAIN only) / F (`tallymoot` also) | App Store: none. GitHub: free | clean |
+| 24 | E | talhord | Coined in Old English style: talu (tale, and also count) + hord | TAHL-hord | A hoard of tales, and of tallies: "tale", "tell" and "tally" all carry both counting and narrating, as German zaehlen and erzaehlen do | F / F (`talehoard`, `talehord` also F / F; `wordhord.com` T 2025) | App Store: 0 results. GitHub: free | clean |
+| 25 | E | heimlore | heim + lore | HIME-lor | Half German, half English, like the user interface. LORE also expands to "Ledger Of Recreation and Entertainment". In German "Lore" is a mine cart and a first name | F / F | App Store: none. GitHub: free | clean |
+| 26 | B | zibaldone, vidimus, legimus | Italian "zibaldone": a commonplace book, a heap of notes. Latin "vidimus": we have seen; in English and German also an attested copy of a document. Latin "legimus": we read / we have read (general knowledge; not looked up today) | - | All three would have been strong | T / T (2003, 2002, 2019) | Legimus is the Swedish talking-book library service (general knowledge) | taken |
+
+### 11.4 Also checked, not in the table
+
+Honest acronyms whose word is long registered (both `.org` and `.com`), listed because the
+expansions may be useful as a tagline: PAST "Pastimes And Shared Time"; REPAST "Record of
+Entertainment, Pastimes And Shared Time"; TALES "Tabletop, Albums, Literature, Episodes,
+Shows"; SLATE "Shows, Literature, Albums, Tabletop, Episodes"; PALS "Plays, Albums,
+Literature, Shows"; MARBLES "Movies, Albums, Reads, Board games, Lists, Episodes, Scores";
+LETTERS "Log of Entertainment, Time Together, Episodes, Reads, Scores"; SPELL "Shared
+Pastimes and Entertainment: Leisure Log"; TALLY "Time And Leisure Log, Yours"; SLOOP
+"Self-hosted Log Of Our Pastimes"; SHALOTT "Self-Hosted Archive of Leisure and Our Time
+Together"; HOLT "Home-hosted Open Leisure Tracker"; TOME "Tracker Of Media and
+Entertainment"; STOA "Shared Time, Our Archive".
+
+Both registered, with the idea that made them worth a look: adversaria, collectanea,
+florilegium (commonplace collections), pinakes (the catalogue of the library of
+Alexandria), hypomnema, amicorum, silvarerum (the Polish-Lithuanian family home chronicle),
+kladde, lesart, beisammen, mitenand, tafelrunde, heimspiel, sammelsurium, gatherum, whatnot,
+manicule, pilcrow, hornbook, chapbook, flyleaf, catchword, abugida, glagol, azbuka, letopis,
+beseda, ludimus, apud, passim, withal, lestur, seura, lugu, tsudoi, kataribe, moim, iyagi,
+moolelo, pukapuka, hadithi, hakawati, baithak, barkada, salusalo, arisan, amikaro, kulupu,
+kinora, gambol, warble, parea, quipu, khipu, griot, daftar, defter, sitaspell, samtale,
+samspil, samspel, samkoma, familect, idiolect, hapax, koine, kist, ambry, scrinium.
+
+`.org` unregistered, `.com` registered: alltold (1998), analekta, stammbuch (2000),
+hausbuch, sudelbuch, snuggery, wynsum (1999; Old English "winsome"), talwyn, tellan,
+fabulary, ludary (2024), ludiary, mediary, talory (2025), whilom, dazumal, verweile,
+spillikin, merels, wellthumbed, otherwhile, legomenon, loanword, clothbound, tuffet,
+shallop, talore, tallytales, taletally, kintale, talekin (2025), iltama, posidelki,
+kumbukumbu, guyub, tarsas (2025), kunulo, hejme, and, registered in 2026: badstofa,
+ethelwyn, heimwyn, ordstir, ludwyn, reihum, philotheca, spicilegium, yadgar, rarangi
+(2025), kunludo, stafrof, tabellis, otiary, wynfold, wynkeep, talefold, talestead,
+taleshelf, hearthtally, nooktally, heimlog, heimwise, hoardwyn.
+
+Both unregistered but not listed: lesefrucht (the fruits of one's reading), lesestunde,
+merkbuch, mussestunde, schummerstunde and Scandinavian morkning (the dusk hour when the
+household sat and told stories before the lamps were lit; not verified today), huslestur
+(Icelandic household reading aloud; not verified today), bokfell, stafrow, bocstaef,
+conlusor (Latin: playfellow; not verified today), multumlusimus, samawist, samwist,
+samantwist (Old High German forms for "being together"; not verified in Koebler today),
+symbelwyn (after Old English symbelwynn, "joy of the feast"; not verified today), bokwyn,
+gleowyn, gleewyn, jotwyn, nookwyn, wynhord, wynhoard, wistwyn, hordwist, bokwist, talwist,
+spilwist, kinwist, talewist, lorewist, heimhord, bokhord, spelhord, sagahord, runhord,
+inkhord, yarnhord, hordkeep, hordwin, hordwine, shelfwyn, samhord, samleik, samsaeti,
+samlese, heimlese, heimsaga, heimtale, heimtally, heimrunde, heimchronik, sippenbuch,
+lagerbuch, rimstok, runakefli, whilery, whilestead, whilekeep, tallymoot, pagehoard,
+reelhoard, gleehoard, joyhoard, oursheaf, ellwist, musamara.
+
+### 11.5 Best of all three rounds
+
+Length = letters / syllables. Domains = .org .com .de .eu .dev .app unless noted.
+
+| Name | Length | Sound | Meaning | Domains | Collisions | Verdict |
+|---|---|---|---|---|---|---|
+| **heimwist** (r2) | 8 / 2 | German as written; English needs "hime-vist" said once | Old High German: being at home, hospitality, stay (Otfrid, 9th century) | all six free, .net too | none on any check | **first choice**; owner: "sounds okay" |
+| hordwyn (r2) | 7 / 2 | easy, name-like | Old English hordwynn: hoard-joy (Beowulf 2270) | all six free | **Hoardwyn**: live tabletop-RPG web product from Munich, `hoardwyn.com` and `.de`, same sound | liked by the owner, but taken by ear; use spelwyn or hordling if the style matters |
+| samanunga (r1) | 9 / 4 | spelled as spoken; long | Old High German: gathering, collection; title of a glossary of about 790 | all six free | none | clean and meaningful; owner: not the sweet spot |
+| skemtan (r1) | 7 / 2 | crisp; faint "scam" | Old Norse: entertainment, shortening the time | all six free | none | clean and short; meaning covers the pastime only |
+| gledi (r2) | 5 / 2 | GLAY-dee / GLEH-di | Old Norse: gladness; enjoyment of stories, music, games | .org free, **.com registered 2003**; others not checked | GitHub user; an Albanian first name | best short sound; no .com |
+| kithkeep on .org | 8 / 2 | "th" is lost in German | kith (one's friends) + keep | .org .de .eu .dev free; **.com and .app taken** | **iOS app "KithKeep: Stay Close"**, live since 2026-10-06 | works, as the junior user of the name |
+| **lusimus** (r3) | 7 / 3 | LOO-si-mus, same in both languages, spelled as heard | Latin: "we have played"; Catullus 50, an idle day with a friend and a writing tablet | all six free, .net too | GitHub user `Lusimus` (dormant) | best new name: meaning with people, play, leisure and writing in it |
+| **philothek** (r3) | 9 / 3 | German natural (like Bibliothek); English "FIL-o-tek", may misspell | historical name of the album amicorum, the book of friends | .org .com .eu .dev .app free; **.de registered (for sale)** | none | strongest for a German audience; no .de |
+| **spelwyn** (r3) | 7 / 2 | easy, name-like | coined from Old English spell (story) + wynn (joy; also a letter) | all six free, .net too | none | the clean stand-in for hordwyn; not an attested word |
+| dallytally (r3) | 10 / 4 | rhyme, unmistakable in English | a tally of dallying | all six free, .net too | near name "TallyDally" (iPhone planner) | the playful option; English only |
+
+Reading of the table: heimwist is the only name that is short, attested, liked by the owner
+and free of every neighbour. lusimus is the one new name that competes with it on meaning
+and beats it on being pronounced the same in both languages. hordwyn drops out on the
+Hoardwyn finding, not on its own namespaces.
+
+### 11.6 Top 5 overall
+
+1. **heimwist**: home, hospitality and time spent in one attested word; clean on the deep
+   check; the owner already likes the sound.
+2. **lusimus**: "we have played", from two lines of Catullus that contain leisure, a friend
+   and a writing tablet; every domain free; needs a GitHub organisation variant.
+3. **philothek**: the old "book of friends" that reads like Bibliothek and Mediathek; best
+   if the German audience comes first; the `.de` would have to be bought from its holder.
+4. **spelwyn**: story-joy, built like hordwyn and free of the Hoardwyn neighbour; honest
+   label: a coinage from two Old English words, not a dictionary word.
+5. **dallytally**: the one that makes people smile; a tally of time happily wasted; every
+   domain free, one near-named planner app.
+
+Fallbacks that stay clean from earlier rounds: skemtan, samanunga, heimbod, samkund. If an
+acronym is wanted on the landing page, "SHEAF: Self-Hosted Entertainment Archive for
+Friends" or "ROOST: Record Of Our Shared Time" can sit under any of the names above.
+
+### 11.7 Limits of this round and manual checks
+
+- The `.org` registry (PIR) rate-limited the script after about 400 lookups (HTTP 429). All
+  `.org` results in 11.3 and 11.4 are RDAP 404 plus NXDOMAIN, except hordling and talemoot
+  (NXDOMAIN only) and the names marked "delegated" (NS records present, RDAP not repeated).
+  Check the chosen name at a registrar before buying, as always.
+- Trade marks: not queryable by script. Searches to run by hand are listed at the end of
+  11.2. For hordwyn the question is no longer the register alone but the live product.
+- Google Play: not readable by script (section 2). Search the chosen name there by hand.
+- Meanings seen at a source today: lusimus (text of the poem), selbander, mitsamt,
+  Weilchen, samkvaem, danran, whilom, bokstafr, Kerbstock, lipu, musi, rakonto, sheaf,
+  dally, spell, wynn, Astolat. Philothek: attested as a name of the Stammbuch in two
+  library publications (search result summaries); its etymology is my reading of the parts.
+  Marked "general knowledge" or "not verified today" where nothing was fetched.
+- Wiktionary and Wikipedia APIs rate-limited the script part of the time; some entries were
+  read through a page fetch instead.
+- Section 8, point 6 still applies: say the two or three favourites aloud to one English
+  and one German speaker and let them write the name down.
+
+### 11.8 Sources for section 11 (all 2026-11-12)
+
+Meanings
+- [CAT] Catullus, Carmina 50, lines 1-6, Latin text at the Perseus Digital Library:
+  https://www.perseus.tufts.edu/hopper/text?doc=Perseus:text:1999.02.0003:poem=50 ;
+  translations and context ("a day of leisure and verse writing" with Licinius Calvus):
+  https://www.poetryintranslation.com/PITBR/Latin/Catullus.php ,
+  https://classicalanthology.theclassicslibrary.com/2013/01/30/catullus-50-and-martial-contributed-by-benjamin-walter/
+  (search result summaries)
+- [AA] Album amicorum: https://en.wikipedia.org/wiki/Album_amicorum (friendship book,
+  Reformation period, kept by university students; oldest known 1545)
+- [PH] "Philothek" as a name of the genre, beside Album Amicorum, Liber Amicorum, Thesaurus
+  Amicorum: https://journals.wlb-stuttgart.de/index.php/sh/article/download/16979/17004/32954 ;
+  the "Philothek" of Adam Pusch (1598-1606):
+  https://journals.wlb-stuttgart.de/index.php/wlbf/article/download/985/1116/2138 ;
+  "philotheca" in a list of names: https://apcz.umk.pl/OR/article/download/56821/40601/166690
+  (all three: search result summaries)
+- [WK] Wiktionary through its API (https://en.wiktionary.org/w/api.php): "dally", "sheaf",
+  "whilom", "selbander", "mitsamt", "Weilchen", "samkvaem" (fetched with the umlaut),
+  "bokstafr" (fetched with the accent), "spell" (Old English section), "wynn" (Old English
+  section)
+- [DW] DWDS, "selbander": https://www.dwds.de/wb/selbander ; Bayerisches Woerterbuch on
+  "selbander": https://publikationen.badw.de/de/bwb/a/1.405.pdf (search result summary)
+- [JI] Jisho, danran: https://jisho.org/api/v1/search/words?keyword=danran (queried with
+  the kanji spelling)
+- [KH] Kerbholz, also Kerbstock, Zaehlholz: https://de.wikipedia.org/wiki/Kerbholz
+- [LK] Linku, toki pona dictionary: https://api.linku.la/v1/words/lipu ,
+  https://api.linku.la/v1/words/musi
+- [RV] Reta Vortaro, "rakonto": https://reta-vortaro.de/revo/art/rakont.html
+- [AS] Astolat: https://en.wikipedia.org/wiki/Astolat
+- Not reachable: https://chaucer.fas.harvard.edu/pages/knights-tale-0 (403),
+  https://www.personal.kent.edu/~rlarson/catullus/cat050.htm (404)
+
+Registration
+- https://rdap.publicinterestregistry.org/rdap/domain/NAME.org (404 = free; 429 after about
+  400 requests)
+- https://rdap.verisign.com/com/v1/domain/NAME.com , https://rdap.verisign.com/net/v1/domain/NAME.net
+- https://rdap.denic.de/domain/NAME.de ; https://pubapi.registry.google/rdap/domain/NAME.dev
+  and NAME.app ; WHOIS whois.eu port 43
+- https://dns.google/resolve?name=NAME.TLD&type=NS
+- `hoardwyn.com` (registration 2026-10-03), `hoardwin.com` (2009), `heimwyn.com`
+  (2026-11-10): Verisign RDAP as above
+
+Collisions
+- Hoardwyn: https://hoardwyn.com/ (title, headline, plans, "made in Munich", imprint link);
+  https://rdap.denic.de/domain/hoardwyn.de (200)
+- https://www.hoardwin.com/ (computer service company, Taichung)
+- https://philothek.de/ ("This domain is for sale")
+- https://api.github.com/users/NAME , https://api.github.com/orgs/samkvam ,
+  https://api.github.com/search/repositories?q=NAME+in:name
+- https://itunes.apple.com/search?term=NAME&entity=software&country=us (and country=de);
+  same-name hits only for "whilom" (https://apps.apple.com/de/app/whilom-country-days-tracker/id6805880993),
+  "sheaf", "roost", "galore"; near name "TallyDally" (https://apps.apple.com/app/id6758053398)
+- https://crates.io/api/v1/crates/NAME , https://crates.io/api/v1/crates?q=NAME ,
+  https://registry.npmjs.org/NAME , https://registry.npmjs.org/-/v1/search?text=NAME ,
+  https://pypi.org/pypi/NAME/json , https://hub.docker.com/v2/users/NAME/ ,
+  https://hub.docker.com/v2/orgs/NAME/ , https://hub.docker.com/v2/search/repositories/?query=NAME ,
+  https://codeberg.org/NAME , https://gitlab.com/api/v4/groups?search=NAME
+- Web searches: "heimwist"; "hordwyn"; "hordwyn OR hordwynn app OR software OR company OR
+  brand OR trademark" (near marks https://markinton.com/trademark/hordr-98963734 ,
+  https://markinton.com/trademark/hordz-99304561 ; near name https://craftcms.com/partners/nordwynd);
+  "lusimus", "philothek", "dallytally", "whilaway", "mitsamt", "samkvam", "luleva" each
+  with app OR software OR company OR brand; two combined searches for bokstaf, kerbstock,
+  spelwyn, samwyn, hordling and for weilchen, roostkeep, talemoot, talhord, heimlore,
+  lipumusi: no product of the same name
