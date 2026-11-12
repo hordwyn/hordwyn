@@ -23,3 +23,9 @@ Keep a progress log in `docs/fable/round2/<package>-progress.md` (item, state, t
 results, files, DECs) so a cut-off run can be resumed. Out of scope items you notice: list
 them, do not build them. Final report: per scope item done / not done, tests added and seen
 red, test runs and results (only what you ran), DECs, files changed, owner-visible choices.
+
+Greenfield until v1 (owner, 2026-11-12): nothing is live anywhere. Do not write migration
+paths, compatibility code or upgrade notes for earlier builds or data; change migrations freely
+if that is simpler (they are squashed into one v1 baseline in package v1-release). Only a fresh
+install has to work. This rule ends with the `v1` tag; from then on every package adds a
+CHANGELOG entry and release-specific upgrade notes.
