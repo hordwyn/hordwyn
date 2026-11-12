@@ -378,7 +378,205 @@ Repository
 
 ## 10. Round 2 (owner feedback)
 
-Date checked: 2026-11-12. Status: IN PROGRESS (candidate pool being checked; table follows).
+Date checked: 2026-11-12 (every lookup in this section). Research only: nothing was
+registered, nobody was contacted, no code was changed.
 
 Owner feedback on round 1 (samanunga, skemtan, couthie, kithshelf): "They're not bad but
-also not really hitting the sweet spot."
+also not really hitting the sweet spot." Earlier: "It doesn't necessarily need to be Kith. I
+just like if a name has a meaning, especially in old languages."
+
+### 10.1 What the sweet spot probably is
+
+Round 1 missed in two directions: samanunga has the meaning but is four syllables, skemtan
+is short but names only the pastime, couthie and kithshelf keep the "th" that German loses.
+Working definition for this round:
+
+- 4 to 7 letters (8 at most), two syllables, said the same way by an English and a German
+  speaker, spelled as heard;
+- a real, attested word (dictionary headword, not a coinage) from an old language;
+- the meaning sits where "kith" sat: one's own people at home, plus what they do together
+  in the evening (feast, story, game), or the record of it;
+- no second meaning that embarrasses in English or German.
+
+A finding that shapes the list: the very short words that hit this exactly are all
+registered (section 10.4: gildi, sinni, gaman, saman, tafla, minni ...). What is still free
+are two-root compounds of 7 to 8 letters. The best of those are in the table.
+
+Round 2 checks are QUICK checks only, as asked: `.org` and `.com` by registry RDAP plus NS
+lookup over DNS over HTTPS (method of domains.md section 2); iTunes Search API, US and DE
+storefronts; one GitHub user and repository-name lookup; a web search for the upper half of
+the table. No trade mark, package registry (except one crate found by accident), Google
+Play, `.de`/`.eu`/`.dev` or social-handle checks. Those follow for the owner's picks.
+
+Spelling: ASCII as in the rest of this file. Where the dictionary letter is eth, the
+candidate uses "d" (the usual Scandinavian ASCII habit: "gledi", "heimbod"); the
+transliteration used elsewhere in this file would be "glethi", "heimboth" (both also
+unregistered in `.org` and `.com`).
+
+Verdict words: **clean** = `.org` and `.com` unregistered and no same-name product found;
+**minor neighbour** = `.org` unregistered, but `.com` registered or a small same-name
+project exists; **taken** = `.org` and `.com` both registered.
+
+### 10.2 The list (sorted by fit, best first)
+
+F = no registration found (RDAP 404 and NXDOMAIN), T = registered (year of `.com`
+registration). Source keys in section 10.6.
+
+| # | Name | Language and literal meaning (source) | Say it | Why it fits | .org / .com | Collision check | Verdict |
+|---|---|---|---|---|---|---|---|
+| 1 | **heimwist** | Old High German `heimwist` (fem.): "Heimat, Gastfreundschaft, Aufenthalt, Daheimsein" = home, hospitality, being at home; heim + wist (being). Middle High German: household, residence, home. Otfrid, 863-871 [KA] | HIME-vist (German as written) | The three things the product is in one old word: at home (self-hosted), hospitality (with whom), being there (time spent). A German hears "Heim" at once, the English "wist" sounds old without being odd | F / F | App Store: none. GitHub: no user, 0 repos. Web: none (near names HeimSync, Heima) | clean |
+| 2 | **gledi** | Old Norse `glethi` (fem.): "gladness, merriment, good cheer; in old writers esp. of enjoyment at a festival, story-telling, music, sport of any kind" [CV gledi] | GLAY-dee / German GLEH-di | The dictionary definition is nearly the feature list: stories, music, games, in company. 5 letters, 2 syllables, sounds like "glad" in both languages | F / T (2003) | App Store: none. GitHub: user `gledi` exists, repo hits are "GLEditor" noise. Gledi is also an Albanian first name (general knowledge, not looked up) | minor neighbour |
+| 3 | **samkund** | Old Norse `samkund` (fem.), = `samkunda`: "a feast, banquet"; from sam (together) + koma (come), a coming-together [CV sam-kund, sam-kunda] | SAHM-koond | "Together" is audible in both languages (zusammen, same); German also hears "Kunde" (tidings, lore), which is the German cousin of "kith". 7 letters, 2 syllables | F / F (`samkunda.com` T 2021) | App Store: none. GitHub: no user, no real repo. Web: none. Note: modern Icelandic `samkunda` also means "synagogue" [CV] | clean |
+| 4 | **heimbod** | Old Norse `heimboth` (neut.): "a 'home-bidding', invitation, a feast" [CV heim-bod] | HAME-bod / German HEIM-bot | Inviting your people home: the self-hosted instance and the game night in one picture. 7 letters, 2 syllables | F / F | App Store: none. GitHub: no user, 0 repos. Web: none | clean |
+| 5 | **hordwyn** | Old English `hordwynn` (fem.): "joy of the hoard", a delightful treasure; hord + wynn (joy). Once, Beowulf 2270 [SC, CL, WH] | HORD-win | The shelf of treasured things, named as a joy and not as a database. Reads like a name (Godwin, Eowyn), easy in both languages. Single-n spelling is a gentle modernisation of the headword | F / F (`hordwynn` also F / F) | App Store: none (0 hits). GitHub: no user, 0 repos | clean |
+| 6 | **kefli** | Old Norse `kefli` (neut.): "a cylinder, stick, piece of wood"; "rista runar a kefli, to carve Runes on a k." (Egil's saga: the stick a poem is cut into to keep it) [CV kefli] | KEF-lee | The oldest Norse log file: what you carve the record and the verse into. 5 letters, 2 syllables, identical in English and German | F / T (2007) | App Store: none. **crates.io: crate `kefli` exists** (task-allocation algorithms, 701 downloads, last update 2025-08) and GitHub user `kefli`; matters for a Rust project | minor neighbour |
+| 7 | **gabaur** | Gothic `gabaur`: (1) neut. a collection, contribution, tax (1 Cor 16:1-2, Rom 13:7); (2) masc. "Festgelage, Schmaus" = festive banquet, merrymaking (Greek komos). ga- (together) + bairan (to bear): what is brought together [KG] | GAH-bor (Gothic "au" before r is a short o); most will say ga-BOWR | Same double sense that made samanunga attractive (the collection and the people feasting), in 6 letters. From Wulfila's Bible, about 350 | F / F | App Store: none. GitHub: user `gabaur` exists, 0 repos. Web: none | clean |
+| 8 | **tenlach** | Old Irish `tenlach`, later `tellach`: "hearth, fireplace"; from the root of teine (fire) [WK tellach] | TEN-lakh (ch as in "Loch", "Bach") | The hearth itself; the older spelling of round 1's `tellach`, whose `.com` was gone. German says the "ch" natively, English says "ten-lack" | F / F | App Store: none. GitHub: no user, 0 repos. Web: none. The "household" sense of the Irish word could not be confirmed today (eDIL unreachable) | clean |
+| 9 | **kveldvaka** | Old Norse `kveld-vaka` (fem.): "eve-wake, the time between twilight and bed-time, when people sit and work by candle-light" [CV kveld-vaka]. In Iceland the household gathering where sagas and rimur were read aloud [KV] | KVELD-vah-ka | The best meaning on the whole list: the long evening, the household, the stories. Loses only on length (9 letters, 3 syllables) | F / F (`kvoldvaka` also F / F) | App Store: none. GitHub: no user, 0 repos. Still a living Icelandic word (scout and school "evening programme") | clean |
+| 10 | **mitiwist** | Old High German `mitiwist` (fem.): "das Mitsein, Zusammensein, Gemeinschaft, Miteinander" = togetherness, community; glosses Latin consortium, coetus [KA] | MIT-i-vist | "Being-with": the "with whom" of the product as one word. German parses it (mit + wist). The short form `mitwist` is gone in `.com` (2024) and sounds like "Midwest" in English | F / F | App Store: none. GitHub: no user, 0 repos. Web: none. One sense in the dictionary is "sexual union" (Notker), as with "intercourse" in English | clean |
+| 11 | **geselda** | Old English `geselda` (masc., poetic): "companion, comrade"; ge- + seld (hall, seat): one of the same hall. Beowulf 1984 [WK geselda] | yeh-SEL-da; moderns say geh-SEL-da | Hall-mate: the person on the same bench. Sounds like a name (Griselda, Zelda), 3 syllables | F / F | App Store: none. GitHub: user `geselda` exists, 0 repos | clean |
+| 12 | **thattr** | Old Norse `thattr` (masc.): "a single strand of a rope"; "a short story", a section. Modern Icelandic `thattur`: an episode of a series [CV thattr] | THAT-ur; German "Tattr" | Strand, short tale and TV episode in one word: what binds people and what they watch. Awkward final "ttr"; `thattur` (F / F) is easier | F / F | App Store: none. GitHub: no user; repo hits are "that-tr..." noise | clean |
+| 13 | **gadaila** | Gothic `gadaila` (masc.): "Teilnehmer, Genosse" = partner, co-participant, sharer (Greek koinonos); ga- + dails (share, German "Teil") [KG] | ga-DAY-la | One who shares: shared lists, shared evenings. 3 syllables, soft sound | F / F | App Store: none. GitHub: no user, 0 repos | clean |
+| 14 | **leikmot** | Old Norse `leik-mot` (neut.): "a 'play-meeting', public athletic sports" [CV leik-mot] | LAKE-moat / German LEIK-moht | Game night as a word: play + meet. Covers the board-game side, less the films and books | F / F | App Store: none. GitHub: no user, 0 repos | clean |
+| 15 | **heimgart** | Old High German `heimgart`: "Versammlungsort, Marktplatz, Dorfplatz" = meeting place; glosses Latin forum, 9th century. Middle High German `heimgarte`; survives as Bavarian "Hoagascht", a sociable evening visit [KA] | HIME-gart | The village square of one's own people: fits the app and even better the hub (forum). `heimgarte` is F / F | F / T (2017) | App Store: none. GitHub: user `heimgart` exists. Web: no product; Heimgarten is a mountain and a common allotment-club name | minor neighbour |
+| 16 | **minjar** | Old Norse `minjar` (fem. pl.): "memorials", keepsakes; "thessa gripi skaltu eiga at minjum" (keep these treasures as mementos); akin to minni, memory [CV minjar] | MIN-yar (German as written) | Keepsakes: the record as memory, not as data. English readers see "min-jar" | F / T (2012) | App Store: none. GitHub: user exists, repo hits are surnames (Minjares) | minor neighbour |
+| 17 | **muoza** | Old High German `muoza` (fem.): "Musse, arbeitsfreie Zeit, freie Zeit" = leisure, free time; glosses Latin otium; from 790 [KA] | MOO-o-tsa | The German "Musse" in its oldest form: time for a book, a film, a game. Names the pastime only, like skemtan; "uo" is unfamiliar | F / T (2015) | App Store: none. GitHub: user exists, no project | minor neighbour |
+| 18 | **healgamen** | Old English `heal(l)gamen` (masc.): "Unterhaltung in der Halle" = entertainment in the hall; Beowulf 1066, of the poet's performance [KE] | HAL-gah-men | Hall + game in one attested word. 9 letters, and "heal" misleads modern readers (App Store search returned hospital games) | F / F (`hallgamen` also F / F) | App Store: none of that name. GitHub: no user, 0 repos | clean |
+| 19 | **senchas** | Old Irish `senchas`: "old tales, ancient history, tradition; genealogy; traditional law": the lore a community keeps [WK seanchas, ES] | SHEN-a-khas; read as SEN-chas | Shared stories and the record of them. Pronunciation and spelling drift apart | F / T (2025) | App Store: none; near name "Sencha" (tea apps, a chat client, the JavaScript framework). Web: "eSenchas" (a Cambridge study resource) | minor neighbour |
+| 20 | **airnean** | Irish `airnean`: "night-visiting; sitting up late at night"; "oiche airneain, a night's visiting; a social evening" [FGB]. Modern Irish; the older base could not be checked (eDIL unreachable) | AR-nyawn; read as AIR-neen | The long evening spent in someone's house, with cards and talk: the custom the product records. Not guessable from the spelling | F / T (2020) | App Store: none (airline apps). GitHub: no user, 0 repos | minor neighbour |
+| 21 | **gosthi** | Sanskrit `goshthi` (fem.): "an assembly, meeting, society, party, fellowship, conversation" (Cappeller); `kavya-goshthi`, a conversation on poetry [WL] | GOSH-tee | The cultivated circle that meets to talk about poems and plays. Three romanisations in use (gosthi, goshthi, goshti) | F / T (2016) | App Store: none. GitHub: user exists; two small video-conferencing repos named Gosthi | minor neighbour |
+| 22 | **congerro** | Latin `congerro` (masc.): "jolly companion, playfellow"; con- + gerro (trifler). Plautus [WK congerro, citing Lewis and Short] | kon-GER-ro | The friend you waste time with, in the best sense. Sounds Spanish, reads close to "conger" | F / F | App Store: none. GitHub: user `Congerro` exists (one dice repo) | clean |
+| 23 | gildi | Old Norse `gildi` (neut.): payment; worth, value; "II. a banquet, feast"; "III. a guild" [CV gildi] | GIL-dee | Would be the sweet spot: guild (German "Gilde", the game group), feast and value in 5 letters | T / T (2004) | Gildi is an Icelandic pension fund, by general knowledge | taken |
+| 24 | sinni | Old Norse `sinni` (masc.): "a follower, companion" (Old English gesith) [CV sinni]; `sinn`, "a time" (one time, two times) | SIN-nee | Companion and "a time" from one root: the two things a play log counts | T / T (2005) | not searched | taken |
+| 25 | gaman | Gothic `gaman` (neut.): "fellow man, partner, comrade, partnership" [KG]; Old Norse `gaman`: "game, sport, pleasure, amusement"; "mathr er manns gaman" (man is man's joy, Havamal) [CV gaman] | GAH-man | The root of the word "game" means "people together". The perfect word, long gone | T / T (2002) | also a Japanese word (endurance), by general knowledge | taken |
+
+### 10.3 Personal top 5
+
+1. **heimwist**. The only candidate where every part of the product is in the dictionary
+   gloss (home, hospitality, being there), it is attested in a named author (Otfrid), it is
+   unclaimed everywhere checked, and a German speaker understands half of it unprompted.
+   Weak point: 8 letters, and English speakers must be told "hime-vist" once.
+2. **gledi**. Closest to the sweet spot by sound and length, and Cleasby's definition
+   ("enjoyment at a festival, story-telling, music, sport of any kind") reads like the
+   product description. Price: no `.com` (registered 2003) and a first name in Albania.
+3. **samkund**. The short sibling of samanunga: same "sam-" (together), two syllables
+   instead of four, means a feast instead of an assembly. Check the synagogue sense with an
+   Icelandic speaker before choosing it.
+4. **heimbod**. The warmest picture (bidding people home) and fully free. Slightly weaker
+   than heimwist because "bod" is English slang for "body" and the old spelling ends in eth.
+5. **hordwyn**. The one name for the collection side that is not dry: hoard-joy. It sounds
+   like an English name, which helps memory, and nothing at all carries it today.
+
+If length is forgiven, **kveldvaka** has the truest meaning of all 25. If the name should be
+as short as possible and `.com` does not matter, **kefli** (mind the crate) and **gledi**
+are the two five-letter options. **gabaur** is the dark horse: best double meaning, but the
+owner should say it aloud first.
+
+### 10.4 Also checked, not in the table
+
+Both `.org` and `.com` registered (so: taken), with the meaning that made them worth a look:
+saman (Old Norse, Gothic, Old High German: together), samtal (Old Norse: conversation),
+samvera (being together), minni (memory; memorial toast), leika (plaything; playmate),
+tafla (game piece; tablet), skra (scroll, register), gersemi (treasure), manntal (census),
+yndi, unad (delight), vinir (friends), heimili (home), flett (Old Saxon/Low German: the
+hearth floor of the hall house), aband (evening), stuba (heated room), samod (Old English:
+together), racu, talu (tale and tally), cofa, bochord (library), hordern, hodd, myne, gamen,
+talea (Latin: the stick behind "tally"), fasti, tablinum, comitas, lusoria, sabha, kosha,
+krida, sangati, samhita, svajana ("one's own people" in Sanskrit, the exact sense of kith;
+`.com` registered 2024), lesche, koinon, sylloge, theke, megaron, eranos, paidia, pinax,
+mnemon, hespera, scela, noson, tinol, cofnod, briugu, kumpan, kundo.
+
+`.org` unregistered, `.com` registered (minor neighbour), dropped for sound or fit: dagatal
+(2014; "tale of days", calendar), skrin (2002), scoru (2013; Old English "notch, tally",
+singular not attested), laiks (1999; Gothic "dance, play"; also Latvian "time"), huzd,
+werod, selida, spilda (2005; Gothic "writing tablet"), yedding, husting, hallmoot (2026),
+nautr, cumann (2025), cronfa, vinoda (2003; Sanskrit "pastime"), ginoz, veizla, teiti
+(2022), vingan, vinatta (2022; friendship), aldavin (2026; old friend), astvin, tomstund
+(2016; leisure hour), difyr (2023; Welsh "pleasant", literally "un-short"), diddan, taisce
+(2004; Irish "hoard, treasure"), bruiden (2010; "hostel, banqueting hall"), fescor, celide,
+acallam, brandub, noctes (2003), pentan (2009; Welsh "hob"; also "pentane" in German, and a
+Japanese vocabulary app of that name), muoze, gliw, blidi, spjall (2026), bispel, primstav,
+synaulia, cimelia, eimyrja (2026). (rimtal, "calendar reckoning": both registered, `.com`
+in 2026.)
+
+Both unregistered but not listed: hirnos (Welsh "long night"; not confirmed in a dictionary
+today, and one letter from German "hirnlos", brainless), firabent (Middle High German
+`vir-abent`, the eve of a feast, today "Feierabend"; headword confirmed in Lexer, gloss not
+fetched), playfere (Middle English "playfellow"; reads as a misspelling of "Playfair"),
+kveldseta ("a sitting up late"), vinabod ("a feast of friends"), gamanmal ("merry talk"),
+seledream, gleodream, hordcofa ("treasure-chamber; breast, heart"), gastseli, winseli,
+gimazzo, spilahus, tresohus, gamunds (Gothic "memory"), garazna, hweila, eimuria (Old High
+German "embers"; too close to the parasite genus Eimeria), langeld, arineld, bakeld,
+mannamot, heimgarte, thattur, glethi, heimboth.
+
+Observation: `.com` registrations dated 2025 or 2026 turned up for senchas, cumann, hallmoot,
+aldavin, spjall, manntal, rimtal, eimyrja, virabent, gluot, hwila, yfere, leikvin, samhal.
+Old-language words are being bought up this year, as "kith" names were (section 3a). A
+name that is free today should not be left for months.
+
+### 10.5 Limits of this round
+
+- Registration only shows "registered now"; no premium or price check (domains.md section 1).
+- Not done on purpose: trade marks, Google Play, package registries, `.de`/`.eu`/`.dev`,
+  GitLab, Codeberg, Docker Hub. Do them for the picks (sections 4 and 8 list the method).
+- Meanings not seen at a primary dictionary today: tenlach and airnean in eDIL (dil.ie
+  refused the connection), goshthi in Monier-Williams itself (Cappeller's gloss was seen),
+  hordwynn in Bosworth-Toller (two other sources agree).
+- Pronunciation hints are approximations for an English reader. The real test stays
+  section 8, point 6: say it to one English and one German speaker and let them write it.
+
+### 10.6 Sources for section 10 (all 2026-11-12)
+
+Meanings
+- [CV] Cleasby-Vigfusson, Icelandic-English Dictionary (1874), online copy:
+  https://cleasby-vigfusson-dictionary.vercel.app/word/gledi, .../word/sam-kund,
+  .../word/sam-kunda, .../word/heim-bod, .../word/kefli, .../word/kveld-vaka,
+  .../word/kveld-seta, .../word/thattr, .../word/leik-mot, .../word/minjar, .../word/gildi,
+  .../word/sinni, .../word/gaman, .../word/vina-bod, .../word/gaman-mal, .../word/alda-vinr,
+  .../word/teiti, .../word/tafla
+- [KA] Koebler, Althochdeutsches Woerterbuch: https://www.koeblergerhard.de/ahd/ahd_h.html
+  (heimwist, heimgart, heimgarte), https://www.koeblergerhard.de/ahd/ahd_m.html (mitiwist,
+  muoza), https://www.koeblergerhard.de/ahd/ahd_e.html (eimuria)
+- [KG] Koebler, Gotisches Woerterbuch: https://www.koeblergerhard.de/got/got_g.html
+  (gabaur, gadaila, gamunds, gaman), https://www.koeblergerhard.de/got/got_s.html (spilda)
+- [KE] Koebler, Altenglisches Woerterbuch: https://www.koeblergerhard.de/ae/ae_h.html
+  (heallgamen, hordcofa)
+- [WK] Wiktionary through its API (https://en.wiktionary.org/w/api.php): "geselda",
+  "hordcofa", "scoru", "tellach" (Middle Irish, from Old Irish tenlach), "bruiden", "taisce",
+  "difyr", "congerro", "playfeer" (from Middle English playfere), "seanchas"
+- [SC] Scaife ATLAS short definitions, hord-wynn "joy of the hoard":
+  https://atlas.perseus.tufts.edu/dictionaries/entry/urn:cite2:scaife-viewer:dictionary-entries.atlas_v1:ang-short-def-1632
+  (search result summary)
+- [CL] A Consolidated Library of Anglo-Saxon Poetry, "hordwynne", one occurrence, Beowulf
+  2270: https://clasp.ell.ox.ac.uk/db-latest/word/hordwynne (search result summary)
+- [WH] Old English Wordhord, "hoard-joy, delightful treasure":
+  https://oldenglishwordhord.com/category/hord-highlights/page/24/ (search result summary)
+- [KV] The Icelandic evening wake: https://www.folklore.ee/Folklore/vol20/literary.pdf,
+  https://timarit.is/page/6803106?lang=en (Gripla 2016),
+  https://www.ancient-origins.net/node/5922 (search result summaries)
+- [ES] eSenchas, University of Cambridge: https://www.asnc.cam.ac.uk/esenchas (search
+  result summary: "the accumulation of tales, history, tradition")
+- [FGB] O Donaill, Focloir Gaeilge-Bearla, "airnean": https://www.teanglann.ie/en/fgb/airnean
+  (fetched with the accented spelling)
+- [WL] Wisdom Library, Sanskrit dictionaries (Cappeller, Shabda-Sagara) for goshthi:
+  https://www.wisdomlib.org/definition/goshthi, https://www.wisdomlib.org/definition/goshtha
+  (search result summary)
+- Lexer, Mittelhochdeutsches Handwoerterbuch, lemma "vir-abent" (3,362,38):
+  https://woerterbuchnetz.de/?sigle=Lexer&lemid=V03873 (lemma list only)
+- Not reachable: https://dil.ie/ (connection reset), Geiriadur Prifysgol Cymru (not found
+  by search for "hirnos" or "pentan"), Middle English Dictionary search (no result text)
+
+Registration (NAME = every name in 10.2 and 10.4)
+- https://rdap.publicinterestregistry.org/rdap/domain/NAME.org
+- https://rdap.verisign.com/com/v1/domain/NAME.com (registration year from the
+  "registration" event)
+- https://dns.google/resolve?name=NAME.org&type=NS and NAME.com
+
+Collisions (names in 10.2)
+- https://itunes.apple.com/search?term=NAME&entity=software&country=us (and country=de);
+  only "pentan" returned a same-name app
+- https://api.github.com/users/NAME, https://api.github.com/search/repositories?q=NAME+in:name
+- https://crates.io/api/v1/crates/kefli (exists)
+- Web searches "NAME app OR software OR company": heimwist, heimbod, samkund, gabaur,
+  kefli, gledi, tenlach, heimgart, mitiwist, thattr, muoza: no product of the same name;
+  near names only (HeimSync, Heima, Heimgard Smart, Keflo AI, GLED App, Tenli)
