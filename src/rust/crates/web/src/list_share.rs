@@ -145,7 +145,7 @@ fn ShareOptions(choice: RwSignal<String>) -> impl IntoView {
             view! {
                 <div class="flex items-start gap-3">
                     <input type="radio" name="ls-share" id=input_id.clone() value=value aria-describedby=hint_id.clone()
-                        class="mt-1 size-4 accent-primary"
+                        class=ui::cn(&["mt-1 size-4", ui::RADIO])
                         prop:checked=move || choice.get() == value
                         on:change=move |_| choice.set(value.to_string())/>
                     <div class="grid">

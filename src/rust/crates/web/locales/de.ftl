@@ -361,6 +361,7 @@ log-duration-hint = h:mm oder Minuten
 log-location = Ort
 log-notes = Notizen
 log-play-step = Partie
+log-session-step = Sitzung
 log-page = Aktuelle Seite
 log-of-pages = von { $pages }
 log-update = Aktualisieren
@@ -388,6 +389,11 @@ episodes-mark-season = Staffel als gesehen markieren
 episodes-mark = S{ $season } E{ $episode } als gesehen markieren
 episodes-mark-again = S{ $season } E{ $episode } nochmal sehen
 episodes-watched = Gesehen
+episodes-mark-season-listen = Staffel als gehört markieren
+episodes-mark-show-listen = Podcast als gehört markieren
+episodes-mark-listen = S{ $season } E{ $episode } als gehört markieren
+episodes-mark-again-listen = S{ $season } E{ $episode } nochmal hören
+episodes-watched-listen = Gehört
 episodes-again = Nochmal
 episodes-next = Als Nächstes
 episodes-row-menu = Mehr zu S{ $season } E{ $episode }
@@ -396,9 +402,14 @@ episodes-ask = { $count ->
     [one] Auch die frühere Folge als gesehen markieren?
    *[other] Auch die { $count } früheren Folgen als gesehen markieren?
 }
+episodes-ask-listen = { $count ->
+    [one] Auch die frühere Folge als gehört markieren?
+   *[other] Auch die { $count } früheren Folgen als gehört markieren?
+}
 episodes-ask-all = Alle { $count } markieren
 episodes-ask-one = Nur S{ $season } E{ $episode }
 episodes-remember = Für diese Serie merken
+episodes-remember-listen = Für diesen Podcast merken
 episodes-logged = { $count ->
     [one] Eine Folge
    *[other] { $count } Folgen
@@ -407,6 +418,10 @@ episodes-none = Noch keine Folgen bekannt.
 episodes-again-ask = { $count ->
     [one] Diese Folge ist schon gesehen. Nochmal als Wiederholung eintragen?
    *[other] Diese { $count } Folgen sind schon gesehen. Nochmal als Wiederholung eintragen?
+}
+episodes-again-ask-views = { $count ->
+    [one] Diese Folge ist schon gesehen. Ein weiteres Mal eintragen?
+   *[other] Diese { $count } Folgen sind schon gesehen. Alle ein weiteres Mal eintragen?
 }
 episodes-again-ask-listen = { $count ->
     [one] Diese Folge ist schon gehört. Nochmal eintragen?
@@ -858,6 +873,7 @@ history-type-progress = Fortschritt
 history-type-session = Sitzungen
 history-year-all = Alle Jahre
 history-session = Sitzung eingetragen
+history-play = Partie eingetragen
 history-with = mit { $names }
 history-play-you = Du
 history-play-won-you = Du hast gewonnen
@@ -2050,11 +2066,13 @@ episodes-when-range = Über einen Zeitraum verteilen
 episodes-from = Von
 episodes-to = Bis
 episodes-range-hint = Staffel, Serie und bis hier markieren verteilen die Folgen gleichmäßig vom ersten bis zum letzten Tag.
+episodes-range-hint-listen = Staffel, Podcast und bis hier markieren verteilen die Folgen gleichmäßig vom ersten bis zum letzten Tag.
 episodes-range-missing = Wähle beide Tage des Zeitraums.
 episodes-range-reversed = Der letzte Tag liegt vor dem ersten.
 episodes-range-future = Der Zeitraum darf nicht nach heute enden.
 episodes-when-release = Am Erscheinungstag
 episodes-release-hint = Staffel, Serie und bis hier markieren tragen jede Folge an dem Tag ein, an dem sie erschienen ist.
+episodes-release-hint-listen = Staffel, Podcast und bis hier markieren tragen jede Folge an dem Tag ein, an dem sie erschienen ist.
 episodes-release-missing = { $count ->
     [one] „Am Erscheinungstag“ wird nicht angeboten: Eine offene Folge dieser Staffel hat bis heute kein Erscheinungsdatum.
    *[other] „Am Erscheinungstag“ wird nicht angeboten: { $count } offene Folgen dieser Staffel haben bis heute kein Erscheinungsdatum.

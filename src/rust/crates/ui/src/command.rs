@@ -311,7 +311,8 @@ pub fn Command(
 
 /// One option, with its group heading before it when the group changes. Rows are at least
 /// 44 px high on phones (WCAG 2.5.8, design.md 6.4). The active row shows the key hints
-/// (hidden from screen readers: the input's description says them).
+/// (hidden from screen readers: the input's description says them) from 40 rem up: below
+/// that they lay over a title that wraps, and a phone has no such keys (v1-polish P4).
 #[component]
 fn CommandOption(
     item: CommandItem,
@@ -332,7 +333,7 @@ fn CommandOption(
         let h = hints.clone().filter(|_| selected())?;
         let second = h.secondary.get();
         Some(view! {
-            <span aria-hidden="true" class="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-1 pl-3">
+            <span aria-hidden="true" data-hints="" class="ml-auto hidden shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-1 pl-3 sm:flex">
                 <span class="inline-flex items-center gap-1 text-xs"><KeyHint keys=h.enter_keys.clone()/> {h.enter.get()}</span>
                 {(!second.is_empty()).then(|| view! {
                     <span class="inline-flex items-center gap-1 text-xs"><KeyHint keys=h.secondary_keys.clone()/> {second.clone()}</span>
@@ -362,16 +363,23 @@ fn CommandOption(
     }
 }
 
-/// The leading slot of an option: 2.5 rem wide whatever the shape of the box in it.
+/// The leading slot of an option: 2.5 rem wide whatever the shape of the box in it. A picture
+/// that does not load is taken away, so the icon under it shows and nothing else: no broken
+/// picture mark and no text (the picture has no alternative text, the label names the row).
+/// The row is kept while the list changes around it: a picture that loads after a failure
+/// (another address for the same row) is shown again.
 #[component]
 fn Leading(leading: CommandLeading) -> impl IntoView {
     let shape = if leading.square { "w-10" } else { "w-7" };
+    let failed = RwSignal::new(false);
     view! {
         <span data-leading="" aria-hidden="true" class="mr-3 flex w-10 shrink-0 justify-center">
             <span class=cn(&["relative flex h-10 items-center justify-center overflow-hidden rounded-sm bg-muted text-muted-foreground", shape])>
                 <Icon name=leading.icon/>
                 {leading.image.map(|src| view! {
                     <img src=src alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"
+                        on:error=move |_| failed.set(true) on:load=move |_| failed.set(false)
+                        class:hidden=move || failed.get()
                         class="absolute inset-0 h-full w-full object-cover"/>
                 })}
             </span>

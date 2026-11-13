@@ -72,7 +72,7 @@ pub(super) fn SignupForm(s: SettingDto) -> impl IntoView {
                     view! {
                         <div class="flex items-start gap-3">
                             <input type="radio" name="signup" id=id.clone() value=*mode disabled=fixed
-                                aria-describedby=hint_id.clone() class="mt-1 size-4 accent-primary"
+                                aria-describedby=hint_id.clone() class=ui::cn(&["mt-1 size-4", ui::RADIO])
                                 prop:checked=move || value.get() == *mode
                                 on:change=move |_| value.set((*mode).to_string())/>
                             <span class="grid gap-0.5">

@@ -361,6 +361,7 @@ log-duration-hint = h:mm or minutes
 log-location = Place
 log-notes = Notes
 log-play-step = Play
+log-session-step = Session
 log-page = Current page
 log-of-pages = of { $pages }
 log-update = Update
@@ -388,6 +389,11 @@ episodes-mark-season = Mark season watched
 episodes-mark = Mark S{ $season } E{ $episode } watched
 episodes-mark-again = Watch S{ $season } E{ $episode } again
 episodes-watched = Watched
+episodes-mark-season-listen = Mark season listened
+episodes-mark-show-listen = Mark podcast listened
+episodes-mark-listen = Mark S{ $season } E{ $episode } listened
+episodes-mark-again-listen = Listen to S{ $season } E{ $episode } again
+episodes-watched-listen = Listened
 episodes-again = Again
 episodes-next = Next up
 episodes-row-menu = More for S{ $season } E{ $episode }
@@ -396,9 +402,14 @@ episodes-ask = { $count ->
     [one] Also mark the earlier episode as watched?
    *[other] Also mark the { $count } earlier episodes as watched?
 }
+episodes-ask-listen = { $count ->
+    [one] Also mark the earlier episode as listened?
+   *[other] Also mark the { $count } earlier episodes as listened?
+}
 episodes-ask-all = Mark all { $count }
 episodes-ask-one = Only S{ $season } E{ $episode }
 episodes-remember = Remember for this show
+episodes-remember-listen = Remember for this podcast
 episodes-logged = { $count ->
     [one] One episode
    *[other] { $count } episodes
@@ -407,6 +418,10 @@ episodes-none = No episodes known yet.
 episodes-again-ask = { $count ->
     [one] This episode is already watched. Log it again as a rewatch?
    *[other] These { $count } episodes are already watched. Log them again as a rewatch?
+}
+episodes-again-ask-views = { $count ->
+    [one] This episode is already watched. Log it again as a further view?
+   *[other] These { $count } episodes are already watched. Log them again as further views?
 }
 episodes-again-ask-listen = { $count ->
     [one] This episode is already listened to. Log it again?
@@ -858,6 +873,7 @@ history-type-progress = Progress
 history-type-session = Sessions
 history-year-all = All years
 history-session = Session logged
+history-play = Play logged
 history-with = with { $names }
 history-play-you = You
 history-play-won-you = You won
@@ -2059,11 +2075,13 @@ episodes-when-range = Spread over a date range
 episodes-from = From
 episodes-to = To
 episodes-range-hint = Mark season, Mark show and Mark up to here spread the episodes evenly from the first to the last day.
+episodes-range-hint-listen = Mark season, Mark podcast and Mark up to here spread the episodes evenly from the first to the last day.
 episodes-range-missing = Pick both days of the range.
 episodes-range-reversed = The last day is before the first.
 episodes-range-future = The range cannot end after today.
 episodes-when-release = On release dates
 episodes-release-hint = Mark season, Mark show and Mark up to here log each episode on the day it was released.
+episodes-release-hint-listen = Mark season, Mark podcast and Mark up to here log each episode on the day it was released.
 episodes-release-missing = { $count ->
     [one] "On release dates" is not offered: one open episode of this season has no release date up to today.
    *[other] "On release dates" is not offered: { $count } open episodes of this season have no release date up to today.

@@ -1,11 +1,18 @@
 import { test, expect, type Page } from "./fixtures";
 import { readFileSync } from "node:fs";
-import { addPerson, contrast, expectNoA11yViolations, hydrated, importDone, PASSWORD, requestLink, signUp, token } from "./helpers";
+import { addPerson, contrast, expectNoA11yViolations, expectReflow, hydrated, importDone, PASSWORD, requestLink, signUp, token } from "./helpers";
 
 // UX phase 0 review (docs/reviews/2026-11-06-ux0-review.md): the real shell signed in, in
 // light and dark, on desktop and at 360 px with the tab bar (UX0-3); the APG menu button and
 // dialog focus rules (UX0-1, UX0-2); shortcuts, aria-current, offline, unread, the Show
 // toggle and the lock-out text (UX0-12, UX0-4, UX0-5, UX0-13).
+
+// Where the server of these tests says the provider's pictures are: the TMDB mock (the image
+// base follows the API base of the connector); the mock has no pictures and answers 404.
+// These are http addresses: the content security policy allows them only because the server
+// of the tests is on http itself. On https the policy guard would fail the cover tests.
+const IMAGES = `http://127.0.0.1:${process.env.TMDB_MOCK_PORT ?? 3011}/t/p/`;
+const isCover = (src: string | null) => !!src && (src.startsWith(IMAGES) || src.startsWith("/assets/"));
 
 const PAGES = [
   "/",
@@ -262,6 +269,44 @@ test("single-key shortcuts, but not while typing; aria-current marks the section
   await page.goto("/settings/notifications");
   await hydrated(page);
   await expect(nav.locator("[aria-current=page]")).toHaveCount(0);
+
+  // v1-polish P1: Stats is reached from the account menu, so the top bar marks no section
+  // there (it marked Home) and the menu marks its own entry
+  await page.goto("/stats");
+  await hydrated(page);
+  await expect(page.getByRole("heading", { level: 1, name: "Stats" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current", "page");
+  await expect(nav.locator("[aria-current=page]")).toHaveCount(0);
+  await page.getByRole("button", { name: "Account menu for Kai" }).click();
+  const menu = page.getByRole("menu");
+  await expect(menu.getByRole("menuitem", { name: "Stats" })).toHaveAttribute("aria-current", "page");
+  await expect(menu.locator("[aria-current=page]")).toHaveCount(1);
+  // review POL-1: the mark can be seen, too. The entry of the page is heavier and tinted
+  // like the current section of the top bar; the entry with the focus keeps its own look
+  const look = (name: string) =>
+    menu.getByRole("menuitem", { name, exact: true }).evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { weight: Number(s.fontWeight), background: s.backgroundColor, colour: s.color };
+    });
+  const [here, plain] = [await look("Stats"), await look("Settings")];
+  expect(here.weight, "the current entry is heavier").toBeGreaterThanOrEqual(600);
+  expect(plain.weight).toBeLessThan(600);
+  expect(here.background, "the current entry is tinted").not.toBe(plain.background);
+  expect(await contrast(page, here.colour, here.background), "current entry: text on its tint").toBeGreaterThanOrEqual(4.5);
+  await expect(menu.getByRole("menuitem", { name: "Notifications", exact: true })).toBeFocused();
+  const focused = await look("Notifications");
+  await page.keyboard.press("ArrowDown");
+  await expect(menu.getByRole("menuitem", { name: "Stats", exact: true })).toBeFocused();
+  const both = await look("Stats");
+  expect(both.background, "with the focus on it the current entry looks focused").toBe(focused.background);
+  expect(both.colour).toBe(focused.colour);
+  expect(both.weight, "and stays the heavier one").toBeGreaterThanOrEqual(600);
+  await page.keyboard.press("Escape");
+  // on a phone the You tab is the current one
+  await page.setViewportSize({ width: 390, height: 800 });
+  const tabs = page.getByRole("navigation", { name: "Main navigation" }).last();
+  await expect(tabs.getByRole("link", { name: "You" })).toHaveAttribute("aria-current", "page");
+  await expect(tabs.getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current", "page");
 });
 
 test("offline: the banner appears and the sign-in button is disabled", async ({ page, context }) => {
@@ -329,7 +374,8 @@ test("the lock-out names the remaining minutes", async ({ page }) => {
 
 test("palette: Ctrl+Enter adds a provider hit as Planned and stays open, Undo removes it; then the next step; recent items and suggestions", async ({ page }) => {
   test.setTimeout(90_000);
-  await signUp(page, `quick${Date.now()}`, "Quinn");
+  const quinn = `quick${Date.now()}`;
+  await signUp(page, quinn, "Quinn");
   const library = async () => (await (await page.request.get("/api/v1/library?limit=50")).json()).items as { entry: { status: string }; item: { title: string } }[];
 
   await page.keyboard.press("Control+k");
@@ -375,11 +421,169 @@ test("palette: Ctrl+Enter adds a provider hit as Planned and stays open, Undo re
   await page.keyboard.press("Control+k");
   const recent = palette.getByRole("option", { name: /^Fight Club \(1999\)/ });
   await expect(recent).toBeVisible();
+  // v1-polish P7: a recent item leads with the same box as a result row, with its cover
+  await expect(recent.locator("[data-leading] svg")).toHaveCount(1);
+  expect(isCover(await recent.locator("[data-leading] img").getAttribute("src"))).toBe(true);
+  // the commands stay rows of text
+  await expect(palette.getByRole("option", { name: "Go to Lists" }).locator("[data-leading]")).toHaveCount(0);
   await expect(palette.getByText("Recent", { exact: true })).toBeVisible();
+  // review POL-3: the list in this browser can hold an address from before the cover was
+  // stored. A search answer that names the item brings the address of today (DEC-640), for
+  // the row and for the stored list
+  await page.keyboard.press("Escape");
+  await expect(palette).toHaveCount(0);
+  const stale = `${IMAGES}w780/remembered-earlier.jpg`;
+  const remembered = () => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? "[]")[0]?.cover as string | undefined, `app-recent-${quinn}`);
+  await page.evaluate(
+    ([key, cover]) => {
+      const list = JSON.parse(localStorage.getItem(key)!);
+      list[0].cover = cover;
+      localStorage.setItem(key, JSON.stringify(list));
+    },
+    [`app-recent-${quinn}`, stale],
+  );
+  await page.keyboard.press("Control+k");
+  await expect(recent.locator("[data-leading] img")).toHaveAttribute("src", stale);
+  await palette.getByRole("combobox").fill("fight club");
+  await expect(palette.getByText("In your library - Movie")).toBeVisible({ timeout: 20_000 });
+  const fresh = await palette.getByRole("option", { name: /^Fight Club \(1999\)/ }).first().locator("[data-leading] img").getAttribute("src");
+  expect(isCover(fresh) && fresh !== stale, `the result row's cover: ${fresh}`).toBe(true);
+  await expect.poll(remembered).toBe(fresh);
+  await palette.getByRole("combobox").fill("");
+  await expect(palette.getByText("Recent", { exact: true })).toBeVisible();
+  await expect(recent.locator("[data-leading] img")).toHaveAttribute("src", fresh!);
   await palette.getByRole("option", { name: "Go to Lists" }).click();
   await expect(page).toHaveURL(/\/lists$/);
   // recent items stay in this browser
   expect(await page.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith("app-recent-")))).toBe(true);
+});
+
+test("palette at 390 px: the active row shows its whole title and no key hints", async ({ page }) => {
+  // v1-polish P4: the hints ("Enter Open", "Ctrl+Enter Add as Planned or next step") lay
+  // over a title that wraps; below 40 rem they are not laid out, the input's description
+  // still says them
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.route((url) => url.href.startsWith(IMAGES), (route) => route.fulfill({ status: 404, body: "" }));
+  await signUp(page, `narrowpal${Date.now()}`, "Nia");
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Search" });
+  await palette.getByRole("combobox").fill("fight club");
+  const long = palette.getByRole("option", { name: /^Fight Club But With Tennis And No Fight/ }).first();
+  await expect(long).toBeVisible({ timeout: 20_000 });
+  await long.hover();
+  await expect(long).toHaveAttribute("aria-selected", "true");
+  await expect(long.locator("[data-hints]")).toBeHidden();
+  const fits = await long.evaluate((row) => {
+    const label = row.querySelector("span.min-w-0")!;
+    const [r, l] = [row.getBoundingClientRect(), label.getBoundingClientRect()];
+    const range = document.createRange();
+    range.selectNodeContents(label);
+    const text = range.getBoundingClientRect();
+    return { inside: l.right <= r.right + 0.5 && text.right <= r.right + 0.5, bottom: text.bottom <= r.bottom + 0.5, width: l.width };
+  });
+  expect(fits.inside, "the title ends inside its row").toBe(true);
+  expect(fits.bottom, "the row grows with a title that wraps").toBe(true);
+  // the title has the row to itself: everything right of the leading box
+  expect(fits.width).toBeGreaterThan(200);
+  await expect(palette.getByRole("combobox")).toHaveAccessibleDescription(/Enter: Open/);
+  await expectReflow(page, "palette at 390 px");
+  // from 40 rem up the active row shows them
+  await page.setViewportSize({ width: 800, height: 800 });
+  await long.hover();
+  await expect(long.locator("[data-hints]")).toBeVisible();
+  // review POL-12: 320 px is a desktop of 1280 px at 400 % zoom. The hints are not drawn
+  // there either; both keys stay in the input's description and in the shortcut help
+  await page.setViewportSize({ width: 320, height: 800 });
+  await long.hover();
+  await expect(long.locator("[data-hints]")).toBeHidden();
+  await expect(palette.getByRole("combobox")).toHaveAccessibleDescription(/Enter: Open\. Ctrl\+Enter: Add as Planned or next step/);
+  await page.keyboard.press("Escape");
+  await expect(palette).toHaveCount(0);
+  await page.keyboard.press("?");
+  const help = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(help.getByText("Add as Planned, or run the next step")).toBeVisible();
+  await expect(help.getByText("Open the result, or choose it for the page that opened the search")).toBeVisible();
+  await expectReflow(page, "shortcut help at 320 px");
+});
+
+test("a cover that failed before the page's code ran shows the title in its box", async ({ page }) => {
+  // review POL-7: on a server-rendered page a picture can fail before the code that listens
+  // for `error` runs (a host that is blocked or refuses at once). The code is held back here
+  // until the picture has failed, so only the check at mount can find it
+  test.setTimeout(90_000);
+  await signUp(page, `earlyfail${Date.now()}`, "Edda");
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Search" });
+  await palette.getByRole("combobox").fill("fight club");
+  const option = palette.getByRole("option", { name: /^Fight Club \(1999\)/ }).first();
+  await expect(option).toBeVisible({ timeout: 20_000 });
+  await option.hover();
+  await page.keyboard.press("Control+Enter");
+  await expect(page.locator("[role=status][aria-live] > div").filter({ hasText: "Added to your library as Planned" })).toBeVisible();
+
+  await page.route(
+    (url) => url.href.startsWith(IMAGES) || url.pathname.startsWith("/assets/"),
+    (route) => route.fulfill({ status: 404, body: "" }),
+  );
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  let code = 0;
+  await page.route(
+    (url) => url.pathname.startsWith("/pkg/") && /\.(js|wasm)$/.test(url.pathname),
+    async (route) => {
+      code += 1;
+      await held;
+      await route.continue();
+    },
+  );
+  // (`load` waits for the code that is held back)
+  await page.goto("/library", { waitUntil: "commit" });
+  const picture = page.locator('img[alt="Cover of Fight Club"]').first();
+  await expect.poll(() => picture.evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth === 0), { timeout: 20_000 }).toBe(true);
+  // the page is not hydrated: the box is still the server's, without a title in it
+  await expect(page.locator("body[data-hydrated]")).toHaveCount(0);
+  const box = page.locator('[role=img][aria-label="Cover of Fight Club"]');
+  await expect(box).toHaveCount(0);
+  expect(code, "the page's code was asked for and held").toBeGreaterThan(0);
+  release();
+  await hydrated(page);
+  await expect(box.first()).toBeVisible();
+  await expect(box.first()).toHaveText("Fight Club");
+  await expect(picture).toBeHidden();
+});
+
+test("a cover that does not load shows the title in its box, on a card and on the item page", async ({ page }) => {
+  // v1-polish P5 (review OT2D-13): covers come from the provider's host until this instance
+  // has stored them (DEC-640); when that host does not answer, the box shows what an item
+  // without a cover shows instead of an empty box or a broken picture
+  test.setTimeout(90_000);
+  await page.route(
+    (url) => url.href.startsWith(IMAGES) || url.pathname.startsWith("/assets/"),
+    (route) => route.fulfill({ status: 404, body: "" }),
+  );
+  await signUp(page, `nocover${Date.now()}`, "Cora");
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Search" });
+  await palette.getByRole("combobox").fill("fight club");
+  const option = palette.getByRole("option", { name: /^Fight Club \(1999\)/ }).first();
+  await expect(option).toBeVisible({ timeout: 20_000 });
+  await option.hover();
+  await page.keyboard.press("Control+Enter");
+  await expect(page.locator("[role=status][aria-live] > div").filter({ hasText: "Added to your library as Planned" })).toBeVisible();
+  for (const path of ["/library", null]) {
+    if (path) {
+      await page.goto(path);
+    } else {
+      await page.getByRole("link", { name: /Fight Club/ }).first().click();
+      await expect(page).toHaveURL(/\/items\//);
+    }
+    await hydrated(page);
+    const cover = page.getByRole("img", { name: "Cover of Fight Club" }).first();
+    await expect(cover).toBeVisible();
+    await expect(cover, path ?? "item page").toHaveText("Fight Club");
+    await expect(cover.locator("img")).toBeHidden();
+    await expectNoA11yViolations(page, `failed cover on ${path ?? "the item page"}`);
+  }
 });
 
 test("wide screens: grid pages and the top bar are 96 rem wide, record pages 80 rem", async ({ page }) => {
@@ -585,13 +789,24 @@ test("palette: rows of the previous query are filtered by the new text until its
 // those copies first, in the order of our own text score, with a source's answer only added
 // below them: from the second search on, a derivative title could stand above the original
 // the source names first. Now only the person's library leads; a source's answer orders its
-// group. Each result row leads with a box: the cover when this instance has stored it, else
-// the icon of the kind (a cover known only by its provider address is not loaded, DEC-608).
+// group. Each result row leads with a box: the cover this instance has stored, else the
+// cover at its provider's address (one rule for every page, DEC-640), over the icon of the
+// kind, which shows while the picture loads, when it fails and when there is none.
 test("palette: the library leads, a source's answer keeps its order, rows lead with a cover box", async ({ page }) => {
   test.setTimeout(120_000);
   const fixture = JSON.parse(readFileSync(`${__dirname}/../../rust/crates/connectors/fixtures/tmdb/search-movie.json`, "utf8"));
   const answer: string[] = fixture.body.results.map((r: { title: string; release_date?: string }) =>
     r.release_date ? `${r.title} (${r.release_date.slice(0, 4)})` : r.title,
+  );
+  // the provider's image host: every second poster of the answer is there, every other
+  // request fails (review POL-8: not only the first title's, which another spec may have
+  // in a library, so that its cover is stored here and the host is never asked for it)
+  const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  const paths: string[] = fixture.body.results.map((r: { poster_path: string | null }) => r.poster_path).filter(Boolean);
+  const there = (src: string) => paths.some((p, i) => i % 2 === 0 && src.endsWith(p));
+  await page.route(
+    (url) => url.href.startsWith(IMAGES),
+    (route) => (there(route.request().url()) ? route.fulfill({ status: 200, contentType: "image/png", body: PNG }) : route.fulfill({ status: 404, body: "" })),
   );
   await signUp(page, `rank${Date.now()}`, "Rank Tester");
   await page.keyboard.press("Control+k");
@@ -631,12 +846,40 @@ test("palette: the library leads, a source's answer keeps its order, rows lead w
   expect(of(all, "tmdb - Movie").slice(0, answer.length), "the source's order").toEqual(answer);
   expect(of(all, "In your library - Movie")).toEqual([]);
 
-  // rows lead with a box of one size; none loads a picture from the provider
+  // rows lead with a box of one size. A result nobody has in a library shows its cover from
+  // the source's address (DEC-640, v1-polish P7): every row of the answer that has a poster
+  // has a picture, stored here or at the provider
   const options = palette.getByRole("option");
   const leading = options.locator("[data-leading]");
   await expect.poll(() => leading.count()).toBe(await options.count());
-  await expect(leading.locator("svg").first()).toBeVisible();
-  expect(await leading.locator("img").evaluateAll((imgs) => imgs.map((i) => i.getAttribute("src")).filter((s) => !s?.startsWith("/assets/")))).toEqual([]);
+  const posters = fixture.body.results.filter((r: { poster_path: string | null }) => r.poster_path).length;
+  const srcs = await leading.locator("img").evaluateAll((imgs) => imgs.map((i) => i.getAttribute("src") ?? ""));
+  expect(srcs.length).toBeGreaterThanOrEqual(posters);
+  expect(srcs.filter((s) => !isCover(s))).toEqual([]);
+  expect(srcs.filter((s) => s.startsWith(IMAGES)).length, "covers at the provider's address").toBeGreaterThan(0);
+  // a row whose picture is at the provider's address and is there: it loads
+  const remote = srcs.filter((s) => s.startsWith(IMAGES));
+  const [good, bad] = [remote.find(there), remote.find((s) => !there(s))];
+  expect(good, `a provider cover that is there, of ${remote}`).toBeTruthy();
+  expect(bad, `a provider cover that is not there, of ${remote}`).toBeTruthy();
+  expect(paths.map((p) => `${IMAGES}w780${p}`)).toContain(good);
+  const picture = leading.locator(`img[src="${good}"]`).first();
+  await picture.scrollIntoViewIfNeeded();
+  await expect.poll(() => picture.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(1);
+  for (const [name, value] of [["alt", ""], ["loading", "lazy"], ["decoding", "async"], ["referrerpolicy", "no-referrer"]]) {
+    await expect(picture).toHaveAttribute(name, value);
+  }
+  await expect(picture).toBeVisible();
+  // v1-polish P5: a picture that does not load is taken away, the icon of the kind shows
+  // and no text is drawn in the box
+  const failed = options
+    .filter({ has: page.locator(`[data-leading] img[src="${bad}"]`) })
+    .first()
+    .locator("[data-leading]");
+  await failed.scrollIntoViewIfNeeded();
+  await expect(failed.locator("img")).toBeHidden();
+  await expect(failed.locator("svg")).toBeVisible();
+  expect((await failed.textContent())?.trim()).toBe("");
   const heights = await options.evaluateAll((rows) => rows.slice(1, 6).map((r) => Math.round(r.getBoundingClientRect().height)));
   expect(new Set(heights).size, `row heights ${heights}`).toBe(1);
   const lefts = await options.evaluateAll((rows) => rows.slice(0, 6).map((r) => Math.round(r.querySelector("span.min-w-0")!.getBoundingClientRect().left)));

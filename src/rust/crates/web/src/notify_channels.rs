@@ -366,6 +366,7 @@ fn CardFooter(
             <Button size=ButtonSize::Sm variant=ButtonVariant::Outline
                 attr:aria-label=named("notify-edit-named")
                 attr:aria-expanded=move || if editing.get() { "true" } else { "false" }
+                attr:data-nf-edit=id.get_value()
                 on:click=move |_| editing.update(|e| *e = !*e)>{t("notify-edit")}</Button>
             <Button size=ButtonSize::Sm variant=ButtonVariant::Outline
                 attr:aria-label=named("notify-delete-named")
@@ -408,6 +409,13 @@ fn check_edit(spec: &FieldSpec, value: &str) -> Option<&'static str> {
 /// keeps them) and whether it is on; `PUT /notifications/channels/{id}`.
 #[component]
 fn EditChannel(c: ChannelDto, state: NotifyState, editing: RwSignal<bool>) -> impl IntoView {
+    // Save and Cancel close the form and hand the focus back to the button that opened it:
+    // first the focus, then the form goes, with the button that had it (sec0 "left open")
+    let opener = format!("[data-nf-edit=\"{}\"]", c.id);
+    let close = Callback::new(move |()| {
+        let _ = crate::keyboard::focus(&opener);
+        editing.set(false);
+    });
     let specs = fields(&c.kind);
     let name = RwSignal::new(c.name.clone());
     let enabled = RwSignal::new(c.enabled);
@@ -450,7 +458,7 @@ fn EditChannel(c: ChannelDto, state: NotifyState, editing: RwSignal<bool>) -> im
         async move {
             match rest::call_dto::<ChannelDto>("PUT", &path, Some(body)).await {
                 Ok(_) => {
-                    editing.set(false);
+                    close.run(());
                     state.refresh();
                 }
                 Err(e) => failed.set(Some(notify_error(&e.code))),
@@ -481,7 +489,7 @@ fn EditChannel(c: ChannelDto, state: NotifyState, editing: RwSignal<bool>) -> im
             {move || failed.get().map(|m| view! { <Alert variant=AlertVariant::Destructive role=AlertRole::Alert>{m}</Alert> })}
             <div class="flex flex-wrap gap-2">
                 <Button r#type="submit" loading=save.pending()>{t("notify-channel-save")}</Button>
-                <Button variant=ButtonVariant::Ghost on:click=move |_| editing.set(false)>{t("notify-channel-cancel")}</Button>
+                <Button variant=ButtonVariant::Ghost on:click=move |_| close.run(())>{t("notify-channel-cancel")}</Button>
             </div>
         </form>
     }

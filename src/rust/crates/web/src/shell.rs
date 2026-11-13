@@ -31,7 +31,8 @@ pub struct ThemeChoice(pub RwSignal<String>);
 pub struct ShortcutsOpen(pub RwSignal<bool>);
 
 /// The section a path belongs to; its links get `aria-current="page"`. Pages reached from
-/// the account menu or the You hub belong to `/you` (the mobile tab).
+/// the account menu or the You hub belong to `/you` (the mobile tab): Stats too, which the
+/// top bar used to mark as Home (v1-polish P1). The account menu marks its own entry.
 #[must_use]
 pub fn section_of(path: &str) -> &'static str {
     match path
@@ -40,12 +41,12 @@ pub fn section_of(path: &str) -> &'static str {
         .next()
         .unwrap_or_default()
     {
-        "" | "stats" => "/",
+        "" => "/",
         "library" | "items" => "/library",
         "history" => "/history",
         "lists" | "shared" => "/lists",
         "people" => "/people",
-        "you" | "settings" | "admin" => "/you",
+        "you" | "stats" | "settings" | "admin" => "/you",
         _ => "",
     }
 }
@@ -87,6 +88,26 @@ const ADMIN_HREF: &str = "/admin";
 
 /// Notifications live in the settings area (design.md 6.8); the bell links there.
 const NOTIFICATIONS_HREF: &str = "/settings/notifications";
+
+/// The entry of the account menu a path belongs to: the page itself, or the area it is in
+/// (`/settings/...`, `/admin/...`). Notifications are an entry of their own inside the
+/// settings area, with every page below them.
+#[must_use]
+pub fn account_entry(path: &str) -> Option<&'static str> {
+    let path = path.trim_end_matches('/');
+    if path
+        .strip_prefix(NOTIFICATIONS_HREF)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    {
+        return Some(NOTIFICATIONS_HREF);
+    }
+    match path.trim_start_matches('/').split('/').next()? {
+        "stats" => Some("/stats"),
+        "settings" => Some("/settings/account"),
+        "admin" => Some(ADMIN_HREF),
+        _ => None,
+    }
+}
 
 /// The five sections of the top bar (design.md 3.2, 3.3); all routes exist.
 fn sections() -> Vec<(&'static str, &'static str)> {
@@ -516,8 +537,15 @@ fn SignedInBar(current: Signal<String>) -> impl IntoView {
     }
 }
 
+/// An entry of the account menu. The entry of the page one is on (`aria-current="page"`) is
+/// heavier and tinted like the current section of the top bar (review POL-1: on Stats,
+/// Settings and Admin the top bar marks nothing); with the focus on it, it looks focused and
+/// keeps the weight.
 const MENU_ITEM: &str = "flex w-full min-h-9 cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 \
-    text-left text-sm outline-none hover:bg-accent focus:bg-accent focus:text-accent-foreground";
+    text-left text-sm outline-none hover:bg-accent focus:bg-accent focus:text-accent-foreground \
+    aria-[current=page]:bg-primary-soft aria-[current=page]:font-semibold \
+    aria-[current=page]:text-primary aria-[current=page]:focus:bg-accent \
+    aria-[current=page]:focus:text-accent-foreground";
 
 const SEPARATOR: &str = "my-1 h-px bg-border";
 
@@ -633,11 +661,17 @@ fn AccountMenuItems(open: RwSignal<bool>, close: Callback<()>) -> impl IntoView 
     let theme = expect_context::<ThemeChoice>().0;
     let help = expect_context::<ShortcutsOpen>().0;
     let links = account_links(cfg.is_admin);
+    // the entry of the page one is on (Stats has no place in the top bar, v1-polish P1)
+    let path = use_location().pathname;
     view! {
-        {links.iter().map(|(href, key)| view! {
-            <a role="menuitem" tabindex="-1" href=*href class=MENU_ITEM on:click=move |_| open.set(false)>
-                {t(key)}
-            </a>
+        {links.iter().map(|(href, key)| {
+            let href = *href;
+            let here = move || path.with(|p| account_entry(p) == Some(href)).then_some("page");
+            view! {
+                <a role="menuitem" tabindex="-1" href=href class=MENU_ITEM aria-current=here on:click=move |_| open.set(false)>
+                    {t(key)}
+                </a>
+            }
         }).collect_view()}
         <div role="separator" class=SEPARATOR></div>
         <ThemeItems theme=theme close=close/>
@@ -1051,6 +1085,10 @@ mod tests {
         assert_eq!(section_of("/people"), "/people");
         assert_eq!(section_of("/settings/notifications"), "/you");
         assert_eq!(section_of("/admin/users"), "/you");
+        // Stats is reached from the account menu and the You hub, like the settings: it is
+        // not Home (v1-polish P1)
+        assert_eq!(section_of("/stats"), "/you");
+        assert_eq!(section_of("/stats/"), "/you");
         assert_eq!(section_of("/notifications"), "");
         assert_eq!(section_of("/sessions"), "");
     }
@@ -1102,5 +1140,29 @@ mod tests {
         );
         // the Stats page is reached from the account menu too (design.md 6.1)
         assert!(account_links(false).iter().any(|(h, _)| *h == "/stats"));
+        // and the menu marks the entry of the page one is on
+        assert_eq!(account_entry("/stats"), Some("/stats"));
+        assert_eq!(
+            account_entry("/settings/notifications"),
+            Some(NOTIFICATIONS_HREF)
+        );
+        assert_eq!(
+            account_entry("/settings/privacy"),
+            Some("/settings/account")
+        );
+        assert_eq!(account_entry("/admin/users"), Some("/admin"));
+        assert_eq!(account_entry("/library"), None);
+        // a page below Notifications is still Notifications (review POL-16)
+        assert_eq!(
+            account_entry("/settings/notifications/rules"),
+            Some(NOTIFICATIONS_HREF)
+        );
+        assert_eq!(
+            account_entry("/settings/notifications-log"),
+            Some("/settings/account")
+        );
+        for (href, _) in account_links(true) {
+            assert_eq!(account_entry(href), Some(href));
+        }
     }
 }

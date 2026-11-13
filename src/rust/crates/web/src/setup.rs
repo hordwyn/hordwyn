@@ -212,7 +212,7 @@ fn HostingCard(id: &'static str, choice: RwSignal<String>, disabled: bool) -> im
     };
     view! {
         <label for=for_id class="flex cursor-pointer gap-3 rounded-xl border bg-card p-4 has-[:checked]:border-primary has-[:checked]:ring-2 has-[:checked]:ring-ring has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
-            <input id=input_id type="radio" name="hosting" value=id class="mt-1 size-5 shrink-0 accent-[var(--primary)]"
+            <input id=input_id type="radio" name="hosting" value=id class=ui::cn(&["mt-1 size-5", ui::RADIO])
                 aria-describedby=described disabled=disabled
                 prop:checked=move || choice.get() == id
                 on:change=move |_| choice.set(id.to_string())/>

@@ -47,11 +47,25 @@ fn others(row: &ActivityRowDto) -> Vec<String> {
         .collect()
 }
 
-/// What happened, in words: the progress, else a logged session.
+/// What happened, in words: the progress, else a logged session, which a board game calls a
+/// play (as the dialog, its toast and the "Plays" tab do; OT-16, v1-polish P3).
+/// A session reaches the feed as a row of its own or as the history event `session`.
 fn what(i: &I18n, row: &ActivityRowDto) -> String {
-    row.progress
-        .as_ref()
-        .map_or_else(|| i.t("history-session"), |p| progress_label(i, p))
+    match &row.progress {
+        Some(p) if p.get("type").and_then(|t| t.as_str()) != Some("session") => {
+            progress_label(i, p)
+        }
+        _ => i.t(session_key(&row.kind)),
+    }
+}
+
+/// "Play logged" for a board game, "Session logged" for every other kind with sessions.
+fn session_key(kind: &str) -> &'static str {
+    if kind == "board_game" {
+        "history-play"
+    } else {
+        "history-session"
+    }
 }
 
 /// The parts of what a play says beyond its people: the result, the scores, the duration.
@@ -1025,6 +1039,39 @@ mod tests {
         r.participants = serde_json::from_value(people).unwrap();
         r.play = serde_json::from_value(play).unwrap();
         r
+    }
+
+    /// A board game's row reads as a play; a video game's stays a session.
+    #[test]
+    fn a_board_game_row_says_play_logged() {
+        let en = I18n::new("en", std::collections::BTreeMap::new());
+        let de = I18n::new("de", std::collections::BTreeMap::new());
+        let of = |kind: &str| {
+            let mut r = row("2026-11-06T10:00:00Z", "2026-11-06", "10:00");
+            r.kind = kind.into();
+            r
+        };
+        assert_eq!(what(&en, &of("board_game")), "Play logged");
+        assert_eq!(what(&de, &of("board_game")), "Partie eingetragen");
+        assert_eq!(what(&en, &of("video_game")), "Session logged");
+        assert_eq!(what(&de, &of("video_game")), "Sitzung eingetragen");
+        // the row of a session history event carries the progress `session`: the same words
+        let event = |kind: &str| {
+            let mut r = of(kind);
+            r.row_type = "progress".into();
+            r.progress = Some(serde_json::json!({"type": "session"}));
+            r
+        };
+        assert_eq!(what(&en, &event("board_game")), "Play logged");
+        assert_eq!(what(&de, &event("board_game")), "Partie eingetragen");
+        assert_eq!(what(&en, &event("video_game")), "Session logged");
+        // a row with another progress says the progress, whatever the kind
+        let mut done = of("board_game");
+        done.progress = Some(serde_json::json!({"type": "finished"}));
+        assert_eq!(
+            what(&en, &done),
+            progress_label(&en, done.progress.as_ref().unwrap())
+        );
     }
 
     /// OT-11: a play's row says who won, the scores and how long it took (it said only

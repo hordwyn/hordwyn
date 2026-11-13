@@ -1,0 +1,101 @@
+= What v1 covers
+
+Version 1 is a home instance: one household, one web process, reachable through a reverse
+proxy. This page says which kinds of media can be found and added from a source, which
+cannot yet and how they get in anyway, and the limits a first-time user would otherwise
+find out by surprise.
+
+// The lines of books, board games and "by hand" are updated by the packages that build
+// them (v1-books, v1-wikidata, v1-manual); the page is final with package v1-wikidata.
+
+== Kinds with a source
+
+The search (`Ctrl+K`, or the search field of the top bar) asks these sources and adds
+what you pick to your library, with cover, year and description.
+
+[cols="1,2,3"]
+|===
+|Kind |Source |Notes
+
+|Movie
+|TMDB
+|Counts every time you watch it; hours come from the runtime.
+
+|Show
+|TMDB; TheTVDB when the instance has a key for it
+|Episodes, bulk marks, rewatch runs. Anime that TMDB lists can be tracked as a show and
+then counts as a show in the filters and the statistics.
+
+|Video game
+|IGDB
+|Sessions with duration, players, scores and winner.
+
+|Podcast
+|Podcast Index
+|The source gives the number of episodes, not a list of them; episodes are counted, not
+timed.
+|===
+
+An admin turns sources on and enters their keys on Admin > Data sources
+(xref:connectors.adoc[Connectors and attribution] has the terms of each). A kind whose
+source is off or has no key behaves like a kind without a source.
+
+== Kinds without a source
+
+These kinds exist (statuses, progress, lists, statistics and sharing work for them), but
+the search finds nothing new for them:
+
+* Book
+* Board game
+* Anime (as its own kind) and manga
+* Comic
+* Audiobook
+* Music
+* Visual novel
+
+The way in is a file in this application's own format, imported on Settings > Imports and
+export: one line per item with a `source_id` (any text that names the line), the `kind`
+and a `title` is enough. Such an item has a title
+and whatever the file says, and no cover, description or lengths, because no source knows
+it. xref:import-format.adoc[Import and export format] describes the file; a minimal one:
+
+[source,json]
+----
+{"format":"library-export","version":1}
+{"source_id":"b1","kind":"book","title":"The Dispossessed","year":1974,"status":"planned"}
+{"source_id":"g1","kind":"board_game","title":"Azul","year":2017,"status":"completed"}
+----
+
+The import of the legacy JSON export (see the same page) brings its books and anime as
+title-only items too; Trakt files hold movies and shows only.
+
+== Limits to know
+
+The export is not a backup::
+The export on Settings > Imports and export carries the library, the ratings, the notes,
+the lists and the history of views, episodes and positions. It does not carry plays: the
+players, scores, winner, co-op result and duration of a game session are not in the file,
+and an export followed by an import loses them. The backup of an instance is the database
+dump described under xref:operations.adoc#_backup[Backup].
+
+Hours of shows need a runtime::
+The time tiles on Home and Stats count a show's hours from the runtime its source gives
+for the series. For a show whose source gives none the tile says "runtimes not known yet"
+and its episodes count as episodes only.
+
+No "owned" mark::
+There is no flag for what you own. A list named "Owned" does the job: lists hold items of
+every kind and can be shared.
+
+Covers can come from the sources' hosts::
+Until this instance has stored the cover of an item, your browser loads it from the
+address the source gave
+(xref:operations.adoc#_which_hosts_a_browser_contacts_for_pictures[Which hosts a browser
+contacts for pictures]). A cover that does not load shows the title in its box, in the
+search the icon of the kind. That is also what a cover with an `http://` address (some
+podcasts) shows on an instance served over https.
+
+History years follow your time zone::
+Days, "today" and the year filter of History use the time zone set on Settings > Account
+(UTC when none is set). Something logged late on New Year's Eve belongs to the year it
+was in where you were.

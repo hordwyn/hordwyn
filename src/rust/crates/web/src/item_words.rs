@@ -316,13 +316,82 @@ pub fn add_undo(entry: Option<&LibraryEntryDto>, events: usize, tags: usize) -> 
     }
 }
 
-/// The bulk question "These N episodes are already watched. Log them again as a rewatch?"
-/// (OT-15); a podcast says "listened to" (OT2A-9).
+/// The Fluent keys of the Episodes tab that name what one does with an episode (v1-polish P3):
+/// a podcast's episodes are listened to, every other kind reads like a show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EpisodeWords {
+    /// The state of a row and the button of an open one: "Watched".
+    pub done: &'static str,
+    /// The button's name: "Mark S1 E1 watched" (`season`, `episode`).
+    pub mark: &'static str,
+    /// The same on a row that is done: "Watch S1 E1 again".
+    pub mark_again: &'static str,
+    /// "Mark season watched".
+    pub mark_season: &'static str,
+    /// "Mark show watched".
+    pub mark_show: &'static str,
+    /// "Also mark the N earlier episodes as watched?" (`count`).
+    pub ask: &'static str,
+    /// "Remember for this show".
+    pub remember: &'static str,
+    /// The hint of the date choice "Over a range", which names the bulk buttons.
+    pub range_hint: &'static str,
+    /// The same for "On release dates".
+    pub release_hint: &'static str,
+}
+
+impl EpisodeWords {
+    #[must_use]
+    pub fn of(verb: Option<Verb>) -> Self {
+        if verb == Some(Verb::Listen) {
+            return Self {
+                done: "episodes-watched-listen",
+                mark: "episodes-mark-listen",
+                mark_again: "episodes-mark-again-listen",
+                mark_season: "episodes-mark-season-listen",
+                mark_show: "episodes-mark-show-listen",
+                ask: "episodes-ask-listen",
+                remember: "episodes-remember-listen",
+                range_hint: "episodes-range-hint-listen",
+                release_hint: "episodes-release-hint-listen",
+            };
+        }
+        Self {
+            done: "episodes-watched",
+            mark: "episodes-mark",
+            mark_again: "episodes-mark-again",
+            mark_season: "episodes-mark-season",
+            mark_show: "episodes-mark-show",
+            ask: "episodes-ask",
+            remember: "episodes-remember",
+            range_hint: "episodes-range-hint",
+            release_hint: "episodes-release-hint",
+        }
+    }
+}
+
+/// The step the toast of a saved play dialog names ("Logged: Play"): a board game is played
+/// in plays, a video game in sessions (v1-polish P3; the dialog's own words differ the same
+/// way, OT-16).
 #[must_use]
-pub fn again_ask_key(verb: Option<Verb>) -> &'static str {
+pub fn play_step_key(board_game: bool) -> &'static str {
+    if board_game {
+        "log-play-step"
+    } else {
+        "log-session-step"
+    }
+}
+
+/// The bulk question on episodes that are all watched (OT-15). Where the answer starts a
+/// rewatch run (`starts_run`: the entry is Completed, DEC-589) it reads "Log them again as a
+/// rewatch?"; on any other status the answer logs further views and the question says so
+/// (v1-polish P6). A podcast says "listened to" and names neither (OT2A-9).
+#[must_use]
+pub fn again_ask_key(verb: Option<Verb>, starts_run: bool) -> &'static str {
     match verb {
         Some(Verb::Listen) => "episodes-again-ask-listen",
-        _ => "episodes-again-ask",
+        _ if starts_run => "episodes-again-ask",
+        _ => "episodes-again-ask-views",
     }
 }
 
@@ -840,7 +909,7 @@ mod tests {
     #[test]
     fn the_bulk_question_follows_the_verb() {
         let (en, de) = both();
-        let ask = |i: &I18n, v, n: u32| i.t_args(again_ask_key(v), &[("count", n.into())]);
+        let ask = |i: &I18n, v, n: u32| i.t_args(again_ask_key(v, true), &[("count", n.into())]);
         let skipped = |i: &I18n, v, n: u32| i.t_args(skipped_key(v), &[("count", n.into())]);
         let l = Some(Verb::Listen);
         assert_eq!(
@@ -1042,6 +1111,156 @@ mod tests {
         assert_eq!(
             de.t("item-added-planned"),
             "Als \u{201e}Geplant\u{201c} in die Bibliothek aufgenommen"
+        );
+    }
+
+    /// v1-polish P3: the episodes of a podcast are listened to, in every label of the tab.
+    #[test]
+    fn a_podcasts_episode_rows_say_listened() {
+        let (en, de) = both();
+        let n = [("season", 1.into()), ("episode", 2.into())];
+        let texts = |i: &I18n, v| {
+            let w = EpisodeWords::of(v);
+            [
+                i.t(w.done),
+                i.t_args(w.mark, &n),
+                i.t_args(w.mark_again, &n),
+                i.t(w.mark_season),
+                i.t(w.mark_show),
+                i.t_args(w.ask, &[("count", 1.into())]),
+                i.t_args(w.ask, &[("count", 3.into())]),
+                i.t(w.remember),
+            ]
+        };
+        assert_eq!(
+            texts(&en, Some(Verb::Listen)),
+            [
+                "Listened",
+                "Mark S1 E2 listened",
+                "Listen to S1 E2 again",
+                "Mark season listened",
+                "Mark podcast listened",
+                "Also mark the earlier episode as listened?",
+                "Also mark the 3 earlier episodes as listened?",
+                "Remember for this podcast",
+            ]
+        );
+        assert_eq!(
+            texts(&de, Some(Verb::Listen)),
+            [
+                "Geh\u{f6}rt",
+                "S1 E2 als geh\u{f6}rt markieren",
+                "S1 E2 nochmal h\u{f6}ren",
+                "Staffel als geh\u{f6}rt markieren",
+                "Podcast als geh\u{f6}rt markieren",
+                "Auch die fr\u{fc}here Folge als geh\u{f6}rt markieren?",
+                "Auch die 3 fr\u{fc}heren Folgen als geh\u{f6}rt markieren?",
+                "F\u{fc}r diesen Podcast merken",
+            ]
+        );
+        // a show keeps the words the owner approved
+        for v in [Some(Verb::Watch), None] {
+            assert_eq!(
+                texts(&en, v),
+                [
+                    "Watched",
+                    "Mark S1 E2 watched",
+                    "Watch S1 E2 again",
+                    "Mark season watched",
+                    "Mark show watched",
+                    "Also mark the earlier episode as watched?",
+                    "Also mark the 3 earlier episodes as watched?",
+                    "Remember for this show",
+                ]
+            );
+        }
+        assert_eq!(texts(&de, Some(Verb::Watch))[0], "Gesehen");
+    }
+
+    /// Review POL-6: the hints of the date choice name the bulk buttons; a podcast has no
+    /// button "Mark show".
+    #[test]
+    fn the_date_hints_of_a_podcast_name_its_own_buttons() {
+        let (en, de) = both();
+        let hints = |i: &I18n, v| {
+            let w = EpisodeWords::of(v);
+            [i.t(w.range_hint), i.t(w.release_hint)]
+        };
+        assert_eq!(
+            hints(&en, Some(Verb::Listen)),
+            [
+                "Mark season, Mark podcast and Mark up to here spread the episodes evenly from the first to the last day.",
+                "Mark season, Mark podcast and Mark up to here log each episode on the day it was released.",
+            ]
+        );
+        assert_eq!(
+            hints(&de, Some(Verb::Listen)),
+            [
+                "Staffel, Podcast und bis hier markieren verteilen die Folgen gleichm\u{e4}\u{df}ig vom ersten bis zum letzten Tag.",
+                "Staffel, Podcast und bis hier markieren tragen jede Folge an dem Tag ein, an dem sie erschienen ist.",
+            ]
+        );
+        for v in [Some(Verb::Watch), None] {
+            assert_eq!(
+                hints(&en, v),
+                [
+                    "Mark season, Mark show and Mark up to here spread the episodes evenly from the first to the last day.",
+                    "Mark season, Mark show and Mark up to here log each episode on the day it was released.",
+                ]
+            );
+        }
+    }
+
+    /// v1-polish P3: the toast of a video game session does not say "Play".
+    #[test]
+    fn the_toast_of_a_session_names_a_session_and_of_a_board_game_a_play() {
+        let (en, de) = both();
+        let toast = |i: &I18n, board| {
+            i.t_args(
+                "library-logged",
+                &[("step", i.t(play_step_key(board)).into())],
+            )
+        };
+        assert_eq!(toast(&en, false), "Logged: Session");
+        assert_eq!(toast(&en, true), "Logged: Play");
+        assert_eq!(toast(&de, false), "Eingetragen: Sitzung");
+        assert_eq!(toast(&de, true), "Eingetragen: Partie");
+    }
+
+    /// v1-polish P6: "as a rewatch" only where the answer starts a rewatch run.
+    #[test]
+    fn the_bulk_question_names_a_rewatch_only_where_one_starts() {
+        let (en, de) = both();
+        let ask =
+            |i: &I18n, v, run, n: u32| i.t_args(again_ask_key(v, run), &[("count", n.into())]);
+        let w = Some(Verb::Watch);
+        assert_eq!(
+            ask(&en, w, true, 5),
+            "These 5 episodes are already watched. Log them again as a rewatch?"
+        );
+        assert_eq!(
+            ask(&en, w, false, 5),
+            "These 5 episodes are already watched. Log them again as further views?"
+        );
+        assert_eq!(
+            ask(&en, w, false, 1),
+            "This episode is already watched. Log it again as a further view?"
+        );
+        // (review POL-2: no "Nochmal als weitere Male")
+        assert_eq!(
+            ask(&de, w, false, 5),
+            "Diese 5 Folgen sind schon gesehen. Alle ein weiteres Mal eintragen?"
+        );
+        assert_eq!(
+            ask(&de, w, false, 1),
+            "Diese Folge ist schon gesehen. Ein weiteres Mal eintragen?"
+        );
+        // a podcast names neither, with or without a run
+        let l = Some(Verb::Listen);
+        assert_eq!(ask(&en, l, false, 2), ask(&en, l, true, 2));
+        assert_eq!(
+            ask(&en, l, false, 2),
+            "These 2 episodes are already listened to. Log them again?"
         );
     }
 }

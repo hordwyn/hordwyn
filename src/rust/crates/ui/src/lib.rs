@@ -61,7 +61,7 @@ pub use disclosure::{
 pub use dropdown::{DropdownMenu, MenuItem};
 pub use error_summary::{ErrorLink, ErrorSummary};
 pub use form::{
-    Checkbox, FormField, Input, Label, RuleState, Select, SelectOption, Switch, Textarea,
+    Checkbox, FormField, Input, Label, RADIO, RuleState, Select, SelectOption, Switch, Textarea,
     field_described_by,
 };
 pub use icon::{Icon, IconName};
