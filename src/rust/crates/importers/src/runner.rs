@@ -43,14 +43,23 @@ const FILE_SIBLINGS: u32 = 200;
 /// Lists by name, created on first use within one run.
 type ListCache = HashMap<String, ListId>;
 
+/// May this person set a picture address other people's browsers load (the rule of `POST
+/// /items`: everybody on a home instance, admins on a hosted one)? Asked at run time, so a
+/// change of the hosting mode counts from the next row on.
+pub type CoverRule = Arc<dyn Fn(Actor) -> bool + Send + Sync>;
+
 pub struct Importer {
     app: App,
     store: Arc<dyn ImportStore>,
     blobs: Arc<dyn BlobStore>,
     jobs: Arc<dyn JobQueue>,
+    may_set_cover: CoverRule,
 }
 
 impl Importer {
+    /// An importer that takes a picture address from admins only (the safe rule while the
+    /// instance's mode is not known); the server gives it the real rule with
+    /// [`Importer::with_cover_rule`].
     #[must_use]
     pub fn new(
         app: App,
@@ -63,7 +72,15 @@ impl Importer {
             store,
             blobs,
             jobs,
+            may_set_cover: Arc::new(|a: Actor| a.is_admin()),
         }
+    }
+
+    /// Who may bring a picture address in with an item entered by hand.
+    #[must_use]
+    pub fn with_cover_rule(mut self, rule: CoverRule) -> Self {
+        self.may_set_cover = rule;
+        self
     }
 
     /// Store the uploaded file (counted against the user's upload quota) and queue the import.
@@ -107,6 +124,7 @@ impl Importer {
             imported: 0,
             matched: 0,
             errors: vec![],
+            warnings: vec![],
             created_at: now,
             updated_at: now,
             total: 0,
@@ -234,7 +252,8 @@ impl Importer {
             .set_item_for(r.user_id, &r.format, source_id, item.0)
             .await?;
         let row = r.unmatched[pos].row.clone();
-        self.apply(actor, &r, &row, &mut ListCache::new()).await?;
+        self.apply(actor, &r, &row, &mut ListCache::new(), &mut None)
+            .await?;
         r.unmatched.remove(pos);
         r.imported += 1;
         r.matched += 1;
@@ -335,10 +354,19 @@ impl Importer {
                 return;
             }
         };
-        match self.apply(actor, r, &row, lists).await {
+        let mut note = None;
+        match self.apply(actor, r, &row, lists, &mut note).await {
             Ok(Applied::Imported(matched)) => {
                 r.imported += 1;
                 r.matched += u64::from(matched);
+                // imported with something left out (a picture address): said per row
+                if let Some(message) = note {
+                    r.warnings.push(RowError {
+                        line: r.cursor + 1,
+                        source_id: Some(row.source_id.clone()),
+                        message,
+                    });
+                }
             }
             Ok(Applied::Unmatched) => {
                 // a resumed run sees the rows since the last checkpoint again
@@ -429,10 +457,12 @@ impl Importer {
     /// one with a matching external id, or a new stub (refreshed later in the import lane).
     async fn resolve(
         &self,
+        actor: Actor,
         r: &ImportRecord,
         row: &ImportRow,
         kind: &KindId,
         external_ids: &[ExternalId],
+        note: &mut Option<String>,
     ) -> Result<Resolved, ImportError> {
         let user = r.user_id;
         if let Some(item) = self.store.item_for(user, &r.format, &row.source_id).await? {
@@ -457,6 +487,21 @@ impl Importer {
         }
         let (id, matched) = match existing {
             Some(id) => (id, true),
+            // no source knows it: an item entered by hand comes back as the person's own
+            // (title and year keep their `user` provenance, review MAN-3); the dry run checks
+            // the same and reports the same picture address as left out
+            None if external_ids.is_empty() => {
+                let (details, left_out) = self.by_hand(actor, row)?;
+                *note = left_out;
+                if r.dry_run {
+                    return Ok(Resolved::New);
+                }
+                let item = self
+                    .app
+                    .create_manual_item(kind.clone(), details, true)
+                    .await?;
+                (item.id, false)
+            }
             None if r.dry_run => return Ok(Resolved::New),
             None => (self.stub(row, kind, external_ids).await?, false),
         };
@@ -468,6 +513,46 @@ impl Importer {
         Ok(Resolved::Item(id, matched))
     }
 
+    /// A row without external ids (only the generic format has them): the details of the
+    /// item entered by hand, checked as the dialog checks them (a wrong title or year is a
+    /// row error), and why its picture address is left out, if it is. The address comes
+    /// back only for a person who may set one ([`CoverRule`]) and only when it passes the
+    /// dialog's check; otherwise the row is imported without it and a row warning says why.
+    /// An address on a row with external ids is never taken (G2-2): the source gives the
+    /// picture.
+    fn by_hand(
+        &self,
+        actor: Actor,
+        row: &ImportRow,
+    ) -> Result<(app::ItemDetails, Option<String>), ImportError> {
+        const LEFT_OUT: &str = "picture address not taken: ";
+        let typed = row
+            .cover_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|c| !c.is_empty());
+        let (cover_url, note) = match typed {
+            None => (None, None),
+            Some(_) if !(self.may_set_cover)(actor) => (
+                None,
+                Some(format!(
+                    "{LEFT_OUT}only an admin can set one on this instance"
+                )),
+            ),
+            Some(c) => match app::checked_cover_url(Some(c)) {
+                Ok(url) => (url, None),
+                Err(e) => (None, Some(format!("{LEFT_OUT}{e}"))),
+            },
+        };
+        let details = self.app.checked_details(app::ItemDetails {
+            title: row.title.clone(),
+            year: row.year,
+            cover_url,
+        })?;
+        Ok((details, note))
+    }
+
+    /// A new item for a row with external ids, refreshed later in the import lane.
     async fn stub(
         &self,
         row: &ImportRow,
@@ -512,6 +597,7 @@ impl Importer {
         r: &ImportRecord,
         row: &ImportRow,
         lists: &mut ListCache,
+        note: &mut Option<String>,
     ) -> Result<Applied, ImportError> {
         let kind = KindId::new(row.kind.clone()).map_err(AppError::from)?;
         let descriptor = self.app.kind(&kind)?;
@@ -529,7 +615,10 @@ impl Importer {
             .iter()
             .map(|(ns, v)| ExternalId::new(ns.clone(), v.clone()))
             .collect();
-        let (item_id, matched) = match self.resolve(r, row, &kind, &external_ids).await? {
+        let resolved = self
+            .resolve(actor, r, row, &kind, &external_ids, note)
+            .await?;
+        let (item_id, matched) = match resolved {
             Resolved::Item(id, matched) => (id, matched),
             Resolved::Unmatched => return Ok(Applied::Unmatched),
             // dry run, no catalog match: nothing more to check

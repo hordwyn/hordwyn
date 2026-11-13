@@ -2060,6 +2060,10 @@ imports-errors = { $count ->
    *[other] { $count } Zeilen wurden übersprungen
 }
 imports-error-line = Zeile { $line }:
+imports-warnings = { $count ->
+    [one] In einer Zeile wird etwas ausgelassen
+   *[other] In { $count } Zeilen wird etwas ausgelassen
+}
 imports-result = Importiert { $imported }, übersprungen { $skipped }, nicht zugeordnet { $unmatched }.
 imports-completed-note = Ein Titel, den die Datei als abgeschlossen führt, gilt am Tag seines neuesten Verlaufseintrags als beendet. Ohne Verlauf hat er kein Datum und zählt nur in den Summen, nicht in einem Monat, Jahr oder Ziel.
 imports-stopped-at = Angehalten nach { $done } von { $total } Zeilen. Was schon importiert ist, bleibt.
@@ -2228,6 +2232,33 @@ search-cmd-import = Datei importieren
 search-hint-open = Öffnen
 search-hint-choose = Auswählen
 search-hint-quick = Als „Geplant“ hinzufügen oder nächster Schritt
+manual-row = „{ $query }“ von Hand hinzufügen...
+manual-group = Nicht dabei?
+manual-add-title = Von Hand hinzufügen
+manual-add-lead = Für etwas, das keine Quelle kennt. Es kommt in deine Bibliothek, und alle Mitglieder dieser Instanz können es finden.
+manual-edit-title = Details bearbeiten
+manual-field-title = Titel
+manual-field-kind = Art
+manual-kind-choose = Art wählen...
+manual-field-year = Jahr
+manual-field-year-hint = Optional.
+manual-field-cover = Bildadresse
+manual-field-cover-hint = Optional, beginnt mit https://. Das Bild wird von jedem Browser, der es anzeigt, direkt von dieser Adresse geladen.
+manual-submit-add = Zur Bibliothek hinzufügen
+manual-submit-edit = Speichern
+manual-existing-title = Schon vorhanden
+manual-existing-use = Diesen Eintrag verwenden
+manual-existing-use-named = Diesen Eintrag verwenden: { $title }
+manual-error-title = Gib einen Titel ein.
+manual-error-title-long = Der Titel darf höchstens 500 Zeichen haben.
+manual-error-kind = Wähle eine Art.
+manual-error-year = Gib das Jahr als Zahl ein, etwa 1995, oder lass das Feld leer.
+manual-error-cover = Die Bildadresse muss mit https:// beginnen und einen Host nennen, ohne Benutzernamen und ohne Leerzeichen.
+manual-error-cover-forbidden = Auf dieser Instanz kann nur ein Admin eine Bildadresse setzen.
+manual-error-forbidden = Auf dieser Instanz kann nur ein Admin die Details eines Eintrags ändern.
+manual-error-sourced = Für diesen Eintrag ist jetzt eine Datenquelle zuständig; seine Details kommen von dort.
+manual-error-duplicate = Ein Eintrag dieser Art mit diesem Titel ist schon vorhanden, siehe unten. Verwende ihn, oder wähle noch einmal „Zur Bibliothek hinzufügen“, um einen zweiten anzulegen.
+item-edit-details = Details bearbeiten
 companions-log-with = Eintragen mit...
 companions-log-with-named = Eintragen mit { $name }
 notify-filter-pick-item = Titel auswählen...

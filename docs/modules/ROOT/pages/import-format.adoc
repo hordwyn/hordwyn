@@ -38,7 +38,21 @@ source's own id of the event (re-importing a newer file of the same source then 
 new events).
 |`lists` |list of strings |Names of the user's lists the entry is on; missing lists are
 created (private). Added in version 1 without a version bump: older files have none.
+|`cover_url` |string |Address of the picture a person typed for an item added by hand
+(`https://` only). The export writes it for such an address only, never for a cover a
+source gave. The import takes it for a new item without `external_ids` when the
+importing person may set a picture address (everybody on a home instance, admins on a
+hosted one). Otherwise, or when the address is not a valid `https://` address, the row is
+imported without the picture and the import report lists the row with the reason (the
+dry run lists it too). A row with `external_ids` never takes the address: the source gives
+the picture. Browsers load the picture from the address; the server never fetches it.
+Added in version 1 without a version bump.
 |===
+
+A row without `external_ids` comes back as an item added by hand: its title and year
+count as set by a person (a source that later knows the item does not overwrite them), as
+they did before the export. Title and year are checked as in the "Add by hand" dialog (a
+year from 1 to five years ahead); a row that fails the check is skipped with its reason.
 
 The JSON Schema of an entry is published as
 link:{attachmentsdir}/library-export-row.schema.json[library-export-row.schema.json] and is
@@ -46,8 +60,9 @@ generated from the code (a test keeps it current).
 
 == CSV (`generic-csv`)
 
-Header row `source_id,kind,title,year,status,rating,notes,external_ids,finished_dates,lists`
-(the `lists` column is optional; files without it still read); `external_ids` as
+Header row
+`source_id,kind,title,year,status,rating,notes,external_ids,finished_dates,lists,cover_url`
+(the `lists` and `cover_url` columns are optional; files without them still read); `external_ids` as
 `ns:value;ns:value`, `finished_dates` and `lists` as `a;b`. CSV keeps only the dates of
 finished views: episodes and positions need JSON Lines. A `;` in a list name is written as
 `,`.

@@ -318,9 +318,13 @@ impl CatalogRepo for MemStore {
             }
             _ => {}
         }
-        // data written to a purged item is stamped again and ends its expiry (UX4-9)
-        if !item.title.is_empty() {
+        // a fetch ends the expiry of a purged item (UX4-9); not any write of a titled item:
+        // a purged item keeps a title a person set (v1-manual)
+        if item.fetched_at.is_some() {
             s.expired_at.remove(&item.id);
+        }
+        // data written to a purged item is stamped again
+        if !item.title.is_empty() {
             s.provider_data_at
                 .entry(item.id)
                 .or_insert_with(|| item.fetched_at.unwrap_or_else(chrono::Utc::now));
@@ -382,14 +386,36 @@ impl CatalogRepo for MemStore {
         let Some(item) = s.catalog.get_mut(&id) else {
             return Ok(None);
         };
-        item.title = String::new();
-        item.year = None;
-        item.description = None;
-        item.original_title = None;
-        item.attributes = serde_json::json!({});
-        item.cover_url = None;
+        // same rule as Postgres: a field a person set stays, with its provenance
+        let mine = |field: &str| item.provenance.get(field).is_some_and(|s| s == "user");
+        if !mine("title") {
+            item.title = String::new();
+        }
+        if !mine("year") {
+            item.year = None;
+        }
+        if !mine("description") {
+            item.description = None;
+        }
+        if !mine("original_title") {
+            item.original_title = None;
+        }
+        if !mine("cover_url") {
+            item.cover_url = None;
+        }
+        let attributes: serde_json::Map<String, serde_json::Value> = item
+            .attributes
+            .as_object()
+            .map(|all| {
+                all.iter()
+                    .filter(|(name, _)| mine(&format!("attributes.{name}")))
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        item.attributes = serde_json::Value::Object(attributes);
         item.popularity = None;
-        item.provenance.clear();
+        item.provenance.retain(|_, source| source == "user");
         item.state = domain::catalog::EntityState::Stub;
         item.fetched_at = None;
         item.fresh_until = None;
@@ -509,6 +535,20 @@ impl CatalogRepo for MemStore {
             .collect();
         items.sort_by(|a, b| (&a.title, a.id.0).cmp(&(&b.title, b.id.0)));
         Ok(items.into_iter().map(|i| i.id).collect())
+    }
+
+    async fn titled(&self, kind: &KindId, title: &str, limit: u32) -> RepoResult<Vec<CatalogItem>> {
+        let wanted = title.trim().to_lowercase();
+        let s = self.state();
+        let mut out: Vec<CatalogItem> = s
+            .catalog
+            .values()
+            .filter(|i| &i.kind == kind && i.title.trim().to_lowercase() == wanted)
+            .cloned()
+            .collect();
+        out.sort_by_key(|i| i.id.0);
+        out.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+        Ok(out)
     }
 
     async fn episode_seasons(&self, item: ItemId) -> RepoResult<Vec<EpisodeSeason>> {

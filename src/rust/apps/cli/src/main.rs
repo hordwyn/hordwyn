@@ -29,9 +29,10 @@ const USAGE: &str = "usage: cli [--config <file>] <command>
                                    with one request per 50, the rest is queued for the
                                    worker. Prints what it would do; --apply does it
   match-books [--apply | --applied]
-                                   find the Open Library work of every book that has none, by
-                                   title; prints the matches, --apply stores them (and logs
-                                   what each book was before), --applied lists that log
+                                   find the Open Library work of every book that has none,
+                                   by title (books entered by hand are left out); prints the
+                                   matches, --apply stores them (and logs what each book was
+                                   before), --applied lists that log
   admin promote <username>         make an account admin
   admin reset-password <username>  print a one-time password reset link (1 hour)
   admin reset-totp <username>      remove the authenticator and its recovery codes

@@ -65,6 +65,15 @@ fn item_from(row: ItemRow, external_ids: Vec<ExternalId>) -> Res<CatalogItem> {
 impl CatalogRepo for PgStore {
     async fn upsert(&self, item: &CatalogItem) -> Res<()> {
         let mut tx = self.begin().await?;
+        // what the library documents carry of the item, before this write (none for a new
+        // item): see the end of the function
+        let old = sqlx::query!(
+            "SELECT title, original_title, year FROM catalog_items WHERE id = $1 FOR UPDATE",
+            item.id.0
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(be)?;
         sqlx::query!(
             "INSERT INTO catalog_items (id, kind, title, original_title, year, description, cover_asset,
                                         attributes, state, fetched_at, fresh_until, updated_at,
@@ -80,7 +89,9 @@ impl CatalogRepo for PgStore {
                      WHEN catalog_items.provider_data_at IS NULL AND EXCLUDED.title <> ''
                      THEN EXCLUDED.provider_data_at
                      ELSE catalog_items.provider_data_at END,
-                 provider_refetch_after = CASE WHEN EXCLUDED.title <> '' THEN NULL
+                 -- a fetch ends the expiry of a purged item; not any write of a titled
+                 -- item: a purged item keeps a title a person set (v1-manual)
+                 provider_refetch_after = CASE WHEN EXCLUDED.fetched_at IS NOT NULL THEN NULL
                      ELSE catalog_items.provider_refetch_after END,
                  title = EXCLUDED.title,
                  original_title = EXCLUDED.original_title, year = EXCLUDED.year,
@@ -122,6 +133,21 @@ impl CatalogRepo for PgStore {
             .map_err(be)?;
         }
         record(&mut tx, "catalog_item", item.id.0, Op::Upsert, &[]).await?;
+        // the library documents in the search index carry title, original title and year
+        // too: a change of one of them (a correction by hand, a refresh) reaches them
+        // (v1-manual LC-36; the year and original title: review MAN-6)
+        if old.is_some_and(|o| {
+            o.title != item.title || o.original_title != item.original_title || o.year != item.year
+        }) {
+            sqlx::query!(
+                "INSERT INTO outbox (entity, entity_id, op)
+                 SELECT 'library_entry', e.id, 'upsert' FROM library_entries e WHERE e.item_id = $1",
+                item.id.0
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(be)?;
+        }
         tx.commit().await.map_err(be)
     }
 
@@ -234,9 +260,25 @@ impl CatalogRepo for PgStore {
             return Ok(None);
         };
         sqlx::query!(
-            "UPDATE catalog_items SET title = '', year = NULL, description = NULL,
-                 original_title = NULL, attributes = '{}'::jsonb, cover_url = NULL,
-                 cover_asset = NULL, provenance = '{}'::jsonb, state = 'stub', fetched_at = NULL,
+            // a field a person set (provenance `user`) is theirs, not the source's: it stays,
+            // and so does its provenance entry, or the refetch would overwrite it (review
+            // BOOK-10 of v1-books). The right-hand sides read the row as it was.
+            "UPDATE catalog_items SET
+                 title = CASE WHEN provenance->>'title' = 'user' THEN title ELSE '' END,
+                 year = CASE WHEN provenance->>'year' = 'user' THEN year END,
+                 description = CASE WHEN provenance->>'description' = 'user' THEN description END,
+                 original_title = CASE WHEN provenance->>'original_title' = 'user'
+                     THEN original_title END,
+                 cover_url = CASE WHEN provenance->>'cover_url' = 'user' THEN cover_url END,
+                 attributes = CASE WHEN jsonb_typeof(attributes) = 'object' THEN COALESCE(
+                     (SELECT jsonb_object_agg(a.key, a.value) FROM jsonb_each(attributes) a
+                      WHERE provenance->>('attributes.' || a.key) = 'user'), '{}'::jsonb)
+                     ELSE '{}'::jsonb END,
+                 provenance = CASE WHEN jsonb_typeof(provenance) = 'object' THEN COALESCE(
+                     (SELECT jsonb_object_agg(p.key, p.value) FROM jsonb_each(provenance) p
+                      WHERE p.value = to_jsonb('user'::text)), '{}'::jsonb)
+                     ELSE '{}'::jsonb END,
+                 cover_asset = NULL, state = 'stub', fetched_at = NULL,
                  fresh_until = NULL, provider_data_at = NULL, provider_refetch_after = $2,
                  popularity = NULL,
                  updated_at = now()
@@ -401,6 +443,25 @@ impl CatalogRepo for PgStore {
         .await
         .map_err(be)?;
         Ok(rows.into_iter().map(ItemId).collect())
+    }
+
+    async fn titled(&self, kind: &KindId, title: &str, limit: u32) -> Res<Vec<CatalogItem>> {
+        // the comparison the index `catalog_items_kind_title` holds (migration 0037)
+        let ids = sqlx::query_scalar!(
+            "SELECT id FROM catalog_items
+             WHERE kind = $1 AND lower(btrim(title)) = lower(btrim($2))
+             ORDER BY id LIMIT $3",
+            kind.as_str(),
+            title,
+            i64::from(limit)
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?;
+        let ids: Vec<ItemId> = ids.into_iter().map(ItemId).collect();
+        let mut items = CatalogRepo::get_many(self, &ids).await?;
+        items.sort_by_key(|i| i.id.0);
+        Ok(items)
     }
 
     async fn get_many(&self, ids: &[ItemId]) -> Res<Vec<CatalogItem>> {

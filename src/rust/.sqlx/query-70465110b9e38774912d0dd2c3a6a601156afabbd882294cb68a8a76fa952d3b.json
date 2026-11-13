@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE catalog_items SET\n                 title = CASE WHEN provenance->>'title' = 'user' THEN title ELSE '' END,\n                 year = CASE WHEN provenance->>'year' = 'user' THEN year END,\n                 description = CASE WHEN provenance->>'description' = 'user' THEN description END,\n                 original_title = CASE WHEN provenance->>'original_title' = 'user'\n                     THEN original_title END,\n                 cover_url = CASE WHEN provenance->>'cover_url' = 'user' THEN cover_url END,\n                 attributes = CASE WHEN jsonb_typeof(attributes) = 'object' THEN COALESCE(\n                     (SELECT jsonb_object_agg(a.key, a.value) FROM jsonb_each(attributes) a\n                      WHERE provenance->>('attributes.' || a.key) = 'user'), '{}'::jsonb)\n                     ELSE '{}'::jsonb END,\n                 provenance = CASE WHEN jsonb_typeof(provenance) = 'object' THEN COALESCE(\n                     (SELECT jsonb_object_agg(p.key, p.value) FROM jsonb_each(provenance) p\n                      WHERE p.value = to_jsonb('user'::text)), '{}'::jsonb)\n                     ELSE '{}'::jsonb END,\n                 cover_asset = NULL, state = 'stub', fetched_at = NULL,\n                 fresh_until = NULL, provider_data_at = NULL, provider_refetch_after = $2,\n                 popularity = NULL,\n                 updated_at = now()\n             WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "70465110b9e38774912d0dd2c3a6a601156afabbd882294cb68a8a76fa952d3b"
+}

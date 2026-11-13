@@ -255,3 +255,101 @@ fn a_source_that_requires_the_contact_is_skipped_until_one_is_set() {
     assert_eq!(r.credential("strict"), CredentialState::Env);
     assert_eq!(ids(&r), ["strict", "polite"]);
 }
+
+/// v1-plan.md 7, B2: an item no registered source answers for (entered by hand, or with
+/// ids of sources this instance does not have) is neither changed nor marked failed by the
+/// refresh job; an item of a registered source whose refresh fails is, as before.
+#[tokio::test]
+async fn an_item_no_source_answers_for_is_left_alone_by_the_refresh() {
+    let mut fake = Fake::new("tmdb", None);
+    fake.info.capabilities = vec![Capability::Details];
+    let mut r = Registry::default();
+    r.register(Arc::new(fake));
+    let env = testkit::TestEnv::new();
+    let movie = |ids: Vec<domain::catalog::ExternalId>, title: &str| app::NewCatalogItem {
+        kind: domain::kind::KindId::new("movie").unwrap(),
+        title: title.into(),
+        original_title: None,
+        year: None,
+        description: None,
+        external_ids: ids,
+        attributes: serde_json::json!({}),
+        cover_url: None,
+        popularity: None,
+    };
+    let by_hand = env
+        .app
+        .create_manual_item(
+            domain::kind::KindId::new("movie").unwrap(),
+            app::ItemDetails {
+                title: "By hand".into(),
+                year: None,
+                cover_url: None,
+            },
+            true,
+        )
+        .await
+        .unwrap();
+    let foreign = env
+        .app
+        .upsert_catalog_item(movie(
+            vec![domain::catalog::ExternalId::new("elsewhere", "1")],
+            "Foreign",
+        ))
+        .await
+        .unwrap();
+    let book = env
+        .app
+        .upsert_catalog_item(app::NewCatalogItem {
+            kind: domain::kind::KindId::new("book").unwrap(),
+            ..movie(
+                vec![domain::catalog::ExternalId::new("tmdb", "7")],
+                "A book with a film id",
+            )
+        })
+        .await
+        .unwrap();
+    let ours = env
+        .app
+        .upsert_catalog_item(movie(
+            vec![domain::catalog::ExternalId::new("tmdb", "949")],
+            "Ours",
+        ))
+        .await
+        .unwrap();
+    assert!(!catalog_core::refresh::source_known(&r, &by_hand));
+    assert!(!catalog_core::refresh::source_known(&r, &foreign));
+    assert!(
+        !catalog_core::refresh::source_known(&r, &book),
+        "not its kind"
+    );
+    assert!(
+        catalog_core::refresh::source_known(&r, &ours),
+        "the source owns its items also without a key"
+    );
+    let http = Arc::new(testkit::ReplayHttp::default());
+    for item in [&by_hand, &foreign, &book] {
+        catalog_core::refresh::refresh_item(
+            &env.app,
+            &r,
+            http.clone(),
+            app::ports::Lane::BackgroundRefresh,
+            item.id,
+        )
+        .await
+        .unwrap();
+        let after = env.app.catalog_item(item.id).await.unwrap();
+        assert_eq!(&after, item, "untouched: no retry time, no failed state");
+    }
+    catalog_core::refresh::refresh_item(
+        &env.app,
+        &r,
+        http.clone(),
+        app::ports::Lane::BackgroundRefresh,
+        ours.id,
+    )
+    .await
+    .unwrap();
+    let after = env.app.catalog_item(ours.id).await.unwrap();
+    assert!(after.fresh_until.is_some(), "retried later, as before");
+}

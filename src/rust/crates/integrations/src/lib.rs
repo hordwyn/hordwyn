@@ -529,8 +529,9 @@ impl Integrations {
                 popularity: None,
             })
             .await?;
-        if item.needs_refresh(self.app.clock.now()) {
-            // details come later, from the connectors (the queue dedupes repeated plays)
+        if item.needs_refresh(self.app.clock.now()) && !item.external_ids.is_empty() {
+            // details come later, from the connectors (the queue dedupes repeated plays);
+            // without an external id nobody could answer (v1-plan.md 7, B2)
             self.app
                 .jobs
                 .enqueue(NewJob {

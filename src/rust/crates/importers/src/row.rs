@@ -63,6 +63,14 @@ pub struct ImportRow {
     /// without a version bump: older files have none); missing lists are created.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lists: Vec<String>,
+    /// Address of the picture a person typed for an item entered by hand (optional, added
+    /// in version 1 without a version bump): `https` only. The export writes it for such an
+    /// address only, never a source's. The import takes it for a new item without external
+    /// ids when the importing person may set one (everybody on a home instance, admins on a
+    /// hosted one); otherwise, or when the address is not valid, the row is imported without
+    /// it and a row warning says why. Browsers load the picture, the server never fetches it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cover_url: Option<String>,
 }
 
 /// Why a row was not imported (per-row report).

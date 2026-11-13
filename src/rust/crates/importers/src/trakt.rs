@@ -73,6 +73,7 @@ impl Acc {
             notes: self.notes,
             history: self.history,
             lists: Vec::new(),
+            cover_url: None,
         }
     }
 }

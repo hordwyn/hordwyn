@@ -48,6 +48,7 @@ pub mod list_share;
 mod lists;
 pub mod log_form;
 pub mod log_sheet;
+pub mod manual_item;
 pub mod next_step;
 mod notifications;
 mod notify_channels;
@@ -86,6 +87,7 @@ pub fn provide_page_context(cfg: &ClientConfig) {
     provide_context(cfg.clone());
     provide_context(palette::PaletteOpen(RwSignal::new(false)));
     provide_context(palette::PaletteScope(RwSignal::new(None)));
+    provide_context(manual_item::ManualItem::new());
 }
 
 /// Browser entry point: read the server's config, then hydrate the server-rendered page.

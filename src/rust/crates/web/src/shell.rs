@@ -417,7 +417,7 @@ pub fn AppShell(children: Children) -> impl IntoView {
         <main id="main" tabindex="-1" class=main_class>
             {children()}
         </main>
-        {cfg.signed_in.then(|| view! { <MobileTabs current=current/> <crate::reauth::ReauthDialog/> <crate::sign_out::SignOutForm/> })}
+        {cfg.signed_in.then(|| view! { <MobileTabs current=current/> <crate::reauth::ReauthDialog/> <crate::sign_out::SignOutForm/> <crate::manual_item::ManualItemDialog/> })}
         <crate::palette::SearchPalette/>
         <ShortcutHelp open=help/>
         <ChordHint hint=chord.hint/>

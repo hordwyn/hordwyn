@@ -87,6 +87,13 @@ pub fn normalise_title(title: &str) -> String {
 /// title looked unique too easily). One request either way.
 pub const MATCH_ROWS: u32 = 20;
 
+/// Did a person enter `item` by hand ("Add by hand" marks its title as theirs)? Such an item
+/// is no candidate of `match-books` (review MAN-4 of v1-manual).
+#[cfg(feature = "openlibrary")]
+fn entered_by_hand(item: &CatalogItem) -> bool {
+    item.provenance.get("title").map(String::as_str) == Some(app::USER_PROVENANCE)
+}
+
 fn authors_of(attributes: &serde_json::Value) -> Vec<String> {
     attributes
         .get("authors")
@@ -199,7 +206,7 @@ mod books {
 
     use super::{
         App, BOOK, CatalogItem, Ctx, ExternalId, ItemId, KindId, MATCH_ROWS, MatchLog,
-        MatchOutcome, MatchRow, authors_of, named, pick, row_refresh,
+        MatchOutcome, MatchRow, authors_of, entered_by_hand, named, pick, row_refresh,
     };
 
     /// The Open Library work id of an item, if it holds one.
@@ -269,6 +276,10 @@ mod books {
         let mut taken: Vec<String> = Vec::new();
         let mut rows = Vec::new();
         for item in app.items_without_id_from(&kind, ID).await? {
+            // a book a person entered by hand is theirs: no source knew it (LC-48)
+            if entered_by_hand(&item) {
+                continue;
+            }
             let outcome = if item.title_unavailable() {
                 MatchOutcome::Unmatched("no title".into())
             } else {
@@ -973,6 +984,42 @@ mod tests {
                 .all(|r| matches!(r.outcome, MatchOutcome::Unmatched(_)))
         );
         assert_eq!(log.0.lock().unwrap().len(), 1);
+    }
+
+    /// LC-48 (review MAN-4): a book a person entered by hand (title provenance `user`) is
+    /// not a candidate: no source knew it, and a match would turn it into a sourced item.
+    #[tokio::test]
+    async fn match_books_leaves_out_books_entered_by_hand() {
+        let env = env();
+        let http = fixtures();
+        http.record(
+            "GET",
+            &title_search("Dune"),
+            200,
+            docs(&[("OL893415W", "Dune", Some(1965))]),
+        );
+        let by_hand = env
+            .app
+            .create_manual_item(
+                KindId::new(BOOK).unwrap(),
+                app::ItemDetails {
+                    title: "Dune".into(),
+                    year: None,
+                    cover_url: None,
+                },
+                true,
+            )
+            .await
+            .unwrap();
+        let before = env.app.catalog_item(by_hand.id).await.unwrap();
+        let ctx = Ctx::new(http, Lane::BackgroundRefresh);
+        let log = Log::default();
+        let rows = match_books(&env.app, &BookSource::new(), &ctx, Some(&log))
+            .await
+            .unwrap();
+        assert!(rows.is_empty(), "{rows:?}");
+        assert!(log.0.lock().unwrap().is_empty());
+        assert_eq!(env.app.catalog_item(by_hand.id).await.unwrap(), before);
     }
 
     /// Review BOOK-9: a book that names its author is matched only to a work of that

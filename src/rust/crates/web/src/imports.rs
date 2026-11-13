@@ -482,15 +482,29 @@ fn LostList(p: PreviewDto) -> impl IntoView {
     }
 }
 
+/// The skipped rows, and the rows imported with something left out (v1-manual review
+/// MAN-3: a picture address), each with the importer's reason.
 #[component]
 fn Errors(r: ImportDto) -> impl IntoView {
-    (!r.errors.is_empty()).then(|| {
-        let n = r.errors.len();
+    view! {
+        <RowNotes notes=r.errors key="imports-errors" testid="imp-errors"/>
+        <RowNotes notes=r.warnings key="imports-warnings" testid="imp-warnings"/>
+    }
+}
+
+#[component]
+fn RowNotes(
+    notes: Vec<contracts::imports::ImportErrorDto>,
+    key: &'static str,
+    testid: &'static str,
+) -> impl IntoView {
+    (!notes.is_empty()).then(|| {
+        let n = notes.len();
         view! {
-            <details class="text-sm" data-testid="imp-errors">
-                <summary class="cursor-pointer">{use_i18n().t_args("imports-errors", &[("count", n.into())])}</summary>
+            <details class="text-sm" data-testid=testid>
+                <summary class="cursor-pointer">{use_i18n().t_args(key, &[("count", n.into())])}</summary>
                 <ul class="mt-1 grid gap-1">
-                    {r.errors.into_iter().map(|e| {
+                    {notes.into_iter().map(|e| {
                         let line = use_i18n().t_args("imports-error-line", &[("line", e.line.into())]);
                         view! {
                             <li><span class="font-medium">{line}</span>" "

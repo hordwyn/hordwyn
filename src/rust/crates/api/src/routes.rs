@@ -118,6 +118,7 @@ pub fn router(state: ApiState) -> axum::Router {
         .merge(crate::admin_routes::routes())
         .merge(crate::people_routes::routes())
         .merge(crate::goals_routes::routes())
+        .merge(crate::manual_routes::routes())
         .merge(crate::oidc_routes::routes())
         .merge(crate::sso_routes::routes())
         .merge(crate::usage_routes::routes())

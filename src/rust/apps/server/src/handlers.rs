@@ -23,8 +23,22 @@ fn uuid_field(job: &Job, field: &str) -> Result<uuid::Uuid, String> {
         .ok_or_else(|| format!("payload field `{field}` missing or not a UUID"))
 }
 
+/// The source whose client fetches and stores the cover of `item`: the connector that gave
+/// the address, else the one of the item's first external id. `None` means the server never
+/// fetches it: an address a person typed (provenance `user`; every browser loads it by
+/// itself, v1-plan.md 7, B5) and an address nobody answers for (no source: the fetch ran
+/// under an empty connector name and failed).
+fn cover_source(item: &domain::catalog::CatalogItem) -> Option<String> {
+    let source = match item.provenance.get("cover_url") {
+        Some(by) if by == app::USER_PROVENANCE => return None,
+        Some(by) => Some(by.clone()),
+        None => item.external_ids.first().map(|e| e.namespace.clone()),
+    };
+    source.filter(|s| !s.is_empty())
+}
+
 /// `catalog.refresh`: details from every connector, merge, store; then register the cover
-/// as an asset (pinned if the item is in a library).
+/// as an asset (pinned if the item is in a library), unless it has no [`cover_source`].
 struct Refresh {
     app: App,
     registry: Registry,
@@ -48,13 +62,8 @@ impl Handler for Refresh {
         let item = self.app.catalog_item(id).await.map_err(|e| e.to_string())?;
         if item.cover_asset.is_none()
             && let Some(url) = &item.cover_url
+            && let Some(connector) = cover_source(&item)
         {
-            let connector = item
-                .provenance
-                .get("cover_url")
-                .cloned()
-                .or_else(|| item.external_ids.first().map(|e| e.namespace.clone()))
-                .unwrap_or_default();
             let in_library = self
                 .app
                 .item_in_any_library(id)
@@ -425,4 +434,53 @@ pub fn worker(s: &Server) -> Worker {
     )
     .handle(notify::DELIVER_JOB, Arc::new(Deliver(s.deliverer.clone())))
     .handle(notify::DIGEST_JOB, Arc::new(Digest(s.deliverer.clone())))
+}
+
+#[cfg(test)]
+mod tests {
+    use domain::catalog::{CatalogItem, EntityState, ExternalId};
+
+    use super::cover_source;
+
+    fn item(ids: &[&str], cover_by: Option<&str>) -> CatalogItem {
+        CatalogItem {
+            id: domain::ids::ItemId(uuid::Uuid::nil()),
+            kind: domain::kind::KindId::new("movie").unwrap(),
+            title: "x".into(),
+            original_title: None,
+            year: None,
+            description: None,
+            cover_asset: None,
+            cover_url: Some("https://img.example/a.jpg".into()),
+            external_ids: ids.iter().map(|ns| ExternalId::new(*ns, "1")).collect(),
+            attributes: serde_json::json!({}),
+            provenance: cover_by
+                .map(|by| ("cover_url".to_string(), by.to_string()))
+                .into_iter()
+                .collect(),
+            state: EntityState::Full,
+            fetched_at: None,
+            fresh_until: None,
+            popularity: None,
+        }
+    }
+
+    #[test]
+    fn a_cover_a_person_typed_has_no_source_to_fetch_it() {
+        // B5: also when the item holds ids of a source (a corrected cover)
+        assert_eq!(cover_source(&item(&[], Some("user"))), None);
+        assert_eq!(cover_source(&item(&["tmdb"], Some("user"))), None);
+        // nobody answers for the address: no fetch under an empty name
+        assert_eq!(cover_source(&item(&[], None)), None);
+        assert_eq!(cover_source(&item(&[], Some(""))), None);
+        // a source's cover is fetched by that source's client
+        assert_eq!(
+            cover_source(&item(&["tmdb"], Some("tvdb"))).as_deref(),
+            Some("tvdb")
+        );
+        assert_eq!(
+            cover_source(&item(&["igdb"], None)).as_deref(),
+            Some("igdb")
+        );
+    }
 }

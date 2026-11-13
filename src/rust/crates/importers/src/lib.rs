@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub use row::{ImportRow, RowError};
-pub use runner::Importer;
+pub use runner::{CoverRule, Importer};
 
 /// Job kind that runs an import.
 pub const IMPORT_JOB: &str = "import.run";
@@ -155,6 +155,10 @@ pub struct ImportRecord {
     /// Rows matched to an existing catalog item by external id.
     pub matched: u64,
     pub errors: Vec<RowError>,
+    /// Rows that were imported with something left out, and why (a picture address that
+    /// was refused or not valid, review MAN-3 of v1-manual).
+    #[serde(default)]
+    pub warnings: Vec<RowError>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     /// Rows in the file (known once it is parsed).
@@ -496,6 +500,7 @@ mod tests {
             notes: None,
             history: vec![at(None)],
             lists: vec!["L".into()],
+            cover_url: None,
         };
         let parsed = super::Parsed {
             rows: ["a", "b", "c", "d", "e", "f"]

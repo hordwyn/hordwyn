@@ -385,7 +385,7 @@ async fn the_export_downloads_as_json_lines_or_csv() {
         (
             "csv",
             "text/csv; charset=utf-8",
-            "source_id,kind,title,year,status,rating,notes,external_ids,finished_dates,lists",
+            "source_id,kind,title,year,status,rating,notes,external_ids,finished_dates,lists,cover_url",
         ),
     ] {
         let resp = t

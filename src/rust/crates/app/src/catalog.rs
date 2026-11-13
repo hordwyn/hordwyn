@@ -52,7 +52,7 @@ impl App {
     /// # Errors
     /// Unknown item. A failing queue is logged by the adapter and does not fail the read.
     pub async fn item_detail(&self, id: ItemId) -> AppResult<CatalogItem> {
-        self.detail(id, None).await
+        self.item_detail_where(id, None, &has_external_id).await
     }
 
     /// [`App::item_detail`] on behalf of `actor` (`GET /items/{id}`): when a refresh is
@@ -66,16 +66,27 @@ impl App {
         actor: domain::user::Actor,
         id: ItemId,
     ) -> AppResult<CatalogItem> {
-        self.detail(id, Some(actor)).await
+        self.item_detail_where(id, Some(actor), &has_external_id)
+            .await
     }
 
-    async fn detail(
+    /// The read behind [`App::item_detail`] and [`App::item_detail_for`] (`watcher`) for a
+    /// caller that knows the sources: a refresh is queued only when `answerable` says a
+    /// source could answer for the item. An item nobody answers for (entered by hand, a
+    /// title-only stub of an import, ids of sources this instance does not have) was queued
+    /// on every view and marked failed every hour (v1-plan.md 7, B2). Without the sources
+    /// at hand the two callers above ask for any external id.
+    ///
+    /// # Errors
+    /// Unknown item.
+    pub async fn item_detail_where(
         &self,
         id: ItemId,
         watcher: Option<domain::user::Actor>,
+        answerable: &(dyn Fn(&CatalogItem) -> bool + Sync),
     ) -> AppResult<CatalogItem> {
         let item = self.catalog_item(id).await?;
-        if item.needs_refresh(self.now()) {
+        if item.needs_refresh(self.now()) && answerable(&item) {
             // before the refresh is queued, so its event cannot come first; best effort
             if let Some(a) = watcher {
                 let _ = self.watch_item(a, id).await;
@@ -95,6 +106,21 @@ impl App {
         }
         Ok(item)
     }
+}
+
+/// The rule of [`App::item_detail`]: without an external id no source can know the item.
+fn has_external_id(item: &CatalogItem) -> bool {
+    !item.external_ids.is_empty()
+}
+
+/// The fields of `item` a person set ([`USER_PROVENANCE`]): no writer of connector data
+/// replaces them.
+fn fields_by_user(item: &CatalogItem) -> std::collections::BTreeSet<String> {
+    item.provenance
+        .iter()
+        .filter(|(_, source)| source.as_str() == USER_PROVENANCE)
+        .map(|(field, _)| field.clone())
+        .collect()
 }
 
 /// Result of refreshing an item from its connectors (already merged).
@@ -138,12 +164,7 @@ impl App {
     ) -> AppResult<CatalogItem> {
         let mut item = self.catalog_item(id).await?;
         let now = self.now();
-        let by_user: std::collections::BTreeSet<String> = item
-            .provenance
-            .iter()
-            .filter(|(_, source)| source.as_str() == USER_PROVENANCE)
-            .map(|(field, _)| field.clone())
-            .collect();
+        let by_user = fields_by_user(&item);
         let kept = |field: &str| by_user.contains(field);
         let attributes = keep_user_attributes(refresh.attributes, &item.attributes, &by_user);
         match self.kinds.validate_attributes(&item.kind, &attributes) {
@@ -380,6 +401,9 @@ impl App {
         mode: OnExisting,
     ) -> AppResult<CatalogItem> {
         let mut changed = false;
+        // what a person set stays, whoever writes (review BOOK-10 of v1-books)
+        let by_user = fields_by_user(&item);
+        let kept = |field: &str| by_user.contains(field);
         match mode {
             OnExisting::Keep => return Ok(item),
             OnExisting::Fill => {
@@ -389,9 +413,17 @@ impl App {
                         changed = true;
                     }
                 }
-                // an expired item gets its data back through a refetch, which stamps it
-                // (UX4-9); a cover from a search result alone would be kept unstamped
-                if item.cover_url.is_none() && new.cover_url.is_some() && !item.title_unavailable()
+                // an expired item (its title gone with the source's data) gets its data back
+                // through a refetch (UX4-9), not from a search result; a cover a person
+                // removed is not filled in again. An expired item that kept a title a
+                // person set (LC-24) is not recognised here and takes the cover and the
+                // popularity below; that write is stamped as source data (`upsert`, the
+                // `title <> ''` branch of `provider_data_at`), so the next sweep purges
+                // it again and the retention limit holds (review MAN-8)
+                if item.cover_url.is_none()
+                    && new.cover_url.is_some()
+                    && !item.title_unavailable()
+                    && !kept("cover_url")
                 {
                     item.cover_url = new.cover_url;
                     changed = true;
@@ -416,20 +448,31 @@ impl App {
         if new.title.trim().is_empty() {
             return Err(DomainError::invalid("title", "title must not be empty").into());
         }
+        let attributes = keep_user_attributes(new.attributes, &item.attributes, &by_user);
         item.attributes = self
             .kinds
-            .validate_attributes(&new.kind, &new.attributes)
+            .validate_attributes(&new.kind, &attributes)
             .map_err(|r| DomainError::invalid("attributes", r))?;
-        item.title = new.title;
-        item.original_title = new.original_title.or(item.original_title);
-        item.year = new.year.or(item.year);
-        item.description = new.description.or(item.description);
+        if !kept("title") {
+            item.title = new.title;
+        }
+        if !kept("original_title") {
+            item.original_title = new.original_title.or(item.original_title);
+        }
+        if !kept("year") {
+            item.year = new.year.or(item.year);
+        }
+        if !kept("description") {
+            item.description = new.description.or(item.description);
+        }
         for ext in new.external_ids {
             if !item.external_ids.contains(&ext) {
                 item.external_ids.push(ext);
             }
         }
-        item.cover_url = new.cover_url.or(item.cover_url);
+        if !kept("cover_url") {
+            item.cover_url = new.cover_url.or(item.cover_url);
+        }
         item.popularity = new.popularity.or(item.popularity);
         self.repos.catalog.upsert(&item).await?;
         self.publish_item(item.id).await;
@@ -457,9 +500,10 @@ impl App {
     }
 
     /// Drop the connector data of an item, its title and year included (only the external
-    /// ids stay; the person's own data is untouched; it becomes an expired stub, fetched
-    /// again once its source can answer, UX4-9) and publish `entity.updated`. Returns the
-    /// cover asset it referenced, for the caller to delete.
+    /// ids stay; the person's own data is untouched, and so is every field of the item a
+    /// person set, [`USER_PROVENANCE`]; it becomes an expired stub, fetched again once its
+    /// source can answer, UX4-9) and publish `entity.updated`. Returns the cover asset it
+    /// referenced, for the caller to delete.
     ///
     /// # Errors
     /// Storage errors.
