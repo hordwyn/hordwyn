@@ -1,0 +1,28 @@
+{
+  "fixture": {
+    "synthetic": false,
+    "source": "recorded from https://www.wikidata.org/w/api.php (Action API), data CC0",
+    "checked": "2026-11-13",
+    "note": "recorded 2026-11-13; untrimmed (the recording asked srlimit=5); request URL rewritten 2026-11-13 for the review fixes (39 classes, wider languages set), body as recorded"
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://www.wikidata.org/w/api.php?action=query&list=search&srnamespace=0&srlimit=5&srprop=&srsearch=zzqqxx+nope+haswbstatement%3AP31%3DQ131436%7CP31%3DQ60474521%7CP31%3DQ3244175%7CP31%3DQ142714%7CP31%3DQ3177859%7CP31%3DQ15804899%7CP31%3DQ1191150%7CP31%3DQ1150710%7CP31%3DQ1272194%7CP31%3DQ4931403%7CP31%3DQ1783817%7CP31%3DQ985834%7CP31%3DQ267989%7CP31%3DQ18703581%7CP31%3DQ5188437%7CP31%3DQ2796140%7CP31%3DQ1275314%7CP31%3DQ21608615%7CP31%3DQ788553%7CP31%3DQ1182245%7CP31%3DQ10924689%7CP31%3DQ10499647%7CP31%3DQ17144589%7CP31%3DQ1099522%7CP31%3DQ1548611%7CP31%3DQ1637382%7CP31%3DQ31977010%7CP31%3DQ4927217%7CP31%3DQ48997832%7CP31%3DQ66152389%7CP31%3DQ104714331%7CP31%3DQ1515156%7CP31%3DQ573573%7CP31%3DQ299191%7CP31%3DQ1509934%7CP31%3DQ14947863%7CP31%3DQ839864%7CP31%3DQ5161688%7CP31%3DQ133889197&format=json&formatversion=2&maxage=86400&smaxage=86400"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "content-type",
+      "application/json; charset=utf-8"
+    ]
+  ],
+  "body": {
+    "batchcomplete": true,
+    "query": {
+      "searchinfo": {
+        "totalhits": 0
+      },
+      "search": []
+    }
+  }
+}

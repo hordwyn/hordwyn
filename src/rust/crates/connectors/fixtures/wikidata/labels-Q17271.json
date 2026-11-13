@@ -1,0 +1,52 @@
+{
+  "fixture": {
+    "synthetic": false,
+    "source": "recorded from https://www.wikidata.org/w/api.php (Action API), data CC0",
+    "checked": "2026-11-13",
+    "note": "recorded 2026-11-13; untrimmed; request URL rewritten 2026-11-13 for the review fixes (39 classes, wider languages set), body as recorded"
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q788553%7CQ142714&props=labels&languages=de%7Cen%7Cmul%7Cfr%7Ces%7Cit%7Cnl%7Cpl%7Cpt%7Csv%7Cda%7Cnb%7Cfi%7Ccs%7Chu%7Cru%7Cuk%7Cja%7Czh%7Cko&format=json&maxage=86400&smaxage=86400"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "content-type",
+      "application/json; charset=utf-8"
+    ]
+  ],
+  "body": {
+    "entities": {
+      "Q788553": {
+        "type": "item",
+        "id": "Q788553",
+        "labels": {
+          "en": {
+            "language": "en",
+            "value": "German-style board game"
+          },
+          "de": {
+            "language": "de",
+            "value": "Eurogame"
+          }
+        }
+      },
+      "Q142714": {
+        "type": "item",
+        "id": "Q142714",
+        "labels": {
+          "de": {
+            "language": "de",
+            "value": "Kartenspiel"
+          },
+          "en": {
+            "language": "en",
+            "value": "card game"
+          }
+        }
+      }
+    },
+    "success": 1
+  }
+}

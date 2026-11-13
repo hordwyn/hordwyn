@@ -1,7 +1,7 @@
 import { test as setup, expect, request, type Page } from "./fixtures";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { ADMIN, PASSWORD, REAUTH_ADMIN, expectNoA11yViolations, expectReflow, hydrated } from "./helpers";
+import { ADMIN, E2E_CONTACT, PASSWORD, REAUTH_ADMIN, expectNoA11yViolations, expectReflow, hydrated } from "./helpers";
 
 // Runs before every spec (project dependency). On a fresh database it walks the whole setup
 // wizard in the browser (design.md 5.1): every page leads to /setup, the first account becomes
@@ -84,6 +84,13 @@ setup("the setup wizard makes the instance admin", async ({ page, baseURL }) => 
   // the wizard is locked now
   const locked = await page.goto("/setup");
   expect(locked?.status()).toBe(404);
+
+  // board games come from Wikidata, which is asked only with the operator contact
+  // (v1-wikidata); the instance keeps one while the specs run
+  const contact = await page.request.put("/api/v1/admin/settings", {
+    data: { values: { "instance.operator_contact": E2E_CONTACT } },
+  });
+  expect(contact.ok(), `operator contact ${contact.status()} ${await contact.text()}`).toBeTruthy();
 
   const other = await request.newContext({ baseURL });
   const signUp = await other.post("/api/v1/auth/sign-up", {

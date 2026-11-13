@@ -105,7 +105,10 @@ attributes!(
         weight: Option<f32>,
         mechanics: Vec<String>,
         categories: Vec<String>,
+        /// BoardGameGeek id: a reference for the outbound link, not a matching key (LB-36).
         bgg_id: Option<u64>,
+        /// GTINs (EAN/UPC) of editions: references, not matching keys (LB-36).
+        gtins: Vec<String>,
     }
 );
 
@@ -136,6 +139,6 @@ impl KindModule for BoardGame {
     }
 
     fn default_connectors() -> Vec<String> {
-        strings(&["bgg"])
+        strings(&["wikidata"])
     }
 }

@@ -41,6 +41,17 @@ request per second; not a backend for high-traffic commercial services. One item
 work: an ISBN finds its work, the page total is the median over the editions (an estimate a
 person can correct). Details: `docs/connectors/openlibrary.md`.
 
+|`wikidata` (Wikidata)
+|board_game
+|none; the operator contact is required: without it the source is not asked at all
+(the sources page and the search footer say "Operator contact missing")
+|"Data from Wikidata (CC0)." with a link: CC0 needs no credit, it is given as a courtesy
+the source asks for. The item page links the item on wikidata.org (where its data is
+corrected) and, when Wikidata knows it, the game on BoardGameGeek (a plain link; nothing is
+fetched from BoardGameGeek). Action API on `www.wikidata.org` only, two requests per second
+at most, one at a time; no images (Wikimedia Commons is not used). Details:
+`docs/connectors/wikidata.md`.
+
 |`tvdb` (TheTVDB)
 |show
 |API key, optional PIN, `<apikey>[:<pin>]` (`APP__CONNECTORS__TVDB__API_KEY`)
@@ -54,7 +65,9 @@ registered only with a key).
 [cols="1,3"]
 |===
 |`anilist` |Terms forbid use in anime/manga tracker services (DEC-108).
-|`bgg` |Docs and terms not reachable from the build host; token needed (DEC-107).
+|`bgg` |Docs and terms not reachable from the build host; token needed (DEC-107). Board
+games come from Wikidata instead (DEC-530, DEC-641); the BoardGameGeek id arrives from there
+as an identifier.
 |`musicbrainz`, `vndb`, `metron` |Not built yet. Their service software is GPL-family: the
 public API documentation may be read to write a client, the code may not (DEC-169, which
 superseded DEC-106).
@@ -73,7 +86,7 @@ shows it read-only. It is the operator's contact, never a member's.
 
 A connector declares whether it gets the contact: `none` (TMDB, TheTVDB, IGDB, Podcast
 Index: their requests carry the plain application `User-Agent` and never the contact),
-`preferred` (Open Library: asked with and without it) or `required` (a source that is not
+`preferred` (Open Library: asked with and without it) or `required` (Wikidata: a source that is not
 asked at all without one; its state on the sources page and in the search footer is
 "Operator contact missing"). The header of a source that gets it is
 `<brand ident>/<version> (<contact>)`. It goes with a request also where the source

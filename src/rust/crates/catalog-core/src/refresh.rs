@@ -63,7 +63,8 @@ pub async fn refresh_item(
         let req = DetailsRequest {
             kind: item.kind.to_string(),
             id: ext.value.clone(),
-            language: None,
+            // the item is shared by every member: the instance language (WD-2, LB-35)
+            language: registry.language().map(String::from),
         };
         match details.details(&ctx, &req).await {
             Ok(s) => snapshots.push(s),

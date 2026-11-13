@@ -66,10 +66,11 @@ gallery = ["web/gallery"]
 tmdb = ["connectors/tmdb"]
 igdb = ["connectors/igdb"]
 openlibrary = ["connectors/openlibrary"]
+wikidata = ["connectors/wikidata"]
 podcastindex = ["connectors/podcastindex"]
 tvdb = ["connectors/tvdb"]
 # every compiled-in connector (release builds, CI)
-all-connectors = ["tmdb", "igdb", "podcastindex", "tvdb", "openlibrary"]
+all-connectors = ["tmdb", "igdb", "podcastindex", "tvdb", "openlibrary", "wikidata"]
 
 [dev-dependencies]
 totp-rs.workspace = true

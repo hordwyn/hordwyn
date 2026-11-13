@@ -32,6 +32,7 @@ mod ops;
 mod phase1_fns;
 mod read_timeout;
 mod retention;
+mod search_language;
 mod security_headers;
 mod setup_page;
 mod sharing;

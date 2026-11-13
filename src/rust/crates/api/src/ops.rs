@@ -342,7 +342,15 @@ async fn stream_connector_results(
     sid: String,
 ) {
     // the member's own credentials (TheTVDB PIN) go with their search (design.md 4.1)
-    let user_keys = crate::admin::user_keys(s, a).await;
+    // and the language they chose (`None`: automatic, the instance language; WD-2, LB-35)
+    let language = match s.app.user(a.user_id).await {
+        Ok(u) => u.locale,
+        Err(e) => {
+            tracing::warn!(error = %e, "member language unreadable");
+            None
+        }
+    };
+    let user_keys = crate::admin::user_keys(s, a).await.with_language(language);
     let state = s.clone();
     tokio::spawn(async move {
         state

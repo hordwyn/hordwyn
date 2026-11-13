@@ -305,6 +305,22 @@ item-section-about = Details
 item-section-notes = Notizen
 item-about-empty = Noch keine Details.
 item-ids = Kennungen:
+item-links = Anderswo:
+game-fact-players = Mitspielende
+game-fact-time = Spieldauer
+game-fact-age = Alter
+game-players = { $count ->
+    [one] { $count } Person
+   *[other] { $count } Personen
+}
+game-players-range = { $min }-{ $max } Personen
+game-players-from = ab { $min } Personen
+game-players-up-to = bis { $max } Personen
+game-minutes = { $count } Min.
+game-minutes-range = { $min }-{ $max } Min.
+game-minutes-from = ab { $min } Min.
+game-minutes-up-to = bis { $max } Min.
+game-age = ab { $age } Jahren
 item-note = Private Notiz
 item-note-hint = Nur du siehst diese Notiz.
 item-note-save = Notiz speichern
@@ -1205,7 +1221,7 @@ admin-users-delete-title = { $name } löschen?
 admin-users-delete-body = Das Konto und seine Bibliothek werden gelöscht. Gemeinsam eingetragene Sitzungen bleiben im Verlauf der anderen, mit dieser Person als Begleitung.
 admin-sources-lead = Woher Titel, Cover und Folgen kommen. Schlüssel werden verschlüsselt gespeichert und nie wieder angezeigt.
 admin-contact-label = Betreiberkontakt
-admin-contact-hint = Deine E-Mail-Adresse (bevorzugt: die Quellen nennen eine E-Mail-Adresse) oder eine https-Adresse. Wird bei jeder Anfrage an Open Library und Wikidata mitgeschickt, damit sie den Betreiber erreichen können; es ist dein Kontakt, nicht der eines Mitglieds.
+admin-contact-hint = Deine E-Mail-Adresse (bevorzugt: die Quellen nennen eine E-Mail-Adresse) oder eine https-Adresse. Wird bei jeder Anfrage an Open Library und Wikidata mitgeschickt, damit sie den Betreiber erreichen können; es ist dein Kontakt, nicht der eines Mitglieds. Ohne ihn wird Wikidata nicht gefragt; mit ihm schickt jede Brettspielsuche die eingegebenen Wörter an Wikidata. Nicht gewünscht? Schalte Wikidata in der Liste unten aus.
 admin-contact-cleared = Entfernt. Anfragen tragen jetzt keinen Kontakt mehr.
 admin-sources-note-openlibrary = Open Library ist ein gemeinschaftlicher Bibliotheksdienst mit niedrigem Anfragelimit. Ein kommerzieller Dienst mit viel Verkehr darf sich nicht auf diese Quelle stützen.
 admin-sources-attention = { $count ->
@@ -1395,7 +1411,13 @@ home-nudge-failing = { $count ->
    *[other] { $sources } sind eingerichtet, antworten aber nicht.
 }
 home-nudge-check = Datenquellen prüfen
+home-nudge-contact = { $count ->
+    [one] { $sources } wird erst gefragt, wenn du den Betreiberkontakt eingetragen hast; bis dahin findet die Suche dort nichts.
+   *[other] { $sources } werden erst gefragt, wenn du den Betreiberkontakt eingetragen hast; bis dahin findet die Suche dort nichts.
+}
+home-nudge-contact-action = Betreiberkontakt eintragen
 home-nudge-snooze = 7 Tage ausblenden
+home-nudge-decline = Nicht mehr erinnern
 
 ## Fußzeile und Keine-Treffer-Karte der Suche (design.md 6.4)
 search-searching = Suche läuft...
@@ -1411,6 +1433,7 @@ search-unset-member = Für diese Suche gibt es noch keine Datenquelle. Bitte dei
 search-scope = Suchen in
 search-footer-label = Datenquellen
 search-footer-source = { $source }: { $state }
+search-footer-source-kinds = { $source } ({ $kinds }): { $state }
 search-footer-group = { $group }: keine Quelle eingerichtet
 
 # UX phase 2 review, web pages (UX2-W1, W7, W12, W14, W21)

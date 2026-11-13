@@ -109,3 +109,50 @@ fn user_keys_redact_their_values_in_debug() {
     assert!(!shown.contains("pin-5678"), "{shown}");
     assert!(shown.contains("tvdb"), "{shown}");
 }
+
+/// A search source that notes the language of each request.
+struct LanguageSpy(Spy, Arc<Mutex<Vec<Option<String>>>>);
+
+#[async_trait]
+impl Search for LanguageSpy {
+    async fn search(&self, _: &Ctx, req: &SearchRequest) -> Result<Vec<Snapshot>, ConnectorError> {
+        self.1.lock().unwrap().push(req.language.clone());
+        Ok(vec![])
+    }
+}
+
+impl Connector for LanguageSpy {
+    fn info(&self) -> &ConnectorInfo {
+        &self.0.info
+    }
+
+    fn as_search(&self) -> Option<&dyn Search> {
+        Some(self)
+    }
+}
+
+/// WD-2: a search asks in the member's own language; a member who left it automatic is asked
+/// in the instance language, and without either the source picks its own.
+#[tokio::test]
+async fn the_search_carries_the_members_language_else_the_instances() {
+    let env = testkit::TestEnv::new();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut r = Registry::default();
+    r.register(Arc::new(LanguageSpy(
+        Spy::new("lang", Arc::default()),
+        Arc::clone(&seen),
+    )));
+    let http = Arc::new(testkit::ReplayHttp::default());
+    let kinds = vec!["movie".to_string()];
+    SearchFanout::new(env.app.clone(), r.clone(), http.clone())
+        .run("x", &kinds, 5, |_| async {})
+        .await;
+    let fanout = SearchFanout::new(env.app.clone(), r.with_language("de"), http);
+    fanout.run("x", &kinds, 5, |_| async {}).await;
+    let member = UserKeys::new().with_language(Some("fr".into()));
+    fanout.run_as(&member, "x", &kinds, 5, |_| async {}).await;
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [None, Some("de".to_string()), Some("fr".to_string())]
+    );
+}

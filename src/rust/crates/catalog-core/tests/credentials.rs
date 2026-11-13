@@ -131,6 +131,8 @@ fn a_disabled_source_serves_nothing_until_enabled_again() {
 struct DetailsSpy {
     inner: Fake,
     calls: std::sync::atomic::AtomicUsize,
+    /// The language of each request.
+    languages: std::sync::Mutex<Vec<Option<String>>>,
 }
 
 #[async_trait::async_trait]
@@ -141,6 +143,7 @@ impl catalog_core::Details for DetailsSpy {
         req: &catalog_core::DetailsRequest,
     ) -> Result<catalog_core::Snapshot, catalog_core::ConnectorError> {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.languages.lock().unwrap().push(req.language.clone());
         Ok(catalog_core::Snapshot {
             connector: "tmdb".into(),
             kind: req.kind.clone(),
@@ -184,6 +187,7 @@ async fn a_disabled_source_is_not_asked_for_details() {
     let spy = Arc::new(DetailsSpy {
         inner: fake,
         calls: std::sync::atomic::AtomicUsize::new(0),
+        languages: std::sync::Mutex::default(),
     });
     let mut r = Registry::default();
     r.register(spy.clone());
@@ -352,4 +356,46 @@ async fn an_item_no_source_answers_for_is_left_alone_by_the_refresh() {
     .unwrap();
     let after = env.app.catalog_item(ours.id).await.unwrap();
     assert!(after.fresh_until.is_some(), "retried later, as before");
+}
+
+/// WD-2: a catalogue item is shared by every member, so a refresh asks in the instance
+/// language (the registry's), not in a member's.
+#[tokio::test]
+async fn a_refresh_asks_in_the_instance_language() {
+    let mut fake = Fake::new("tmdb", Some("k"));
+    fake.info.capabilities = vec![Capability::Details];
+    let spy = Arc::new(DetailsSpy {
+        inner: fake,
+        calls: std::sync::atomic::AtomicUsize::new(0),
+        languages: std::sync::Mutex::default(),
+    });
+    let mut r = Registry::default();
+    r.register(spy.clone());
+    let r = r.with_language("de");
+    let env = testkit::TestEnv::new();
+    let item = env
+        .app
+        .upsert_catalog_item(app::NewCatalogItem {
+            kind: domain::kind::KindId::new("movie").unwrap(),
+            title: "Heat".into(),
+            original_title: None,
+            year: Some(1995),
+            description: None,
+            external_ids: vec![domain::catalog::ExternalId::new("tmdb", "949")],
+            attributes: serde_json::json!({}),
+            cover_url: None,
+            popularity: None,
+        })
+        .await
+        .unwrap();
+    catalog_core::refresh::refresh_item(
+        &env.app,
+        &r,
+        Arc::new(testkit::ReplayHttp::default()),
+        app::ports::Lane::BackgroundRefresh,
+        item.id,
+    )
+    .await
+    .unwrap();
+    assert_eq!(*spy.languages.lock().unwrap(), [Some("de".to_string())]);
 }

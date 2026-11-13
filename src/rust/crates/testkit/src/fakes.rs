@@ -282,9 +282,36 @@ pub struct ReplayHttp {
     /// APIs that POST different queries to one URL.
     by_body: Mutex<Vec<(String, String, HttpResponse)>>,
     requests: Mutex<Vec<HttpRequest>>,
+    /// The pauses connectors asked for (`HttpFetch::pause`), in order.
+    pauses: Mutex<Vec<(String, std::time::Duration)>>,
 }
 
 impl ReplayHttp {
+    /// Record a response with headers (`Retry-After`, `Cache-Control`, ...).
+    pub fn record_with_headers(
+        &self,
+        method: &str,
+        url: &str,
+        status: u16,
+        headers: Vec<(String, String)>,
+        body: impl Into<Vec<u8>>,
+    ) {
+        self.responses.lock().expect("lock").insert(
+            format!("{method} {url}"),
+            HttpResponse {
+                status,
+                headers,
+                body: body.into(),
+            },
+        );
+    }
+
+    /// The pauses asked for so far, as `(connector, wait)`.
+    #[must_use]
+    pub fn pauses(&self) -> Vec<(String, std::time::Duration)> {
+        self.pauses.lock().expect("lock").clone()
+    }
+
     pub fn record(&self, method: &str, url: &str, status: u16, body: impl Into<Vec<u8>>) {
         self.responses.lock().expect("lock").insert(
             format!("{method} {url}"),
@@ -323,6 +350,13 @@ impl HttpFetch for ReplayHttp {
             .get(&key)
             .cloned()
             .ok_or_else(|| HttpError::Network(format!("no recorded response for {key}")))
+    }
+
+    fn pause(&self, connector: &str, wait: std::time::Duration) {
+        self.pauses
+            .lock()
+            .expect("lock")
+            .push((connector.to_string(), wait));
     }
 }
 

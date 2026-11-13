@@ -1,0 +1,39 @@
+{
+  "fixture": {
+    "synthetic": false,
+    "source": "recorded from https://www.wikidata.org/w/api.php (Action API), data CC0",
+    "checked": "2026-11-13",
+    "note": "recorded 2026-11-13; an error arrives with HTTP 200; untrimmed; request URL rewritten 2026-11-13 for the review fixes (39 classes, wider languages set), body as recorded"
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q99999999999&props=labels%7Cdescriptions%7Cclaims%7Csitelinks&languages=en%7Cmul%7Cde%7Cfr%7Ces%7Cit%7Cnl%7Cpl%7Cpt%7Csv%7Cda%7Cnb%7Cfi%7Ccs%7Chu%7Cru%7Cuk%7Cja%7Czh%7Cko&format=json&maxage=86400&smaxage=86400"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "content-type",
+      "application/json; charset=utf-8"
+    ]
+  ],
+  "body": {
+    "error": {
+      "code": "no-such-entity",
+      "info": "Could not find an entity with the ID \"Q99999999999\".",
+      "id": "Q99999999999",
+      "messages": [
+        {
+          "name": "wikibase-api-no-such-entity",
+          "parameters": [
+            "Q99999999999"
+          ],
+          "html": {
+            "*": "Could not find an entity with the ID \"Q99999999999\"."
+          }
+        }
+      ],
+      "*": "See https://www.wikidata.org/w/api.php for API usage. Subscribe to the mediawiki-api-announce mailing list at &lt;https://lists.wikimedia.org/postorius/lists/mediawiki-api-announce.lists.wikimedia.org/&gt; for notice of API deprecations and breaking changes."
+    },
+    "servedby": "mw-api-ext.eqiad.main-5c985fd6b8-dqwgs"
+  }
+}

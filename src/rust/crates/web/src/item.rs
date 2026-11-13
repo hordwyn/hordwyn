@@ -1116,17 +1116,25 @@ fn attribute_text(v: &serde_json::Value) -> Option<String> {
 fn About(page: ItemPageDto, kind: Option<KindDto>) -> impl IntoView {
     let i18n = use_i18n();
     let item = page.item;
-    let facts: Vec<(String, String)> = kind
-        .map(|k| k.facets)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|f| {
-            Some((
-                i18n.t(&format!("library-facet-{f}")),
-                attribute_text(item.attributes.get(&f)?)?,
-            ))
-        })
-        .collect();
+    // a board game says players, time and age in words; its raw counts are not repeated
+    let mut facts = if item.kind == "board_game" {
+        crate::item_words::game_facts(&i18n, &item.attributes)
+    } else {
+        Vec::new()
+    };
+    let worded = !facts.is_empty();
+    facts.extend(
+        kind.map(|k| k.facets)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|f| !(worded && matches!(f.as_str(), "players_min" | "players_max")))
+            .filter_map(|f| {
+                Some((
+                    i18n.t(&format!("library-facet-{f}")),
+                    attribute_text(item.attributes.get(&f)?)?,
+                ))
+            }),
+    );
     let empty = item.description.is_none() && facts.is_empty();
     view! {
         <div class="grid gap-4 py-2">
@@ -1236,6 +1244,7 @@ fn Note(item_id: String, note: String) -> impl IntoView {
 
 #[component]
 fn Attribution(page: ItemPageDto) -> impl IntoView {
+    let links = crate::item_words::outbound_links(&page.item.external_ids, &page.item.attributes);
     view! {
         <footer class="mt-2 border-t border-border pt-4 text-xs text-muted-foreground" data-testid="attribution">
             {page.sources.iter().map(|s| view! {
@@ -1245,6 +1254,15 @@ fn Attribution(page: ItemPageDto) -> impl IntoView {
                     <span lang="en">{s.text.clone()}</span> " " <a href=s.url.clone() class="text-primary underline" rel="noopener">{s.url.clone()}</a>
                 </p>
             }).collect_view()}
+            {(!links.is_empty()).then(|| view! {
+                <p data-testid="item-links">
+                    {use_i18n().t("item-links")} " "
+                    {links.into_iter().enumerate().map(|(n, (name, href))| view! {
+                        {(n > 0).then_some(" - ")}
+                        <a href=href class="text-primary underline" rel="noopener">{name}</a>
+                    }).collect_view()}
+                </p>
+            })}
         </footer>
     }
 }

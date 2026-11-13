@@ -1,0 +1,741 @@
+{
+  "fixture": {
+    "synthetic": false,
+    "source": "recorded from https://www.wikidata.org/w/api.php (Action API), data CC0",
+    "checked": "2026-11-13",
+    "note": "recorded 2026-11-13; claims cut to the properties the connector reads plus P18 and P8646, references removed; request URL rewritten 2026-11-13 for the review fixes (39 classes, wider languages set), body as recorded"
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q17271%7CQ105395676%7CQ839962&props=labels%7Cdescriptions%7Cclaims%7Csitelinks&languages=de%7Cen%7Cmul%7Cfr%7Ces%7Cit%7Cnl%7Cpl%7Cpt%7Csv%7Cda%7Cnb%7Cfi%7Ccs%7Chu%7Cru%7Cuk%7Cja%7Czh%7Cko&format=json&maxage=86400&smaxage=86400"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "content-type",
+      "application/json; charset=utf-8"
+    ]
+  ],
+  "body": {
+    "entities": {
+      "Q17271": {
+        "type": "item",
+        "id": "Q17271",
+        "labels": {
+          "de": {
+            "language": "de",
+            "value": "Die Siedler von Catan"
+          },
+          "en": {
+            "language": "en",
+            "value": "The Settlers of Catan"
+          }
+        },
+        "descriptions": {
+          "en": {
+            "language": "en",
+            "value": "board game (1995)"
+          },
+          "de": {
+            "language": "de",
+            "value": "Brettspiel"
+          }
+        },
+        "claims": {
+          "P31": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P31",
+                "hash": "3033071b8ff4020f1bf602c4811b184ec5fef20c",
+                "datavalue": {
+                  "value": {
+                    "entity-type": "item",
+                    "numeric-id": 131436,
+                    "id": "Q131436"
+                  },
+                  "type": "wikibase-entityid"
+                },
+                "datatype": "wikibase-item"
+              },
+              "type": "statement",
+              "id": "q17271$DD165200-A219-430A-A169-8F8380C4F1F3",
+              "rank": "normal"
+            },
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P31",
+                "hash": "ee5beae3eecb03fcefa0093bacddc531f4893263",
+                "datavalue": {
+                  "value": {
+                    "entity-type": "item",
+                    "numeric-id": 18703581,
+                    "id": "Q18703581"
+                  },
+                  "type": "wikibase-entityid"
+                },
+                "datatype": "wikibase-item"
+              },
+              "type": "statement",
+              "id": "Q17271$aeec395b-4949-65d9-9d10-539302547788",
+              "rank": "normal"
+            }
+          ],
+          "P18": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P18",
+                "hash": "c89e48752f08a9ad6f0c5b17c133e0fe1adcd8ad",
+                "datavalue": {
+                  "value": "Nepomuk 280 - Osadníci z Katanu.jpg",
+                  "type": "string"
+                },
+                "datatype": "commonsMedia"
+              },
+              "type": "statement",
+              "id": "Q17271$7663A22A-8022-4029-A642-C2F924E66BD1",
+              "rank": "normal"
+            }
+          ],
+          "P1872": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P1872",
+                "hash": "f9718bd6466dcf2bac5847a88288d13abc8f1b5a",
+                "datavalue": {
+                  "value": {
+                    "amount": "+3",
+                    "unit": "1"
+                  },
+                  "type": "quantity"
+                },
+                "datatype": "quantity"
+              },
+              "type": "statement",
+              "id": "Q17271$390e00f9-4b0d-5c5d-a2ff-0ef5b6de621d",
+              "rank": "normal"
+            }
+          ],
+          "P1873": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P1873",
+                "hash": "5586d4a93c2c61322ee92a3cd28a8cc0894bc234",
+                "datavalue": {
+                  "value": {
+                    "amount": "+4",
+                    "unit": "1"
+                  },
+                  "type": "quantity"
+                },
+                "datatype": "quantity"
+              },
+              "type": "statement",
+              "id": "Q17271$e9b70a3e-4641-a07b-b50a-6ea77e6bc074",
+              "rank": "normal"
+            }
+          ],
+          "P2339": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P2339",
+                "hash": "9ca8ea183eff490fea9ea4a6a9c2c5e38c8cb2a8",
+                "datavalue": {
+                  "value": "13",
+                  "type": "string"
+                },
+                "datatype": "external-id"
+              },
+              "type": "statement",
+              "id": "Q17271$11d5fd34-4093-78bb-04e5-d99d70ce0862",
+              "rank": "normal"
+            }
+          ],
+          "P577": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P577",
+                "hash": "8342d9ebfa73eae8193415946f87d8d4ee544197",
+                "datavalue": {
+                  "value": {
+                    "time": "+1995-00-00T00:00:00Z",
+                    "timezone": 0,
+                    "before": 0,
+                    "after": 0,
+                    "precision": 9,
+                    "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                  },
+                  "type": "time"
+                },
+                "datatype": "time"
+              },
+              "type": "statement",
+              "id": "Q17271$6af20885-455d-1d69-7afa-b6908edd2f09",
+              "rank": "normal"
+            }
+          ],
+          "P136": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P136",
+                "hash": "18f29acba45b1bf45118adae96da0cc02f3b3b32",
+                "datavalue": {
+                  "value": {
+                    "entity-type": "item",
+                    "numeric-id": 788553,
+                    "id": "Q788553"
+                  },
+                  "type": "wikibase-entityid"
+                },
+                "datatype": "wikibase-item"
+              },
+              "type": "statement",
+              "id": "Q17271$143a6726-4f18-0686-f94f-6536cf4ae21e",
+              "rank": "normal"
+            },
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P136",
+                "hash": "c4ff513fa69d5f3a38eda03da5d682f6d4c3223d",
+                "datavalue": {
+                  "value": {
+                    "entity-type": "item",
+                    "numeric-id": 142714,
+                    "id": "Q142714"
+                  },
+                  "type": "wikibase-entityid"
+                },
+                "datatype": "wikibase-item"
+              },
+              "type": "statement",
+              "id": "Q17271$a19885e0-4d0f-c50e-d590-05c54787b093",
+              "rank": "normal"
+            }
+          ],
+          "P3962": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P3962",
+                "hash": "6c82d4c2dc955c09acda7a0641aecff9221385e8",
+                "datavalue": {
+                  "value": "0688623905027",
+                  "type": "string"
+                },
+                "datatype": "external-id"
+              },
+              "type": "statement",
+              "id": "Q17271$9EE6569C-E424-4C0A-9ADB-1B6B228C0578",
+              "rank": "normal"
+            }
+          ],
+          "P2899": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P2899",
+                "hash": "863706368ca21821f42806a7636c351f906e27fa",
+                "datavalue": {
+                  "value": {
+                    "amount": "+10",
+                    "unit": "http://www.wikidata.org/entity/Q24564698"
+                  },
+                  "type": "quantity"
+                },
+                "datatype": "quantity"
+              },
+              "type": "statement",
+              "id": "Q17271$49D6AA59-8BE9-44EF-A90A-06E3015AD7C7",
+              "rank": "normal"
+            }
+          ],
+          "P2047": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P2047",
+                "hash": "739caca887b4b3cfbb12b6803e680cfe83c16977",
+                "datavalue": {
+                  "value": {
+                    "amount": "+75",
+                    "unit": "http://www.wikidata.org/entity/Q7727"
+                  },
+                  "type": "quantity"
+                },
+                "datatype": "quantity"
+              },
+              "type": "statement",
+              "id": "Q17271$B4550503-372F-4FCD-B7D0-8D1A944E171A",
+              "rank": "normal"
+            }
+          ]
+        },
+        "sitelinks": {
+          "be_x_oldwiki": {
+            "site": "be_x_oldwiki",
+            "title": "Пасяленцы Катану",
+            "badges": []
+          },
+          "cawiki": {
+            "site": "cawiki",
+            "title": "Catan",
+            "badges": []
+          },
+          "cswiki": {
+            "site": "cswiki",
+            "title": "Osadníci z Katanu",
+            "badges": []
+          },
+          "cywiki": {
+            "site": "cywiki",
+            "title": "Settlers of Catan",
+            "badges": []
+          },
+          "dawiki": {
+            "site": "dawiki",
+            "title": "Settlers",
+            "badges": []
+          },
+          "dewiki": {
+            "site": "dewiki",
+            "title": "Die Siedler von Catan",
+            "badges": []
+          },
+          "elwiki": {
+            "site": "elwiki",
+            "title": "Κατάν",
+            "badges": []
+          },
+          "enwiki": {
+            "site": "enwiki",
+            "title": "Catan",
+            "badges": []
+          },
+          "eowiki": {
+            "site": "eowiki",
+            "title": "Catan",
+            "badges": []
+          },
+          "eswiki": {
+            "site": "eswiki",
+            "title": "Los colonos de Catán",
+            "badges": []
+          },
+          "etwiki": {
+            "site": "etwiki",
+            "title": "Catan",
+            "badges": []
+          },
+          "euwiki": {
+            "site": "euwiki",
+            "title": "Catango kolonoak",
+            "badges": []
+          },
+          "fawiki": {
+            "site": "fawiki",
+            "title": "کاتان",
+            "badges": []
+          },
+          "fiwiki": {
+            "site": "fiwiki",
+            "title": "Catan",
+            "badges": []
+          },
+          "fowiki": {
+            "site": "fowiki",
+            "title": "Settlers",
+            "badges": []
+          },
+          "frwiki": {
+            "site": "frwiki",
+            "title": "Les Colons de Catane",
+            "badges": []
+          },
+          "gdwiki": {
+            "site": "gdwiki",
+            "title": "Catan (cluiche)",
+            "badges": []
+          },
+          "hewiki": {
+            "site": "hewiki",
+            "title": "המתיישבים של קטאן",
+            "badges": []
+          },
+          "hrwiki": {
+            "site": "hrwiki",
+            "title": "Catan",
+            "badges": []
+          },
+          "huwiki": {
+            "site": "huwiki",
+            "title": "Catan telepesei",
+            "badges": []
+          },
+          "hywiki": {
+            "site": "hywiki",
+            "title": "Catan (խաղ)",
+            "badges": []
+          },
+          "hywwiki": {
+            "site": "hywwiki",
+            "title": "Catan",
+            "badges": []
+          },
+          "itwiki": {
+            "site": "itwiki",
+            "title": "I coloni di Catan",
+            "badges": []
+          },
+          "jawiki": {
+            "site": "jawiki",
+            "title": "カタンの開拓者たち",
+            "badges": []
+          },
+          "kowiki": {
+            "site": "kowiki",
+            "title": "카탄의 개척자",
+            "badges": []
+          },
+          "lvwiki": {
+            "site": "lvwiki",
+            "title": "Katanas ieceļotāji",
+            "badges": []
+          },
+          "nlwiki": {
+            "site": "nlwiki",
+            "title": "Catan",
+            "badges": []
+          },
+          "nnwiki": {
+            "site": "nnwiki",
+            "title": "The Settlers",
+            "badges": []
+          },
+          "nowiki": {
+            "site": "nowiki",
+            "title": "Catan",
+            "badges": []
+          },
+          "plwiki": {
+            "site": "plwiki",
+            "title": "Osadnicy z Catanu",
+            "badges": []
+          },
+          "ptwiki": {
+            "site": "ptwiki",
+            "title": "Descobridores de Catan",
+            "badges": []
+          },
+          "rowiki": {
+            "site": "rowiki",
+            "title": "Coloniștii din Catan",
+            "badges": []
+          },
+          "ruwiki": {
+            "site": "ruwiki",
+            "title": "Колонизаторы (настольная игра)",
+            "badges": []
+          },
+          "simplewiki": {
+            "site": "simplewiki",
+            "title": "The Settlers of Catan",
+            "badges": []
+          },
+          "skwiki": {
+            "site": "skwiki",
+            "title": "Osadníci z Katanu",
+            "badges": []
+          },
+          "slwiki": {
+            "site": "slwiki",
+            "title": "Naseljenci otoka Catan",
+            "badges": []
+          },
+          "srwiki": {
+            "site": "srwiki",
+            "title": "Naseljenici ostrva Katan",
+            "badges": []
+          },
+          "svwiki": {
+            "site": "svwiki",
+            "title": "Settlers of Catan",
+            "badges": []
+          },
+          "trwiki": {
+            "site": "trwiki",
+            "title": "Catan",
+            "badges": []
+          },
+          "ukwiki": {
+            "site": "ukwiki",
+            "title": "Колонізатори (гра)",
+            "badges": []
+          },
+          "viwiki": {
+            "site": "viwiki",
+            "title": "Catan",
+            "badges": []
+          },
+          "zhwiki": {
+            "site": "zhwiki",
+            "title": "卡坦岛",
+            "badges": []
+          }
+        }
+      },
+      "Q105395676": {
+        "type": "item",
+        "id": "Q105395676",
+        "labels": {
+          "de": {
+            "language": "de",
+            "value": "Helfer von Catan"
+          },
+          "en": {
+            "language": "en",
+            "value": "Catan Scenarios: Helpers of Catan"
+          }
+        },
+        "descriptions": {
+          "de": {
+            "language": "de",
+            "value": "Ergänzung für das Basisspiel und die Seefahrererweiterung der Siedler von Catan von Klaus Teuber"
+          }
+        },
+        "claims": {
+          "P31": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P31",
+                "hash": "c6e89307408a88b0e41810f7744dcd39567ccfc6",
+                "datavalue": {
+                  "value": {
+                    "entity-type": "item",
+                    "numeric-id": 60474521,
+                    "id": "Q60474521"
+                  },
+                  "type": "wikibase-entityid"
+                },
+                "datatype": "wikibase-item"
+              },
+              "type": "statement",
+              "id": "Q105395676$D1361049-EF56-4B3D-B109-BFA8080DDAAD",
+              "rank": "normal"
+            }
+          ],
+          "P2339": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P2339",
+                "hash": "0ee2c53b30ecd3d3ef50b97ea19985a2b279a806",
+                "datavalue": {
+                  "value": "86669",
+                  "type": "string"
+                },
+                "datatype": "external-id"
+              },
+              "type": "statement",
+              "id": "Q105395676$c893502b-42c5-1f86-98ac-2c766a6c32a7",
+              "rank": "normal"
+            }
+          ]
+        },
+        "sitelinks": {
+          "dewiki": {
+            "site": "dewiki",
+            "title": "Die Siedler von Catan: Helfer von Catan",
+            "badges": []
+          }
+        }
+      },
+      "Q839962": {
+        "type": "item",
+        "id": "Q839962",
+        "labels": {
+          "de": {
+            "language": "de",
+            "value": "Die Siedler von Catan – Das Kartenspiel"
+          },
+          "en": {
+            "language": "en",
+            "value": "Catan Card Game"
+          }
+        },
+        "descriptions": {
+          "en": {
+            "language": "en",
+            "value": "board game"
+          },
+          "de": {
+            "language": "de",
+            "value": "Kartenspiel"
+          }
+        },
+        "claims": {
+          "P31": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P31",
+                "hash": "c81b468b46560a67d9b974b27d730735e620c286",
+                "datavalue": {
+                  "value": {
+                    "entity-type": "item",
+                    "numeric-id": 3177859,
+                    "id": "Q3177859"
+                  },
+                  "type": "wikibase-entityid"
+                },
+                "datatype": "wikibase-item"
+              },
+              "type": "statement",
+              "id": "Q839962$9b6b1f24-4df0-fe84-a335-82e775613132",
+              "rank": "normal"
+            }
+          ],
+          "P2339": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P2339",
+                "hash": "29006beb286498237ba2cb358266bb22f57a7f0a",
+                "datavalue": {
+                  "value": "278",
+                  "type": "string"
+                },
+                "datatype": "external-id"
+              },
+              "type": "statement",
+              "id": "Q839962$0D6AB744-DCFA-4B95-9550-9D49A524CD86",
+              "rank": "normal"
+            }
+          ],
+          "P18": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P18",
+                "hash": "e911b7c2a3b9d36db62662950c8f3ab108cb2738",
+                "datavalue": {
+                  "value": "Deskohraní 08-10-05 046.jpg",
+                  "type": "string"
+                },
+                "datatype": "commonsMedia"
+              },
+              "type": "statement",
+              "id": "Q839962$14086ad0-4f5e-836c-e7e0-55182ef289b3",
+              "rank": "normal"
+            }
+          ],
+          "P1872": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P1872",
+                "hash": "667f201dd26a3ac2d1a167738b7bc12d47164dcb",
+                "datavalue": {
+                  "value": {
+                    "amount": "+2",
+                    "unit": "1"
+                  },
+                  "type": "quantity"
+                },
+                "datatype": "quantity"
+              },
+              "type": "statement",
+              "id": "Q839962$e4c519a4-4c01-4a65-f25e-8735b7103ba4",
+              "rank": "normal"
+            }
+          ],
+          "P1873": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P1873",
+                "hash": "3787fa640c2a667378f5231f7564e91b83c42248",
+                "datavalue": {
+                  "value": {
+                    "amount": "+2",
+                    "unit": "1"
+                  },
+                  "type": "quantity"
+                },
+                "datatype": "quantity"
+              },
+              "type": "statement",
+              "id": "Q839962$cd051b03-4804-de54-8df9-329b00a2ac7c",
+              "rank": "normal"
+            }
+          ],
+          "P577": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P577",
+                "hash": "212bc94898ee3f5c08ea8f8bd88757c8ea103ad5",
+                "datavalue": {
+                  "value": {
+                    "time": "+1996-00-00T00:00:00Z",
+                    "timezone": 0,
+                    "before": 0,
+                    "after": 0,
+                    "precision": 9,
+                    "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                  },
+                  "type": "time"
+                },
+                "datatype": "time"
+              },
+              "type": "statement",
+              "id": "Q839962$f4ab3b1a-48d2-cd10-63e8-084aa438b35a",
+              "rank": "normal"
+            }
+          ]
+        },
+        "sitelinks": {
+          "commonswiki": {
+            "site": "commonswiki",
+            "title": "Category:Settlers of Catan (card game)",
+            "badges": []
+          },
+          "dewiki": {
+            "site": "dewiki",
+            "title": "Die Siedler von Catan – Das Kartenspiel",
+            "badges": []
+          },
+          "enwiki": {
+            "site": "enwiki",
+            "title": "Catan Card Game",
+            "badges": []
+          },
+          "frwiki": {
+            "site": "frwiki",
+            "title": "Les Colons de Catane (le jeu de cartes pour 2 joueurs)",
+            "badges": []
+          },
+          "huwiki": {
+            "site": "huwiki",
+            "title": "Catan (kártyajáték)",
+            "badges": []
+          },
+          "itwiki": {
+            "site": "itwiki",
+            "title": "I coloni di Catan — gioco di carte",
+            "badges": []
+          }
+        }
+      }
+    },
+    "success": 1
+  }
+}

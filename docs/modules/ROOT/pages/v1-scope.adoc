@@ -35,6 +35,17 @@ then counts as a show in the filters and the statistics.
 |Podcast Index
 |The source gives the number of episodes, not a list of them; episodes are counted, not
 timed.
+
+|Book
+|Open Library
+|Pages read count from the page total; the source gives the median over the editions, which
+the page calls an estimate and you can change.
+
+|Board game
+|Wikidata, once the admin has entered the operator contact (Admin > Data sources)
+|Players, playing time, age and year where Wikidata has them, no cover. Wikidata knows about
+4,700 board games, many of them with a title and a year only, so a search often finds
+nothing; the item page links the game on Wikidata, where its data can be corrected.
 |===
 
 An admin turns sources on and enters their keys on Admin > Data sources
@@ -46,8 +57,6 @@ source is off or has no key behaves like a kind without a source.
 These kinds exist (statuses, progress, lists, statistics and sharing work for them), but
 the search finds nothing new for them:
 
-* Book
-* Board game
 * Anime (as its own kind) and manga
 * Comic
 * Audiobook

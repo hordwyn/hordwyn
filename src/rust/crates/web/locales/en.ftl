@@ -306,6 +306,22 @@ item-section-about = About
 item-section-notes = Notes
 item-about-empty = No details yet.
 item-ids = Identifiers:
+item-links = Elsewhere:
+game-fact-players = Players
+game-fact-time = Playing time
+game-fact-age = Age
+game-players = { $count ->
+    [one] { $count } player
+   *[other] { $count } players
+}
+game-players-range = { $min }-{ $max } players
+game-players-from = from { $min } players
+game-players-up-to = up to { $max } players
+game-minutes = { $count } min
+game-minutes-range = { $min }-{ $max } min
+game-minutes-from = from { $min } min
+game-minutes-up-to = up to { $max } min
+game-age = from { $age } years
 item-note = Private note
 item-note-hint = Only you see this note.
 item-note-save = Save note
@@ -1215,7 +1231,7 @@ admin-users-delete-title = Delete { $name }?
 admin-users-delete-body = The account and its library are deleted. Sessions logged with others stay in their history, with this person as a companion.
 admin-sources-lead = Where titles, covers and episodes come from. Keys are stored encrypted and never shown again.
 admin-contact-label = Operator contact
-admin-contact-hint = Your e-mail address (preferred: the sources name an e-mail address) or an https address. Sent to Open Library and Wikidata with every request so they can reach the operator; it is your contact, not a member's.
+admin-contact-hint = Your e-mail address (preferred: the sources name an e-mail address) or an https address. Sent to Open Library and Wikidata with every request so they can reach the operator; it is your contact, not a member's. Wikidata is not asked without it; with it, every board game search sends the words typed to Wikidata. Not wanted? Switch Wikidata off in the list below.
 admin-contact-cleared = Removed. Requests carry no contact now.
 admin-sources-note-openlibrary = Open Library is a shared library service with a low request limit. A high-traffic commercial service must not rely on this source.
 admin-sources-attention = { $count ->
@@ -1405,7 +1421,13 @@ home-nudge-failing = { $count ->
    *[other] { $sources } are set up but do not answer.
 }
 home-nudge-check = Check data sources
+home-nudge-contact = { $count ->
+    [one] { $sources } is not asked until you set the operator contact, so its titles cannot be found yet.
+   *[other] { $sources } are not asked until you set the operator contact, so their titles cannot be found yet.
+}
+home-nudge-contact-action = Set the operator contact
 home-nudge-snooze = Snooze for 7 days
+home-nudge-decline = Don't remind me
 
 ## Search palette footer and no-results card (design.md 6.4)
 search-searching = Searching...
@@ -1421,6 +1443,7 @@ search-unset-member = There is no data source for this search yet. Ask your admi
 search-scope = Search in
 search-footer-label = Data sources
 search-footer-source = { $source }: { $state }
+search-footer-source-kinds = { $source } ({ $kinds }): { $state }
 search-footer-group = { $group }: no source set up
 
 # UX phase 2 review, web pages (UX2-W1, W7, W12, W14, W21)

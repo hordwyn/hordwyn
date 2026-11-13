@@ -1,0 +1,451 @@
+{
+  "fixture": {
+    "synthetic": false,
+    "source": "recorded from https://www.wikidata.org/w/api.php (Action API), data CC0",
+    "checked": "2026-11-13",
+    "note": "recorded 2026-11-13; claims cut to the properties the connector reads plus P18 and P8646, references removed; request URL rewritten 2026-11-13 for the review fixes (39 classes, wider languages set), body as recorded"
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q65784798&props=labels%7Cdescriptions%7Cclaims%7Csitelinks&languages=en%7Cmul%7Cde%7Cfr%7Ces%7Cit%7Cnl%7Cpl%7Cpt%7Csv%7Cda%7Cnb%7Cfi%7Ccs%7Chu%7Cru%7Cuk%7Cja%7Czh%7Cko&format=json&maxage=86400&smaxage=86400"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "content-type",
+      "application/json; charset=utf-8"
+    ]
+  ],
+  "body": {
+    "entities": {
+      "Q65784798": {
+        "type": "item",
+        "id": "Q65784798",
+        "labels": {
+          "en": {
+            "language": "en",
+            "value": "Wingspan"
+          }
+        },
+        "descriptions": {
+          "en": {
+            "language": "en",
+            "value": "2019 board game by Elizabeth Hargrave"
+          }
+        },
+        "claims": {
+          "P31": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P31",
+                "hash": "3033071b8ff4020f1bf602c4811b184ec5fef20c",
+                "datavalue": {
+                  "value": {
+                    "entity-type": "item",
+                    "numeric-id": 131436,
+                    "id": "Q131436"
+                  },
+                  "type": "wikibase-entityid"
+                },
+                "datatype": "wikibase-item"
+              },
+              "type": "statement",
+              "id": "Q65784798$8535958a-4c9a-b813-063a-16a53dfda52a",
+              "rank": "normal"
+            }
+          ],
+          "P2339": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P2339",
+                "hash": "55b362e9db0a61cb6c7b8806cd220603a320d201",
+                "datavalue": {
+                  "value": "266192",
+                  "type": "string"
+                },
+                "datatype": "external-id"
+              },
+              "type": "statement",
+              "id": "Q65784798$5a59d2fd-4717-7ea3-9731-957cb2a99787",
+              "rank": "normal"
+            }
+          ],
+          "P1872": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P1872",
+                "hash": "b2e293e791f51256ed2d316517501430b86b3051",
+                "datavalue": {
+                  "value": {
+                    "amount": "+1",
+                    "unit": "1"
+                  },
+                  "type": "quantity"
+                },
+                "datatype": "quantity"
+              },
+              "type": "statement",
+              "id": "Q65784798$49f03f28-4b71-d73c-a23c-2647a139071a",
+              "rank": "normal"
+            }
+          ],
+          "P1873": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P1873",
+                "hash": "8ed1e32ddc85d54e9578f43c7a709f8d52189afe",
+                "datavalue": {
+                  "value": {
+                    "amount": "+5",
+                    "unit": "1"
+                  },
+                  "type": "quantity"
+                },
+                "datatype": "quantity"
+              },
+              "type": "statement",
+              "id": "Q65784798$8ffea9ee-4571-f5b9-003a-4d625a7b0707",
+              "rank": "normal"
+            },
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P1873",
+                "hash": "4398be9f98668aa4501041d6d24d77657c0f508d",
+                "datavalue": {
+                  "value": {
+                    "amount": "+7",
+                    "unit": "1"
+                  },
+                  "type": "quantity"
+                },
+                "datatype": "quantity"
+              },
+              "type": "statement",
+              "qualifiers": {
+                "P1012": [
+                  {
+                    "snaktype": "value",
+                    "property": "P1012",
+                    "hash": "fa8de1ee8c03a37abca37a2647a239a53abc83c1",
+                    "datavalue": {
+                      "value": {
+                        "entity-type": "item",
+                        "numeric-id": 60474521,
+                        "id": "Q60474521"
+                      },
+                      "type": "wikibase-entityid"
+                    },
+                    "datatype": "wikibase-item"
+                  }
+                ]
+              },
+              "qualifiers-order": [
+                "P1012"
+              ],
+              "id": "Q65784798$49adeba6-4d42-bb2f-3e95-5b75b5ae0b2a",
+              "rank": "normal"
+            },
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P1873",
+                "hash": "3787fa640c2a667378f5231f7564e91b83c42248",
+                "datavalue": {
+                  "value": {
+                    "amount": "+2",
+                    "unit": "1"
+                  },
+                  "type": "quantity"
+                },
+                "datatype": "quantity"
+              },
+              "type": "statement",
+              "qualifiers": {
+                "P518": [
+                  {
+                    "snaktype": "value",
+                    "property": "P518",
+                    "hash": "84cd9935dda7463a4864afcba114244625b229a8",
+                    "datavalue": {
+                      "value": {
+                        "entity-type": "item",
+                        "numeric-id": 60474521,
+                        "id": "Q60474521"
+                      },
+                      "type": "wikibase-entityid"
+                    },
+                    "datatype": "wikibase-item"
+                  }
+                ],
+                "P1476": [
+                  {
+                    "snaktype": "value",
+                    "property": "P1476",
+                    "hash": "718568a06db2403af52c7f4327a8912c3fe74e8e",
+                    "datavalue": {
+                      "value": {
+                        "text": "Wingspan Asia",
+                        "language": "en"
+                      },
+                      "type": "monolingualtext"
+                    },
+                    "datatype": "monolingualtext"
+                  }
+                ]
+              },
+              "qualifiers-order": [
+                "P518",
+                "P1476"
+              ],
+              "id": "Q65784798$44652f07-4ebf-aa13-ab33-5afef07a564e",
+              "rank": "normal"
+            }
+          ],
+          "P2899": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P2899",
+                "hash": "863706368ca21821f42806a7636c351f906e27fa",
+                "datavalue": {
+                  "value": {
+                    "amount": "+10",
+                    "unit": "http://www.wikidata.org/entity/Q24564698"
+                  },
+                  "type": "quantity"
+                },
+                "datatype": "quantity"
+              },
+              "type": "statement",
+              "id": "Q65784798$e2d0c646-49d7-9d72-bc4d-a734314f67f0",
+              "rank": "normal"
+            }
+          ],
+          "P577": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P577",
+                "hash": "c987e06e4ead916f40b44747601b85092a326c96",
+                "datavalue": {
+                  "value": {
+                    "time": "+2019-03-08T00:00:00Z",
+                    "timezone": 0,
+                    "before": 0,
+                    "after": 0,
+                    "precision": 11,
+                    "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                  },
+                  "type": "time"
+                },
+                "datatype": "time"
+              },
+              "type": "statement",
+              "qualifiers": {
+                "P291": [
+                  {
+                    "snaktype": "value",
+                    "property": "P291",
+                    "hash": "d030038c836f9ed0d37c69cb8c389d689ebeb05a",
+                    "datavalue": {
+                      "value": {
+                        "entity-type": "item",
+                        "numeric-id": 30,
+                        "id": "Q30"
+                      },
+                      "type": "wikibase-entityid"
+                    },
+                    "datatype": "wikibase-item"
+                  }
+                ],
+                "P123": [
+                  {
+                    "snaktype": "value",
+                    "property": "P123",
+                    "hash": "2b039dc43d0bd8cab5bf84a9df22b82c7974f106",
+                    "datavalue": {
+                      "value": {
+                        "entity-type": "item",
+                        "numeric-id": 97385241,
+                        "id": "Q97385241"
+                      },
+                      "type": "wikibase-entityid"
+                    },
+                    "datatype": "wikibase-item"
+                  }
+                ]
+              },
+              "qualifiers-order": [
+                "P291",
+                "P123"
+              ],
+              "id": "Q65784798$8b91a39e-42fa-ff12-45ae-b548c57e69ec",
+              "rank": "normal"
+            }
+          ],
+          "P18": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P18",
+                "hash": "6dc5c9b3100115d0a4097bcae29a4d19bac74eef",
+                "datavalue": {
+                  "value": "Birdfeeder dice tower in Wingspan board game.jpg",
+                  "type": "string"
+                },
+                "datatype": "commonsMedia"
+              },
+              "type": "statement",
+              "id": "Q65784798$6693266E-BABD-4284-84F9-47BE4A95A6D7",
+              "rank": "normal"
+            }
+          ],
+          "P2047": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P2047",
+                "hash": "112e88d3076b271c0f9bbae3a7f0a35333a55aa0",
+                "datavalue": {
+                  "value": {
+                    "amount": "+40",
+                    "unit": "http://www.wikidata.org/entity/Q7727"
+                  },
+                  "type": "quantity"
+                },
+                "datatype": "quantity"
+              },
+              "type": "statement",
+              "id": "Q65784798$076813EF-B828-4FCA-9921-25D92ACDF9C8",
+              "rank": "normal"
+            },
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P2047",
+                "hash": "e6760b359d13a67e3366c35ef29f095e88b5d56f",
+                "datavalue": {
+                  "value": {
+                    "amount": "+70",
+                    "unit": "http://www.wikidata.org/entity/Q7727"
+                  },
+                  "type": "quantity"
+                },
+                "datatype": "quantity"
+              },
+              "type": "statement",
+              "id": "Q65784798$C3793F4A-FB1C-4364-8929-D85DAD3D1045",
+              "rank": "normal"
+            }
+          ],
+          "P136": [
+            {
+              "mainsnak": {
+                "snaktype": "value",
+                "property": "P136",
+                "hash": "c4ff513fa69d5f3a38eda03da5d682f6d4c3223d",
+                "datavalue": {
+                  "value": {
+                    "entity-type": "item",
+                    "numeric-id": 142714,
+                    "id": "Q142714"
+                  },
+                  "type": "wikibase-entityid"
+                },
+                "datatype": "wikibase-item"
+              },
+              "type": "statement",
+              "id": "Q65784798$831e0d1b-4b1e-df26-4345-a4b8af5e2587",
+              "rank": "normal"
+            }
+          ]
+        },
+        "sitelinks": {
+          "be_x_oldwiki": {
+            "site": "be_x_oldwiki",
+            "title": "Размах крылаў (настольная гульня)",
+            "badges": []
+          },
+          "commonswiki": {
+            "site": "commonswiki",
+            "title": "Category:Wingspan (board game)",
+            "badges": []
+          },
+          "dewiki": {
+            "site": "dewiki",
+            "title": "Flügelschlag",
+            "badges": []
+          },
+          "enwiki": {
+            "site": "enwiki",
+            "title": "Wingspan (board game)",
+            "badges": [
+              "Q17437798"
+            ]
+          },
+          "eswiki": {
+            "site": "eswiki",
+            "title": "Wingspan",
+            "badges": []
+          },
+          "fiwiki": {
+            "site": "fiwiki",
+            "title": "Wingspan",
+            "badges": []
+          },
+          "frwiki": {
+            "site": "frwiki",
+            "title": "Wingspan (jeu)",
+            "badges": []
+          },
+          "itwiki": {
+            "site": "itwiki",
+            "title": "Wingspan",
+            "badges": []
+          },
+          "jawiki": {
+            "site": "jawiki",
+            "title": "ウイングスパン (ボードゲーム)",
+            "badges": []
+          },
+          "nlwiki": {
+            "site": "nlwiki",
+            "title": "Wingspan (bordspel)",
+            "badges": []
+          },
+          "nowiki": {
+            "site": "nowiki",
+            "title": "Wingspan (brettspill)",
+            "badges": []
+          },
+          "srwiki": {
+            "site": "srwiki",
+            "title": "Wingspan (igra)",
+            "badges": []
+          },
+          "ukwiki": {
+            "site": "ukwiki",
+            "title": "Крила (настільна гра)",
+            "badges": []
+          },
+          "viwiki": {
+            "site": "viwiki",
+            "title": "Wingspan",
+            "badges": []
+          },
+          "zhwiki": {
+            "site": "zhwiki",
+            "title": "展翅翱翔",
+            "badges": []
+          }
+        }
+      }
+    },
+    "success": 1
+  }
+}

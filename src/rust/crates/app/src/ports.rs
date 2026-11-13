@@ -875,6 +875,14 @@ pub enum HttpError {
 #[async_trait]
 pub trait HttpFetch: Send + Sync {
     async fn fetch(&self, req: HttpRequest) -> Result<HttpResponse, HttpError>;
+
+    /// The source `connector` asked to be left alone for `wait` in an answer the client
+    /// cannot read as such (an error object in HTTP 200, WD-4): requests to it wait for the
+    /// pause, or fail fast when it is longer than the client waits. Adapters without pauses
+    /// ignore it.
+    fn pause(&self, connector: &str, wait: std::time::Duration) {
+        let _ = (connector, wait);
+    }
 }
 
 // ---------------------------------------------------------------- sync
