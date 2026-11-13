@@ -26,3 +26,14 @@ Rules on top of PKG-implement.md:
   before v1 anyway).
 - Before you finish: the targeted tests, the server page tests and the WHOLE Playwright
   `chromium` project on your lane's final build (your ports).
+
+Process rules (added 2026-11-13, from lane C):
+- Never `pkill -x server` or `pkill -x cargo-leptos`: it kills every lane's servers. Stop only
+  your own processes by PID. Run your e2e/Playwright server from a hard link with a lane name
+  (e.g. `ln -f src/rust/target/debug/server src/rust/target/debug/<lane>-server`) via
+  `E2E_SERVER_CMD`, and kill that name only.
+- Server integration test databases are named `test_<uuid>` without a lane prefix; drop only
+  the ones your own run created (note them before and after), never all `test_%`.
+- Under parallel load the browser suite runs about twice as slow; a test that hits its timeout
+  only under load is reported, not given a longer timeout as a workaround - the orchestrator
+  judges it in the main-checkout gate.
