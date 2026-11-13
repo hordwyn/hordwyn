@@ -919,3 +919,8 @@ Addendum 3 (2026-11-13, after the rename to hordwyn): v1-release also renames th
 variables from the `KK_` prefix (initials of the former name, e.g. `KK_TMDB_API_KEY`) to a
 neutral prefix that carries no brand (white-label rule 9), in code, `config/.env.example`, CI
 and docs; greenfield rule: no alias for the old names.
+
+Addendum 4 (2026-11-13): v1-release also makes `store_pg::testing` drop the `test_<uuid>`
+database a test created when the test ends (also on success; keep it only on failure or with
+`KEEP_TEST_DB=1`), so parallel lanes and repeated runs stop leaving thousands of databases
+behind (2,971 were dropped by hand on 2026-11-13).

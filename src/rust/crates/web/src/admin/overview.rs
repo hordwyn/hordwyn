@@ -33,6 +33,7 @@ fn health_name(id: &str) -> String {
         "mail" => "admin-health-name-mail",
         "data_sources" => "admin-health-name-data_sources",
         "identity_provider" => "admin-health-name-identity_provider",
+        "reverse_proxy" => "admin-health-name-reverse_proxy",
         _ => "admin-health-name-secrets",
     })
 }

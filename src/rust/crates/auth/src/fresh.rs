@@ -12,7 +12,7 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
 use crate::store::{InviteStore, RecoveryCode, Session, SessionSecret, SignupInvite};
-use crate::{Auth, AuthError, SessionToken, hash_password, token_hash, verify_password};
+use crate::{Auth, AuthError, SessionToken, hash_password, token_hash};
 
 /// The window slides by this much from the last proof or gated action.
 pub const REAUTH_SLIDE_MINUTES: i64 = 15;
@@ -169,30 +169,20 @@ impl Auth {
     ) -> Result<SessionToken, AuthError> {
         let s = self.live_session(token).await?;
         let user = self.app.user(s.user_id).await?;
-        self.throttle.check(&user.username, self.now())?;
+        let attempt = self.attempt(Some(&user.username)).await?;
         let mut creds = self.credentials_or_default(user.id).await?;
         let hash = creds
             .password_hash
             .clone()
             .unwrap_or_else(|| crate::DUMMY_HASH.to_string());
-        let ok = verify_password(password.to_string(), hash).await && creds.password_hash.is_some();
+        let ok = self.verify(password, hash).await && creds.password_hash.is_some();
         let result = if ok {
             self.second_factor(&mut creds, totp, &user.username).await
         } else {
             Err(AuthError::InvalidCredentials)
         };
-        match result {
-            Ok(method) => {
-                self.throttle.succeeded(&user.username);
-                self.regenerate(&s, method).await
-            }
-            Err(e) => {
-                if matches!(e, AuthError::InvalidCredentials | AuthError::InvalidTotp) {
-                    self.throttle.failed(&user.username, self.now());
-                }
-                Err(e)
-            }
-        }
+        let method = self.settle(attempt, result).await?;
+        self.regenerate(&s, method).await
     }
 
     /// Hook for the OIDC round trip with `max_age=0` (phase 3): accepts the proof when the
@@ -293,7 +283,7 @@ impl Auth {
     pub(crate) async fn use_recovery(&self, user: UserId, code: &str) -> Result<(), AuthError> {
         let normal = normalize_code(code).ok_or(AuthError::InvalidTotp)?;
         for c in self.store.recovery_codes(user).await? {
-            if !c.used && verify_password(normal.clone(), c.code_hash.clone()).await {
+            if !c.used && self.verify(&normal, c.code_hash.clone()).await {
                 if self.store.use_recovery_code(c.id, self.now()).await? {
                     return Ok(());
                 }

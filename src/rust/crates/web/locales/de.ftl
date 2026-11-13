@@ -560,7 +560,7 @@ integrations-url = Webhook-URL
 integrations-example = Derselbe Aufruf mit curl
 integrations-empty = Noch keine Absender.
 integrations-revoke = Widerrufen
-auth-error-too_many_attempts = Zu viele fehlgeschlagene Anmeldungen. Bitte warte ein paar Minuten.
+auth-error-too_many_attempts = Zu viele Fehlversuche. Warte einen Moment und versuch es noch einmal.
 auth-error-username_too_short = Der Benutzername braucht mindestens 3 Zeichen.
 auth-error-username_too_long = Der Benutzername darf höchstens 32 Zeichen haben.
 auth-error-username_space = Der Benutzername enthält ein Leerzeichen. Nimm stattdessen - oder _.
@@ -707,8 +707,12 @@ notify-event-admin-local_sign_in = Lokale Anmeldung verwendet (Admin)
 
 # ---- UX phase 0 review (docs/reviews/2026-11-06-ux0-review.md) ----
 auth-lockout-minutes = { $minutes ->
-    [one] Zu viele fehlgeschlagene Anmeldungen. Versuch es in 1 Minute noch einmal.
-   *[other] Zu viele fehlgeschlagene Anmeldungen. Versuch es in { $minutes } Minuten noch einmal.
+    [one] Zu viele Fehlversuche. Versuch es in 1 Minute noch einmal.
+   *[other] Zu viele Fehlversuche. Versuch es in { $minutes } Minuten noch einmal.
+}
+auth-wait-seconds = { $seconds ->
+    [one] Zu viele Fehlversuche. Versuch es in 1 Sekunde noch einmal.
+   *[other] Zu viele Fehlversuche. Versuch es in { $seconds } Sekunden noch einmal.
 }
 auth-check-throttled = Gerade zu viele Prüfungen; du kannst das Konto trotzdem anlegen.
 auth-offline = Du bist offline
@@ -997,6 +1001,8 @@ admin-health-data_sources-some_not_working = { $working } von { $total } funktio
 admin-health-data_sources-none_working = Keine Datenquelle funktioniert
 admin-health-identity_provider-configured = Eingerichtet
 admin-health-identity_provider-off = Nicht eingerichtet
+admin-health-reverse_proxy-fine = Keine weitergeleiteten Anfragen von einem nicht eingetragenen Proxy
+admin-health-reverse_proxy-untrusted = Anfragen mit X-Forwarded-For kommen von { $peer }, das nicht in APP__SERVER__TRUSTED_PROXIES steht: alle Besucher zählen als diese Adresse, auch für die Anmeldegrenzen (zuletzt { $at })
 admin-health-secrets-active = Schlüssel v{ $version } aktiv
 admin-health-secrets-locked = { $count } Geheimnisse lassen sich nicht entschlüsseln
 admin-health-secrets-rotation_due = Schlüssel v{ $version } ist älter als zwei Jahre: ein neuer wäre gut
@@ -1115,6 +1121,7 @@ admin-health-name-jobs = Hintergrundaufgaben
 admin-health-name-mail = E-Mail
 admin-health-name-data_sources = Datenquellen
 admin-health-name-identity_provider = Identitätsanbieter
+admin-health-name-reverse_proxy = Reverse-Proxy
 admin-health-name-secrets = Gespeicherte Geheimnisse
 admin-overview-lead = Was Mitglieder nicht sehen: die Teile, von denen diese Instanz abhängt.
 admin-overview-attention = { $count ->
@@ -1496,6 +1503,12 @@ admin-mail-test-ok = Die Testnachricht wurde gesendet.
 admin-mail-test-failed = Der Test ist fehlgeschlagen: { $reason }
 admin-mail-last-ok = Letzter Test { $at }: hat geklappt.
 admin-mail-last-failed = Letzter Test { $at }: { $reason }
+admin-mail-reason-not_configured = E-Mail ist nicht eingerichtet.
+admin-mail-reason-connection = Der Mailserver war nicht erreichbar. Prüfe Server, Port und Verbindungssicherheit.
+admin-mail-reason-auth = Der Mailserver hat Benutzername oder Passwort abgelehnt.
+admin-mail-reason-rejected = Der Mailserver hat die Nachricht abgelehnt.
+admin-mail-reason-send_failed = Die Nachricht konnte nicht gesendet werden.
+admin-mail-reason-private_target = Die Adresse des Mailservers liegt in einem privaten Netz, und diese Instanz verbindet sich nicht dorthin.
 admin-mail-security-tls = TLS
 admin-mail-security-starttls = STARTTLS
 admin-mail-security-none = Keine (nur lokales Relay)
@@ -1570,6 +1583,9 @@ admin-sso-test-at = ({ $at })
 admin-sso-test-discovery = Discovery
 admin-sso-test-discovery-ok = funktioniert
 admin-sso-test-discovery-failed = fehlgeschlagen: { $reason }
+admin-sso-reason-oidc_unavailable = der Anbieter hat nicht geantwortet
+admin-sso-reason-oidc_failed = die Antwort des Anbieters war nicht verwendbar; prüfe die Aussteller-Adresse
+admin-sso-reason-oidc_blocked_target = seine Adresse liegt in einem privaten Netz, und diese Instanz verbindet sich nicht dorthin
 admin-sso-test-end-session = Abmelden beim Anbieter
 admin-sso-test-backchannel = Back-Channel-Logout
 admin-sso-test-frontchannel = Front-Channel-Logout
@@ -2385,6 +2401,7 @@ admin-health-mail-result-connection = der Mailserver war nicht erreichbar
 admin-health-mail-result-auth = der Mailserver hat die Anmeldung abgelehnt
 admin-health-mail-result-rejected = der Mailserver hat die Nachricht abgelehnt
 admin-health-mail-result-send_failed = das Senden ist fehlgeschlagen
+admin-health-mail-result-private_target = der Mailserver liegt in einem privaten Netz, mit dem sich diese Instanz nicht verbindet
 log-coop-result = Ausgang
 log-coop-none = Kein Ergebnis
 log-coop-lost = Wir haben verloren

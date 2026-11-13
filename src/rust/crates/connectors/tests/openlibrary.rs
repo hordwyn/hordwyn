@@ -12,6 +12,7 @@ use catalog_core::{
 };
 use connectors::openlibrary::{OpenLibrary, isbn13};
 use domain::catalog::ExternalId;
+use domain::net::PrivateHosts;
 use testkit::ReplayHttp;
 
 fn replay() -> (Arc<ReplayHttp>, Ctx) {
@@ -339,7 +340,12 @@ async fn every_request_goes_to_an_allowed_host() {
     let info = catalog_core::Connector::info(&c).clone();
     assert_eq!(
         info.hosts,
-        ["openlibrary.org", "covers.openlibrary.org", "archive.org"]
+        [
+            "openlibrary.org",
+            "covers.openlibrary.org",
+            "archive.org",
+            "*.archive.org"
+        ]
     );
     c.search(&ctx, &query("dune", 3, Some("en"))).await.unwrap();
     c.search(&ctx, &query("9780140328721", 20, None))
@@ -353,7 +359,7 @@ async fn every_request_goes_to_an_allowed_host() {
     assert!(urls.len() > 6);
     for u in urls {
         let host = url::Url::parse(&u).unwrap().host_str().unwrap().to_string();
-        assert!(info.hosts.contains(&host), "{u}");
+        assert!(PrivateHosts::new(&info.hosts).covers(&host, None), "{u}");
         assert!(!u.contains("/b/isbn/"), "covers by cover id only: {u}");
     }
     // the policy the governed client enforces (docs/connectors/openlibrary.md)
@@ -371,6 +377,36 @@ async fn every_request_goes_to_an_allowed_host() {
     assert!(catalog_core::ConnectorPolicy::from_info(&info).shared_pace);
     assert_eq!(info.kinds, ["book"]);
     assert_eq!(info.attribution.url, "https://openlibrary.org/");
+}
+
+/// A stored cover follows `covers.openlibrary.org` -> `archive.org` -> a numbered
+/// `ia*.us.archive.org` host (docs/connectors/openlibrary.md); the governed client checks every
+/// hop against this list with the rules of [`PrivateHosts`] (sec2), so the numbered hosts must
+/// be covered and an unlisted host must not.
+#[test]
+fn the_cover_redirect_hosts_are_on_the_list_and_no_others() {
+    let info = catalog_core::Connector::info(&OpenLibrary::new()).clone();
+    let list = PrivateHosts::new(&info.hosts);
+    for host in [
+        "covers.openlibrary.org",
+        "archive.org",
+        "ia800703.us.archive.org",
+        "ia601602.us.archive.org",
+    ] {
+        assert!(list.covers(host, None), "{host}");
+    }
+    for host in [
+        "images.example.net",
+        "archive.org.example.net",
+        "notarchive.org",
+        "openlibrary.org.example.net",
+    ] {
+        assert!(!list.covers(host, None), "{host}");
+    }
+    assert!(
+        !list.covers("ia800703.us.archive.org", Some(8443)),
+        "default port only"
+    );
 }
 
 #[tokio::test]

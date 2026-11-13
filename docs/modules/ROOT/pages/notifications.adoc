@@ -63,8 +63,11 @@ Admins can set instance defaults (`PUT /api/v1/notifications/subscriptions` with
 |===
 
 Tokens and secrets are never shown again after saving. Targets in private networks
-(`192.168.x.x`, `localhost`, ...) are refused unless the admin sets
-`notify.allow_private_targets = true`.
+(`192.168.x.x`, `localhost`, ...) are refused unless the operator sets
+`notify.allow_private_targets = true`, or allows single hosts in
+`outbound.allow_private_hosts` (for example `["ntfy.lan:8080"]`); the first setting also
+decides whether sign-in providers and the mail server may be there
+(xref:operations.adoc[Operations, "What the server connects to"]).
 
 === Verifying webhooks
 

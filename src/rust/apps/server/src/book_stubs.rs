@@ -616,7 +616,10 @@ impl Catalog {
         let brand = brand::Brand::load(std::path::Path::new(&cfg.brand.dir))
             .with_context(|| format!("brand directory {}", cfg.brand.dir))?;
         let version = env!("CARGO_PKG_VERSION");
-        let mut http = catalog_core::GovernedHttp::new(&brand.user_agent(version), None);
+        // the same private hosts as the server's client (SEC-4): the operator's list and the
+        // hosts of the connector base URLs (a mirror on the LAN)
+        let mut http = catalog_core::GovernedHttp::new(&brand.user_agent(version), None)
+            .with_private_hosts(crate::outbound::private_hosts(cfg));
         for info in registry.infos() {
             http.add_connector(&info.id, catalog_core::ConnectorPolicy::from_info(&info));
         }

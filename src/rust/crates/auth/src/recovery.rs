@@ -40,10 +40,11 @@ impl Auth {
 
     /// Set a new password with a reset token. The new password is checked first, so a weak
     /// one does not use up the link. Every session of the account ends. `Ok(None)`: the
-    /// token is unknown, used or expired.
+    /// token is unknown, used or expired; that counts against the budget of the client
+    /// address (SEC-5; a link names no account).
     ///
     /// # Errors
-    /// The password rules, storage errors.
+    /// The password rules, [`AuthError::TooManyAttempts`], storage errors.
     pub async fn reset_password(
         &self,
         token: &str,
@@ -51,14 +52,17 @@ impl Auth {
     ) -> Result<Option<UserId>, AuthError> {
         check_password(new)?;
         let hash = token_hash(token);
+        let attempt = self.attempt(None).await?;
         if self
             .store
             .open_password_reset(&hash, self.now())
             .await?
             .is_none()
         {
+            self.attempt_failed(attempt).await?;
             return Ok(None);
         }
+        drop(attempt);
         let password_hash = hash_password(new.to_string()).await?;
         // claim, password and sessions in one transaction: a storage error keeps the link
         Ok(self

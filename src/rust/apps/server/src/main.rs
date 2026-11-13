@@ -145,16 +145,18 @@ async fn run() -> anyhow::Result<()> {
         tracing::info!(addr = %options.site_addr, ?role, "listening");
         let s = stop.clone();
         let bus = server.bus.clone();
-        axum::serve(
+        // the listener of this server, not `axum::serve`: a request head has a time limit
+        server::serve::serve(
             listener,
-            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            app,
+            std::time::Duration::from_secs(server.config.server.header_read_timeout_secs),
+            async move {
+                s.cancelled().await;
+                // open SSE streams would otherwise keep graceful shutdown waiting forever
+                bus.shutdown();
+            },
         )
-        .with_graceful_shutdown(async move {
-            s.cancelled().await;
-            // open SSE streams would otherwise keep graceful shutdown waiting forever
-            bus.shutdown();
-        })
-        .await?;
+        .await;
     } else {
         tracing::info!(?role, "worker running");
         stop.cancelled().await;

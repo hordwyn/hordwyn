@@ -57,7 +57,8 @@ pub struct ConnectorInfo {
     pub rate_limit: RateLimit,
     pub auth: Auth,
     pub attribution: Attribution,
-    /// `host` or `host:port` values the connector may contact.
+    /// `host`, `host:port` or `*.domain` values the connector may contact
+    /// ([`crate::ConnectorPolicy::hosts`]).
     pub hosts: Vec<String>,
     /// Default HTTP cache TTL for responses without `Cache-Control: max-age`.
     pub cache_ttl_secs: u64,

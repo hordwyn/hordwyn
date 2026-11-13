@@ -17,6 +17,8 @@ TLS in front of it. Compose publishes the port on `127.0.0.1` only
 |The address the proxy connects from, as a list: `["127.0.0.1"]` does not fit a container
 (the application sees the compose network's gateway); use the compose network, for example
 `["172.16.0.0/12"]`, or the proxy host's address. Only then `X-Forwarded-For` is believed.
+Not optional behind a proxy: the sign-in limits count per client address, and without this
+setting every visitor has the proxy's address and shares one budget (<<limits>>).
 
 |`APP__AUTH__SECURE_COOKIES`
 |Stays `true` (the default) behind TLS.
@@ -30,7 +32,63 @@ What the proxy must do:
 * not buffer the event stream `/api/v1/events` (server-sent events: live updates, search
   results as they arrive) and not cut it after a short idle time;
 * allow request bodies of 64 MiB (import uploads; everything else stays under 2 MiB);
+* close its idle connections to the application sooner than the application does (150
+  seconds; the defaults of Caddy and nginx are below that, <<limits>>);
 * compress responses if you want compression: the application sends none itself.
+
+[#limits]
+== Sign-in limits and time limits
+
+The application slows down guesses at passwords and codes by itself
+(xref:operations.adoc#sign-in-limits[Operations, Sign-in limits]): the pair of account and
+client address waits longer after each failure, and a client address may fail 30 times in
+15 minutes across all names before it is refused for a while. The client address is the
+one `APP__SERVER__TRUSTED_PROXIES` yields. If the proxy is not listed there, the
+application sees one address for everybody: thirty wrong passwords by anyone then close the
+sign-in for all, the owner included, until the window is over. The owner must therefore set
+`APP__SERVER__TRUSTED_PROXIES` behind a proxy. The server logs a warning (at most once an
+hour) when a request with `X-Forwarded-For` arrives from an address that is not trusted,
+and Admin > Overview shows a "Reverse proxy" warning row while such requests come from a
+private address (the usual place of a proxy).
+A limit of its own at the proxy (requests per address on `/api/v1/auth/` and `/_fn/`) is
+not needed and can stay out.
+
+Requests that stall are given up, by settings in seconds:
+
+[cols="2,1,4"]
+|===
+|Setting |Default |What it limits
+
+|`APP__SERVER__HEADER_READ_TIMEOUT_SECS` |150
+|The head of a request (request line and headers); the connection is closed. It is also how
+long an idle keep-alive connection is kept, and that is why the default is this long: the
+proxy has to close its idle connections to the application first, or it can send a request
+into a connection that is just being closed ("connection reset by peer"; Caddy's
+documentation of `keepalive` warns of exactly this). Caddy keeps idle connections for 2
+minutes by default (`keepalive` of the `http` transport: "Default: `2m`"), nginx for 60
+seconds (`keepalive_timeout` in an `upstream` block: "Default: keepalive_timeout 60s";
+"Since 1.29.7, keepalive connections are enabled by default"). Both
+pages read 2026-11-13: https://caddyserver.com/docs/caddyfile/directives/reverse_proxy,
+https://nginx.org/en/docs/http/ngx_http_upstream_module.html. If you lower this setting,
+lower the proxy's time below it as well.
+
+|`APP__SERVER__BODY_IDLE_TIMEOUT_SECS` |30
+|The longest pause inside a request body; the request is answered `408`.
+
+|`APP__SERVER__BODY_READ_TIMEOUT_SECS` |60
+|A whole request body, for everything except the import upload; the request is answered
+`408`.
+
+|`APP__SERVER__IMPORT_READ_TIMEOUT_SECS` |1800
+|The whole body of an import upload (up to 64 MiB: about 0.3 Mbit/s); the request is
+answered `408`.
+|===
+
+The application speaks HTTP/1.1 only, which is what a proxy speaks to the application; a
+client that opens a connection and sends nothing is cut off after the head limit too. A
+proxy that buffers request bodies (nginx by default) sends them in one go, and its own limits
+(`client_header_timeout`, `client_body_timeout`) are what a slow visitor meets first; the
+application's limits then cover what reaches it directly.
 
 == Security headers
 
@@ -201,6 +259,10 @@ exists since nginx 1.25.1 (https://nginx.org/en/docs/http/ngx_http_v2_module.htm
 . Open the same title in two browser windows and log it in one: the other updates without
   a reload. If it does not, the proxy buffers the event stream.
 . Admin > Audit log shows your own address, not the proxy's.
+. Type a wrong password four times, then once more: the page says
+  "Too many failed attempts. Try again in 1 second." From another network (a phone without
+  Wi-Fi) the same account signs in without a wait at that moment. If it has to wait too,
+  the application sees the proxy's address for both: check `APP__SERVER__TRUSTED_PROXIES`.
 
 The snippets were written from the Caddy and nginx documentation and were not run on the
 project's build host.

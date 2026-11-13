@@ -1219,3 +1219,209 @@ async fn mail_settings_are_validated_and_a_test_needs_a_recipient() {
         );
     }
 }
+
+async fn mail_test(t: &T, cookie: Option<&str>) -> Resp {
+    call(
+        t,
+        "POST",
+        "/admin/mail/test",
+        cookie,
+        Some(json!({"to": "root@example.org"})),
+    )
+    .await
+}
+
+async fn mail_at(t: &T, cookie: Option<&str>, port: u16) {
+    let values = json!({"values": {
+        "mail.host": "127.0.0.1", "mail.port": port, "mail.security": "none",
+        "mail.from": "Shelf <noreply@example.org>"
+    }});
+    let r = call(t, "PUT", "/admin/settings", cookie, Some(values)).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+}
+
+/// sec2 (SEC-4, DEC-534): a mail server on a private address is used on a home instance and
+/// refused on a hosted one, and a failed test answers with its category only.
+#[tokio::test]
+async fn a_mail_server_on_a_private_address_follows_the_hosting_mode() {
+    use std::sync::atomic::Ordering;
+    if skip() {
+        return;
+    }
+    let (port, sent) = fake_smtp().await;
+    let t = start("[auth]\nsecure_cookies = false\n", vec![])
+        .await
+        .unwrap();
+    let admin = sign_up(&t, "root").await;
+    let a = Some(admin.as_str());
+    mail_at(&t, a, port).await;
+    let r = mail_test(&t, a).await;
+    assert_eq!(r.body["ok"], true, "home: {}", r.text);
+    assert_eq!(sent.load(Ordering::SeqCst), 1);
+
+    let hosted = json!({"values": {"instance.hosting": "hosted"}});
+    let r = call(&t, "PUT", "/admin/settings", a, Some(hosted)).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    let r = mail_test(&t, a).await;
+    assert_eq!(
+        (&r.body["ok"], &r.body["result"]),
+        (&json!(false), &json!("failed: private_target")),
+        "hosted: {}",
+        r.text
+    );
+    assert_eq!(sent.load(Ordering::SeqCst), 1, "not connected to");
+    let mail = call(&t, "GET", "/admin/mail", a, None).await.body;
+    assert_eq!(mail["last_test_result"], "failed: private_target");
+
+    // back at home, a server that is not there: the category, not the transport's text
+    let home = json!({"values": {"instance.hosting": "home", "mail.port": 1}});
+    let r = call(&t, "PUT", "/admin/settings", a, Some(home)).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    let r = mail_test(&t, a).await;
+    assert_eq!(r.body["result"], "failed: connection", "{}", r.text);
+    assert!(!r.text.contains("127.0.0.1"), "{}", r.text);
+}
+
+/// sec2 (DEC-534): `notify.allow_private_targets` overrides the hosting mode in both
+/// directions.
+#[tokio::test]
+async fn the_private_target_switch_overrides_the_hosting_mode() {
+    use std::sync::atomic::Ordering;
+    if skip() {
+        return;
+    }
+    let (port, sent) = fake_smtp().await;
+    let t = start(
+        "[auth]\nsecure_cookies = false\n[instance]\nhosting = \"hosted\"\n[notify]\nallow_private_targets = true\n",
+        vec![],
+    )
+    .await
+    .unwrap();
+    let admin = sign_up(&t, "root").await;
+    let a = Some(admin.as_str());
+    mail_at(&t, a, port).await;
+    let r = mail_test(&t, a).await;
+    assert_eq!(r.body["ok"], true, "hosted, allowed: {}", r.text);
+    assert_eq!(sent.load(Ordering::SeqCst), 1);
+
+    let t = start(
+        "[auth]\nsecure_cookies = false\n[notify]\nallow_private_targets = false\n",
+        vec![],
+    )
+    .await
+    .unwrap();
+    let admin = sign_up(&t, "root").await;
+    let a = Some(admin.as_str());
+    mail_at(&t, a, port).await;
+    let r = mail_test(&t, a).await;
+    assert_eq!(
+        r.body["result"], "failed: private_target",
+        "home, refused: {}",
+        r.text
+    );
+    assert_eq!(sent.load(Ordering::SeqCst), 1);
+}
+
+async fn sign_in_from(
+    t: &T,
+    peer: &str,
+    forwarded: Option<&str>,
+    uri: &str,
+    name: &str,
+    password: &str,
+) -> Resp {
+    send(
+        t,
+        "POST",
+        uri,
+        Opts {
+            body: Some(json!({"username": name, "password": password})),
+            peer: Some(peer),
+            headers: forwarded
+                .map(|f| ("x-forwarded-for", f))
+                .into_iter()
+                .collect(),
+            ..Opts::default()
+        },
+    )
+    .await
+}
+
+/// sec2 (SEC-5, DEC-535): the wait belongs to the account and the client address behind the
+/// trusted proxy; the local sign-in stays open for the owner while someone guesses at the
+/// admin name from elsewhere, and an address over its budget is refused for every name.
+#[tokio::test]
+async fn sign_in_is_slowed_per_account_and_client_address() {
+    if skip() {
+        return;
+    }
+    let t = start(
+        "[auth]\nsignup = \"open\"\nsecure_cookies = false\n[auth.throttle]\naddress_failures = 6\n\
+         [server]\ntrusted_proxies = [\"10.0.0.0/8\"]\n",
+        vec![],
+    )
+    .await
+    .unwrap();
+    let _ = sign_up(&t, "root").await;
+    let proxy = "10.0.0.1:4000";
+    let attacker = Some("198.51.100.9");
+    let owner = Some("203.0.113.7");
+    let local = "/auth/sign-in/local";
+    let good = "correct horse battery";
+
+    // three free failures, then the pair waits: 429 with the seconds, also for the right
+    // password, on both doors
+    for _ in 0..4 {
+        let r = sign_in_from(&t, proxy, attacker, local, "root", "wrong password!").await;
+        assert_eq!(r.status, 401, "{}", r.text);
+    }
+    for uri in [local, "/auth/sign-in"] {
+        let r = sign_in_from(&t, proxy, attacker, uri, "root", good).await;
+        assert_eq!(r.status, 429, "{uri}: {}", r.text);
+        assert_eq!(r.body["code"], "too_many_attempts");
+        assert_eq!(r.body["retry_after_secs"], 1, "{}", r.text);
+    }
+    // the owner, behind the same proxy but from another address, is not slowed
+    let r = sign_in_from(&t, proxy, owner, local, "root", good).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    // and the break-glass sign-in is still recorded
+    let rows = audit_rows(&t, r.cookie.as_deref(), "auth.local_sign_in").await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0]["client_addr"], "203.0.113.7");
+
+    // the attacker's address runs out of budget (6 failures) across other names
+    for n in 0..2 {
+        let name = format!("guess{n}");
+        let r = sign_in_from(
+            &t,
+            proxy,
+            attacker,
+            "/auth/sign-in",
+            &name,
+            "wrong password!",
+        )
+        .await;
+        assert_eq!(r.status, 401, "{}", r.text);
+    }
+    let r = sign_in_from(
+        &t,
+        proxy,
+        attacker,
+        "/auth/sign-in",
+        "another",
+        "wrong password!",
+    )
+    .await;
+    assert_eq!(r.status, 429, "{}", r.text);
+    assert!(
+        r.body["retry_after_secs"].as_u64().unwrap() > 60,
+        "{}",
+        r.text
+    );
+    // an address that names itself in the header without coming through the proxy is the
+    // socket address: it cannot borrow someone else's budget or escape its own
+    let r = sign_in_from(&t, "198.51.100.9:999", owner, "/auth/sign-in", "root", good).await;
+    assert_eq!(r.status, 429, "{}", r.text);
+    let r = sign_in_from(&t, proxy, owner, "/auth/sign-in", "root", good).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+}

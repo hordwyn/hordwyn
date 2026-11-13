@@ -38,7 +38,7 @@ default = []
 pg = ["dep:sqlx"]
 # HTTP channels: ntfy, Gotify, Discord, Matrix, Apprise, signed webhook
 http = ["dep:tokio", "dep:url"]
-email = ["dep:lettre"]
+email = ["dep:lettre", "dep:tokio"]
 all = ["pg", "http", "email"]
 
 [dev-dependencies]

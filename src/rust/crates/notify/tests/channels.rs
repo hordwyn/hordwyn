@@ -49,7 +49,11 @@ impl HttpFetch for Reqwest {
 }
 
 fn channels(allow_private: bool) -> HttpChannels {
-    HttpChannels::new(Arc::new(Reqwest(reqwest::Client::new())), allow_private)
+    with_rule(domain::net::PrivateAllow::fixed(allow_private))
+}
+
+fn with_rule(rule: domain::net::PrivateAllow) -> HttpChannels {
+    HttpChannels::new(Arc::new(Reqwest(reqwest::Client::new())), rule)
 }
 
 fn lan() -> HttpChannels {
@@ -236,4 +240,34 @@ async fn private_targets_are_refused_unless_allowed() {
         channels(true).send(&bad, &msg()).await,
         Err(SendError::Permanent(_))
     ));
+}
+
+/// Review SEC2-3: one LAN target on `outbound.allow_private_hosts` is called while private
+/// targets stay refused for every other host and port.
+#[tokio::test]
+async fn a_private_target_on_the_operator_list_is_called() {
+    let s = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&s)
+        .await;
+    let port = s.address().port();
+    let listed = with_rule(domain::net::PrivateAllow::new(
+        Arc::new(|| false),
+        domain::net::PrivateHosts::new([format!("127.0.0.1:{port}")]),
+    ));
+    let c = |host: &str| ChannelConfig::Ntfy {
+        server: format!("http://{host}:{port}"),
+        topic: "t".into(),
+        token: None,
+    };
+    listed.send(&c("127.0.0.1"), &msg()).await.unwrap();
+    assert_eq!(s.received_requests().await.unwrap().len(), 1);
+    // `localhost` is another host name: not listed
+    let err = listed.send(&c("localhost"), &msg()).await.unwrap_err();
+    assert!(
+        matches!(err, SendError::Permanent(ref m) if m.contains("private")),
+        "{err:?}"
+    );
+    assert_eq!(s.received_requests().await.unwrap().len(), 1);
 }

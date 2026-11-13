@@ -61,8 +61,11 @@ impl OpenLibrary {
     pub fn new() -> Self {
         let mut c = Self::with_base_urls(DEFAULT_API_BASE, DEFAULT_COVERS_BASE);
         // a stored cover is fetched by the server: covers.openlibrary.org answers with a
-        // redirect to archive.org, which redirects to a numbered ia*.us.archive.org host
+        // redirect to archive.org, which redirects to a numbered ia*.us.archive.org host; the
+        // governed client checks every hop against this list (sec2), and `*.archive.org`
+        // covers the subdomains only, so the domain is an entry of its own
         c.info.hosts.push("archive.org".into());
+        c.info.hosts.push("*.archive.org".into());
         c
     }
 

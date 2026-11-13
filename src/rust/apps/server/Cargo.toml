@@ -13,6 +13,11 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+tower = { version = "0.5", features = ["util"] }
+# the listener loop (serve.rs) and the body limit of pages; all three are in the tree through axum
+hyper = { version = "1.12", default-features = false, features = ["http1", "server"] }
+hyper-util = { version = "0.1.21", default-features = false, features = ["tokio", "server-graceful", "service", "http1"] }
+http-body-util = "0.1.5"
 api.workspace = true
 app.workspace = true
 assets.workspace = true
@@ -72,4 +77,3 @@ wiremock.workspace = true
 reqwest = { workspace = true, features = ["json", "stream"] }
 serde_json.workspace = true
 testkit.workspace = true
-tower = { version = "0.5", features = ["util"] }

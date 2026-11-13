@@ -15,6 +15,7 @@ fn env(signup: SignupMode) -> (Auth, Arc<FixedClock>, TestEnv) {
             signup,
             session_days: 30,
             totp_issuer: "Test".into(),
+            ..AuthSettings::default()
         },
     );
     (auth, t.clock.clone(), t)
@@ -307,6 +308,117 @@ async fn reauth_checks_the_password_then_totp_and_regenerates_the_session() {
     assert_eq!(s.reauth_method.as_deref(), Some("password+totp"));
 }
 
+/// A six-digit code that none of the steps around `now` accepts.
+fn a_wrong_code(totp: &totp_rs::Totp, clock: &FixedClock) -> String {
+    let now = u64::try_from(clock.now().timestamp()).unwrap();
+    let right: Vec<String> = [now - 60, now - 30, now, now + 30, now + 60]
+        .iter()
+        .map(|t| totp.generate(*t).to_string())
+        .collect();
+    (0..1_000_000u32)
+        .map(|c| format!("{c:06}"))
+        .find(|c| !right.contains(c))
+        .unwrap()
+}
+
+/// SEC2-1: someone who has the password guesses the one-time code from many addresses.
+/// The count of wrong codes belongs to the account alone, so the wait grows whatever the
+/// address; a right code clears it.
+#[tokio::test]
+async fn wrong_codes_are_bounded_per_account_whatever_the_address() {
+    let (auth, clock, _) = env(SignupMode::Open);
+    let (_, token) = auth.sign_up(su("anna")).await.unwrap();
+    let (totp, codes) = totp_on(&auth, &clock, &token).await;
+    let free = auth.settings().throttle.free_failures;
+    let wrong = a_wrong_code(&totp, &clock);
+    let mut outcomes = Vec::new();
+    for n in 0..40u8 {
+        let from = format!("198.51.{n}.7");
+        let code = if n % 2 == 0 {
+            wrong.as_str()
+        } else {
+            "aaaaa-bbbbb"
+        };
+        let r = client::scope(
+            Some(&from),
+            auth.sign_in("anna", "correct horse battery", Some(code)),
+        )
+        .await;
+        outcomes.push(match r {
+            Err(AuthError::InvalidTotp) => 0,
+            Err(AuthError::TooManyAttempts { retry_after_secs }) => retry_after_secs,
+            other => panic!("{other:?}"),
+        });
+    }
+    let checked = outcomes.iter().filter(|w| **w == 0).count();
+    assert_eq!(
+        checked,
+        usize::try_from(free).unwrap() + 1,
+        "wrong codes checked from 40 addresses: {outcomes:?}"
+    );
+    assert!(outcomes[40 - 1] >= 1, "the account waits: {outcomes:?}");
+    // the wait grows with the next failure, from yet another address
+    clock.advance(Duration::seconds(outcomes[40 - 1]));
+    let wrong = a_wrong_code(&totp, &clock);
+    for (from, expect_wait) in [("192.0.2.1", 0), ("192.0.2.2", 2)] {
+        let r = client::scope(
+            Some(from),
+            auth.sign_in("anna", "correct horse battery", Some(&wrong)),
+        )
+        .await;
+        match (r, expect_wait) {
+            (Err(AuthError::InvalidTotp), 0) => {}
+            (Err(AuthError::TooManyAttempts { retry_after_secs }), w) if w > 0 => {
+                assert_eq!(retry_after_secs, w);
+            }
+            (other, _) => panic!("{other:?}"),
+        }
+    }
+    // after the wait the right code works and clears the count
+    clock.advance(Duration::seconds(2));
+    auth.sign_in("anna", "correct horse battery", Some(&codes[0]))
+        .await
+        .unwrap();
+    let wrong = a_wrong_code(&totp, &clock);
+    for n in 0..free {
+        let r = client::scope(
+            Some(&format!("192.0.2.{}", 10 + n)),
+            auth.sign_in("anna", "correct horse battery", Some(&wrong)),
+        )
+        .await;
+        assert!(matches!(r, Err(AuthError::InvalidTotp)), "{r:?}");
+    }
+}
+
+/// SEC2-1: wrong passwords never reach the code count, so strangers cannot make the owner
+/// wait at the second step.
+#[tokio::test]
+async fn wrong_passwords_do_not_touch_the_code_count() {
+    let (auth, clock, _) = env(SignupMode::Open);
+    let (_, token) = auth.sign_up(su("anna")).await.unwrap();
+    let (totp, _) = totp_on(&auth, &clock, &token).await;
+    clock.advance(Duration::seconds(30));
+    for n in 0..40u8 {
+        let r = client::scope(
+            Some(&format!("198.51.{n}.7")),
+            auth.sign_in("anna", "wrong password!", Some("123456")),
+        )
+        .await;
+        assert!(matches!(r, Err(AuthError::InvalidCredentials)), "{r:?}");
+    }
+    let now = u64::try_from(clock.now().timestamp()).unwrap();
+    client::scope(
+        Some("203.0.113.7"),
+        auth.sign_in(
+            "anna",
+            "correct horse battery",
+            Some(&totp.generate(now).to_string()),
+        ),
+    )
+    .await
+    .unwrap();
+}
+
 #[tokio::test]
 async fn recovery_codes_are_shown_once_hashed_and_work_once() {
     let (auth, clock, _) = env(SignupMode::Open);
@@ -505,14 +617,14 @@ async fn a_failed_sign_up_does_not_use_up_the_invite() {
     auth.sign_up(ben).await.unwrap();
 }
 
-/// UX2-S6: guessing the current password through the password change is throttled like
-/// sign-in, and shares its budget.
+/// UX2-S6: guessing the current password through the password change is slowed like
+/// sign-in, and shares its count (SEC-5: a growing wait, no lock).
 #[tokio::test]
 async fn changing_the_password_is_throttled_like_sign_in() {
     let (auth, clock, _) = env(SignupMode::Open);
     let (_, t1) = auth.sign_up(su("anna")).await.unwrap();
     let actor = auth.session(&t1.0).await.unwrap().unwrap();
-    for _ in 0..MAX_FAILED_SIGN_INS {
+    for _ in 0..=auth.settings().throttle.free_failures {
         assert!(matches!(
             auth.change_password(actor, "wrong password!", "another long secret")
                 .await,
@@ -528,7 +640,7 @@ async fn changing_the_password_is_throttled_like_sign_in() {
         auth.sign_in("anna", "correct horse battery", None).await,
         Err(AuthError::TooManyAttempts { .. })
     ));
-    clock.advance(Duration::minutes(16));
+    clock.advance(Duration::seconds(1));
     auth.change_password(actor, "correct horse battery", "another long secret")
         .await
         .unwrap();

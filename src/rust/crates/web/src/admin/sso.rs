@@ -592,7 +592,11 @@ fn TestOutcome(r: OidcTestDto) -> impl IntoView {
     let discovery = if r.discovery == "ok" {
         t("admin-sso-test-discovery-ok")
     } else {
-        let reason = r.discovery.trim_start_matches("failed: ").to_string();
+        // a code only (DEC-534); in words where there is a sentence for it
+        let code = r.discovery.trim_start_matches("failed: ").to_string();
+        let key = format!("admin-sso-reason-{code}");
+        let text = i18n.t(&key);
+        let reason = if text == key { code } else { text };
         i18n.t_args(
             "admin-sso-test-discovery-failed",
             &[("reason", reason.into())],

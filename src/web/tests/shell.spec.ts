@@ -355,21 +355,23 @@ test("sign-up: the Show toggle reveals the password and says so", async ({ page 
   await expect(password).toHaveAttribute("type", "password");
 });
 
-test("the lock-out names the remaining minutes", async ({ page }) => {
+test("failed sign-ins are slowed: after the free ones the page names the wait in seconds", async ({ page }) => {
   await page.goto("/sign-in");
   await hydrated(page);
   await page.getByLabel("Username").fill(`lock${Date.now()}`);
   await page.getByLabel("Password").fill(`not ${PASSWORD}`);
   const submit = page.getByRole("button", { name: "Sign in", exact: true }).last();
   const alert = page.getByRole("alert");
-  for (let i = 0; i < 10; i++) {
+  // sec2 (SEC-5): three failures are free, the fourth starts a wait of one second for this
+  // name from this address; no lock
+  for (let i = 0; i < 4; i++) {
     const answer = page.waitForResponse((r) => r.url().includes("/_fn/sign_in"));
     await submit.click();
     await answer;
     await expect(alert).toHaveText("Wrong username or password.");
   }
   await submit.click();
-  await expect(alert).toHaveText(/^Too many failed sign-ins\. Try again in 1[45] minutes\.$/);
+  await expect(alert).toHaveText("Too many failed attempts. Try again in 1 second.");
 });
 
 test("palette: Ctrl+Enter adds a provider hit as Planned and stays open, Undo removes it; then the next step; recent items and suggestions", async ({ page }) => {

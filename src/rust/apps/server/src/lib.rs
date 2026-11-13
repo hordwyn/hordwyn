@@ -8,7 +8,10 @@ mod csrf;
 pub mod escape;
 mod handlers;
 pub mod infra;
+mod outbound;
+pub mod read_timeout;
 pub mod security_headers;
+pub mod serve;
 pub mod web_admin;
 pub mod web_backend;
 
@@ -23,9 +26,8 @@ use axum::extract::{Path, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use catalog_core::cache::HttpCache;
+use catalog_core::Registry;
 use catalog_core::search::SearchFanout;
-use catalog_core::{ConnectorPolicy, GovernedHttp, Registry};
 use config::{AppConfig, ServerRole};
 use tokio_util::sync::CancellationToken;
 
@@ -78,6 +80,16 @@ fn enabled_kinds(config: &AppConfig) -> (kinds::Registry, Vec<String>) {
     (kinds, ids)
 }
 
+/// What the notification engine is built with besides the configuration and the stores.
+struct NotifyWith {
+    clock: Arc<dyn app::ports::Clock>,
+    cipher: Arc<dyn app::ports::SecretCipher>,
+    /// May the mail server be on a private address (DEC-534, review SEC2-3)?
+    mail: domain::net::PrivateAllow,
+    /// May notification channels be on a private address?
+    channels: domain::net::PrivateAllow,
+}
+
 /// The notification engine and deliverer, and the VAPID public key if web push is on.
 async fn notify_engine(
     config: &AppConfig,
@@ -85,9 +97,14 @@ async fn notify_engine(
     pool: &sqlx::PgPool,
     queue: &jobs::PgQueue,
     bus: &realtime::Bus,
-    clock: Arc<dyn app::ports::Clock>,
-    cipher: Arc<dyn app::ports::SecretCipher>,
+    with: NotifyWith,
 ) -> anyhow::Result<NotifyParts> {
+    let NotifyWith {
+        clock,
+        cipher,
+        mail,
+        channels,
+    } = with;
     let engine = Arc::new(notify::Engine::new(
         Arc::new(notify::pg::PgNotifyStore::new(pool.clone(), cipher)),
         Arc::new(queue.clone()),
@@ -102,8 +119,12 @@ async fn notify_engine(
         .reload_templates()
         .await
         .context("notification templates")?;
-    let (channels, web_push_key, mailer) =
-        notify_channels(config, &brand.user_agent(env!("CARGO_PKG_VERSION")))?;
+    let (channels, web_push_key, mailer) = notify_channels(
+        config,
+        &brand.user_agent(env!("CARGO_PKG_VERSION")),
+        mail,
+        channels,
+    )?;
     let deliverer = Arc::new(notify::Deliverer::new(
         engine.clone(),
         Arc::new(channels),
@@ -131,6 +152,8 @@ struct NotifyParts {
 fn notify_channels(
     cfg: &AppConfig,
     user_agent: &str,
+    mail: domain::net::PrivateAllow,
+    channels: domain::net::PrivateAllow,
 ) -> anyhow::Result<(
     notify::channels::Channels,
     Option<String>,
@@ -157,15 +180,13 @@ fn notify_channels(
         })
         .transpose()
         .map_err(|e| anyhow::anyhow!("notify.smtp: {e}"))?;
-    let mailer = Arc::new(email::Mailer::new(email));
+    // the mail server may be on a private address only where that is allowed (DEC-534)
+    let mailer = Arc::new(email::Mailer::with_private_rule(email, mail));
     Ok((
         Channels {
             http: Some(http::HttpChannels::new(
-                Arc::new(catalog_core::PlainHttp::new(
-                    user_agent,
-                    n.allow_private_targets,
-                )),
-                n.allow_private_targets,
+                Arc::new(catalog_core::PlainHttp::new(user_agent, channels.clone())),
+                channels,
             )),
             email: mailer.clone(),
         },
@@ -224,76 +245,251 @@ fn default_registry(cfg: &AppConfig) -> (Registry, Vec<(String, String, Vec<Stri
     (r, disabled)
 }
 
+/// Connect (in containers the database name may resolve only a moment after start-up) and
+/// migrate.
+async fn connect(config: &AppConfig) -> anyhow::Result<sqlx::PgPool> {
+    let pool = store_pg::connect_with_retry(
+        &config.database.url,
+        config.database.max_connections,
+        Duration::from_secs(60),
+    )
+    .await
+    .context("connect to Postgres")?;
+    store_pg::migrate(&pool).await.context("migrations")?;
+    Ok(pool)
+}
+
+/// The storage budget; its watermark events also become admin notifications.
+fn storage_budget(
+    config: &AppConfig,
+    pool: &sqlx::PgPool,
+    bus: &realtime::Bus,
+    engine: &Arc<notify::Engine>,
+    clock: &Arc<dyn app::ports::Clock>,
+    queue: &jobs::PgQueue,
+) -> anyhow::Result<Arc<assets::StorageBudget>> {
+    let budget_events =
+        notify::AdminBridge::new(Arc::new(bus.clone()), engine.clone(), clock.clone());
+    Ok(Arc::new(
+        assets::StorageBudget::open(
+            config.storage.clone(),
+            Arc::new(assets::pg::PgObjectIndex::new(pool.clone())),
+            clock.clone(),
+            Arc::new(budget_events),
+        )?
+        .with_jobs(Arc::new(queue.clone())),
+    ))
+}
+
+/// The adapters everything else is built on.
+struct Core {
+    pool: sqlx::PgPool,
+    keys: admin_wiring::Keys,
+    bus: realtime::Bus,
+    queue: jobs::PgQueue,
+    clock: Arc<dyn app::ports::Clock>,
+    app: App,
+    kind_ids: Vec<String>,
+    outbound: outbound::Outbound,
+    engine: Arc<notify::Engine>,
+    deliverer: Arc<notify::Deliverer>,
+    web_push_key: Option<String>,
+    mailer: Arc<notify::channels::email::Mailer>,
+    budget: Arc<assets::StorageBudget>,
+}
+
+/// Database, keys, events, jobs, the application, notifications and the storage budget.
+async fn core(config: &AppConfig, brand: &brand::Brand, role: ServerRole) -> anyhow::Result<Core> {
+    let pool = connect(config).await?;
+    let keys = admin_wiring::load_keys(config, &pool).await?;
+    // Web and worker in separate processes need cross-process events (LISTEN/NOTIFY).
+    let bus = if role == ServerRole::All {
+        realtime::Bus::local()
+    } else {
+        realtime::Bus::postgres(pool.clone()).await?
+    };
+    let queue = jobs::PgQueue::new(pool.clone());
+    let clock: Arc<dyn app::ports::Clock> = Arc::new(infra::SystemClock::default());
+    let (kinds, kind_ids) = enabled_kinds(config);
+    // the hosting mode and the rules for private addresses (DEC-534, review SEC2-3)
+    let outbound = outbound::Outbound::new(config);
+    let NotifyParts {
+        engine,
+        deliverer,
+        web_push_key,
+        mailer,
+    } = notify_engine(
+        config,
+        brand,
+        &pool,
+        &queue,
+        &bus,
+        NotifyWith {
+            clock: clock.clone(),
+            cipher: keys.ring.clone(),
+            mail: outbound.mail(),
+            channels: outbound.channels(),
+        },
+    )
+    .await?;
+    let app = App {
+        repos: pg_repos(&pool),
+        kinds: Arc::new(kinds),
+        clock: clock.clone(),
+        ids: Arc::new(infra::SystemIds),
+        events: Arc::new(bus.clone()),
+        jobs: Arc::new(queue.clone()),
+        notifications: engine.clone(),
+    };
+    let budget = storage_budget(config, &pool, &bus, &engine, &clock, &queue)?;
+    Ok(Core {
+        pool,
+        keys,
+        bus,
+        queue,
+        clock,
+        app,
+        kind_ids,
+        outbound,
+        engine,
+        deliverer,
+        web_push_key,
+        mailer,
+        budget,
+    })
+}
+
+/// Local accounts and the sign-in providers.
+async fn sign_in(
+    config: &AppConfig,
+    brand: &brand::Brand,
+    c: &Core,
+    http: Arc<dyn HttpFetch>,
+    oidc_hosts: Option<Arc<catalog_core::HostList>>,
+) -> anyhow::Result<(auth::Auth, Option<Arc<auth::oidc::Oidc>>)> {
+    let cipher: Arc<dyn app::ports::SecretCipher> = c.keys.ring.clone();
+    let auth_store = Arc::new(auth::pg::PgAuthStore::new(c.pool.clone(), cipher.clone()));
+    let auth = auth::Auth::new(
+        c.app.clone(),
+        auth_store.clone(),
+        auth_settings(config, brand),
+    )
+    .with_invites(auth_store);
+    let oidc = outbound::oidc(outbound::OidcWiring {
+        config,
+        pool: &c.pool,
+        cipher,
+        keys: c.keys.ring.clone(),
+        clock: c.clock.clone(),
+        http,
+        hosts: oidc_hosts,
+        allow_private: c.outbound.oidc(),
+    })
+    .await?;
+    Ok((auth, oidc))
+}
+
+/// The client address behind trusted proxies, and the security headers.
+fn request_guards(
+    config: &AppConfig,
+    api: &api::ApiState,
+) -> anyhow::Result<(
+    Arc<api::request_meta::TrustedProxies>,
+    Arc<security_headers::Headers>,
+)> {
+    let trusted_proxies = Arc::new(
+        api::request_meta::TrustedProxies::parse(&config.server.trusted_proxies)
+            .map_err(anyhow::Error::msg)?,
+    );
+    let headers = Arc::new(security_headers::Headers::new(
+        &config.server,
+        api.oidc
+            .clone()
+            .map(|o| o as Arc<dyn security_headers::FormTargets>),
+    ));
+    Ok((trusted_proxies, headers))
+}
+
+/// What the API state is built from besides the core.
+struct ApiWith<'a> {
+    config: &'a AppConfig,
+    brand: &'a brand::Brand,
+    core: &'a Core,
+    auth: auth::Auth,
+    oidc: Option<Arc<auth::oidc::Oidc>>,
+    search: &'a Arc<dyn SearchIndex>,
+    registry: &'a Registry,
+    http: &'a Arc<dyn HttpFetch>,
+    assets: &'a Arc<assets::AssetService>,
+}
+
+/// The API state without the admin area (added by `admin_wiring::with_admin`).
+fn api_state(w: ApiWith<'_>) -> api::ApiState {
+    let c = w.core;
+    let app = &c.app;
+    api::ApiState {
+        app: app.clone(),
+        auth: w.auth,
+        oidc: w.oidc,
+        bus: c.bus.clone(),
+        search: w.search.clone(),
+        fanout: SearchFanout::new(app.clone(), w.registry.clone(), w.http.clone()),
+        registry: w.registry.clone(),
+        assets: Some(w.assets.clone()),
+        changes: Some(Arc::new(store_pg::PgStore::new(c.pool.clone()))),
+        notify: Some(api::NotifyApi {
+            engine: c.engine.clone(),
+            deliverer: c.deliverer.clone(),
+            web_push_key: c.web_push_key.clone(),
+        }),
+        integrations: Some(Arc::new(integrations::Integrations::new(
+            app.clone(),
+            Arc::new(integrations::pg::PgIntegrationStore::new(c.pool.clone())),
+        ))),
+        public_url: w.config.server.public_url.clone(),
+        importer: Some(Arc::new(
+            importers::Importer::new(
+                app.clone(),
+                Arc::new(importers::pg::PgImportStore::new(c.pool.clone())),
+                c.budget.clone(),
+                Arc::new(c.queue.clone()),
+            )
+            .with_cover_rule(cover_rule(c.outbound.hosting.clone())),
+        )),
+        naming: api::Naming::from_prefix(&w.brand.ident(), &w.brand.name),
+        secure_cookies: w.config.auth.secure_cookies,
+        default_kinds: c.kind_ids.clone(),
+        admin: None,
+    }
+}
+
+/// At start: the counters other processes flushed, and the Overview rows as of now (WP4-2).
+async fn first_checks(registry: &Registry, pool: &sqlx::PgPool, api: &api::ApiState) {
+    if let Some(st) = registry.stats()
+        && let Err(e) = st
+            .sync(&catalog_core::pg::PgSourceStats::new(pool.clone()))
+            .await
+    {
+        tracing::warn!(error = %e, "reading the shared source counters failed");
+    }
+    if api.admin.is_some()
+        && let Err(e) = api::admin::run_probes(api).await
+    {
+        tracing::warn!(error = %e.message, "the first health probe failed");
+    }
+}
+
 impl Server {
     /// Connect, migrate and build every adapter.
     ///
     /// # Errors
     /// Unreachable database, invalid brand or storage configuration.
-    // The composition root: every adapter is wired here, in one place, on purpose.
-    #[allow(clippy::too_many_lines)]
+    // The composition root: every adapter is wired here and in the helpers above, on purpose.
     pub async fn build(config: AppConfig, role: ServerRole, o: Overrides) -> anyhow::Result<Self> {
         let brand = brand::Brand::load(std::path::Path::new(&config.brand.dir))
             .with_context(|| format!("brand directory {}", config.brand.dir))?;
         log_contrast(&brand);
-        // in containers the database name may resolve only a moment after start-up
-        let pool = store_pg::connect_with_retry(
-            &config.database.url,
-            config.database.max_connections,
-            Duration::from_secs(60),
-        )
-        .await
-        .context("connect to Postgres")?;
-        store_pg::migrate(&pool).await.context("migrations")?;
-        let keys = admin_wiring::load_keys(&config, &pool).await?;
-        let cipher: Arc<dyn app::ports::SecretCipher> = keys.ring.clone();
-
-        let repos = pg_repos(&pool);
-        // Web and worker in separate processes need cross-process events (LISTEN/NOTIFY).
-        let bus = if role == ServerRole::All {
-            realtime::Bus::local()
-        } else {
-            realtime::Bus::postgres(pool.clone()).await?
-        };
-        let queue = jobs::PgQueue::new(pool.clone());
-        let clock: Arc<dyn app::ports::Clock> = Arc::new(infra::SystemClock::default());
-        let (kinds, kind_ids) = enabled_kinds(&config);
-        let NotifyParts {
-            engine,
-            deliverer,
-            web_push_key,
-            mailer,
-        } = notify_engine(
-            &config,
-            &brand,
-            &pool,
-            &queue,
-            &bus,
-            clock.clone(),
-            cipher.clone(),
-        )
-        .await?;
-        let app = App {
-            repos,
-            kinds: Arc::new(kinds),
-            clock: clock.clone(),
-            ids: Arc::new(infra::SystemIds),
-            events: Arc::new(bus.clone()),
-            jobs: Arc::new(queue.clone()),
-            notifications: engine.clone(),
-        };
-
-        // storage watermark events also become admin notifications
-        let budget_events =
-            notify::AdminBridge::new(Arc::new(bus.clone()), engine.clone(), clock.clone());
-        let budget = Arc::new(
-            assets::StorageBudget::open(
-                config.storage.clone(),
-                Arc::new(assets::pg::PgObjectIndex::new(pool.clone())),
-                clock.clone(),
-                Arc::new(budget_events),
-            )?
-            .with_jobs(Arc::new(queue.clone())),
-        );
+        let c = core(&config, &brand, role).await?;
         let stats = Arc::new(catalog_core::SourceStats::default());
         let (registry, disabled_sources) = match o.registry {
             Some(r) => (r, Vec::new()),
@@ -309,151 +505,85 @@ impl Server {
         let registry = registry
             .with_stats(stats.clone())
             .with_contact(contact.clone());
-        // `instance.hosting`, shared by the admin API (which changes it) and the governed
-        // client (fair share of the interactive lane in hosted mode, design.md 4.1)
-        let hosting = Arc::new(std::sync::RwLock::new(
-            config.instance.hosting.as_str().to_string(),
-        ));
-        let (http, oidc_hosts): (Arc<dyn HttpFetch>, _) = if let Some(h) = o.http {
-            (h, None)
-        } else {
-            governed_http(
+        let (http, oidc_hosts): (Arc<dyn HttpFetch>, _) = match o.http {
+            Some(h) => (h, None),
+            None => outbound::governed_http(
                 &config,
-                &brand,
-                &registry,
-                &pool,
-                budget.clone(),
-                stats,
-                LiveSettings {
-                    hosting: hosting.clone(),
+                outbound::GovernedWith {
+                    brand: &brand,
+                    registry: &registry,
+                    pool: &c.pool,
+                    budget: c.budget.clone(),
+                    stats,
                     contact: contact.clone(),
                 },
-            )
+                &c.outbound,
+            ),
         };
         let assets = Arc::new(assets::AssetService::new(
-            budget.clone(),
-            Arc::new(assets::pg::PgAssetRepo::new(pool.clone())),
+            c.budget.clone(),
+            Arc::new(assets::pg::PgAssetRepo::new(c.pool.clone())),
             http.clone(),
-            Arc::new(queue.clone()),
+            Arc::new(c.queue.clone()),
             assets::CpuPool::default_size()?,
         ));
-        let auth_store = Arc::new(auth::pg::PgAuthStore::new(pool.clone(), cipher.clone()));
-        let auth = auth::Auth::new(
-            app.clone(),
-            auth_store.clone(),
-            auth_settings(&config, &brand),
-        )
-        .with_invites(auth_store);
-        let oidc = oidc(OidcWiring {
-            config: &config,
-            pool: &pool,
-            cipher: cipher.clone(),
-            keys: keys.ring.clone(),
-            clock: clock.clone(),
-            http: http.clone(),
-            hosts: oidc_hosts,
-        })
-        .await?;
+        let (auth, oidc) = sign_in(&config, &brand, &c, http.clone(), oidc_hosts).await?;
         let (search, search_backend) = match o.search {
             Some(s) => (s, "override"),
-            None => search_index(&config, &pool).await,
+            None => search_index(&config, &c.pool).await,
         };
-        let ident = brand.ident();
-        let api = api::ApiState {
-            app: app.clone(),
+        let api = api_state(ApiWith {
+            config: &config,
+            brand: &brand,
+            core: &c,
             auth,
             oidc,
-            bus: bus.clone(),
-            search: search.clone(),
-            fanout: SearchFanout::new(app.clone(), registry.clone(), http.clone()),
-            registry: registry.clone(),
-            assets: Some(assets.clone()),
-            changes: Some(Arc::new(store_pg::PgStore::new(pool.clone()))),
-            notify: Some(api::NotifyApi {
-                engine: engine.clone(),
-                deliverer: deliverer.clone(),
-                web_push_key,
-            }),
-            integrations: Some(Arc::new(integrations::Integrations::new(
-                app.clone(),
-                Arc::new(integrations::pg::PgIntegrationStore::new(pool.clone())),
-            ))),
-            public_url: config.server.public_url.clone(),
-            importer: Some(Arc::new(
-                importers::Importer::new(
-                    app.clone(),
-                    Arc::new(importers::pg::PgImportStore::new(pool.clone())),
-                    budget.clone(),
-                    Arc::new(queue.clone()),
-                )
-                .with_cover_rule(cover_rule(hosting.clone())),
-            )),
-            naming: api::Naming::from_prefix(&ident, &brand.name),
-            secure_cookies: config.auth.secure_cookies,
-            default_kinds: kind_ids,
-            admin: None,
-        };
-        let secret_rows = admin_wiring::secret_rows(&pool, &cipher);
-        admin_wiring::seal_plaintext(&secret_rows, cipher.as_ref(), &keys.source).await?;
+            search: &search,
+            registry: &registry,
+            http: &http,
+            assets: &assets,
+        });
+        let cipher: Arc<dyn app::ports::SecretCipher> = c.keys.ring.clone();
+        let secret_rows = admin_wiring::secret_rows(&c.pool, &cipher);
+        admin_wiring::seal_plaintext(&secret_rows, cipher.as_ref(), &c.keys.source).await?;
         let api = admin_wiring::with_admin(
             api,
             admin_wiring::AdminParts {
                 config: &config,
                 brand: &brand,
-                pool: &pool,
-                keys,
+                pool: &c.pool,
+                keys: c.keys,
                 secret_rows,
-                budget: budget.clone(),
-                queue: queue.clone(),
+                budget: c.budget.clone(),
+                queue: c.queue.clone(),
                 http: http.clone(),
                 search_backend,
                 disabled_sources,
-                mailer,
-                hosting,
+                mailer: c.mailer,
+                hosting: c.outbound.hosting.clone(),
                 contact,
             },
         )
         .await?;
-        // the counters other processes flushed, and the Overview rows as of now (WP4-2)
-        if let Some(st) = registry.stats()
-            && let Err(e) = st
-                .sync(&catalog_core::pg::PgSourceStats::new(pool.clone()))
-                .await
-        {
-            tracing::warn!(error = %e, "reading the shared source counters failed");
-        }
-        if api.admin.is_some()
-            && let Err(e) = api::admin::run_probes(&api).await
-        {
-            tracing::warn!(error = %e.message, "the first health probe failed");
-        }
-        let trusted_proxies = Arc::new(
-            api::request_meta::TrustedProxies::parse(&config.server.trusted_proxies)
-                .map_err(anyhow::Error::msg)?,
-        );
-        let headers = Arc::new(security_headers::Headers::new(
-            &config.server,
-            api.oidc
-                .clone()
-                .map(|o| o as Arc<dyn security_headers::FormTargets>),
-        ));
+        first_checks(&registry, &c.pool, &api).await;
+        let (trusted_proxies, headers) = request_guards(&config, &api)?;
         Ok(Self {
             config,
             trusted_proxies,
             headers,
             brand,
-            app,
+            app: c.app,
             api,
-            queue,
-            budget,
+            queue: c.queue,
+            budget: c.budget,
             assets,
             registry,
             http,
-            bus,
-            pool,
+            bus: c.bus,
+            pool: c.pool,
             search,
-            notify: engine,
-            deliverer,
+            notify: c.engine,
+            deliverer: c.deliverer,
         })
     }
 
@@ -476,9 +606,14 @@ impl Server {
     /// Cross-site request protection for cookie-authenticated mutations (G2-1).
     /// Also gives every request its client address and request id (DEC-284), and every
     /// answer its security headers (SEC-1): that layer is the outermost, so a request
-    /// refused by one of the others is answered with them too.
+    /// refused by one of the others is answered with them too. Innermost, a request body
+    /// gets its time limits (DEC-653): they run when a handler reads it.
     fn guarded(&self, r: Router) -> Router {
         r.layer(axum::middleware::from_fn_with_state(
+            read_timeout::ReadLimits::from_config(&self.config.server),
+            read_timeout::layer,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
             csrf::public_origin(&self.config.server.public_url),
             csrf::guard,
         ))
@@ -649,14 +784,6 @@ async fn serve_asset(
     }
 }
 
-/// Instance settings the governed client reads with every request.
-struct LiveSettings {
-    /// `instance.hosting`.
-    hosting: Arc<std::sync::RwLock<String>>,
-    /// `instance.operator_contact`.
-    contact: catalog_core::OperatorContact,
-}
-
 /// Who may bring a picture address in with an imported item entered by hand: the rule of
 /// `POST /items` (`api::ops::may_edit_items`), everybody on a home instance and admins on a
 /// hosted one, read per row from the shared `instance.hosting` (review MAN-3 of v1-manual).
@@ -670,54 +797,6 @@ fn cover_rule(hosting: Arc<std::sync::RwLock<String>>) -> importers::CoverRule {
     })
 }
 
-/// The production `HttpFetch`: governed client with HTTP cache in the storage budget and one
-/// policy (allowlist, rate limit) per connector, plus the OIDC connector whose allowlist
-/// follows the configured providers at run time (the returned handle).
-fn governed_http(
-    config: &AppConfig,
-    brand: &brand::Brand,
-    registry: &Registry,
-    pool: &sqlx::PgPool,
-    budget: Arc<assets::StorageBudget>,
-    stats: Arc<catalog_core::SourceStats>,
-    live: LiveSettings,
-) -> (Arc<dyn HttpFetch>, Option<Arc<catalog_core::HostList>>) {
-    let cache = HttpCache {
-        index: Arc::new(catalog_core::pg::PgCacheIndex::new(pool.clone())),
-        blobs: budget,
-    };
-    let version = env!("CARGO_PKG_VERSION");
-    let ua = brand.user_agent(version);
-    let mut g = GovernedHttp::new(&ua, Some(cache));
-    for info in registry.infos() {
-        g.add_connector(&info.id, ConnectorPolicy::from_info(&info));
-    }
-    let mut policy = ConnectorPolicy::oidc("", None);
-    policy.hosts = config
-        .auth
-        .oidc
-        .as_ref()
-        .and_then(|o| url::Url::parse(&o.issuer).ok())
-        .and_then(|u| {
-            let host = u.host_str()?.to_string();
-            Some(match u.port() {
-                Some(p) => format!("{host}:{p}"),
-                None => host,
-            })
-        })
-        .into_iter()
-        .collect();
-    g.add_connector(auth::oidc::CONNECTOR, policy);
-    let hosts = g.host_list(auth::oidc::CONNECTOR);
-    let g = g
-        .with_stats(stats)
-        .with_hosting(live.hosting)
-        .with_contact(&format!("{}/{version}", brand.ident()), live.contact)
-        // one pace per keyless source for every process on this database (BOOK-8)
-        .with_shared_pace(Arc::new(catalog_core::pg::PgPace::new(pool.clone())));
-    (Arc::new(g), hosts)
-}
-
 fn auth_settings(config: &AppConfig, brand: &brand::Brand) -> auth::AuthSettings {
     auth::AuthSettings {
         signup: match config.auth.signup {
@@ -727,85 +806,18 @@ fn auth_settings(config: &AppConfig, brand: &brand::Brand) -> auth::AuthSettings
         },
         session_days: config.auth.session_days,
         totp_issuer: brand.name.clone(),
+        throttle: {
+            let t = &config.auth.throttle;
+            auth::ThrottleSettings {
+                free_failures: t.free_failures,
+                delay_base_secs: t.delay_base_secs,
+                delay_max_secs: t.delay_max_secs,
+                window_minutes: t.window_minutes,
+                address_failures: t.address_failures,
+                verify_concurrency: t.verify_concurrency,
+            }
+        },
     }
-}
-
-/// The governed client's run-time OIDC allowlist as the `auth` port.
-struct OidcHosts(Arc<catalog_core::HostList>);
-
-impl auth::oidc::HostAllowlist for OidcHosts {
-    fn set_hosts(&self, hosts: Vec<String>) {
-        self.0.set(hosts);
-    }
-}
-
-struct OidcWiring<'a> {
-    config: &'a AppConfig,
-    pool: &'a sqlx::PgPool,
-    cipher: Arc<dyn app::ports::SecretCipher>,
-    keys: Arc<auth::secrets::LiveKeys>,
-    clock: Arc<dyn app::ports::Clock>,
-    http: Arc<dyn HttpFetch>,
-    hosts: Option<Arc<catalog_core::HostList>>,
-}
-
-/// The OIDC providers (admin area plus the environment's `auth.oidc` as a read-only row).
-async fn oidc(w: OidcWiring<'_>) -> anyhow::Result<Option<Arc<auth::oidc::Oidc>>> {
-    use auth::oidc::{EnvProvider, Provider, RoleSource};
-    let config = w.config;
-    let oidc = Arc::new(auth::oidc::Oidc::new(auth::oidc::OidcParts {
-        store: Arc::new(auth::oidc::PgProviderStore::new(
-            w.pool.clone(),
-            w.cipher.clone(),
-        )),
-        http: w.http,
-        keys: w.keys,
-        clock: w.clock.clone(),
-        hosts: w
-            .hosts
-            .map(|h| Arc::new(OidcHosts(h)) as Arc<dyn auth::oidc::HostAllowlist>),
-        audit: Some(Arc::new(auth::admin_pg::PgAdminStore::new(
-            w.pool.clone(),
-            w.cipher,
-        ))),
-        public_url: config.server.public_url.trim_end_matches('/').to_string(),
-    }));
-    let env = config.auth.oidc.as_ref().map(|c| {
-        let now = w.clock.now();
-        let mut p = Provider::new(
-            auth::oidc::ENV_PROVIDER_ID,
-            &c.slug,
-            &c.issuer,
-            &c.client_id,
-            now,
-        );
-        p.display_name.clone_from(&c.display_name);
-        p.auto_create = c.auto_create;
-        p.is_default = true;
-        if !c.scopes.is_empty() {
-            p.scopes = std::iter::once("openid".to_string())
-                .chain(c.scopes.iter().filter(|s| *s != "openid").cloned())
-                .collect();
-        }
-        p.groups_claim.clone_from(&c.groups_claim);
-        p.allowed_groups.clone_from(&c.allowed_groups);
-        p.admin_groups.clone_from(&c.admin_groups);
-        p.role_source = match c.role_source {
-            config::OidcRoleSource::Local => RoleSource::Local,
-            config::OidcRoleSource::Provider => RoleSource::Provider,
-        };
-        EnvProvider {
-            provider: p,
-            secret: c
-                .client_secret
-                .as_ref()
-                .map(|s| zeroize::Zeroizing::new(s.expose().to_string())),
-        }
-    });
-    oidc.install_env(env)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    Ok(Some(oidc))
 }
 
 /// The configured search backend. If Meilisearch cannot be reached at start-up the process
@@ -917,14 +929,16 @@ impl Server {
 /// The body limit of server functions, pages and every path without a route (SEC-2): at
 /// most [`api::JSON_BODY_LIMIT`] bytes, as for a JSON request to the REST API (the import
 /// upload goes through REST and keeps its own limit). A request that declares more is
-/// answered `413` before anything of its body is read; one that declares no length is read
-/// up to the limit and then answered `413`.
+/// answered `413` before anything of its body is read.
 ///
-/// The body is read here, not behind a `DefaultBodyLimit`: the server-function handler
-/// takes the request as it is, and what it does with a body that is too long (a `500` with
-/// the reader's error text, after reading up to axum's built-in default) is the business of
-/// a library, not a rule of this server. No server function or page reads its body as a
-/// stream, so nothing is lost by collecting it first.
+/// Only the body of a server function (`/_fn/`) is read here, up to the limit, and then
+/// answered `413` if there is more: the server-function handler takes the request as it
+/// is, and what it does with a body that is too long (a `500` with the reader's error
+/// text, after reading up to axum's built-in default) is the business of a library, not a
+/// rule of this server. Every other path of this router (pages, files, paths without a
+/// route) reads no body, so theirs is handed on unread, behind the same limit should
+/// something read it after all: a body that stalls there holds no memory (DEC-653). How
+/// long a body may take is the business of [`read_timeout`].
 async fn body_limit(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     use futures::StreamExt;
 
@@ -945,12 +959,17 @@ async fn body_limit(req: axum::extract::Request, next: axum::middleware::Next) -
     if declared.is_some_and(|n| usize::try_from(n).map_or(true, |n| n > LIMIT)) {
         return too_large();
     }
+    if !req.uri().path().starts_with("/_fn/") {
+        let req = req.map(|body| axum::body::Body::new(http_body_util::Limited::new(body, LIMIT)));
+        return next.run(req).await;
+    }
     let (parts, body) = req.into_parts();
     let mut pieces = body.into_data_stream();
     let mut read = Vec::new();
     while let Some(piece) = pieces.next().await {
         let Ok(piece) = piece else {
-            // the sender broke off or sent a malformed body
+            // the sender broke off, sent a malformed body or was too slow (then the
+            // read-timeout layer answers 408 in place of this)
             return api::ApiError::bad_request("the request body could not be read")
                 .into_response();
         };

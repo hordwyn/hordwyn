@@ -57,10 +57,20 @@ pub(crate) fn form_message(i: &I18n, code: &str) -> String {
     }
 }
 
-/// [`form_message`], with the remaining minutes for a lock-out (`retry_after_secs`).
+/// [`form_message`], with the time left of a wait after failed attempts (`retry_after_secs`,
+/// SEC-5): in seconds below a minute, else in minutes.
 #[must_use]
 pub(crate) fn form_message_after(i: &I18n, code: &str, retry_after_secs: Option<u64>) -> String {
     match retry_after_secs {
+        Some(secs)
+            if secs < 60
+                && AuthErrorCode::from_code(code) == Some(AuthErrorCode::TooManyAttempts) =>
+        {
+            i.t_args(
+                "auth-wait-seconds",
+                &[("seconds", FluentValue::from(secs.max(1)))],
+            )
+        }
         Some(secs) if AuthErrorCode::from_code(code) == Some(AuthErrorCode::TooManyAttempts) => {
             let minutes = secs.div_ceil(60).max(1);
             i.t_args(
@@ -568,26 +578,35 @@ mod tests {
         assert_eq!(sign_up_errors(&i, &ok, None).len(), 0);
     }
 
-    /// UX0-4 (design.md 5.2): the lock-out names the remaining minutes; the availability
-    /// check has its own throttle text (there were no failed attempts).
+    /// UX0-4 (design.md 5.2), SEC-5: the wait names the time left, in seconds below a minute
+    /// and in minutes from there; the availability check has its own throttle text (there
+    /// were no failed attempts).
     #[test]
-    fn lock_out_names_the_remaining_minutes() {
+    fn a_wait_names_the_time_left() {
         let i = en();
         assert_eq!(
             form_message_after(&i, "too_many_attempts", Some(61)),
-            "Too many failed sign-ins. Try again in 2 minutes."
+            "Too many failed attempts. Try again in 2 minutes."
         );
         assert_eq!(
             form_message_after(&i, "too_many_attempts", Some(30)),
-            "Too many failed sign-ins. Try again in 1 minute."
+            "Too many failed attempts. Try again in 30 seconds."
+        );
+        assert_eq!(
+            form_message_after(&i, "too_many_attempts", Some(1)),
+            "Too many failed attempts. Try again in 1 second."
         );
         assert_eq!(
             form_message_after(&de(), "too_many_attempts", Some(600)),
-            "Zu viele fehlgeschlagene Anmeldungen. Versuch es in 10 Minuten noch einmal."
+            "Zu viele Fehlversuche. Versuch es in 10 Minuten noch einmal."
         );
         assert_eq!(
             form_message_after(&de(), "too_many_attempts", Some(60)),
-            "Zu viele fehlgeschlagene Anmeldungen. Versuch es in 1 Minute noch einmal."
+            "Zu viele Fehlversuche. Versuch es in 1 Minute noch einmal."
+        );
+        assert_eq!(
+            form_message_after(&de(), "too_many_attempts", Some(8)),
+            "Zu viele Fehlversuche. Versuch es in 8 Sekunden noch einmal."
         );
         assert_eq!(
             form_message_after(&i, "too_many_attempts", None),

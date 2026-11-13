@@ -54,7 +54,11 @@ test("an admin reaches the eight admin pages from the account menu; axe and refl
   await page.getByRole("menuitem", { name: "Admin" }).click();
   await expect(page).toHaveURL(/\/admin$/);
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
-  await expect(page.getByTestId("health-row")).toHaveCount(8);
+  await expect(page.getByTestId("health-row")).toHaveCount(9);
+  // review SEC2-4: the browser reaches the server directly here, so no unlisted proxy is seen
+  await expect(page.getByTestId("health-row").filter({ hasText: "Reverse proxy" })).toContainText(
+    "No forwarded requests from an unlisted proxy",
+  );
   for (const theme of ["light", "dark"] as const) {
     await page.evaluate((t) => localStorage.setItem("app-theme", t), theme);
     for (const [path, title] of ADMIN_PAGES) {
@@ -322,7 +326,9 @@ test("Instance > Mail: Save and send a test says what failed, and Overview follo
     await mail.getByLabel("From address").fill("shelf@example.test");
     await mail.getByRole("button", { name: "Save and send a test" }).click();
     await expect(mail.getByTestId("mail-warning")).toHaveCount(0);
-    await expect(mail.getByRole("alert")).toContainText("The test failed:");
+    await expect(mail.getByRole("alert")).toHaveText(
+      "The test failed: The mail server could not be reached. Check the server, the port and the connection security.",
+    );
     await expect(mail.getByRole("alert")).not.toContainText("sender address");
     await visit(page, "/admin");
     const row = page.getByTestId("health-row").filter({ hasText: "Mail" });

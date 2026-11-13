@@ -170,15 +170,101 @@ pub fn of(req: &Request, trusted: &TrustedProxies) -> RequestMeta {
     }
 }
 
-/// Middleware: work out the meta, keep it for the request, echo the request id.
+/// Requests that carry `X-Forwarded-For` from a private address that is no trusted proxy:
+/// most likely a reverse proxy missing from `server.trusted_proxies`. Then every visitor
+/// counts as the proxy's address, in the audit log and for the sign-in budget per address
+/// (SEC-5), and thirty wrong passwords by anyone close the sign-in for all (review SEC2-4).
+/// The last one is kept for the health row of Admin > Overview; the log says it at most once
+/// an hour. A public peer that sends the header is a client's own header, not a proxy.
+#[derive(Debug, Default)]
+pub struct UntrustedForwarder(std::sync::Mutex<ForwarderState>);
+
+#[derive(Debug, Default)]
+struct ForwarderState {
+    last: Option<(IpAddr, chrono::DateTime<chrono::Utc>)>,
+    warned: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl UntrustedForwarder {
+    /// Look at `req`; true when this is the time to log the warning (the first such request,
+    /// or the first an hour after the last warning).
+    pub fn observe(
+        &self,
+        req: &Request,
+        trusted: &TrustedProxies,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> bool {
+        if !req.headers().contains_key(FORWARDED_FOR) {
+            return false;
+        }
+        let Some(peer) = req
+            .extensions()
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|c| canonical(c.0.ip()))
+        else {
+            return false;
+        };
+        if trusted.contains(peer) || !domain::net::is_private_ip(peer) {
+            return false;
+        }
+        let mut s = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        s.last = Some((peer, now));
+        let due = s
+            .warned
+            .is_none_or(|w| now - w >= chrono::Duration::hours(1));
+        if due {
+            s.warned = Some(now);
+        }
+        due
+    }
+
+    /// The address and time of the latest such request.
+    #[must_use]
+    pub fn last(&self) -> Option<(IpAddr, chrono::DateTime<chrono::Utc>)> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .last
+    }
+}
+
+/// What this process saw (the health probe runs in the web process of the supported
+/// one-process shape).
+pub static UNTRUSTED_FORWARDER: std::sync::LazyLock<UntrustedForwarder> =
+    std::sync::LazyLock::new(UntrustedForwarder::default);
+
+fn warn_untrusted_forwarder(req: &Request, trusted: &TrustedProxies) {
+    if UNTRUSTED_FORWARDER.observe(req, trusted, chrono::Utc::now())
+        && let Some((peer, _)) = UNTRUSTED_FORWARDER.last()
+    {
+        tracing::warn!(
+            %peer,
+            "requests with X-Forwarded-For come from an address that is not in \
+             server.trusted_proxies: the header is ignored and every visitor behind that \
+             address shares one client address (audit log, sign-in budget: thirty wrong \
+             passwords by anyone close the sign-in for all). If it is your reverse proxy, set \
+             APP__SERVER__TRUSTED_PROXIES"
+        );
+    }
+}
+
+/// Middleware: work out the meta, keep it for the request (the client address also for the
+/// sign-in throttle, `auth::client`), echo the request id.
 pub async fn layer(
     State(trusted): State<Arc<TrustedProxies>>,
     req: Request,
     next: Next,
 ) -> Response {
+    warn_untrusted_forwarder(&req, &trusted);
     let meta = of(&req, &trusted);
     let id = meta.request_id.clone();
-    let mut resp = META.scope(meta, next.run(req)).await;
+    let client = meta.client_addr.clone();
+    let mut resp = META
+        .scope(meta, auth::client::scope(client.as_deref(), next.run(req)))
+        .await;
     if let Ok(v) = HeaderValue::from_str(&id) {
         resp.headers_mut().insert(REQUEST_ID, v);
     }
@@ -273,6 +359,50 @@ mod tests {
             Some("203.0.113.7"),
             "repeated headers in order"
         );
+    }
+
+    fn forwarded(peer: [u8; 4], xff: bool) -> Request {
+        let mut b = axum::http::Request::builder().uri("/");
+        if xff {
+            b = b.header(FORWARDED_FOR, "203.0.113.7");
+        }
+        let mut req = b.body(axum::body::Body::empty()).unwrap();
+        req.extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from((peer, 443))));
+        req
+    }
+
+    /// Review SEC2-4: a reverse proxy missing from `server.trusted_proxies` is recorded for
+    /// the Overview (requests with `X-Forwarded-For` from a private address that is not
+    /// trusted) and logged at most once an hour.
+    #[test]
+    fn an_unlisted_proxy_on_a_private_address_is_recorded() {
+        let seen = UntrustedForwarder::default();
+        let none = nets(&[]);
+        let t0 = chrono::Utc::now();
+        assert!(
+            seen.observe(&forwarded([172, 18, 0, 1], true), &none, t0),
+            "warn"
+        );
+        assert_eq!(seen.last(), Some(("172.18.0.1".parse().unwrap(), t0)));
+        let later = t0 + chrono::Duration::minutes(10);
+        assert!(
+            !seen.observe(&forwarded([172, 18, 0, 1], true), &none, later),
+            "no second warning within the hour"
+        );
+        assert_eq!(seen.last().map(|l| l.1), Some(later), "the time follows");
+        let hour = t0 + chrono::Duration::minutes(61);
+        assert!(seen.observe(&forwarded([172, 18, 0, 1], true), &none, hour));
+        // no header, a trusted proxy, or a public peer (a client's own header): not recorded
+        for (peer, xff, trusted) in [
+            ([172, 18, 0, 1], false, nets(&[])),
+            ([172, 18, 0, 1], true, nets(&["172.16.0.0/12"])),
+            ([198, 51, 100, 9], true, nets(&[])),
+        ] {
+            let other = UntrustedForwarder::default();
+            other.observe(&forwarded(peer, xff), &trusted, t0);
+            assert_eq!(other.last(), None, "{peer:?} {xff}");
+        }
     }
 
     #[test]

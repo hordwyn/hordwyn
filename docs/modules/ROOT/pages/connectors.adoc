@@ -99,3 +99,12 @@ client (host allowlist, rate limit, circuit breaker, cache), see
 xref:provider-pipeline.adoc[provider pipeline]. The project never talks to indexers,
 trackers, Prowlarr/Jackett, torrent or usenet clients, and never searches for or handles
 media files.
+
+== Hosts
+
+The server calls a data source only at the hosts its connector lists (`ConnectorInfo.hosts`,
+written down per source in `docs/connectors/<id>.md`); a redirect is followed only to a host
+on the same list. An entry is `host`, `host:port`, or `*.domain` for every subdomain of a
+domain (for download hosts with changing names; the domain itself is an entry of its
+own). None of them may be on a private address unless the operator allows the host
+(xref:operations.adoc[Operations, "What the server connects to"]).

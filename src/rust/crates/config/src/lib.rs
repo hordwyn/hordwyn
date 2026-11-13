@@ -113,6 +113,21 @@ pub struct ServerConfig {
     /// browser reports what the policy would refuse in its console and refuses nothing.
     /// For finding out whether the policy is the reason something does not load.
     pub csp_report_only: bool,
+    /// Seconds a client may take to send the head of a request (request line and headers);
+    /// then the connection is closed. Also how long an idle keep-alive connection is kept:
+    /// keep it above the time the reverse proxy keeps idle connections to the application
+    /// (Caddy 2 minutes, nginx 60 seconds by default), or the proxy can send a request into
+    /// a connection that is just being closed. The default is above both.
+    pub header_read_timeout_secs: u64,
+    /// Seconds a request body may pause between two pieces; then the request is answered
+    /// `408`. Applies to every request, the import upload included.
+    pub body_idle_timeout_secs: u64,
+    /// Seconds the whole body of a request may take to arrive; then the request is answered
+    /// `408`. The import upload has its own limit (`import_read_timeout_secs`).
+    pub body_read_timeout_secs: u64,
+    /// Seconds the body of an import upload (up to 64 MiB) may take to arrive; then the
+    /// request is answered `408`. The default allows 64 MiB at about 0.3 Mbit/s.
+    pub import_read_timeout_secs: u64,
 }
 
 impl Default for ServerConfig {
@@ -125,6 +140,10 @@ impl Default for ServerConfig {
             trusted_proxies: Vec::new(),
             hsts_max_age_secs: 31_536_000,
             csp_report_only: false,
+            header_read_timeout_secs: 150,
+            body_idle_timeout_secs: 30,
+            body_read_timeout_secs: 60,
+            import_read_timeout_secs: 1800,
         }
     }
 }
@@ -257,6 +276,48 @@ pub struct AuthConfig {
     /// `page` (sign-in page) or `auto` (straight to the default identity provider,
     /// addendum-1 4.3; needs a tested provider). `cli admin disable-sso-only` sets `page`.
     pub sign_in_mode: SignInMode,
+    /// How guesses at passwords and codes are slowed down.
+    pub throttle: ThrottleConfig,
+}
+
+/// Limits for every check of a password, a one-time code, a recovery code, a reset link or
+/// an emailed sign-in link. Nothing here locks an account: the pair of account and client
+/// address waits longer after each failure, and a client address has a budget across all
+/// names. The client address is the one `server.trusted_proxies` yields. Counted per web
+/// process, in memory. Read at start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct ThrottleConfig {
+    /// Failures of one account from one client address that cost no wait.
+    pub free_failures: u32,
+    /// Seconds to wait after the first failure beyond the free ones; the wait doubles with
+    /// each further failure. `0` switches the wait off.
+    pub delay_base_secs: u32,
+    /// The longest wait in seconds.
+    pub delay_max_secs: u32,
+    /// Minutes without a failure after which an account starts again for an address; also
+    /// the length of the budget window of a client address.
+    pub window_minutes: u32,
+    /// Failures one client address may have across all names within the window; then it is
+    /// refused for every name until the window ends. Behind a reverse proxy that is not in
+    /// `server.trusted_proxies` all visitors share the proxy's address and this budget.
+    pub address_failures: u32,
+    /// Password verifications (argon2id, about 19 MiB each) that run at once; further ones
+    /// wait their turn.
+    pub verify_concurrency: u32,
+}
+
+impl Default for ThrottleConfig {
+    fn default() -> Self {
+        Self {
+            free_failures: 3,
+            delay_base_secs: 1,
+            delay_max_secs: 300,
+            window_minutes: 15,
+            address_failures: 30,
+            verify_concurrency: 8,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
@@ -287,6 +348,7 @@ impl Default for AuthConfig {
             secure_cookies: true,
             oidc: None,
             sign_in_mode: SignInMode::Page,
+            throttle: ThrottleConfig::default(),
         }
     }
 }
@@ -388,9 +450,13 @@ const fn default_smtp_port() -> u16 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct NotifyConfig {
-    /// Allow channel targets (ntfy, Gotify, webhooks, ...) in private and loopback networks.
-    /// Off by default: otherwise any member could make the server call internal services.
-    pub allow_private_targets: bool,
+    /// May the server call targets in private and loopback networks that people name in the
+    /// application? Not set: notification channels (ntfy, Gotify, webhooks, ...) may not,
+    /// otherwise any member could make the server call internal services; sign-in providers
+    /// (OIDC discovery, token, keys, user info) and the mail server follow
+    /// `instance.hosting`: allowed in `home`, refused in `hosted`. `true` allows all of
+    /// them, `false` refuses all of them, in either hosting mode.
+    pub allow_private_targets: Option<bool>,
     /// Attempts per delivery before it is marked failed.
     pub max_attempts: u32,
     /// Email channel; email notifications are unavailable without it.
@@ -400,7 +466,7 @@ pub struct NotifyConfig {
 impl Default for NotifyConfig {
     fn default() -> Self {
         Self {
-            allow_private_targets: false,
+            allow_private_targets: None,
             max_attempts: 5,
             smtp: None,
         }
@@ -529,6 +595,27 @@ impl Default for UsageConfig {
     }
 }
 
+/// What the server may call. Data sources and cover downloads only reach the hosts their
+/// connector documents (redirects are checked hop by hop against the same list), sign-in
+/// providers and mail the configured hosts, and none of them an address in a private,
+/// loopback or link-local network unless it is allowed: here per host (for every kind of
+/// outgoing request), by `connectors.<id>.base_url` and `notify.smtp.host` for the host
+/// they name, or by `notify.allow_private_targets` for sign-in providers, mail and
+/// notification channels as a whole.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct OutboundConfig {
+    /// Hosts that may be on a private, loopback or link-local address: `host` (the default
+    /// port of the URL; for mail the ports 25, 465 and 587), `host:port`, an IP address
+    /// (`10.0.0.5:8443`, `[fd00::1]:8080`), or `*.home.arpa` for every subdomain of a
+    /// domain. Honoured by data sources, sign-in providers (discovery, keys, token, user
+    /// info), the mail server and notification channels (webhooks, ntfy, ...): for example
+    /// a metadata mirror, a sign-in provider or a mail relay in the local network of a
+    /// hosted instance, or one webhook target in the LAN without allowing all of them. A
+    /// host still has to be one the feature may call at all. Compared in lower case.
+    pub allow_private_hosts: Vec<String>,
+}
+
 /// The whole configuration.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
@@ -548,6 +635,7 @@ pub struct AppConfig {
     pub instance: InstanceConfig,
     pub secrets: SecretsConfig,
     pub usage: UsageConfig,
+    pub outbound: OutboundConfig,
     /// Dotted keys set by the file or the environment (not part of the file format).
     #[serde(skip)]
     #[schemars(skip)]
@@ -677,6 +765,10 @@ impl AppConfig {
             origins.insert("instance.operator_contact".into(), Origin::Env(k.clone()));
         }
         cfg.origins = origins;
+        // host names are compared in lower case (review SEC2-11)
+        for h in &mut cfg.outbound.allow_private_hosts {
+            *h = h.trim().to_ascii_lowercase();
+        }
         cfg.validate()?;
         Ok(cfg)
     }
@@ -727,6 +819,38 @@ impl AppConfig {
                 "server.trusted_proxies: `{p}` is no IP address or CIDR network"
             ));
         }
+        let s = &self.server;
+        if s.header_read_timeout_secs == 0
+            || s.body_idle_timeout_secs == 0
+            || s.body_read_timeout_secs == 0
+            || s.import_read_timeout_secs == 0
+        {
+            return bad("server.header_read_timeout_secs, body_idle_timeout_secs, \
+                 body_read_timeout_secs and import_read_timeout_secs must be positive"
+                .into());
+        }
+        let t = &self.auth.throttle;
+        if t.window_minutes == 0 || t.address_failures == 0 || t.verify_concurrency == 0 {
+            return bad(
+                "auth.throttle: window_minutes, address_failures and verify_concurrency must \
+                 be positive"
+                    .into(),
+            );
+        }
+        if t.delay_max_secs < t.delay_base_secs {
+            return bad("auth.throttle.delay_max_secs must not be below delay_base_secs".into());
+        }
+        if let Some(h) = self
+            .outbound
+            .allow_private_hosts
+            .iter()
+            .find(|h| !is_host(h))
+        {
+            return bad(format!(
+                "outbound.allow_private_hosts: `{h}` is not `host`, `host:port` or \
+                 `*.domain` (no scheme, no path)"
+            ));
+        }
         if self.jobs.concurrency == 0 {
             return bad("jobs.concurrency must be positive".into());
         }
@@ -736,6 +860,26 @@ impl AppConfig {
         }
         self.storage.validate().map_err(ConfigError::Invalid)
     }
+}
+
+/// `idp.lan`, `10.0.0.5:8443`, `[fd00::1]:8080`: a host as a URL writes it, with an optional
+/// port.
+fn is_host(s: &str) -> bool {
+    // `*.home.arpa`: every subdomain (review SEC2-11; a bare leading dot is refused)
+    let s = s.strip_prefix("*.").unwrap_or(s);
+    if s.starts_with('.') || s.contains('*') {
+        return false;
+    }
+    let (host, port) = match s.rsplit_once(':') {
+        Some((h, p)) if !p.contains(']') => (h, Some(p)),
+        _ => (s, None),
+    };
+    !host.is_empty()
+        && port.is_none_or(|p| p.parse::<u16>().is_ok())
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '[' | ']' | ':'))
+        && (!host.contains(':') || (host.starts_with('[') && host.ends_with(']')))
 }
 
 /// `10.0.0.0/8`, `192.0.2.1`, `fd00::/8`.
@@ -807,6 +951,97 @@ mod tests {
 
     /// DEC-284 and addendum-1 4.3: trusted proxies (empty by default, CIDR checked) and the
     /// sign-in mode (`page` by default).
+    /// sec2: every limit is a setting with a safe default.
+    #[test]
+    fn throttle_timeouts_and_outbound_have_safe_defaults_and_are_checked() {
+        let d = AppConfig::default();
+        assert_eq!(d.auth.throttle, ThrottleConfig::default());
+        assert_eq!(
+            (
+                d.auth.throttle.free_failures,
+                d.auth.throttle.delay_base_secs,
+                d.auth.throttle.delay_max_secs,
+                d.auth.throttle.window_minutes,
+                d.auth.throttle.address_failures,
+                d.auth.throttle.verify_concurrency
+            ),
+            (3, 1, 300, 15, 30, 8)
+        );
+        assert_eq!(
+            (
+                d.server.header_read_timeout_secs,
+                d.server.body_idle_timeout_secs,
+                d.server.body_read_timeout_secs
+            ),
+            (150, 30, 60)
+        );
+        assert_eq!(d.outbound.allow_private_hosts.len(), 0);
+        assert_eq!(
+            d.notify.allow_private_targets, None,
+            "follows the hosting mode"
+        );
+        let c = AppConfig::from_sources(
+            "[auth.throttle]\naddress_failures = 5\n[outbound]\nallow_private_hosts = [\"idp.lan\", \"10.0.0.5:8443\", \"[fd00::1]:8080\"]\n",
+            env(&[
+                ("APP__SERVER__BODY_READ_TIMEOUT_SECS", "20"),
+                ("APP__NOTIFY__ALLOW_PRIVATE_TARGETS", "false"),
+                ("APP__AUTH__THROTTLE__DELAY_MAX_SECS", "60"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(c.auth.throttle.address_failures, 5);
+        assert_eq!(c.auth.throttle.delay_max_secs, 60);
+        assert_eq!(
+            c.auth.throttle.free_failures, 3,
+            "the rest keeps its default"
+        );
+        assert_eq!(c.server.body_read_timeout_secs, 20);
+        assert_eq!(c.notify.allow_private_targets, Some(false));
+        assert_eq!(c.outbound.allow_private_hosts.len(), 3);
+        for bad in [
+            "[server]\nheader_read_timeout_secs = 0\n",
+            "[server]\nbody_idle_timeout_secs = 0\n",
+            "[server]\nbody_read_timeout_secs = 0\n",
+            "[auth.throttle]\nverify_concurrency = 0\n",
+            "[auth.throttle]\naddress_failures = 0\n",
+            "[auth.throttle]\nwindow_minutes = 0\n",
+            "[auth.throttle]\ndelay_base_secs = 10\ndelay_max_secs = 5\n",
+            "[outbound]\nallow_private_hosts = [\"http://idp.lan\"]\n",
+            "[outbound]\nallow_private_hosts = [\"idp.lan/path\"]\n",
+            "[outbound]\nallow_private_hosts = [\"\"]\n",
+            "[outbound]\nallow_private_hosts = [\"fd00::1\"]\n",
+        ] {
+            assert!(AppConfig::from_sources(bad, env(&[])).is_err(), "{bad}");
+        }
+    }
+
+    /// Review SEC2-7: the import upload has a total time of its own; SEC2-11: private host
+    /// entries are lower-cased, and only `*.` names a whole domain (a leading dot is refused
+    /// instead of silently covering every subdomain).
+    #[test]
+    fn import_upload_time_and_private_host_entries() {
+        let d = AppConfig::default();
+        assert_eq!(d.server.import_read_timeout_secs, 1800);
+        let c = AppConfig::from_sources(
+            "[server]\nimport_read_timeout_secs = 600\n[outbound]\nallow_private_hosts = [\"IdP.LAN\", \"*.Home.Arpa\", \" relay.lan:25 \"]\n",
+            env(&[]),
+        )
+        .unwrap();
+        assert_eq!(c.server.import_read_timeout_secs, 600);
+        assert_eq!(
+            c.outbound.allow_private_hosts,
+            ["idp.lan", "*.home.arpa", "relay.lan:25"]
+        );
+        for bad in [
+            "[server]\nimport_read_timeout_secs = 0\n",
+            "[outbound]\nallow_private_hosts = [\".lan\"]\n",
+            "[outbound]\nallow_private_hosts = [\"*lan\"]\n",
+            "[outbound]\nallow_private_hosts = [\"a.*.lan\"]\n",
+        ] {
+            assert!(AppConfig::from_sources(bad, env(&[])).is_err(), "{bad}");
+        }
+    }
+
     #[test]
     fn trusted_proxies_and_sign_in_mode() {
         let d = AppConfig::from_sources("", env(&[])).unwrap();
