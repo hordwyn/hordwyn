@@ -64,9 +64,11 @@ fn SignedInHome() -> impl IntoView {
     let i18n = use_i18n();
     let data = Resource::new(|| (), |()| api::home());
     let shown = StoredValue::new(Shown::default());
-    let refresh = Callback::new(move |()| data.refetch());
-    // paced: an import announces every item it writes (OT-21)
-    crate::events::refresh_on_updates(crate::offline::refresh_when_online(refresh));
+    let refetch = Callback::new(move |()| data.refetch());
+    // paced: an import announces every item it writes (OT-21); the own refreshes tell the
+    // same pace (LR-5)
+    let own = crate::events::refresh_on_updates(crate::offline::refresh_when_online(refetch));
+    let refresh = own.wrap(refetch);
     let title = i18n.t_args(
         "home-greeting",
         &[("name", cfg.display_name.clone().into())],

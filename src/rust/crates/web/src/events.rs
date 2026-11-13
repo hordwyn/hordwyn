@@ -245,7 +245,11 @@ pub fn refresh_when_lagged(refresh: Callback<()>) {
 /// once for the person's own actions made elsewhere ([`OwnAction`]). For pages whose every
 /// row would be looked at again (Home, Library, History, People, a person, the lists); a page
 /// of one entity filters the events itself.
-pub fn refresh_on_updates(refresh: Callback<()>) {
+///
+/// The answer makes the page's own refreshes (after an action on the page) known to the same
+/// pace: [`OwnRefresh::wrap`].
+#[must_use = "the page's own refreshes go through `OwnRefresh::wrap` (LR-5)"]
+pub fn refresh_on_updates(refresh: Callback<()>) -> OwnRefresh {
     let paced = Paced::new(refresh);
     if let Some(own) = use_context::<OwnAction>() {
         Effect::new(move |seen: Option<u64>| {
@@ -260,6 +264,25 @@ pub fn refresh_on_updates(refresh: Callback<()>) {
         });
     }
     paced.on_topics(&["entity.updated"]);
+    OwnRefresh(paced.pace)
+}
+
+/// The pace of a page's [`refresh_on_updates`], for the page's own refreshes (LR-5): the
+/// event that announces an action on the page is then answered once at the end of the quiet
+/// time instead of by a second read at once.
+#[derive(Clone, Copy)]
+pub struct OwnRefresh(StoredValue<Pace>);
+
+impl OwnRefresh {
+    /// `refresh` as the page's own refresh: noted in the pace ([`Pace::own`]) and run at once.
+    #[must_use]
+    pub fn wrap(self, refresh: Callback<()>) -> Callback<()> {
+        let pace = self.0;
+        Callback::new(move |()| {
+            pace.update_value(|p| p.own(crate::keyboard::now_ms()));
+            refresh.run(());
+        })
+    }
 }
 
 /// Run `refresh` for the events of `topics`, paced by [`Pace`], and whenever the event

@@ -1,5 +1,16 @@
 import { test, expect, type Page } from "./fixtures";
-import { expectNoA11yViolations, expectReflow, hydrated, signUp, importDone } from "./helpers";
+import {
+  expectNoA11yViolations,
+  expectReflow,
+  gateEntityEvents,
+  heldEvents,
+  holdEvents,
+  hydrated,
+  importDone,
+  requestStarts,
+  signUp,
+  twoFrames,
+} from "./helpers";
 
 // UX phase 1 Library page (design.md 6.2, 3.5; addendum-1 1.3): group switcher, kind chips,
 // status tabs, the one Filters button with the tag filter, sort, grid/list, the URL as the
@@ -482,4 +493,154 @@ test.describe("the bulk bar at 360 px", () => {
     const b = await bar(page).boundingBox();
     expect(t && b && t.y + t.height <= b.y + 1, `toast ${JSON.stringify(t)} bar ${JSON.stringify(b)}`).toBeTruthy();
   });
+});
+
+/** The status tabs as the server writes them (`StatusTabs` in `crates/web/src/library.rs`). */
+const STATUS_TABS = /<div class="-mx-4 mb-3 overflow-x-auto px-4"><div role="tablist" aria-label="Status"[\s\S]*?<\/div><!><\/div>/;
+
+// Race package F2 (race diagnosis 2.3): the server once sent the Library without its status
+// tabs while the browser rendered them, hydration panicked, the page was marked hydrated all
+// the same and stayed dead below the kind chips. These tests give the browser that answer.
+
+/** Answer the Library document as the failed run did: a placeholder where the status tabs are. */
+async function withoutStatusTabs(page: Page, times?: number) {
+  const seen = { swapped: 0 };
+  await page.route(
+    (url) => url.pathname === "/library",
+    async (route) => {
+      const res = await route.fetch();
+      const html = await res.text();
+      const cut = html.replace(STATUS_TABS, "<!>");
+      expect(cut, "the status tabs were found in the server's page").not.toBe(html);
+      seen.swapped += 1;
+      await route.fulfill({ response: res, body: cut });
+    },
+    times ? { times } : undefined,
+  );
+  return seen;
+}
+
+/** Panics only: a release build prints no detailed hydration message (RACE-12). */
+const panicsIn = (failures: string[]) => failures.filter((f) => /panicked at/.test(f)).length;
+
+test("a page whose hydration panics reloads once and works; the guard reports the panic", async ({ page, appFailures }) => {
+  test.setTimeout(120_000);
+  await signUp(page, `hyd${Date.now()}`, "Hydration Tester");
+  await seed(page);
+  const seen = await withoutStatusTabs(page, 1);
+  // the first page's code waits until a person has typed into the server's page
+  let release = () => {};
+  const typed = new Promise<void>((r) => (release = r));
+  let wasm = 0;
+  await page.route(
+    (url) => url.pathname.endsWith(".wasm"),
+    async (route) => {
+      if (wasm++ === 0) await typed;
+      await route.continue();
+    },
+  );
+  await page.goto("/library?view=list&sort=title", { waitUntil: "domcontentloaded" });
+  await page.locator("#lib-q").fill("Harbour");
+  release();
+  await hydrated(page);
+  // the reloaded page is the server's own answer: alive from top to bottom
+  await expect(page.getByRole("checkbox", { name: "Select all on this page" })).toBeEnabled();
+  await expect(page.getByRole("tablist", { name: "Status" })).toBeVisible();
+  expect(seen.swapped).toBe(1);
+  await expect(page.locator("body[data-hydration-failed]")).toHaveCount(0);
+  // the text typed before the reload is still there, and the page works with it (RACE-13)
+  await expect(page.locator("#lib-q")).toHaveValue("Harbour");
+  await expect(page).toHaveURL(/q=Harbour/);
+  // the second reading of the page has a reason (RACE-13)
+  await expect(page.getByRole("status").filter({ hasText: "did not start properly and was loaded again" })).toHaveCount(1);
+  // a later failure reloads again: the note of the reload is gone
+  expect(await page.evaluate(() => sessionStorage.getItem("app-hydration-retry"))).toBeNull();
+  // and the guard of every test saw it (it fails the test unless the test expects it)
+  expect(panicsIn(appFailures)).toBe(1);
+  appFailures.length = 0;
+});
+
+test("a page whose hydration panics again after the reload is not marked hydrated and says so", async ({ page, appFailures }) => {
+  test.setTimeout(120_000);
+  await signUp(page, `hyd2${Date.now()}`, "Hydration Twice");
+  await seed(page);
+  const seen = await withoutStatusTabs(page);
+  const loads: string[] = [];
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) loads.push(frame.url());
+  });
+  await page.goto("/library?view=list&sort=title");
+  // one reload, then the page says what it is instead of pretending to work. The notice is
+  // shown only by the branch that does not reload (RACE-4): once it is there, no further
+  // load can follow, so no fixed wait is needed to rule out a loop (RACE-9)
+  const notice = page.getByRole("alert").filter({ hasText: "This page did not start properly" });
+  await expect(notice).toBeVisible({ timeout: 30_000 });
+  await page.waitForLoadState("load");
+  expect(panicsIn(appFailures)).toBe(2);
+  expect(seen.swapped, "no reload loop").toBe(2);
+  expect(loads, "no reload loop").toHaveLength(2);
+  expect(await page.evaluate(() => sessionStorage.getItem("app-hydration-retry")), "the tab is marked as reloaded").toBe("1");
+  await expect(page.locator("body[data-hydration-failed]")).toBeAttached();
+  await expect(page.locator("body[data-hydrated]")).toHaveCount(0);
+  // the notice offers the reload by hand; it loads the page again (the server is still wrong)
+  await notice.getByRole("link", { name: "Reload" }).click();
+  await expect.poll(() => loads.length, { timeout: 30_000 }).toBe(3);
+  await expect(notice).toBeVisible({ timeout: 30_000 });
+  expect(panicsIn(appFailures)).toBe(3);
+  appFailures.length = 0;
+});
+
+test("the event that announces a change from a card is answered at the end of the quiet time, not at once", async ({ page }) => {
+  // race package F5 (diagnosis 3.1 point 3): the card refetched the rows, and the event of the
+  // same change refetched them a second time at once
+  test.setTimeout(120_000);
+  await signUp(page, `pace${Date.now()}`, "Pace Tester");
+  await seed(page);
+  await gateEntityEvents(page);
+  await open(page, "/library?kind=movie");
+  const starts = requestStarts(page, "/_fn/library_query");
+  await holdEvents(page, true);
+  await page.getByRole("button", { name: "Actions for Harbour Lights" }).click();
+  await page.getByRole("menuitem", { name: "Mark as Completed" }).click();
+  await expect(cards(page).filter({ hasText: "Harbour Lights" })).toContainText("Completed");
+  await expect.poll(() => starts.length, { timeout: 20_000 }).toBe(1);
+  await expect.poll(() => heldEvents(page), { timeout: 20_000 }).toBeGreaterThan(0);
+  await holdEvents(page, false);
+  await expect.poll(() => starts.length, { timeout: 20_000 }).toBe(2);
+  expect(starts[1] - starts[0]).toBeGreaterThanOrEqual(1_900);
+});
+
+test("a refetch keeps the kind chips, the status tabs and the focus on them until the answer is there", async ({ page }) => {
+  // race package F6 (diagnosis 4): every refetch of the counts swapped the chips and the tabs
+  // for their skeletons until the answer came
+  test.setTimeout(120_000);
+  await signUp(page, `hold${Date.now()}`, "Hold Tester");
+  await seed(page);
+  const lib = await (await page.request.get("/api/v1/library?limit=500")).json();
+  const id = lib.items.find((i: { item: { title: string } }) => i.item.title === "Harbour Lights").item.id;
+  await open(page, "/library");
+  let release = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  await page.route("**/_fn/library_counts*", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.getByRole("tablist", { name: "Status" }).evaluate((el) => ((el as HTMLElement).dataset.same = "1"));
+  await page.getByRole("list", { name: "Kinds" }).evaluate((el) => ((el as HTMLElement).dataset.same = "1"));
+  const planned = page.getByRole("tab", { name: /^Planned/ });
+  await planned.focus();
+  // a change from elsewhere starts the refetch; its counts are held
+  const asked = page.waitForRequest((r) => r.url().includes("/_fn/library_counts"));
+  expect((await page.request.put(`/api/v1/library/${id}/status`, { data: { status: "completed" } })).ok()).toBeTruthy();
+  await asked;
+  await twoFrames(page);
+  await expect(page.locator('[role="tablist"][data-same="1"]')).toBeVisible();
+  await expect(page.locator('ul[data-same="1"]')).toBeVisible();
+  await expect(planned).toBeFocused();
+  await expect(page.getByText("5 items", { exact: true })).toBeVisible();
+  const answered = page.waitForResponse((r) => r.url().includes("/_fn/library_counts"));
+  release();
+  await answered;
+  await page.unroute("**/_fn/library_counts*");
+  await expect(page.getByRole("tab", { name: /^Completed 2/ })).toBeVisible();
 });

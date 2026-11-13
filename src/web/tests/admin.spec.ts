@@ -110,6 +110,11 @@ test("a gated change asks to confirm it is you and is retried once confirmed", a
   await visit(page, "/admin/instance");
   await openAdvanced(page);
   await expect(page.getByLabel("Session length (days)")).toHaveValue("45");
+  // a value stored other than typed shows as stored, also when the answer equals the last one
+  // (RACE-5: an equal answer keeps its render, a save asks for a new one)
+  await days.fill("045");
+  await page.locator("#adm-advanced").getByRole("button", { name: "Save", exact: true }).click();
+  await expect(days).toHaveValue("45");
 
   // the audit row, found with a filter that lives in the URL
   await visit(page, "/admin/audit");

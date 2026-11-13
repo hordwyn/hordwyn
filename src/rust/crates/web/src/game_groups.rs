@@ -17,6 +17,7 @@ use crate::api;
 use crate::i18n::{t, use_i18n};
 use crate::people::day_words;
 use crate::rest;
+use crate::settings::kept_menu;
 use crate::sharing::share_error;
 use crate::widgets::CompanionPicker;
 
@@ -137,6 +138,7 @@ fn GroupCard(g: GameGroupDto) -> impl IntoView {
     ];
     let menu_label = i18n.t_args("groups-menu-named", &[("name", g.name.clone().into())]);
     let log = log_button(&g);
+    let menu = kept_menu(&format!("pp-group-menu-{}", g.id));
     view! {
         <li class="grid gap-3 rounded-xl border border-border bg-card p-4 shadow-elevation-1" data-testid="pp-group-card">
             <div class="flex items-start gap-3">
@@ -144,7 +146,8 @@ fn GroupCard(g: GameGroupDto) -> impl IntoView {
                     <h3 class="break-words font-semibold">{g.name.clone()}</h3>
                     <p class="text-sm text-muted-foreground">{members}</p>
                 </div>
-                <DropdownMenu label=menu_label id=format!("pp-group-menu-{}", g.id) items=items/>
+                <DropdownMenu label=menu_label id=format!("pp-group-menu-{}", g.id) items=items
+                    open=menu.open active=menu.active/>
             </div>
             <dl class="flex flex-wrap gap-x-6 gap-y-1">
                 <div class="grid">

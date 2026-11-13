@@ -24,7 +24,7 @@ use crate::admin_state::{Origin, find_setting, origin, setting_label_key};
 use crate::i18n::{t, use_i18n};
 use crate::reauth::{gated, gated_settings, use_reauth};
 use crate::rest;
-use crate::settings::{Outcome, kept, loaded};
+use crate::settings::{Outcome, kept, loaded, render_again};
 
 type Message = RwSignal<Option<Result<String, String>>>;
 type MailData = Resource<Result<MailSettingsDto, ServerFnError>>;
@@ -260,6 +260,7 @@ fn Mail(m: MailSettingsDto, data: MailData) -> impl IntoView {
     let replacing = RwSignal::new(false);
     let busy = RwSignal::new(false);
     let message: Message = kept("instance-mail", || None);
+    let again = render_again();
     let warning = kept("instance-mail-warning", || None::<String>);
     let reauth = use_reauth();
     let stored = m.password_set.then(|| t("admin-mail-password-stored"));
@@ -282,6 +283,9 @@ fn Mail(m: MailSettingsDto, data: MailData) -> impl IntoView {
         let done = Callback::new(move |r: Result<Tested, String>| {
             match r {
                 Ok((warnings, test)) => {
+                    // the fields show what is stored, also when it equals the last answer
+                    // (RACE-5)
+                    again();
                     let w = warnings
                         .first()
                         .map(|w| texts.t(&format!("admin-warning-{w}")));

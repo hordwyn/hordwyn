@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./fixtures";
-import { contrast, expectNoA11yViolations, expectReflow, hydrated, signUp, importDone } from "./helpers";
+import { contrast, expectNoA11yViolations, expectReflow, hydrated, signUp, importDone, twoFrames } from "./helpers";
 
 // UX phase 1 item page (design.md 6.3, 5.4, 5.5, 3.4; addendum-1 1.3 Item row): the next step
 // with Undo, the "With..." sheet with a person and a rating, the play sheet with players and
@@ -1593,4 +1593,76 @@ test("the score table: one id per player, the winner by score or by hand, no win
   const body = (await sheet.boundingBox())!;
   expect(table.x + table.width).toBeLessThanOrEqual(body.x + body.width);
   await expectReflow(page, "play dialog 320");
+});
+
+/**
+ * The page fetches itself again (a rating does that) and the answer of the server function
+ * `held` waits: whatever is opened meanwhile is open when the answer arrives. Returns the
+ * release, which waits for the new render (the facts card shows the rating).
+ */
+async function heldRefetch(page: Page, held: string, stars: number) {
+  let release = () => {};
+  const wait = new Promise<void>((r) => (release = r));
+  const mine = (url: string) => new RegExp(`/_fn/${held}(?![a-z_])`).test(new URL(url).pathname);
+  await page.route(`**/_fn/${held}*`, async (route) => {
+    if (mine(route.request().url())) await wait;
+    await route.continue();
+  });
+  const asked = page.waitForRequest((req) => mine(req.url()));
+  await page.locator("#ip-rate").getByRole("radio", { name: `Rate ${stars} of 5` }).click();
+  await asked;
+  return {
+    rendered: () => expect(page.getByTestId("item-facts")).toContainText(`${stars} of 5`, { timeout: 20_000 }),
+    release: async () => {
+      const answered = page.waitForResponse((res) => mine(res.url()));
+      release();
+      await answered;
+      await page.unroute(`**/_fn/${held}*`);
+    },
+  };
+}
+
+test("a refetch of the page keeps the open actions menu and the open list menu", async ({ page }) => {
+  // race package F4 (diagnosis 5): every refetch renders the item afresh; a menu that was
+  // open closed under the pointer (the cover job that ends just after an add does that)
+  test.setTimeout(240_000);
+  await signUp(page, `imenu${Date.now()}`, "Menu Tester");
+  const ids = await seed(page);
+  expect((await page.request.post("/api/v1/lists", { data: { name: "Shelf of the month" } })).ok()).toBeTruthy();
+  await open(page, `/items/${ids["Meeple Harbour"]}`);
+  const menus = [
+    { opener: "More actions for Meeple Harbour", stars: 4 },
+    { opener: "Add to list", stars: 2 },
+  ];
+  for (const { opener, stars } of menus) {
+    const refetch = await heldRefetch(page, "item_page", stars);
+    await page.getByRole("button", { name: opener }).click();
+    const menu = page.getByRole("menu", { name: opener });
+    await expect(menu).toBeVisible();
+    await refetch.release();
+    await refetch.rendered();
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("menuitem").first()).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(page.getByRole("button", { name: opener })).toBeFocused();
+  }
+});
+
+test("a refetch of the page keeps the lists of the item while the lists are read again", async ({ page }) => {
+  // race package F6 (diagnosis 5): the lists cell sat in a Suspense over the refetched lists
+  test.setTimeout(240_000);
+  await signUp(page, `ilists${Date.now()}`, "Lists Tester");
+  const ids = await seed(page);
+  expect((await page.request.post("/api/v1/lists", { data: { name: "Shelf of the month" } })).ok()).toBeTruthy();
+  await open(page, `/items/${ids["Meeple Harbour"]}`);
+  const opener = page.getByRole("button", { name: "Add to list" });
+  await expect(opener).toBeVisible();
+  const refetch = await heldRefetch(page, "lists", 3);
+  // the page itself is answered and rendered again; the lists are still on their way
+  await refetch.rendered();
+  await twoFrames(page);
+  await expect(opener).toBeVisible();
+  await refetch.release();
+  await expect(opener).toBeVisible();
 });

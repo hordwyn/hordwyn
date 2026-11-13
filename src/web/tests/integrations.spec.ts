@@ -104,3 +104,23 @@ test("after a minute without a call the panel says to check the token", async ({
   await expect(wait).toHaveAttribute("data-state", "quiet");
   await expect(wait).toContainText("Check the token and the URL");
 });
+
+test("a call that arrives under the open menu of a sender leaves the menu open", async ({ page }) => {
+  // race package F4 (diagnosis 5): every call of a sender refetches the cards
+  await signUp(page, `intmenu${Date.now()}`);
+  await page.goto(PAGE);
+  await hydrated(page);
+  const { token, url } = await connect(page, "Media server");
+  expect((await post(page, url, token, PLAY)).status()).toBe(200);
+  await page.getByRole("button", { name: "Done" }).click();
+  const sender = page.getByRole("list", { name: "Senders" }).getByRole("listitem").filter({ hasText: "Media server" });
+  await expect(sender).toContainText("Working");
+  await sender.getByRole("button", { name: "Actions for Media server" }).click();
+  const menu = page.getByRole("menu", { name: "Actions for Media server" });
+  await expect(menu).toBeVisible();
+  await post(page, url, token, { ...PLAY, season: "two" });
+  await expect(sender).toContainText("Last call refused", { timeout: 20_000 });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("menuitem", { name: "Revoke" }).click({ timeout: 5_000 });
+  await expect(page.getByRole("dialog", { name: /Media server/ })).toBeVisible();
+});

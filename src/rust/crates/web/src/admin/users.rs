@@ -21,7 +21,7 @@ use crate::admin_api;
 use crate::admin_state::{Origin, origin};
 use crate::i18n::{t, use_i18n};
 use crate::reauth::{gated, gated_settings, use_reauth};
-use crate::settings::{Outcome, loaded};
+use crate::settings::{Outcome, kept_menu, loaded};
 
 type Message = RwSignal<Option<Result<String, String>>>;
 
@@ -502,8 +502,10 @@ fn row_menu(u: &AdminUserDto, on_menu: Callback<Pick>) -> Option<impl IntoView +
         &[("name", u.display_name.clone().into())],
     );
     let id = format!("user-menu-{}", u.id);
+    let menu = kept_menu(&id);
     Some(view! {
-        <DropdownMenu label=label id=id items=items trigger_class="h-8 px-3 text-sm"
+        <DropdownMenu label=label items=items trigger_class="h-8 px-3 text-sm"
+            open=menu.open active=menu.active id=id
             trigger=Box::new(|| view! { {t("admin-users-more-short")} }.into_any())/>
     })
 }

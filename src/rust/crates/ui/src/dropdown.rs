@@ -1,5 +1,5 @@
 //! Menu button: `aria-haspopup`, `aria-expanded`, `role="menu"` with `menuitem`s, arrow keys
-//! move focus, Escape closes and returns focus to the trigger.
+//! move focus, Escape closes and returns focus to the trigger, a press outside closes it.
 
 use leptos::html;
 use leptos::prelude::*;
@@ -21,6 +21,46 @@ fn focus_item(menu: &web_sys::HtmlElement, index: usize) {
     {
         let _ = el.focus();
     }
+}
+
+/// May an open menu take the focus? Only when the focus is nowhere (on `body`: the item that
+/// had it left with a render a refresh replaced) or already inside this dropdown; never from a
+/// field or a dialog the person moved to while the menu stayed open (RACE-2, WCAG 3.2.1).
+fn may_take_focus(root: &web_sys::Node) -> bool {
+    document()
+        .active_element()
+        .is_none_or(|a| a.tag_name().eq_ignore_ascii_case("body") || root.contains(Some(&a)))
+}
+
+/// Is the target of `ev` inside `root`?
+fn inside(root: &web_sys::Node, ev: &web_sys::Event) -> bool {
+    ev.target()
+        .and_then(|t| t.dyn_into::<web_sys::Node>().ok())
+        .is_some_and(|n| root.contains(Some(&n)))
+}
+
+/// While `open`: a press outside `root` closes the menu (the focus goes where the press put
+/// it, not back to the trigger). One window listener per open menu, removed when it closes.
+fn close_on_outside_press(open: RwSignal<bool>, root: NodeRef<html::Div>) {
+    let handle = StoredValue::new(None::<WindowListenerHandle>);
+    let stop = move || {
+        if let Some(h) = handle.try_update_value(Option::take).flatten() {
+            h.remove();
+        }
+    };
+    Effect::new(move |_| {
+        if !open.get() {
+            stop();
+        } else if handle.with_value(Option::is_none) {
+            let h = window_event_listener(leptos::ev::pointerdown, move |ev| {
+                if root.get_untracked().is_some_and(|r| !inside(&r, &ev)) {
+                    open.set(false);
+                }
+            });
+            handle.set_value(Some(h));
+        }
+    });
+    on_cleanup(stop);
 }
 
 /// Arrow keys, Home and End move the active item (wrapping); Escape and Tab close the menu.
@@ -105,23 +145,30 @@ pub fn DropdownMenu(
     /// refresh rebuilds stays open when the caller keeps this signal outside that view.
     #[prop(optional_no_strip, into)]
     open: Option<RwSignal<bool>>,
+    /// The index of the item with the focus, owned by the caller next to `open`: the menu of
+    /// a new render gives the focus back to the same item (RACE-2).
+    #[prop(optional_no_strip, into)]
+    active: Option<RwSignal<usize>>,
 ) -> impl IntoView {
     let open = open.unwrap_or_else(|| RwSignal::new(false));
-    let active = RwSignal::new(0usize);
+    let active = active.unwrap_or_else(|| RwSignal::new(0usize));
     let base = id.unwrap_or_else(|| slug(&label));
     let menu_id = format!("{base}-menu");
     let panel_id = menu_id.clone();
     let trigger_ref = NodeRef::<html::Button>::new();
     let menu_ref = NodeRef::<html::Div>::new();
+    let root_ref = NodeRef::<html::Div>::new();
     let count = items.len();
     let items = StoredValue::new(items);
     Effect::new(move |_| {
         if open.get()
             && let Some(menu) = menu_ref.get()
+            && root_ref.get_untracked().is_some_and(|r| may_take_focus(&r))
         {
             focus_item(&menu, active.get_untracked());
         }
     });
+    close_on_outside_press(open, root_ref);
     let close = move || {
         open.set(false);
         if let Some(t) = trigger_ref.get_untracked() {
@@ -131,7 +178,7 @@ pub fn DropdownMenu(
     let on_menu_key = menu_keys(active, count, menu_ref, close);
     let trigger_label = label.clone();
     view! {
-        <div class=move || cn(&["relative inline-block", &class.get().unwrap_or_default()])>
+        <div node_ref=root_ref class=move || cn(&["relative inline-block", &class.get().unwrap_or_default()])>
             <button
                 node_ref=trigger_ref
                 type="button"

@@ -67,3 +67,24 @@ pub(crate) fn fresh(counter: StoredValue<u32>) -> u32 {
     counter.update_value(|v| *v = v.wrapping_add(1));
     counter.get_value()
 }
+
+/// A value computed from other reactive values: a memo in the browser, on the server a
+/// derived signal that is computed on every read.
+///
+/// The rule (LR-1): on the server no memo reads a resource. The server renders on several
+/// threads; a memo that caches a resource read there can miss the resource's answer when it
+/// arrives on another thread while the memo computes, and stays at "not loaded" for good. The
+/// page is then sent without a part that the browser renders from the same resource, and
+/// hydration panics (the Library's status tabs, race diagnosis 2.2; earlier cases of the same
+/// family: DEC-398, DEC-456). The browser has one thread and keeps its memos, so nothing is
+/// rendered more often there. `tests/server_memos.rs` holds the rule.
+pub(crate) fn derived<T>(f: impl Fn() -> T + Send + Sync + 'static) -> Signal<T>
+where
+    T: Clone + PartialEq + Send + Sync + 'static,
+{
+    #[cfg(feature = "hydrate")]
+    let value = Memo::new(move |_| f()).into();
+    #[cfg(not(feature = "hydrate"))]
+    let value = Signal::derive(f);
+    value
+}

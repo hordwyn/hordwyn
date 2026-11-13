@@ -19,7 +19,7 @@ use crate::events::use_events;
 use crate::i18n::{t, use_i18n};
 use crate::pages::PageTitle;
 use crate::rest;
-use crate::settings::{Lead, loaded};
+use crate::settings::{Lead, kept_menu, loaded};
 
 /// The sample the panel's "Send a test call from here" posts, also shown as the body shape.
 const SAMPLE: &str = r#"{"kind": "movie", "title": "Heat", "year": 1995,
@@ -195,6 +195,7 @@ fn SenderCard(
         "integrations-menu-named",
         &[("name", i.name.clone().into())],
     );
+    let kept_open = kept_menu(&format!("ig-menu-{}", i.id));
     view! {
         <li class="grid gap-3 rounded-xl border border-border bg-card p-4 shadow-elevation-1" data-testid=format!("ig-card-{}", i.id)>
             <div class="flex flex-wrap items-start justify-between gap-2">
@@ -204,7 +205,8 @@ fn SenderCard(
                 </div>
                 <div class="flex items-center gap-2">
                     <StatusDot state=dot label=words/>
-                    <DropdownMenu label=menu_label id=format!("ig-menu-{}", i.id) items=menu/>
+                    <DropdownMenu label=menu_label id=format!("ig-menu-{}", i.id) items=menu
+                        open=kept_open.open active=kept_open.active/>
                 </div>
             </div>
             {detail.map(|d| view! { <p class="break-words text-sm">{d}</p> })}

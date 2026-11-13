@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 leptos.workspace = true
-web-sys = { workspace = true, features = ["KeyboardEventInit", "ScrollIntoViewOptions", "ScrollLogicalPosition", "HtmlElement", "Element", "Document", "Window", "Storage", "DomTokenList", "Node", "NodeList", "KeyboardEvent", "FocusEvent", "MouseEvent", "Navigator", "Clipboard", "HtmlInputElement", "HtmlDetailsElement", "Performance"] }
+web-sys = { workspace = true, features = ["KeyboardEventInit", "ScrollIntoViewOptions", "ScrollLogicalPosition", "HtmlElement", "Element", "Document", "Window", "Storage", "DomTokenList", "Node", "NodeList", "KeyboardEvent", "FocusEvent", "MouseEvent", "PointerEvent", "EventTarget", "Navigator", "Clipboard", "HtmlInputElement", "HtmlDetailsElement", "Performance"] }
 
 # Render tests run natively with `ssr`; browser tests run on wasm with `csr`. The features must
 # not mix, so each target gets its own dev-dependency.

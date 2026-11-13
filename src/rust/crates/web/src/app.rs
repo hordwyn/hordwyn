@@ -165,7 +165,12 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 // after the stylesheet link: brand fonts (same origin) and theme tokens
                 <style id="brand-theme" nonce=nonce inner_html=theme></style>
             </head>
-            <body class="min-h-screen bg-background text-foreground antialiased">
+            // the words the browser shows without the app when a page fails to start
+            // (`crate::hydration`, RACE-4, RACE-13): the app is not there to translate them
+            <body class="min-h-screen bg-background text-foreground antialiased"
+                data-start-failed=crate::i18n::t("app-start-failed")
+                data-start-reload=crate::i18n::t("app-start-reload")
+                data-start-reloaded=crate::i18n::t("app-start-reloaded")>
                 <App/>
             </body>
         </html>
@@ -183,16 +188,8 @@ pub fn App() -> impl IntoView {
     let cfg = expect_context::<ClientConfig>();
     let user = Resource::new(|| (), |()| crate::api::current_user());
     provide_context(user);
-    // Marker for end-to-end tests: effects only run in the browser, after hydration.
-    Effect::new(move |_| {
-        #[cfg(feature = "hydrate")]
-        if let Some(body) = web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.body())
-        {
-            let _ = body.set_attribute("data-hydrated", "1");
-        }
-    });
+    // (the marker `body[data-hydrated]` is set by `crate::hydrate` once hydration went
+    // through, not by an effect here: an effect queued before a hydration panic still runs)
     // Routes: `/history` and `/people` replaced `/sessions` and `/companions`, and the
     // settings area `/settings/*` replaced `/notifications`, `/integrations` and `/sources`,
     // without redirects (owner ruling, DEC-171); the old paths are 404s.

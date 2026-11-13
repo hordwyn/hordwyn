@@ -20,7 +20,7 @@ use crate::admin_state::{
 };
 use crate::i18n::{t, use_i18n};
 use crate::reauth::{gated, use_reauth};
-use crate::settings::{Outcome, kept, loaded};
+use crate::settings::{Outcome, kept, loaded, render_again};
 
 type Data = Resource<Result<StorageJobsDto, ServerFnError>>;
 
@@ -158,6 +158,7 @@ fn BudgetForm(settings: Vec<SettingDto>, data: Data) -> impl IntoView {
     let reauth = use_reauth();
     let busy = RwSignal::new(false);
     let message = kept("storage-budget", || None::<Result<String, String>>);
+    let again = render_again();
     let i18n = use_i18n();
     let fields: Vec<(SettingDto, RwSignal<String>)> = BUDGET_KEYS
         .iter()
@@ -191,6 +192,10 @@ fn BudgetForm(settings: Vec<SettingDto>, data: Data) -> impl IntoView {
             busy,
             call,
             Callback::new(move |r: Result<_, String>| {
+                // the fields show what is stored, also when it equals the last answer (RACE-5)
+                if r.is_ok() {
+                    again();
+                }
                 message.set(Some(r.map(|_| saved.clone())));
                 data.refetch();
             }),

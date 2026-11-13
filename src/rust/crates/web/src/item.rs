@@ -38,6 +38,7 @@ use crate::next_step::{
     rewatch_start, rewatch_stop, run_first_step, run_step, step_progress, toast_added,
 };
 use crate::pages::{error_text, go, needs_sign_in};
+use crate::settings::KeptMenu;
 use crate::widgets::{Cover, RatingInput, TagBadges, TagEditor};
 
 type Res<T> = Resource<Result<T, ServerFnError>>;
@@ -66,7 +67,34 @@ struct ItemUi {
     auto_log: RwSignal<Option<(Vec<String>, String)>>,
     /// The inline page or position field's typed text and error (DEC-477).
     inline: InlineDraft,
+    /// The open state of the page's two menus: every refetch renders the page afresh, and a
+    /// menu that is open stays open in the new render (LR-4).
+    menus: ItemMenus,
     refresh: Callback<()>,
+}
+
+/// See [`ItemUi::menus`].
+#[derive(Clone, Copy)]
+struct ItemMenus {
+    /// "More actions for ..." of the action bar.
+    actions: KeptMenu,
+    /// "Add to list".
+    lists: KeptMenu,
+}
+
+impl ItemMenus {
+    fn new() -> Self {
+        Self {
+            actions: KeptMenu::new(),
+            lists: KeptMenu::new(),
+        }
+    }
+
+    /// Another item: its menus start closed.
+    fn close(self) {
+        self.actions.close();
+        self.lists.close();
+    }
 }
 
 #[component]
@@ -99,16 +127,7 @@ pub fn ItemPage() -> impl IntoView {
             );
         }
     };
-    let events = use_events();
-    Effect::new(move |_| {
-        if let Some((topic, payload)) = events.0.get()
-            // missed events may have been about this item (SEC0-9)
-            && (topic == crate::events::LAGGED
-                || (topic == "entity.updated" && mentions(&payload, &id())))
-        {
-            refetch();
-        }
-    });
+    follow_item_events(id, refetch);
     let companions = RwSignal::new(Vec::new());
     let ui = ItemUi {
         tab: RwSignal::new(String::new()),
@@ -123,20 +142,10 @@ pub fn ItemPage() -> impl IntoView {
         pick: RwSignal::new(None),
         auto_log: RwSignal::new(None),
         inline: InlineDraft::new(),
+        menus: ItemMenus::new(),
         refresh: Callback::new(move |()| refetch()),
     };
-    let (inline, episodes) = (ui.inline, ui.episodes);
-    Effect::new(move |prev: Option<String>| {
-        let now = id();
-        if prev.is_some_and(|p| p != now) {
-            inline.clear();
-            episodes.reset();
-            // a log dialog left open belongs to the item that is gone
-            ui.watched.dismiss();
-            ui.play.dismiss();
-        }
-        now
-    });
+    reset_on_other_item(id, &ui);
     // before the first item is there (and for the ids of the panel) the plain name
     let plain = use_i18n().t("next-step-log-play");
     let play_title = Signal::derive(move || {
@@ -174,6 +183,39 @@ pub fn ItemPage() -> impl IntoView {
         <WatchedSheet state=ui.watched info=ui.info companions=ui.companions/>
         <PlaySheet state=ui.play info=ui.info title=play_title/>
     }
+}
+
+/// Refetch the page when an event is about this item (or events were missed, SEC0-9).
+fn follow_item_events(
+    id: impl Fn() -> String + Send + Sync + 'static,
+    refetch: impl Fn() + Send + Sync + 'static,
+) {
+    let events = use_events();
+    Effect::new(move |_| {
+        if let Some((topic, payload)) = events.0.get()
+            && (topic == crate::events::LAGGED
+                || (topic == "entity.updated" && mentions(&payload, &id())))
+        {
+            refetch();
+        }
+    });
+}
+
+/// The route shows another item: what belonged to the last one goes (typed text, the episode
+/// selection, open menus, a log dialog left open).
+fn reset_on_other_item(id: impl Fn() -> String + Send + Sync + 'static, ui: &ItemUi) {
+    let ui = *ui;
+    Effect::new(move |prev: Option<String>| {
+        let now = id();
+        if prev.is_some_and(|p| p != now) {
+            ui.inline.clear();
+            ui.episodes.reset();
+            ui.menus.close();
+            ui.watched.dismiss();
+            ui.play.dismiss();
+        }
+        now
+    });
 }
 
 /// One render of the page: the item's kind when it is known, and the answer.
@@ -602,6 +644,7 @@ fn overflow(
     );
     Some(view! {
         <DropdownMenu label=label items=items id="item-actions" trigger_class="h-10 px-3"
+            open=ui.menus.actions.open active=ui.menus.actions.active
             trigger=Box::new(|| view! { <Icon name=IconName::More/> }.into_any())/>
         {move || error.get().map(|e| view! { <p role="alert" class="w-full text-sm text-destructive-text">{e}</p> })}
     })
@@ -894,16 +937,23 @@ fn ItemRow(
                     </Button>
                 </div>
             </div>
-            <Suspense fallback=|| ()>
-                {move || lists.get().and_then(Result::ok).map(|ls| view! { <ListsCell lists=ls item_id=item_id.clone() refresh=ui.refresh/> })}
-            </Suspense>
+            // no boundary of its own: one inside this render would be a new one on every
+            // refetch and show its fallback while the lists are read again; the page's
+            // Transition holds the lists on screen until their answer is there (LR-6)
+            {move || lists.get().and_then(Result::ok).map(|ls| view! { <ListsCell lists=ls item_id=item_id.clone() refresh=ui.refresh menu=ui.menus.lists/> })}
         </div>
     }
     .into_any()
 }
 
 #[component]
-fn ListsCell(lists: Vec<ListDto>, item_id: String, refresh: Callback<()>) -> impl IntoView {
+fn ListsCell(
+    lists: Vec<ListDto>,
+    item_id: String,
+    refresh: Callback<()>,
+    /// The menu's open state and focused item, kept by the page (LR-4, RACE-2).
+    menu: KeptMenu,
+) -> impl IntoView {
     let i18n = use_i18n();
     let (inside, others): (Vec<ListDto>, Vec<ListDto>) = lists
         .into_iter()
@@ -937,7 +987,7 @@ fn ListsCell(lists: Vec<ListDto>, item_id: String, refresh: Callback<()>) -> imp
             <div class="flex flex-wrap items-center gap-2">
                 {inside.into_iter().map(|l| view! { <Badge variant=BadgeVariant::Outline>{l.name}</Badge> }).collect_view()}
                 {has_more.then(|| view! {
-                    <DropdownMenu label=use_i18n().t("item-lists") items=items id="item-lists" trigger_class="h-8 px-3 text-sm"/>
+                    <DropdownMenu label=use_i18n().t("item-lists") items=items id="item-lists" trigger_class="h-8 px-3 text-sm" open=menu.open active=menu.active/>
                 })}
             </div>
         </div>

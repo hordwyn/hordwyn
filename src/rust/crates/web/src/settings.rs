@@ -108,6 +108,10 @@ pub fn admin_error_with(i18n: &crate::i18n::I18n, e: &ServerFnError) -> String {
 pub struct Kept {
     owner: Owner,
     slots: StoredValue<HashMap<String, Box<dyn Any + Send + Sync>>>,
+    /// The menus of [`kept_menu`], each with "asked for by the latest render".
+    menus: StoredValue<HashMap<String, (KeptMenu, bool)>>,
+    /// Render the next answer afresh even when it equals the last one ([`render_again`]).
+    again: StoredValue<bool>,
 }
 
 impl Kept {
@@ -117,8 +121,88 @@ impl Kept {
         Self {
             owner: Owner::current().unwrap_or_default(),
             slots: StoredValue::new(HashMap::new()),
+            menus: StoredValue::new(HashMap::new()),
+            again: StoredValue::new(false),
         }
     }
+
+    /// A render starts: no menu is asked for yet.
+    fn begin_render(&self) {
+        self.menus
+            .update_value(|m| m.values_mut().for_each(|(_, asked)| *asked = false));
+    }
+
+    /// After a render: close the menus it did not ask for (their card or page left the
+    /// answer, or the person page shows another person), so that one coming back later does
+    /// not open by itself (RACE-6).
+    fn close_menus_not_asked(&self) {
+        self.menus.with_value(|m| {
+            for (menu, asked) in m.values() {
+                if !asked {
+                    menu.close();
+                }
+            }
+        });
+    }
+}
+
+/// A handle that makes the next answer of the nearest [`loaded`] render afresh even when it
+/// equals the one on screen (nothing outside `loaded`): for the callback of a save that the
+/// server may store other than typed (`045` stored as 45, a normalised value), so that the
+/// fields show what is stored (RACE-5). Call it before the refetch.
+pub fn render_again() -> impl Fn() + Copy + Send + Sync + 'static {
+    let again = use_context::<Kept>().map(|k| k.again);
+    move || {
+        if let Some(a) = again {
+            a.set_value(true);
+        }
+    }
+}
+
+/// The open state of a menu and its focused item, kept across the renders of a [`loaded`]
+/// value (LR-4, RACE-2): a menu a different answer renders again stays open, with the focus
+/// on the same item.
+#[derive(Clone, Copy)]
+pub struct KeptMenu {
+    pub open: RwSignal<bool>,
+    pub active: RwSignal<usize>,
+}
+
+impl KeptMenu {
+    /// A menu of its own, closed (outside `loaded`, or kept by its page).
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            open: RwSignal::new(false),
+            active: RwSignal::new(0),
+        }
+    }
+
+    pub fn close(self) {
+        self.open.set(false);
+        self.active.set(0);
+    }
+}
+
+impl Default for KeptMenu {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The menu named `key` (with the row id in lists) of the nearest [`loaded`] render; a menu
+/// that a render does not ask for is closed after it (RACE-6).
+pub fn kept_menu(key: &str) -> KeptMenu {
+    let menu = KeptMenu {
+        open: kept(&format!("{key}-open"), || false),
+        active: kept(&format!("{key}-active"), || 0_usize),
+    };
+    if let Some(k) = use_context::<Kept>() {
+        k.menus.update_value(|m| {
+            m.insert(key.to_string(), (menu, true));
+        });
+    }
+    menu
 }
 
 impl Default for Kept {
@@ -148,26 +232,71 @@ pub fn kept<T: Send + Sync + 'static>(key: &str, init: impl FnOnce() -> T) -> Rw
     s
 }
 
-/// Render a resource inside a `Transition`, each new value afresh (UX1-2), with an inline
-/// error and Retry. State that must survive a refetch comes from [`kept`].
+/// The key of a [`loaded`] render for `answer`, given the last `Ok` value shown and its key
+/// (`last`, updated here): the same key for an `Ok` equal to that value, so the render stays
+/// as it is; a new key from `next` for another value and for an error (LR-3). After an error
+/// the next value is rendered anew whatever it is.
+pub(crate) fn render_key<T: Clone + PartialEq, E>(
+    last: &mut Option<(u32, T)>,
+    answer: &Result<T, E>,
+    mut next: impl FnMut() -> u32,
+) -> u32 {
+    match (answer, last.as_ref()) {
+        (Ok(v), Some((k, old))) if v == old => *k,
+        (Ok(v), _) => {
+            let k = next();
+            *last = Some((k, v.clone()));
+            k
+        }
+        (Err(_), _) => {
+            *last = None;
+            next()
+        }
+    }
+}
+
+/// Render a resource inside a `Transition`, each different value afresh (UX1-2) while an
+/// equal one leaves the render as it is (LR-3: the echo of an own action and events about
+/// other things keep cards, menus, focus and typed text), with an inline error and Retry.
+/// State that must survive a different value comes from [`kept`] and [`kept_menu`]; a caller
+/// whose save the server may store other than typed asks for the next render with
+/// [`render_again`].
 pub fn loaded<T, V>(
     data: Resource<Result<T, ServerFnError>>,
     render: impl Fn(T) -> V + Send + Sync + 'static,
 ) -> impl IntoView
 where
-    T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static,
+    T: Clone + PartialEq + Send + Sync + Serialize + DeserializeOwned + 'static,
     V: IntoView + 'static,
 {
     let renders = StoredValue::new(0_u32);
+    let last = StoredValue::new(None::<(u32, T)>);
     let render = Arc::new(render);
     let keep = Kept::new();
+    let again = keep.again;
+    let key_of = move |r: &Result<T, ServerFnError>| {
+        let mut key = 0;
+        let afresh = again.try_update_value(std::mem::take).unwrap_or(false);
+        last.update_value(|shown| {
+            if afresh {
+                *shown = None;
+            }
+            key = render_key(shown, r, || fresh(renders));
+        });
+        key
+    };
     view! {
         <Transition fallback=|| view! { <Skeleton class="h-32 w-full"/> }>
-            <For each=move || data.get().map(|r| (fresh(renders), r)) key=|(k, _)| *k
+            <For each=move || data.get().map(|r| (key_of(&r), r)) key=|(k, _)| *k
                 children=move |(_, r)| match r {
                     Ok(v) => {
+                        keep.begin_render();
                         provide_context(keep.clone());
-                        render(v).into_any()
+                        let view = render(v).into_any();
+                        // after the render and the views it builds when it is mounted
+                        let swept = keep.clone();
+                        Effect::new(move |_| swept.close_menus_not_asked());
+                        view
                     }
                     Err(e) => view! {
                         <Alert variant=AlertVariant::Destructive role=AlertRole::Alert
@@ -685,6 +814,33 @@ mod tests {
 
     use super::*;
     use crate::i18n::I18n;
+
+    /// LR-3: an equal answer keeps the render (its key), another value or an error gets a
+    /// new one, and an answer after an error is rendered anew even when it equals the last
+    /// value.
+    #[test]
+    fn an_equal_answer_keeps_the_key_of_its_render() {
+        let mut n = 0_u32;
+        let mut next = || {
+            n += 1;
+            n
+        };
+        let mut last = None::<(u32, Vec<&str>)>;
+        let ok = |v: &[&'static str]| Ok::<_, String>(v.to_vec());
+        let first = render_key(&mut last, &ok(&["Zed"]), &mut next);
+        assert_eq!(render_key(&mut last, &ok(&["Zed"]), &mut next), first);
+        let other = render_key(&mut last, &ok(&["Zed", "Yan"]), &mut next);
+        assert_ne!(other, first);
+        assert_eq!(
+            render_key(&mut last, &ok(&["Zed", "Yan"]), &mut next),
+            other
+        );
+        let failed = render_key(&mut last, &Err("down".to_string()), &mut next);
+        assert_ne!(failed, other);
+        let again = render_key(&mut last, &ok(&["Zed", "Yan"]), &mut next);
+        assert_ne!(again, failed);
+        assert_ne!(again, other);
+    }
 
     /// The e2e failure of "a gated change ... is retried once confirmed": the save's
     /// `done` sets "Saved." and refetches, and the fresh render of the value (UX1-2) must
