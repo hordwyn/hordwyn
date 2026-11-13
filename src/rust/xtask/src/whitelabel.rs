@@ -27,6 +27,9 @@ pub fn codenames() -> Vec<String> {
 pub const ALLOWED_PREFIXES: &[&str] = &[
     "config/brand/",
     "docs/",
+    // The project's own website content names the product on purpose (the site is not
+    // white-label app code; its code reads the name from `content/site.toml`).
+    "src/rust/apps/website/content/",
     ".git/",
     "README.md",
     "LICENSE",
