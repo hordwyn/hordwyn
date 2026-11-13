@@ -2047,6 +2047,10 @@ imports-errors = { $count ->
    *[other] { $count } rows were skipped
 }
 imports-error-line = Row { $line }:
+imports-warnings = { $count ->
+    [one] Something is left out of one row
+   *[other] Something is left out of { $count } rows
+}
 imports-result = Imported { $imported }, skipped { $skipped }, without a match { $unmatched }.
 imports-stopped-at = Stopped after { $done } of { $total } rows. Rows imported so far stay.
 imports-unmatched = Rows without a match
@@ -2214,6 +2218,33 @@ search-cmd-import = Import a file
 search-hint-open = Open
 search-hint-choose = Choose
 search-hint-quick = Add as Planned or next step
+manual-row = Add "{ $query }" by hand...
+manual-group = Not what you are looking for?
+manual-add-title = Add by hand
+manual-add-lead = For something no source knows. It is added to your library, and every member of this instance can find it.
+manual-edit-title = Edit details
+manual-field-title = Title
+manual-field-kind = Kind
+manual-kind-choose = Choose a kind...
+manual-field-year = Year
+manual-field-year-hint = Optional.
+manual-field-cover = Picture address
+manual-field-cover-hint = Optional, starts with https://. The picture is loaded from this address by every browser that shows it.
+manual-submit-add = Add to library
+manual-submit-edit = Save
+manual-existing-title = Already here
+manual-existing-use = Use this one
+manual-existing-use-named = Use this one: { $title }
+manual-error-title = Enter a title.
+manual-error-title-long = The title can have at most 500 characters.
+manual-error-kind = Choose a kind.
+manual-error-year = Enter the year as a number, such as 1995, or leave the field empty.
+manual-error-cover = The picture address must start with https:// and name a host, without a user name and without blanks.
+manual-error-cover-forbidden = Only an admin can set a picture address on this instance.
+manual-error-forbidden = Only an admin can change the details of an item on this instance.
+manual-error-sourced = A data source answers for this item now; its details follow the source.
+manual-error-duplicate = An item of this kind with this title is already here, listed below. Use it, or choose Add to library again to add a second one.
+item-edit-details = Edit details
 companions-log-with = Log with...
 companions-log-with-named = Log with { $name }
 notify-filter-pick-item = Choose an item...

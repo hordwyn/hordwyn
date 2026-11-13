@@ -65,7 +65,7 @@ test("the legacy export: preview, run, result and both exports", async ({ page }
 
   for (const [id, name, first] of [
     ["imp-export-jsonl", "library-export.jsonl", '{"format":"library-export","version":1}'],
-    ["imp-export-csv", "library-export.csv", "source_id,kind,title,year,status,rating,notes,external_ids,finished_dates,lists"],
+    ["imp-export-csv", "library-export.csv", "source_id,kind,title,year,status,rating,notes,external_ids,finished_dates,lists,cover_url"],
   ]) {
     const download = page.waitForEvent("download");
     await page.getByTestId(id).click();

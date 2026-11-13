@@ -360,12 +360,15 @@ impl Server {
                 Arc::new(integrations::pg::PgIntegrationStore::new(pool.clone())),
             ))),
             public_url: config.server.public_url.clone(),
-            importer: Some(Arc::new(importers::Importer::new(
-                app.clone(),
-                Arc::new(importers::pg::PgImportStore::new(pool.clone())),
-                budget.clone(),
-                Arc::new(queue.clone()),
-            ))),
+            importer: Some(Arc::new(
+                importers::Importer::new(
+                    app.clone(),
+                    Arc::new(importers::pg::PgImportStore::new(pool.clone())),
+                    budget.clone(),
+                    Arc::new(queue.clone()),
+                )
+                .with_cover_rule(cover_rule(hosting.clone())),
+            )),
             naming: api::Naming::from_prefix(&ident, &brand.name),
             secure_cookies: config.auth.secure_cookies,
             default_kinds: kind_ids,
@@ -624,6 +627,19 @@ async fn serve_asset(
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
+}
+
+/// Who may bring a picture address in with an imported item entered by hand: the rule of
+/// `POST /items` (`api::ops::may_edit_items`), everybody on a home instance and admins on a
+/// hosted one, read per row from the shared `instance.hosting` (review MAN-3 of v1-manual).
+fn cover_rule(hosting: Arc<std::sync::RwLock<String>>) -> importers::CoverRule {
+    Arc::new(move |a: domain::user::Actor| {
+        a.is_admin()
+            || *hosting
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                != "hosted"
+    })
 }
 
 /// The production `HttpFetch`: governed client with HTTP cache in the storage budget and one
@@ -1054,4 +1070,28 @@ async fn sso_redirect(
     let overrides = p.brand.strings.get(&locale).cloned().unwrap_or_default();
     let html = web::auth_redirect::interstitial(&locale, overrides, &provider, &url);
     api::with_body(r, html)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, RwLock};
+
+    use domain::ids::UserId;
+    use domain::user::{Actor, Role};
+
+    #[test]
+    fn an_import_takes_a_picture_address_as_post_items_does() {
+        let actor = |role| Actor {
+            user_id: UserId(uuid::Uuid::nil()),
+            role,
+        };
+        let hosting = Arc::new(RwLock::new("home".to_string()));
+        let rule = super::cover_rule(hosting.clone());
+        assert!(rule(actor(Role::Member)), "a member of a home instance");
+        assert!(rule(actor(Role::Admin)));
+        // the mode is read per row: a change in the admin area counts at once
+        *hosting.write().unwrap() = "hosted".into();
+        assert!(!rule(actor(Role::Member)), "a member of a hosted instance");
+        assert!(rule(actor(Role::Admin)));
+    }
 }

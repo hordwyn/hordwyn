@@ -23,6 +23,8 @@ pub struct ImportDto {
     pub imported: u64,
     pub matched: u64,
     pub errors: Vec<ImportErrorDto>,
+    /// Rows imported with something left out (a picture address), and why.
+    pub warnings: Vec<ImportErrorDto>,
     pub unmatched: Vec<UnmatchedDto>,
     pub preview: Option<PreviewDto>,
     /// The import whose file this one runs again.
@@ -40,7 +42,7 @@ impl ImportDto {
     }
 }
 
-/// Why a row was not imported.
+/// Why a row was not imported, or (in `warnings`) what was left out of an imported one.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ImportErrorDto {

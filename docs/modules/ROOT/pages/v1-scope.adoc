@@ -5,8 +5,9 @@ proxy. This page says which kinds of media can be found and added from a source,
 cannot yet and how they get in anyway, and the limits a first-time user would otherwise
 find out by surprise.
 
-// The lines of books, board games and "by hand" are updated by the packages that build
-// them (v1-books, v1-wikidata, v1-manual); the page is final with package v1-wikidata.
+// The lines of books and board games are updated by the packages that build them
+// (v1-books, v1-wikidata); "Added by hand" is as built by v1-manual. The page is final
+// with package v1-wikidata.
 
 == Kinds with a source
 
@@ -53,10 +54,11 @@ the search finds nothing new for them:
 * Music
 * Visual novel
 
-The way in is a file in this application's own format, imported on Settings > Imports and
+One item at a time gets in by hand (<<_added_by_hand>>). Many at once get in with a file in
+this application's own format, imported on Settings > Imports and
 export: one line per item with a `source_id` (any text that names the line), the `kind`
 and a `title` is enough. Such an item has a title
-and whatever the file says, and no cover, description or lengths, because no source knows
+and whatever the file says, and no description or lengths, because no source knows
 it. xref:import-format.adoc[Import and export format] describes the file; a minimal one:
 
 [source,json]
@@ -68,6 +70,55 @@ it. xref:import-format.adoc[Import and export format] describes the file; a mini
 
 The import of the legacy JSON export (see the same page) brings its books and anime as
 title-only items too; Trakt files hold movies and shows only.
+
+== Added by hand
+
+Anything no source knows (a small-press game, a zine, a home video, a kind without a
+source) can be added by hand, in every kind that is turned on. Search for it; once the
+sources have answered, the last row of the search reads `Add "..." by hand...`. It asks
+for the title, the kind, and optionally the year and the address of a picture, puts the
+item into your library and opens its page. From there it is tracked like any other item.
+The kind is chosen for you only when the part of the search you are in (Watch, Read,
+Play, Listen) holds a single kind; choose it with care, it cannot be changed afterwards.
+
+Already here::
+The dialog lists the items of that kind that already have that title, with "Use this
+one". When you add one anyway, the first "Add to library" stops and names them; choosing
+it again adds a second item of the same title: your choice, not an accident. There is no
+merging of two items yet: if a source later knows the title as well, both exist and you
+keep the one you use.
+
+A show or anime added by hand::
+It has no list of seasons and episodes, because no source gave one. You can set its
+status (Planned, In progress, Completed and so on) and rate it, and log it one episode at
+a time: the next step reads "Watch S1 E1", then E2, and so on, and the Episodes tab lists
+the episodes you logged. What it cannot do in v1: count "3 of 12" or say "caught up"
+(there is no episode total to compare with, and none can be entered), move to a second
+season (the episodes of an item added by hand are counted in season 1), or mark a whole
+season at once. Set it to Completed yourself when you are done. A rewatch runs until you
+stop it. When a source of this instance knows the show, use that item instead.
+
+Everybody on the instance can find it::
+An item added by hand is part of the instance's catalogue. Other members find it in the
+search ("In your instance"); what you log on it stays yours.
+
+The picture is an address, not an upload::
+The picture address must start with `https://`. It is not fetched or stored by the
+server: every browser that shows the item loads the picture from that address, without a
+referrer (xref:operations.adoc#_which_hosts_a_browser_contacts_for_pictures[Which hosts a
+browser contacts for pictures]). When the address stops working, the cover box shows the
+title. On a hosted instance only an admin can set a picture address.
+
+Edit details::
+The menu of the item's page has "Edit details" for an item no source of this instance
+answers for: one added by hand, and a title-only item an import left behind. Title, year
+and picture address can be corrected; other fields (players, playing time, lengths)
+cannot yet. On a home instance every member may do it, on a hosted one admins. What a
+person typed is kept when a source later answers for the item.
+
+No delete::
+An item added by hand that nobody has in a library stays in the catalogue and in the
+search.
 
 == Limits to know
 

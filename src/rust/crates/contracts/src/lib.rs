@@ -94,6 +94,42 @@ pub struct CatalogItemDto {
     pub provenance: std::collections::BTreeMap<String, String>,
 }
 
+/// An item a person enters by hand (`POST /items`, v1-manual): something no source knows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct NewItemDto {
+    /// An enabled kind.
+    pub kind: String,
+    /// 1 to 500 characters after trimming.
+    pub title: String,
+    /// 1 to the current year plus 5.
+    #[serde(default)]
+    pub year: Option<i32>,
+    /// Address of a picture: `https` only, up to 2000 characters, no user info. Every
+    /// browser that shows the item loads it from there; the server never fetches it. On a
+    /// hosted instance only an admin may set one.
+    #[serde(default)]
+    pub cover_url: Option<String>,
+    /// Add the item although items of the kind with this title exist (409 `conflict` on the
+    /// field `title` otherwise, naming them): a second one is the person's choice.
+    #[serde(default)]
+    pub allow_duplicate: bool,
+}
+
+/// The details a person may correct on an item no source answers for (`PATCH /items/{id}`).
+/// The three fields are sent together; a field whose value changes is marked as set by a
+/// person and survives later refreshes. `year` absent or null: none. `cover_url` absent or
+/// null: an address a person set is removed; a cover from a source stays as it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct ItemDetailsDto {
+    pub title: String,
+    #[serde(default)]
+    pub year: Option<i32>,
+    #[serde(default)]
+    pub cover_url: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct LibraryEntryDto {
@@ -292,6 +328,11 @@ pub struct ItemPageDto {
     pub progress: Vec<ProgressEventDto>,
     /// Attribution of the connectors that supplied data for this item.
     pub sources: Vec<AttributionDto>,
+    /// "Edit details" is offered (v1-manual): no source of this instance answers for the
+    /// item (entered by hand, a title-only stub of an import) and the viewer may change
+    /// shared items (everybody on a home instance, admins only on a hosted one).
+    #[serde(default)]
+    pub details_editable: bool,
     /// The entry's tags (empty when not in the library).
     #[serde(default)]
     pub tags: Vec<String>,

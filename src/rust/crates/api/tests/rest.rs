@@ -332,11 +332,22 @@ async fn openapi_document_uses_the_brand_and_lists_paths() {
         "/search",
         "/library",
         "/items/{id}/progress",
+        "/items",
+        "/items/titled",
         "/events",
     ] {
         assert!(doc["paths"].get(p).is_some(), "missing path {p}");
     }
     assert!(doc["components"]["schemas"]["CatalogItemDto"].is_object());
+    // v1-manual: an item entered by hand, and its details
+    assert!(doc["paths"]["/items"]["post"].is_object());
+    assert!(doc["paths"]["/items/{id}"]["patch"].is_object());
+    assert!(
+        doc["paths"]["/items/{id}"]["get"].is_object(),
+        "still there"
+    );
+    assert!(doc["components"]["schemas"]["NewItemDto"].is_object());
+    assert!(doc["components"]["schemas"]["ItemDetailsDto"].is_object());
 }
 
 #[tokio::test]
@@ -2363,4 +2374,371 @@ async fn a_storage_failure_behind_the_notifications_routes_answers_with_the_gene
             );
         }
     }
+}
+
+// ---------------------------------------------------------------- v1-manual
+
+/// A source that answers for movies in the namespace `src`.
+struct MovieSource(catalog_core::ConnectorInfo);
+
+impl MovieSource {
+    fn new() -> Self {
+        Self(catalog_core::ConnectorInfo {
+            id: "src".into(),
+            name: "Source".into(),
+            kinds: vec!["movie".into()],
+            capabilities: vec![catalog_core::Capability::Details],
+            rate_limit: catalog_core::RateLimit {
+                per_second: 1,
+                burst: 1,
+                max_concurrency: 1,
+            },
+            auth: catalog_core::Auth::None,
+            attribution: catalog_core::Attribution {
+                text: String::new(),
+                url: String::new(),
+                licence: String::new(),
+            },
+            hosts: vec![],
+            cache_ttl_secs: 0,
+        })
+    }
+}
+
+impl catalog_core::Connector for MovieSource {
+    fn info(&self) -> &catalog_core::ConnectorInfo {
+        &self.0
+    }
+}
+
+/// `POST /items`: 201 with the item, 422 with the field, 401 without a session; the item is
+/// found by its title and its page offers "Edit details" and queues no refresh.
+#[tokio::test]
+async fn an_item_is_entered_by_hand_over_http() {
+    let (s, t) = state();
+    let app = api::router(s);
+    let tk = signed_up(&app).await;
+    let tk = Some(tk.as_str());
+    let (status, _, body) = call(
+        &app,
+        "POST",
+        "/api/v1/items",
+        None,
+        Some(serde_json::json!({"kind": "board_game", "title": "Marsh"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+
+    let (status, _, item) = call(
+        &app,
+        "POST",
+        "/api/v1/items",
+        tk,
+        Some(serde_json::json!({
+            "kind": "board_game", "title": " Zine of the Marsh ", "year": 2019,
+            "cover_url": "https://img.example/box.jpg"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{item}");
+    assert_eq!(item["title"], "Zine of the Marsh");
+    assert_eq!(item["kind"], "board_game");
+    assert_eq!(item["year"], 2019);
+    assert_eq!(item["state"], "full");
+    assert_eq!(item["external_ids"], serde_json::json!([]));
+    assert_eq!(item["cover"]["url"], "https://img.example/box.jpg");
+    assert_eq!(
+        item["provenance"],
+        serde_json::json!({"cover_url": "user", "title": "user", "year": "user"})
+    );
+    let id = item["id"].as_str().unwrap().to_string();
+
+    refused_entries_name_their_field(&app, tk).await;
+
+    // found by its title before a second one is entered
+    let (status, _, found) = call(
+        &app,
+        "GET",
+        "/api/v1/items/titled?kind=board_game&title=%20zine%20OF%20the%20marsh",
+        tk,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found.as_array().unwrap().len(), 1);
+    assert_eq!(found[0]["id"], id.as_str());
+    let (_, _, none) = call(
+        &app,
+        "GET",
+        "/api/v1/items/titled?kind=book&title=Zine%20of%20the%20Marsh",
+        tk,
+        None,
+    )
+    .await;
+    assert_eq!(none, serde_json::json!([]), "another kind");
+    let (status, _, _) = call(
+        &app,
+        "GET",
+        "/api/v1/items/titled?kind=board_game&title=x",
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // its page and the plain read queue no refresh (B2), and the page offers "Edit details"
+    let (status, _, page) = call(&app, "GET", &format!("/api/v1/items/{id}/page"), tk, None).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["details_editable"], true);
+    let (status, _, _) = call(&app, "GET", &format!("/api/v1/items/{id}"), tk, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(t.jobs.jobs().len(), 0, "nobody could answer a refresh");
+}
+
+/// `PATCH /items/{id}`: the three details of an item no source answers for; 409 for an item
+/// of a registered source, whose page does not offer the edit and still queues its refresh.
+#[tokio::test]
+async fn details_are_edited_over_http_unless_a_source_answers() {
+    let (mut s, t) = state();
+    let mut registry = Registry::default();
+    registry.register(Arc::new(MovieSource::new()));
+    s.registry = registry;
+    let app = api::router(s);
+    let tk = signed_up(&app).await;
+    let tk = Some(tk.as_str());
+    let (_, _, item) = call(
+        &app,
+        "POST",
+        "/api/v1/items",
+        tk,
+        Some(serde_json::json!({"kind": "movie", "title": "Home video", "year": 2001})),
+    )
+    .await;
+    let id = item["id"].as_str().unwrap().to_string();
+    let path = format!("/api/v1/items/{id}");
+
+    let (status, _, _) = call(
+        &app,
+        "PATCH",
+        &path,
+        None,
+        Some(serde_json::json!({"title": "X"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _, edited) = call(
+        &app,
+        "PATCH",
+        &path,
+        tk,
+        Some(serde_json::json!({
+            "title": "Home video, summer", "year": 2001,
+            "cover_url": "https://img.example/summer.jpg"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    assert_eq!(edited["title"], "Home video, summer");
+    assert_eq!(edited["cover"]["url"], "https://img.example/summer.jpg");
+    assert_eq!(edited["year"], 2001);
+    // year and cover left out: none
+    let (status, _, edited) = call(
+        &app,
+        "PATCH",
+        &path,
+        tk,
+        Some(serde_json::json!({"title": "Home video, summer"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    assert_eq!(edited["year"], serde_json::Value::Null);
+    assert_eq!(edited["cover"], serde_json::Value::Null);
+    let (status, _, e) = call(
+        &app,
+        "PATCH",
+        &path,
+        tk,
+        Some(serde_json::json!({"title": "A", "cover_url": "ftp://img.example/a"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{e}");
+    assert_eq!(e["field"], "cover_url");
+    let (status, _, e) = call(
+        &app,
+        "PATCH",
+        &format!("/api/v1/items/{}", uuid::Uuid::from_u128(77)),
+        tk,
+        Some(serde_json::json!({"title": "A"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{e}");
+
+    a_sourced_item_refuses_the_edit(&app, &t, tk).await;
+}
+
+/// Review MAN-2: a second item of a kind and title is a choice, not an accident. `POST /items`
+/// answers 409 `conflict` on the field `title`, naming the items, unless the body says
+/// `allow_duplicate`; the check comes after the field checks.
+#[tokio::test]
+async fn a_title_that_is_there_is_refused_unless_a_second_one_is_asked_for() {
+    let (s, _t) = state();
+    let app = api::router(s);
+    let tk = signed_up(&app).await;
+    let tk = Some(tk.as_str());
+    let new = |title: &str, allow: Option<bool>| {
+        let mut b = serde_json::json!({"kind": "board_game", "title": title});
+        if let Some(a) = allow {
+            b["allow_duplicate"] = a.into();
+        }
+        b
+    };
+    let (status, _, first) =
+        call(&app, "POST", "/api/v1/items", tk, Some(new("Catan", None))).await;
+    assert_eq!(status, StatusCode::CREATED, "{first}");
+    let first_id = first["id"].as_str().unwrap().to_string();
+
+    // the same title but for case and blanks: refused, the items named
+    let (status, _, e) = call(
+        &app,
+        "POST",
+        "/api/v1/items",
+        tk,
+        Some(new(" catan ", None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{e}");
+    assert_eq!(e["code"], "conflict");
+    assert_eq!(e["field"], "title");
+    assert!(e["message"].as_str().unwrap().contains(&first_id), "{e}");
+    let (status, _, e) = call(
+        &app,
+        "POST",
+        "/api/v1/items",
+        tk,
+        Some(new("Catan", Some(false))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{e}");
+    // a wrong field is still named first
+    let mut bad = new("Catan", None);
+    bad["year"] = 0.into();
+    let (status, _, e) = call(&app, "POST", "/api/v1/items", tk, Some(bad)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{e}");
+    assert_eq!(e["field"], "year");
+    // another kind of that title is no conflict
+    let (status, _, e) = call(
+        &app,
+        "POST",
+        "/api/v1/items",
+        tk,
+        Some(serde_json::json!({"kind": "book", "title": "Catan"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{e}");
+
+    // asked for: a second one
+    let (status, _, second) = call(
+        &app,
+        "POST",
+        "/api/v1/items",
+        tk,
+        Some(new("Catan", Some(true))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{second}");
+    assert_ne!(second["id"], first["id"]);
+    let (_, _, found) = call(
+        &app,
+        "GET",
+        "/api/v1/items/titled?kind=board_game&title=Catan",
+        tk,
+        None,
+    )
+    .await;
+    assert_eq!(found.as_array().unwrap().len(), 2, "{found}");
+}
+
+/// What `POST /items` refuses, each with its field.
+async fn refused_entries_name_their_field(app: &axum::Router, tk: Option<&str>) {
+    for (body, field) in [
+        (
+            serde_json::json!({"kind": "board_game", "title": "  "}),
+            "title",
+        ),
+        (
+            serde_json::json!({"kind": "board_game", "title": "x".repeat(501)}),
+            "title",
+        ),
+        (
+            serde_json::json!({"kind": "board_game", "title": "A", "year": 0}),
+            "year",
+        ),
+        (
+            serde_json::json!({"kind": "board_game", "title": "A", "year": 9999}),
+            "year",
+        ),
+        (
+            serde_json::json!({"kind": "board_game", "title": "A",
+                "cover_url": "http://img.example/a.jpg"}),
+            "cover_url",
+        ),
+        (
+            serde_json::json!({"kind": "board_game", "title": "A",
+                "cover_url": "https://me:pw@img.example/a.jpg"}),
+            "cover_url",
+        ),
+        (serde_json::json!({"kind": "zine", "title": "A"}), "kind"),
+        (serde_json::json!({"kind": "No Kind", "title": "A"}), "kind"),
+    ] {
+        let (status, _, e) = call(app, "POST", "/api/v1/items", tk, Some(body.clone())).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}: {e}");
+        assert_eq!(e["code"], "invalid", "{body}");
+        assert_eq!(e["field"], field, "{body}: {e}");
+    }
+}
+
+/// An item the registered source answers for: no edit, no offer, and its refresh is queued.
+async fn a_sourced_item_refuses_the_edit(
+    app: &axum::Router,
+    t: &testkit::TestEnv,
+    tk: Option<&str>,
+) {
+    // an item the registered source answers for
+    let sourced = t
+        .app
+        .upsert_catalog_item(app::NewCatalogItem {
+            kind: domain::kind::KindId::new("movie").unwrap(),
+            title: "Heat".into(),
+            original_title: None,
+            year: Some(1995),
+            description: None,
+            external_ids: vec![domain::catalog::ExternalId::new("src", "949")],
+            attributes: serde_json::json!({}),
+            cover_url: None,
+            popularity: None,
+        })
+        .await
+        .unwrap();
+    let (status, _, e) = call(
+        app,
+        "PATCH",
+        &format!("/api/v1/items/{}", sourced.id.0),
+        tk,
+        Some(serde_json::json!({"title": "Mine"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{e}");
+    assert_eq!(e["code"], "conflict");
+    assert_eq!(t.jobs.jobs().len(), 0, "nothing was queued so far");
+    let (_, _, page) = call(
+        app,
+        "GET",
+        &format!("/api/v1/items/{}/page", sourced.id.0),
+        tk,
+        None,
+    )
+    .await;
+    assert_eq!(page["details_editable"], false);
+    assert_eq!(page["item"]["title"], "Heat");
+    assert_eq!(t.jobs.jobs().len(), 1, "its source is asked");
 }

@@ -14,8 +14,24 @@ pub const FRESH_FOR_SECS: i64 = 7 * 24 * 3600;
 /// Seconds before a failed refresh is retried.
 pub const RETRY_FAILED_SECS: i64 = 3600;
 
+/// Does a source of this instance answer for the item: a registered connector that gives
+/// details for the item's kind and in whose namespace the item holds an external id. The
+/// connector's key and switch do not matter (a source without its key still owns its
+/// items; their refresh fails and is retried as before). Without such a source no refresh
+/// is queued or recorded for the item (B2) and its details may be edited by hand
+/// (v1-manual, "Edit details").
+#[must_use]
+pub fn source_known(registry: &Registry, item: &domain::catalog::CatalogItem) -> bool {
+    registry.infos().iter().any(|info| {
+        info.capabilities.contains(&Capability::Details)
+            && info.kinds.iter().any(|k| k == item.kind.as_str())
+            && item.external_ids.iter().any(|e| e.namespace == info.id)
+    })
+}
+
 /// Fetch details from every connector that knows the item (by external id in its
-/// namespace), merge, store, publish `entity.updated`.
+/// namespace), merge, store, publish `entity.updated`. An item no source answers for
+/// ([`source_known`]) is left untouched.
 ///
 /// # Errors
 /// Unknown item or storage errors. Connector failures are recorded on the item instead.
@@ -27,6 +43,12 @@ pub async fn refresh_item(
     id: ItemId,
 ) -> Result<(), AppError> {
     let item = app.catalog_item(id).await?;
+    if !source_known(registry, &item) {
+        // nobody to ask (entered by hand, a title-only stub of an import, ids of sources this
+        // instance does not have): the item stays as it is. It used to be marked failed
+        // and retried every hour (v1-plan.md 7, B2)
+        return Ok(());
+    }
     let ctx = Ctx::new(http, lane);
     let mut snapshots = Vec::new();
     let connectors = registry.for_kind(item.kind.as_str(), Capability::Details);

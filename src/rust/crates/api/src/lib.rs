@@ -15,6 +15,8 @@ mod extract;
 pub mod goals;
 mod goals_routes;
 pub mod hooks;
+pub mod manual;
+mod manual_routes;
 pub mod notifications;
 mod oidc_routes;
 pub mod ops;

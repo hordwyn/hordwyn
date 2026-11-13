@@ -134,6 +134,54 @@ const CMD_LISTS: &str = "cmd:lists";
 const CMD_NEW_LIST: &str = "cmd:new-list";
 const CMD_IMPORT: &str = "cmd:import";
 const CMD_PLAY: &str = "cmd:play:";
+/// The last row of a search: "Add ... by hand" (v1-manual). It opens the dialog of
+/// [`crate::manual_item`] and goes nowhere by itself.
+const CMD_MANUAL: &str = "cmd:manual";
+
+/// A row that is a command, not a catalogue item: Enter and Ctrl+Enter both run it.
+fn is_command(id: &str) -> bool {
+    id == CMD_MANUAL || command_href(id).is_some()
+}
+
+/// "Add "<query>" by hand...": the row under the results of a search, in a group of its own.
+/// The query is in its keywords, so the list's own filter keeps it whatever is typed.
+fn manual_row(i18n: &I18n, query: &str) -> CommandItem {
+    let query = query.trim();
+    CommandItem {
+        id: CMD_MANUAL.into(),
+        label: i18n.t_args("manual-row", &[("query", query.to_string().into())]),
+        group: i18n.t("manual-group"),
+        keywords: query.to_string(),
+        // the box of a result row with a plus in it: the labels of a search line up
+        leading: Some(CommandLeading {
+            icon: ui::IconName::Plus,
+            image: None,
+            square: false,
+        }),
+    }
+}
+
+/// Is "Add ... by hand" offered: the search has its answer and every asked source has
+/// answered (the row never becomes the active one before the results do, so Enter does not
+/// open it by accident), nothing else is being chosen (`target`: a match for an import row,
+/// an item for a list or a rule) and somebody is signed in.
+/// `answered` is the text the shown answer is for: while a newer text waits for its own
+/// answer the row is not there (Enter must not add what was typed a moment ago, OT1A-1).
+fn offers_manual(
+    answered: Option<&str>,
+    typed: &str,
+    waiting: usize,
+    target: bool,
+    signed_in: bool,
+) -> bool {
+    answered.is_some_and(|a| a.trim() == typed.trim()) && waiting == 0 && !target && signed_in
+}
+
+/// `rows` with the row of [`manual_row`] last, whatever joins the results later.
+fn with_manual_row(mut rows: Vec<CommandItem>, row: Option<CommandItem>) -> Vec<CommandItem> {
+    rows.extend(row);
+    rows
+}
 
 /// Where a suggested command goes; `None` for an item.
 #[must_use]
@@ -767,8 +815,10 @@ fn select_handler(
     query: RwSignal<String>,
     i18n: std::sync::Arc<I18n>,
     chose: StoredValue<bool>,
+    kinds: RwSignal<String>,
 ) -> Callback<CommandItem> {
     let scope = expect_context::<PaletteScope>().0;
+    let manual = expect_context::<crate::manual_item::ManualItem>();
     let navigate = use_navigate();
     Effect::new(move |_| {
         if !open.get() {
@@ -779,8 +829,13 @@ fn select_handler(
     Callback::new(move |item: CommandItem| {
         // the funnel flow goes on to the chosen page (WP4-5)
         chose.set_value(true);
+        let typed = query.get_untracked();
         open.set(false);
         query.set(String::new());
+        if item.id == CMD_MANUAL {
+            manual.add(&typed, &kinds.get_untracked());
+            return;
+        }
         let go = |href: &str| navigate(href, leptos_router::NavigateOptions::default());
         if let Some(href) = command_href(&item.id) {
             go(&href);
@@ -819,7 +874,7 @@ fn secondary_handler(
         );
     });
     Callback::new(move |item: CommandItem| {
-        if scope.with_untracked(Option::is_some) || command_href(&item.id).is_some() {
+        if scope.with_untracked(Option::is_some) || is_command(&item.id) {
             select.run(item);
         } else {
             quick(ctx.clone(), item, (busy, error), open_page);
@@ -899,6 +954,42 @@ fn status_texts(
     (waiting_text, empty)
 }
 
+/// The rows of the list: below two characters the recent items and the suggestions, else
+/// the results of the search with "Add ... by hand" as the last row once it is offered
+/// ([`offers_manual`], v1-manual).
+fn shown_rows(
+    s: State,
+    scope: RwSignal<Option<PaletteTarget>>,
+    recent: RwSignal<Vec<RecentItem>>,
+    i18n: std::sync::Arc<I18n>,
+    signed_in: bool,
+) -> Memo<Vec<CommandItem>> {
+    let State {
+        query,
+        items,
+        waiting,
+        asked,
+        ..
+    } = s;
+    Memo::new(move |_| {
+        if query.with(|q| q.trim().chars().count() < 2) {
+            return recent.with(|r| idle_items(&i18n, r, scope.with(Option::is_none), signed_in));
+        }
+        let typed = query.get();
+        let offered = asked.with(|a| {
+            offers_manual(
+                a.as_ref().map(|a| a.query.as_str()),
+                &typed,
+                waiting.with(Vec::len),
+                scope.with(Option::is_some),
+                signed_in,
+            )
+        });
+        let row = offered.then(|| manual_row(&i18n, &typed));
+        with_manual_row(items.get(), row)
+    })
+}
+
 #[component]
 pub fn SearchPalette() -> impl IntoView {
     let open = expect_context::<PaletteOpen>().0;
@@ -925,7 +1016,7 @@ pub fn SearchPalette() -> impl IntoView {
         }
     });
     let chose = funnel_flow(open);
-    let on_select = select_handler(open, query, i18n.clone(), chose);
+    let on_select = select_handler(open, query, i18n.clone(), chose, s.scope);
     let on_secondary = secondary_handler(open, on_select, (busy, quick_error));
     // matching an import row: search for its title
     Effect::new(move |_| {
@@ -933,14 +1024,7 @@ pub fn SearchPalette() -> impl IntoView {
             query.set(m.title);
         }
     });
-    let i2 = i18n.clone();
-    let shown = Memo::new(move |_| {
-        if query.with(|q| q.trim().chars().count() < 2) {
-            recent.with(|r| idle_items(&i2, r, scope.with(Option::is_none), signed_in))
-        } else {
-            items.get()
-        }
-    });
+    let shown = shown_rows(s, scope, recent, i18n.clone(), signed_in);
     // the no-results card shows once every asked source has answered with nothing
     let empty_answer = Memo::new(move |_| {
         asked
@@ -1621,6 +1705,71 @@ mod tests {
         assert_eq!(
             to_item(&dto("n", "Heat", "tmdb"), "tmdb").leading,
             leading(None)
+        );
+    }
+
+    #[test]
+    fn the_add_by_hand_row_is_last_and_carries_the_query() {
+        with_en(the_manual_row);
+    }
+
+    fn the_manual_row() {
+        let i18n = use_i18n();
+        let results = vec![
+            to_item(&dto("a", "Dune", "tmdb"), "tmdb"),
+            to_item(&dto("b", "Dune II", "tmdb"), "tmdb"),
+        ];
+        let rows = with_manual_row(results.clone(), Some(manual_row(&i18n, "  Dune zine ")));
+        assert_eq!(just_ids(&rows), ["a", "b", CMD_MANUAL]);
+        let last = rows.last().unwrap();
+        assert_eq!(last.label, "Add \"Dune zine\" by hand...");
+        assert_eq!(
+            last.keywords, "Dune zine",
+            "the list's filter keeps the row"
+        );
+        assert_eq!(last.group, "Not what you are looking for?");
+        assert_eq!(
+            last.leading.as_ref().map(|l| (l.icon, l.image.clone())),
+            Some((ui::IconName::Plus, None)),
+            "a box like the result rows, with a plus"
+        );
+        assert!(results.iter().all(|r| r.group != last.group));
+        one_heading_per_group(&rows);
+        // with no results it is the only row; not offered: the results as they are
+        let alone = with_manual_row(Vec::new(), Some(manual_row(&i18n, "Dune zine")));
+        assert_eq!(just_ids(&alone), [CMD_MANUAL]);
+        assert_eq!(with_manual_row(results.clone(), None), results);
+        // a command, not an item: Enter and Ctrl+Enter both open the dialog, no page
+        assert!(is_command(CMD_MANUAL));
+        assert_eq!(command_href(CMD_MANUAL), None);
+        assert!(is_command(CMD_LISTS));
+        assert!(!is_command("6f1c0a52-0000-7000-8000-000000000001"));
+    }
+
+    #[test]
+    fn add_by_hand_is_offered_once_every_source_has_answered() {
+        let dune = Some("dune zine");
+        assert!(offers_manual(dune, "dune zine", 0, false, true));
+        assert!(offers_manual(dune, " dune zine ", 0, false, true));
+        assert!(
+            !offers_manual(None, "dune zine", 0, false, true),
+            "no answer yet"
+        );
+        assert!(
+            !offers_manual(dune, "dune zines", 0, false, true),
+            "the answer is for an older text"
+        );
+        assert!(
+            !offers_manual(dune, "dune zine", 1, false, true),
+            "a source is being asked"
+        );
+        assert!(
+            !offers_manual(dune, "dune zine", 0, true, true),
+            "something else is being chosen"
+        );
+        assert!(
+            !offers_manual(dune, "dune zine", 0, false, false),
+            "signed out"
         );
     }
 }

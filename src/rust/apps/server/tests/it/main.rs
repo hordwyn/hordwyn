@@ -22,6 +22,7 @@ mod item_page;
 mod latency;
 mod library_page;
 mod load;
+mod manual;
 mod member_pin;
 mod notifications;
 mod offline;

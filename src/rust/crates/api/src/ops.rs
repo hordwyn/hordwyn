@@ -5,6 +5,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use app::ports::{AppEvent, SearchQuery};
+use catalog_core::refresh::source_known;
 use contracts::{
     AttributionDto, CatalogItemDto, CompanionDto, ItemPageDto, LibraryEntryDto, LibraryItemDto,
     ListDto, NewProgressDto, ProgressEventDto, SearchResponseDto, SearchResultsEventDto,
@@ -19,6 +20,9 @@ use domain::user::Actor;
 
 use crate::error::ApiResult;
 use crate::{ApiError, ApiState, dto};
+
+/// Provenance of a field a person set ([`app::USER_PROVENANCE`]).
+const USER: &str = app::USER_PROVENANCE;
 
 /// Topic of streamed connector search results.
 pub const SEARCH_RESULTS: &str = "search.results";
@@ -39,7 +43,11 @@ pub fn parse_id<T>(s: &str, wrap: impl FnOnce(uuid::Uuid) -> T) -> ApiResult<T> 
 /// # Errors
 /// Unknown item.
 pub async fn item(s: &ApiState, a: Actor, id: &str) -> ApiResult<CatalogItemDto> {
-    let item = s.app.item_detail_for(a, parse_id(id, ItemId)?).await?;
+    let known = |i: &domain::catalog::CatalogItem| source_known(&s.registry, i);
+    let item = s
+        .app
+        .item_detail_where(parse_id(id, ItemId)?, Some(a), &known)
+        .await?;
     Ok(dto::item(s, &item).await)
 }
 
@@ -54,7 +62,9 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
     // before the refresh is queued, so its event cannot come first; best effort (an unknown
     // item fails below)
     let _ = s.app.watch_item(a, item_id).await;
-    let item = s.app.item_detail(item_id).await?;
+    // a refresh is queued only for an item a source of this instance answers for (B2)
+    let known = |i: &domain::catalog::CatalogItem| source_known(&s.registry, i);
+    let item = s.app.item_detail_where(item_id, None, &known).await?;
     let entry = s.app.entry(a, item_id).await?;
     let progress = s.app.history(a, item_id).await?;
     // the row from the entry and history already read (UX1-10)
@@ -127,6 +137,7 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
         entry: entry.as_ref().map(dto::entry),
         progress: progress.iter().map(dto::progress).collect(),
         sources,
+        details_editable: may_edit_items(s, a) && !source_known(&s.registry, &item),
         tags: state.as_ref().map(|x| x.2.clone()).unwrap_or_default(),
         summary: state.as_ref().map(|x| x.0.clone()),
         next_step: state.map(|x| x.1).or(first),
@@ -136,6 +147,13 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
         plays,
         play_totals,
     })
+}
+
+/// May the actor correct data of a shared catalog item (the page total of a book)? Everybody
+/// on a home instance; on a hosted one only admins, because the item is everybody's.
+#[must_use]
+pub fn may_edit_items(s: &ApiState, a: Actor) -> bool {
+    a.is_admin() || !s.admin.as_ref().is_some_and(crate::admin::AdminApi::hosted)
 }
 
 /// The kinds a search covers: one kind, the enabled kinds of one kind group (the palette's
@@ -682,7 +700,12 @@ async fn export_rows(s: &ApiState, a: Actor) -> ApiResult<Vec<importers::ImportR
                 event_id: None,
             })
             .collect();
+        // only an address a person typed: a source's cover comes back from the source
+        let cover_url = item
+            .cover_url
+            .filter(|_| item.provenance.get("cover_url").map(String::as_str) == Some(USER));
         rows.push(importers::ImportRow {
+            cover_url,
             source_id: e.id.0.to_string(),
             kind: e.kind.to_string(),
             title: item.title,

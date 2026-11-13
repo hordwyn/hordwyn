@@ -49,7 +49,7 @@ fn err(line: u64, source_id: Option<String>, message: String) -> RowError {
 }
 
 /// CSV columns of the generic format (header row required).
-pub const CSV_COLUMNS: [&str; 10] = [
+pub const CSV_COLUMNS: [&str; 11] = [
     "source_id",
     "kind",
     "title",
@@ -61,6 +61,8 @@ pub const CSV_COLUMNS: [&str; 10] = [
     "finished_dates",
     // added later; files without it still read (the column is optional)
     "lists",
+    // v1-manual, optional as well
+    "cover_url",
 ];
 
 /// Rows of a CSV file: `external_ids` as `ns:value;ns:value`, `finished_dates` and `lists`
@@ -149,6 +151,7 @@ pub fn csv<R: Read + 'static>(input: R) -> Box<dyn Iterator<Item = Parsed>> {
                         .collect()
                 })
                 .unwrap_or_default(),
+            cover_url: get("cover_url"),
         })
     }))
 }
@@ -186,6 +189,7 @@ pub fn csv_text(rows: &[ImportRow]) -> String {
             text(&ids.join(";")),
             finished.join(";"),
             text(&lists.join(";")),
+            text(r.cover_url.as_deref().unwrap_or_default()),
         ]);
     }
     w.into_inner()
@@ -290,10 +294,11 @@ mod tests {
                 },
             ],
             lists: vec!["Picks".into(), "A;B".into()],
+            cover_url: Some("https://img.example/heat.jpg".into()),
         };
         let text = csv_text(std::slice::from_ref(&row));
         assert!(text.starts_with(
-            "source_id,kind,title,year,status,rating,notes,external_ids,finished_dates,lists\n"
+            "source_id,kind,title,year,status,rating,notes,external_ids,finished_dates,lists,cover_url\n"
         ));
         let back = rows(csv(std::io::Cursor::new(text)));
         let back = back[0].as_ref().unwrap();
@@ -302,6 +307,7 @@ mod tests {
         assert_eq!(back.external_ids, row.external_ids);
         assert_eq!(back.history.len(), 1, "episodes need JSON Lines");
         assert_eq!(back.lists, vec!["Picks".to_string(), "A,B".into()]);
+        assert_eq!(back.cover_url, row.cover_url);
     }
 
     /// UX3-5: a free-text cell a spreadsheet would run as a formula gets a leading `'`, and
@@ -319,6 +325,7 @@ mod tests {
             notes: Some("-1 star".into()),
             history: Vec::new(),
             lists: vec!["@home".into(), "'=quoted".into()],
+            cover_url: None,
         };
         let text = csv_text(std::slice::from_ref(&row));
         let line = text.lines().nth(1).unwrap();

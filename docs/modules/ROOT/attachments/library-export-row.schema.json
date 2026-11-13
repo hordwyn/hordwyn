@@ -30,6 +30,13 @@
   "additionalProperties": false,
   "description": "One library entry.",
   "properties": {
+    "cover_url": {
+      "description": "Address of the picture a person typed for an item entered by hand (optional, added\nin version 1 without a version bump): `https` only. The export writes it for such an\naddress only, never a source's. The import takes it for a new item without external\nids when the importing person may set one (everybody on a home instance, admins on a\nhosted one); otherwise, or when the address is not valid, the row is imported without\nit and a row warning says why. Browsers load the picture, the server never fetches it.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "external_ids": {
       "additionalProperties": {
         "type": "string"

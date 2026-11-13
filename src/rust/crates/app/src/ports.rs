@@ -152,6 +152,9 @@ pub trait CatalogRepo: Send + Sync {
     ) -> RepoResult<Option<CatalogItem>>;
     /// The items with these ids that exist, in any order.
     async fn get_many(&self, ids: &[ItemId]) -> RepoResult<Vec<CatalogItem>>;
+    /// The items of `kind` whose title equals `title` but for case and surrounding blanks,
+    /// by id, at most `limit` (v1-manual: shown before a second one is entered by hand).
+    async fn titled(&self, kind: &KindId, title: &str, limit: u32) -> RepoResult<Vec<CatalogItem>>;
     /// The seasons fetched for an item with their episodes, by season number (WP4-7).
     async fn episode_seasons(
         &self,

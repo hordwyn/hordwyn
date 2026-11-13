@@ -52,7 +52,7 @@ impl App {
     /// # Errors
     /// Unknown item. A failing queue is logged by the adapter and does not fail the read.
     pub async fn item_detail(&self, id: ItemId) -> AppResult<CatalogItem> {
-        self.detail(id, None).await
+        self.item_detail_where(id, None, &has_external_id).await
     }
 
     /// [`App::item_detail`] on behalf of `actor` (`GET /items/{id}`): when a refresh is
@@ -66,16 +66,27 @@ impl App {
         actor: domain::user::Actor,
         id: ItemId,
     ) -> AppResult<CatalogItem> {
-        self.detail(id, Some(actor)).await
+        self.item_detail_where(id, Some(actor), &has_external_id)
+            .await
     }
 
-    async fn detail(
+    /// The read behind [`App::item_detail`] and [`App::item_detail_for`] (`watcher`) for a
+    /// caller that knows the sources: a refresh is queued only when `answerable` says a
+    /// source could answer for the item. An item nobody answers for (entered by hand, a
+    /// title-only stub of an import, ids of sources this instance does not have) was queued
+    /// on every view and marked failed every hour (v1-plan.md 7, B2). Without the sources
+    /// at hand the two callers above ask for any external id.
+    ///
+    /// # Errors
+    /// Unknown item.
+    pub async fn item_detail_where(
         &self,
         id: ItemId,
         watcher: Option<domain::user::Actor>,
+        answerable: &(dyn Fn(&CatalogItem) -> bool + Sync),
     ) -> AppResult<CatalogItem> {
         let item = self.catalog_item(id).await?;
-        if item.needs_refresh(self.now()) {
+        if item.needs_refresh(self.now()) && answerable(&item) {
             // before the refresh is queued, so its event cannot come first; best effort
             if let Some(a) = watcher {
                 let _ = self.watch_item(a, id).await;
@@ -95,6 +106,21 @@ impl App {
         }
         Ok(item)
     }
+}
+
+/// The rule of [`App::item_detail`]: without an external id no source can know the item.
+fn has_external_id(item: &CatalogItem) -> bool {
+    !item.external_ids.is_empty()
+}
+
+/// The fields of `item` a person set ([`USER_PROVENANCE`]): no writer of connector data
+/// replaces them.
+fn fields_by_user(item: &CatalogItem) -> std::collections::BTreeSet<String> {
+    item.provenance
+        .iter()
+        .filter(|(_, source)| source.as_str() == USER_PROVENANCE)
+        .map(|(field, _)| field.clone())
+        .collect()
 }
 
 /// Result of refreshing an item from its connectors (already merged).
@@ -125,35 +151,70 @@ impl App {
         id: ItemId,
         refresh: CatalogRefresh,
     ) -> AppResult<CatalogItem> {
+        self.store_refresh(id, refresh, true).await
+    }
+
+    /// The rules shared by a full refresh and a partial fill. A field whose provenance is
+    /// [`USER_PROVENANCE`] keeps its value and its provenance (v1-plan.md 7, B3).
+    async fn store_refresh(
+        &self,
+        id: ItemId,
+        refresh: CatalogRefresh,
+        complete: bool,
+    ) -> AppResult<CatalogItem> {
         let mut item = self.catalog_item(id).await?;
         let now = self.now();
-        match self
-            .kinds
-            .validate_attributes(&item.kind, &refresh.attributes)
-        {
+        let by_user: std::collections::BTreeSet<String> = item
+            .provenance
+            .iter()
+            .filter(|(_, source)| source.as_str() == USER_PROVENANCE)
+            .map(|(field, _)| field.clone())
+            .collect();
+        let kept = |field: &str| by_user.contains(field);
+        let attributes = keep_user_attributes(refresh.attributes, &item.attributes, &by_user);
+        match self.kinds.validate_attributes(&item.kind, &attributes) {
             Ok(attrs) => item.attributes = attrs,
             Err(reason) => {
                 // Provider data that does not fit the schema must not break the page.
                 item.provenance.insert("attributes.invalid".into(), reason);
             }
         }
-        if !refresh.title.trim().is_empty() {
+        if !refresh.title.trim().is_empty() && !kept("title") {
             item.title = refresh.title;
         }
-        item.original_title = refresh.original_title.or(item.original_title);
-        item.year = refresh.year.or(item.year);
-        item.description = refresh.description.or(item.description);
-        item.cover_url = refresh.cover_url.or(item.cover_url);
+        if !kept("original_title") {
+            item.original_title = refresh.original_title.or(item.original_title);
+        }
+        if !kept("year") {
+            item.year = refresh.year.or(item.year);
+        }
+        if !kept("description") {
+            item.description = refresh.description.or(item.description);
+        }
+        if !kept("cover_url") {
+            item.cover_url = refresh.cover_url.or(item.cover_url);
+        }
         item.popularity = refresh.popularity.or(item.popularity);
         for ext in refresh.external_ids {
             if !item.external_ids.contains(&ext) {
                 item.external_ids.push(ext);
             }
         }
-        item.provenance.extend(refresh.provenance);
-        item.state = EntityState::Full;
+        item.provenance.extend(
+            refresh
+                .provenance
+                .into_iter()
+                .filter(|(field, _)| !by_user.contains(field)),
+        );
         item.fetched_at = Some(now);
-        item.fresh_until = Some(now + chrono::Duration::seconds(refresh.fresh_for_secs));
+        if complete {
+            item.state = EntityState::Full;
+            item.fresh_until = Some(now + chrono::Duration::seconds(refresh.fresh_for_secs));
+        } else {
+            // the rest (description, subjects) comes with the refresh a page view queues
+            item.state = EntityState::Partial;
+            item.fresh_until = None;
+        }
         self.repos.catalog.upsert(&item).await?;
         self.publish_item(item.id).await;
         Ok(item)
@@ -345,6 +406,9 @@ impl App {
         mode: OnExisting,
     ) -> AppResult<CatalogItem> {
         let mut changed = false;
+        // what a person set stays, whoever writes (review BOOK-10 of v1-books)
+        let by_user = fields_by_user(&item);
+        let kept = |field: &str| by_user.contains(field);
         match mode {
             OnExisting::Keep => return Ok(item),
             OnExisting::Fill => {
@@ -354,9 +418,17 @@ impl App {
                         changed = true;
                     }
                 }
-                // an expired item gets its data back through a refetch, which stamps it
-                // (UX4-9); a cover from a search result alone would be kept unstamped
-                if item.cover_url.is_none() && new.cover_url.is_some() && !item.title_unavailable()
+                // an expired item (its title gone with the source's data) gets its data back
+                // through a refetch (UX4-9), not from a search result; a cover a person
+                // removed is not filled in again. An expired item that kept a title a
+                // person set (LC-24) is not recognised here and takes the cover and the
+                // popularity below; that write is stamped as source data (`upsert`, the
+                // `title <> ''` branch of `provider_data_at`), so the next sweep purges
+                // it again and the retention limit holds (review MAN-8)
+                if item.cover_url.is_none()
+                    && new.cover_url.is_some()
+                    && !item.title_unavailable()
+                    && !kept("cover_url")
                 {
                     item.cover_url = new.cover_url;
                     changed = true;
@@ -381,20 +453,31 @@ impl App {
         if new.title.trim().is_empty() {
             return Err(DomainError::invalid("title", "title must not be empty").into());
         }
+        let attributes = keep_user_attributes(new.attributes, &item.attributes, &by_user);
         item.attributes = self
             .kinds
-            .validate_attributes(&new.kind, &new.attributes)
+            .validate_attributes(&new.kind, &attributes)
             .map_err(|r| DomainError::invalid("attributes", r))?;
-        item.title = new.title;
-        item.original_title = new.original_title.or(item.original_title);
-        item.year = new.year.or(item.year);
-        item.description = new.description.or(item.description);
+        if !kept("title") {
+            item.title = new.title;
+        }
+        if !kept("original_title") {
+            item.original_title = new.original_title.or(item.original_title);
+        }
+        if !kept("year") {
+            item.year = new.year.or(item.year);
+        }
+        if !kept("description") {
+            item.description = new.description.or(item.description);
+        }
         for ext in new.external_ids {
             if !item.external_ids.contains(&ext) {
                 item.external_ids.push(ext);
             }
         }
-        item.cover_url = new.cover_url.or(item.cover_url);
+        if !kept("cover_url") {
+            item.cover_url = new.cover_url.or(item.cover_url);
+        }
         item.popularity = new.popularity.or(item.popularity);
         self.repos.catalog.upsert(&item).await?;
         self.publish_item(item.id).await;
@@ -422,9 +505,10 @@ impl App {
     }
 
     /// Drop the connector data of an item, its title and year included (only the external
-    /// ids stay; the person's own data is untouched; it becomes an expired stub, fetched
-    /// again once its source can answer, UX4-9) and publish `entity.updated`. Returns the
-    /// cover asset it referenced, for the caller to delete.
+    /// ids stay; the person's own data is untouched, and so is every field of the item a
+    /// person set, [`USER_PROVENANCE`]; it becomes an expired stub, fetched again once its
+    /// source can answer, UX4-9) and publish `entity.updated`. Returns the cover asset it
+    /// referenced, for the caller to delete.
     ///
     /// # Errors
     /// Storage errors.
@@ -508,4 +592,35 @@ impl App {
             .await?;
         Ok(())
     }
+}
+
+/// Provenance of a field a person set on the shared item: a refresh keeps its value
+/// (v1-plan.md 7, B3).
+pub const USER_PROVENANCE: &str = "user";
+
+/// `fresh` with the attributes a person set taken from `stored`: kept when the source gives
+/// another value, and when it gives none.
+fn keep_user_attributes(
+    fresh: serde_json::Value,
+    stored: &serde_json::Value,
+    by_user: &std::collections::BTreeSet<String>,
+) -> serde_json::Value {
+    let mut names = by_user
+        .iter()
+        .filter_map(|f| f.strip_prefix("attributes."))
+        .peekable();
+    if names.peek().is_none() {
+        return fresh;
+    }
+    let mut out = match fresh {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    for name in names {
+        match stored.get(name) {
+            Some(v) => out.insert(name.to_string(), v.clone()),
+            None => out.remove(name),
+        };
+    }
+    serde_json::Value::Object(out)
 }

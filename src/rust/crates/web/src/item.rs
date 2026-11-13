@@ -589,6 +589,16 @@ fn overflow(
     if entry.status == "completed" && kind.is_some_and(|k| k.progress_model == "episodic") {
         items.insert(0, run.item(true));
     }
+    // an item no source answers for: its details are the person's to correct (v1-manual)
+    if page.details_editable {
+        let manual = expect_context::<crate::manual_item::ManualItem>();
+        let item = page.item.clone();
+        items.push(MenuItem {
+            label: i18n.t("item-edit-details"),
+            on_select: Callback::new(move |()| manual.edit(item.clone(), refresh)),
+            destructive: false,
+        });
+    }
     items.push(MenuItem {
         label: i18n.t("item-remove"),
         on_select: Callback::new(move |()| {

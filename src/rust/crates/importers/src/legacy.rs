@@ -214,6 +214,7 @@ fn row(
         notes: None,
         history,
         lists,
+        cover_url: None,
     })
 }
 

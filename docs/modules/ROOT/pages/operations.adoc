@@ -544,6 +544,14 @@ This happens wherever a cover is shown that is not stored yet: on the rows of th
 while someone types, on the cards of Home, the Library and the lists and on the item page
 of an item that was just added, and on the recent items of the empty search.
 
+One more kind of host is not in that list: the picture address a member typed for an item
+added by hand or under "Edit details" (xref:v1-scope.adoc#_added_by_hand[Added by hand]).
+The server never requests such an address, whatever `storage.fetch_policy` says, and
+never stores the picture; every browser that shows the item loads it from there, without
+a referrer, for as long as the item is shown. Only `https://` addresses are accepted. On a
+home instance every member can set one, so a member decides which host the browsers of
+the other members contact for that picture; on a hosted instance only admins can.
+
 `storage.fetch_policy` decides how much is stored ahead
 (xref:storage-budget.adoc[storage budget], "Fetch priority"). With `library`, the default,
 the covers of everything in a library, a list or a play are stored shortly after the item

@@ -16,6 +16,7 @@ mod game_groups;
 mod goals;
 mod library;
 mod lists;
+mod manual;
 mod next_step;
 mod people;
 mod plays;
@@ -39,12 +40,17 @@ pub use browse::{
 pub use bulk::{
     BulkFailure, BulkOp, BulkOutcome, BulkUndo, EntrySnapshot, MAX_BULK, MAX_UNDO_BYTES, StatusBack,
 };
-pub use catalog::{CatalogRefresh, ITEM_WATCH_SECS, NewCatalogItem, REFRESH_JOB};
+pub use catalog::{
+    CatalogRefresh, ITEM_WATCH_SECS, MAX_TITLE_CHARS, NewCatalogItem, REFRESH_JOB, USER_PROVENANCE,
+};
 pub use episodes::{EPISODES_JOB, SeasonFetch, SeasonKey, season_keys, season_needs_fetch};
 pub use error::{AppError, AppResult};
 pub use game_groups::{GameGroupInput, GameGroupView};
 pub use goals::{ComparePair, GoalProgress, NewGoal, YearCompare, same_day_last_year};
 pub use library::UNDO_WINDOW_HOURS;
+pub use manual::{
+    ItemDetails, MAX_COVER_URL_CHARS, MAX_TITLED, MAX_YEARS_AHEAD, checked_cover_url,
+};
 pub use next_step::{NextStep, Rewatch, first_step, next_step, pass_at, rewatch, times};
 pub use people::{CompanionStats, MergeSuggestion, MostPlayed, StatItem, suggest_merges};
 pub use plays::PlayTotals;
