@@ -13,6 +13,13 @@ rules (section 2, verbatim), `docs/DECISIONS.md`, `docs/design/DESIGN.md`, the U
 
 **Update 2026-11-10 (after the restart), this wins over the threads below:**
 
+- **2026-11-13: Fable usage limit reached; four lanes paused, uncommitted, resumable from their progress logs:**
+  - `<worktree lane-sec2>` (lane/sec2): items 1-7 built, item 8 (final runs) open; then review.
+  - `<worktree lane-polish>` (lane/v1-manual): items 1-4, 6, 7, 9 green; 5 (cover job) and 8 (web) written, not run; then review.
+  - `<worktree lane-race>` (lane/race): tests for F1-F6 written, app code pending (diagnosis docs/fable/round2/race-diagnosis.md).
+  - `<worktree lane-books>` (lane/v1-wikidata): just started (5 files).
+  Lane rules: docs/handoff/fable-briefs/LANES.md; gate flag `<projects dir>/.gate-running`. Remaining after these: v1-release, owner acceptance, tag v1. Waiting for the owner: reset Fable usage, switch model, or pause.
+
 - **website merged** (tag `site`, merge of lane/site, DEC-692..710): apps/website (static Leptos site on ui/brand), GitLab Pages job gated by PAGES_DEPLOY and a strict publish gate; ci 1121 passed / 0 failed / 4 ignored; e2e first run 1 failed (`library.spec.ts:427` bulk bar at 360 px, checkbox never checkable - suspected app race with `people.spec.ts:91`, diagnosis in docs/fable/round2/race-diagnosis.md), rerun 173 passed, 0 panics.
 - **v1-polish done** (tag `v1-polish`, merge of lane/v1-polish, DEC-670..691): Stats current entry, podcast wording, covers from providers everywhere, focus fixes, radios, "Play logged", docs page "What v1 covers"; ci 1077 passed / 0 failed / 4 ignored, e2e 173 passed, 0 panics. Rename to hordwyn merged before it (DEC-666..669; its gate: ci 1064, e2e 169).
 - **sec1 done** (tag `sec1`): security headers and CSP with per-answer nonce on every answer, HSTS for https, no-store on session answers, content-hashed bundles, Playwright CSP guard with a canary (DEC-655..665; inline style attributes stay allowed, follow-up package sec1b); ci 1063 passed / 0 failed / 4 ignored, e2e 169 passed, 0 panics. Lanes: B v1-books, C v1-polish (review fixes), site (reviewed, fixed), rename (ready).
