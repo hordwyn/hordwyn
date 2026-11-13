@@ -41,3 +41,7 @@ Process rules (added 2026-11-13, from lane C):
   `<projects dir>/.gate-running` exists. Before starting Playwright, the server `it`
   binary or any cargo command with more than CARGO_BUILD_JOBS=1, check it; if it exists, do
   code work or single-crate unit tests only, and poll every 2 minutes until it is gone.
+- Scripts: keep wrapper scripts in a scratch directory unique to your lane (e.g.
+  `<scratchpad>/lane-<name>/`) and name your worktree by absolute path in them. Two lanes once
+  shared a script name in the common scratchpad, and one lane's `cargo fmt --all` and clippy
+  ran in another lane's worktree.
