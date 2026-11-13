@@ -38,9 +38,8 @@ hands it to the application container. Set these before the first start:
 |Password of the database user. There is no default: compose refuses to start without it.
 Letters and digits only, because it becomes part of the database URL, for example
 `openssl rand -hex 24`. This is for a new installation: an existing database keeps its
-password (the variable is applied when the empty data directory is created), so for an
-instance that is already running write the password it has, see
-xref:operations.adoc#_coming_from_a_build_before_0034[Coming from a build before 0034].
+password (the variable is applied when the empty data directory is created), so after a
+restore or with a new `config/.env` for a running instance write the password it has.
 
 |`MEILI_MASTER_KEY`
 |always

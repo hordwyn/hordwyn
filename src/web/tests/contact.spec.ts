@@ -43,6 +43,8 @@ test("without the operator contact Wikidata is not asked, and the sources page, 
     await dialog.getByRole("combobox").fill("Wingspan");
     await expect(dialog.getByTestId("no-results")).toBeVisible({ timeout: 20_000 });
     await expect(dialog.getByRole("list", { name: "Data sources" })).toContainText("Wikidata (Board game): Operator contact missing");
+    // what the source cannot find can still be added by hand (LB-33, v1-release item 8)
+    await expect(dialog.getByRole("option", { name: 'Add "Wingspan" by hand...' })).toBeVisible();
     await expectNoA11yViolations(page, "palette without the operator contact");
     expect(await asked(page)).toBe(before);
   } finally {

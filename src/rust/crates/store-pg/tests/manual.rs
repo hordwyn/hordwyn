@@ -1,6 +1,6 @@
 //! v1-manual on Postgres: the purge of connector data keeps what a person set (review
 //! BOOK-10 of v1-books), a purged item with a kept title is still refetched, and the lookup
-//! of items by title (migration 0037).
+//! of items by title (v1 baseline migration).
 
 mod common;
 
@@ -167,7 +167,7 @@ async fn a_hand_entered_item_is_stored_and_found_by_its_title_on_postgres() {
             "the whole item, ids and provenance included"
         );
     }
-    // the index of migration 0037 holds the compared expression
+    // the index `catalog_items_kind_title` holds the compared expression
     assert_eq!(
         common::count(
             &env.store,

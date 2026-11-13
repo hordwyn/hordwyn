@@ -13,7 +13,7 @@ pub mod pg;
 pub mod pool;
 pub mod service;
 
-pub use backend::{BackendError, legacy_dirs_pending, prefix};
+pub use backend::{BackendError, prefix};
 pub use budget::{
     DiskSpace, EVICT_JOB, EvictionReport, NewObject, NoDisk, ReadOutcome, Refusal, StorageBudget,
     StorageReport, VolumeSpace, WriteOutcome,

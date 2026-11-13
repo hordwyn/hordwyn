@@ -1,5 +1,4 @@
-//! Postgres adapter for [`ImportStore`] (store-pg migrations `0008_imports.sql`,
-//! `0022_imports_page.sql`).
+//! Postgres adapter for [`ImportStore`] (store-pg migration `0001_v1_baseline.sql`).
 
 use app::ports::PortError;
 use async_trait::async_trait;

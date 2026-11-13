@@ -1,4 +1,4 @@
-//! The statistics cache (WP4-1, DEC-235, migration 0023): the amounts per user, item and
+//! The statistics cache (WP4-1, DEC-235, the v1 baseline migration): the amounts per user, item and
 //! month of the user's zone in `stats_item_months`, summed per kind and month in
 //! `stats_months`. Triggers mark changed `(user, item)` pairs in `stats_dirty`; a read
 //! recomputes only those with the full statement restricted to them and the sums of the months

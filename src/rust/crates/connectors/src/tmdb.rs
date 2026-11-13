@@ -13,7 +13,7 @@ use serde::Deserialize;
 use crate::util::{date_of, get_json, non_empty, year_of};
 
 pub const ID: &str = "tmdb";
-pub const API_KEY_ENV: &str = "KK_TMDB_API_KEY";
+pub const API_KEY_ENV: &str = "SOURCE_TMDB_API_KEY";
 pub const DEFAULT_API_BASE: &str = "https://api.themoviedb.org";
 pub const DEFAULT_IMAGE_BASE: &str = "https://image.tmdb.org";
 /// The API read access token (v4 bearer).

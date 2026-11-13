@@ -1,6 +1,6 @@
-//! Postgres index of the HTTP cache (store-pg migration `0006_http_cache.sql`). Bodies live in
+//! Postgres index of the HTTP cache (store-pg migration `0001_v1_baseline.sql`). Bodies live in
 //! the budgeted `BlobStore`; this table only holds validators and freshness. Also the shared
-//! data-source counters (`0024_admin_ops.sql`).
+//! data-source counters (`0001_v1_baseline.sql`).
 
 use std::collections::HashMap;
 
@@ -82,7 +82,7 @@ impl HttpCacheIndex for PgCacheIndex {
     }
 }
 
-/// The counters of every process (migration `0024_admin_ops.sql`, DEC-247/326).
+/// The counters of every process (migration `0001_v1_baseline.sql`, DEC-247/326).
 #[derive(Clone)]
 pub struct PgSourceStats {
     pool: PgPool,

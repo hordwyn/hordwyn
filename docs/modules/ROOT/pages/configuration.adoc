@@ -69,7 +69,7 @@ Limits for every check of a password, a one-time code, a recovery code, a reset 
 |===
 |Key |Environment |Type |Default |Description
 
-|`api_key` |`APP__CONNECTORS__<ID>__API_KEY` |string |- |API key or token. Prefer `APP__CONNECTORS__<ID>__API_KEY`; `KK_<ID>_API_KEY` is read as a fallback.
+|`api_key` |`APP__CONNECTORS__<ID>__API_KEY` |string |- |API key or token. Prefer `APP__CONNECTORS__<ID>__API_KEY`; `SOURCE_<ID>_API_KEY` is read as a fallback.
 |`base_url` |`APP__CONNECTORS__<ID>__BASE_URL` |string |- |Override of the API base URL (tests, mirrors). Its host is added to the allowlist.
 |`enabled` |`APP__CONNECTORS__<ID>__ENABLED` |boolean |- |Compiled-in connectors are on unless switched off here.
 |===
@@ -100,7 +100,7 @@ Limits for every check of a password, a one-time code, a recovery code, a reset 
 |Key |Environment |Type |Default |Description
 
 |`hosting` |`APP__INSTANCE__HOSTING` |`home` \| `hosted` |`"home"` |`home` or `hosted`. When set here or in the environment the admin area shows it read-only; otherwise the setup wizard and Admin > Instance store it in the database.
-|`operator_contact` |`APP__INSTANCE__OPERATOR_CONTACT` |string |- |Contact of the person who runs the instance: an e-mail address (preferred) or an https URL, at most 200 characters. Sent in the `User-Agent` of requests to the data sources that ask clients to identify themselves (Open Library, Wikidata), to no other source; Wikidata is not asked without one. Short form: `KK_OPERATOR_CONTACT`. When set here or in the environment the admin area shows it read-only; otherwise Admin > Data sources stores it in the database.
+|`operator_contact` |`APP__INSTANCE__OPERATOR_CONTACT` |string |- |Contact of the person who runs the instance: an e-mail address (preferred) or an https URL, at most 200 characters. Sent in the `User-Agent` of requests to the data sources that ask clients to identify themselves (Open Library, Wikidata), to no other source; Wikidata is not asked without one. Short form: `SOURCE_OPERATOR_CONTACT`. When set here or in the environment the admin area shows it read-only; otherwise Admin > Data sources stores it in the database.
 |===
 
 == `[jobs]`
@@ -204,7 +204,6 @@ The `storage` section of the configuration (D-8).
 |`backend` |`APP__STORAGE__BACKEND` |`fs` \| `s3` \| `memory` |`"fs"` |
 |`fetch_policy` |`APP__STORAGE__FETCH_POLICY` |`lazy` \| `library` \| `eager` |`"library"` |Which images get bytes ahead of being requested (D-8).
 |`formats` |`APP__STORAGE__FORMATS` |list of `avif` \| `webp` |`["avif", "webp"]` |
-|`fs_legacy_root` |`APP__STORAGE__FS_LEGACY_ROOT` |string |- |fs only: the blob root of an earlier layout. At start the server moves its directories `up`, `img`, `http` and `orig` into `fs_root` unless `fs_root` has them already (the container image sets `/data`: its blobs used to lie around the secrets key). The admin CLI never moves them: its storage commands refuse to run until the server has.
 |`fs_root` |`APP__STORAGE__FS_ROOT` |string |`"data/blobs"` |Root directory of the fs backend.
 |`high_watermark` |`APP__STORAGE__HIGH_WATERMARK` |number |`0.9` |Start evicting above this fraction of the cap.
 |`http_cache_max_bytes` |`APP__STORAGE__HTTP_CACHE_MAX_BYTES` |string |`"2GiB"` |Limit for raw provider responses kept by the HTTP cache.

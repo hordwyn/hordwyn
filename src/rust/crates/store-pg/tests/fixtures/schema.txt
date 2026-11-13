@@ -1,0 +1,1496 @@
+== postgres
+major 18
+== extensions
+pg_trgm
+== types
+== domain constraints
+== tables
+admin_audit r
+assets r
+auth_sessions r
+catalog_episode_seasons r
+catalog_episodes r
+catalog_items r
+catalog_match_log r
+catalog_watchers r
+companions r
+connector_credentials r
+credentials r
+cron_schedules r
+entry_tags r
+external_ids r
+game_group_members r
+game_groups r
+goals r
+health_probes r
+http_cache r
+import_rows r
+imports r
+instance_settings r
+integrations r
+invites r
+jobs r
+library_entries r
+link_requests r
+list_items r
+lists r
+notify_channels r
+notify_deliveries r
+notify_inbox r
+notify_subscriptions r
+notify_templates r
+oidc_identities r
+oidc_providers r
+oidc_used_jti r
+oidc_used_states r
+outbox r
+password_resets r
+progress_events r
+reviews r
+search_docs r
+secrets_keys r
+session_participants r
+session_secrets r
+sessions r
+signup_invites r
+source_licences r
+source_pace r
+source_stats r
+source_stats_hours r
+source_switches r
+stats_dirty r
+stats_item_months r
+stats_months r
+stats_users r
+storage_ops r
+stored_objects r
+totp_recovery_codes r
+usage_funnel_daily r
+user_change_seq r
+user_changes r
+user_disabled r
+users r
+== columns
+admin_audit.id uuid not null
+admin_audit.at timestamp with time zone not null
+admin_audit.actor_id uuid
+admin_audit.actor_kind text not null
+admin_audit.actor_name text
+admin_audit.action text not null
+admin_audit.target_type text
+admin_audit.target_id text
+admin_audit.detail jsonb not null default '{}'::jsonb
+admin_audit.client_addr text
+admin_audit.request_id text
+assets.id uuid not null
+assets.kind text not null
+assets.source_url text
+assets.connector text
+assets.hash text
+assets.width integer
+assets.height integer
+assets.thumbhash bytea
+assets.dominant_color text
+assets.pins integer not null default 0
+assets.owner_id uuid
+assets.priority text not null
+assets.failed boolean not null default false
+assets.created_at timestamp with time zone not null
+auth_sessions.token_hash text not null
+auth_sessions.user_id uuid not null
+auth_sessions.created_at timestamp with time zone not null
+auth_sessions.last_seen_at timestamp with time zone not null
+auth_sessions.expires_at timestamp with time zone not null
+auth_sessions.reauth_at timestamp with time zone
+auth_sessions.reauth_method text
+auth_sessions.reauth_slide_at timestamp with time zone
+auth_sessions.provider_id uuid
+auth_sessions.oidc_sid text
+catalog_episode_seasons.item_id uuid not null
+catalog_episode_seasons.season integer not null
+catalog_episode_seasons.connector text not null
+catalog_episode_seasons.episode_count integer not null
+catalog_episode_seasons.air_date date
+catalog_episode_seasons.fetched_at timestamp with time zone not null
+catalog_episodes.item_id uuid not null
+catalog_episodes.season integer not null
+catalog_episodes.number integer not null
+catalog_episodes.air_date date
+catalog_episodes.runtime_minutes integer
+catalog_items.id uuid not null
+catalog_items.kind text not null
+catalog_items.title text not null
+catalog_items.original_title text
+catalog_items.year integer
+catalog_items.description text
+catalog_items.cover_asset text
+catalog_items.attributes jsonb not null default '{}'::jsonb
+catalog_items.state text not null
+catalog_items.fetched_at timestamp with time zone
+catalog_items.fresh_until timestamp with time zone
+catalog_items.updated_at timestamp with time zone not null default now()
+catalog_items.cover_url text
+catalog_items.provenance jsonb not null default '{}'::jsonb
+catalog_items.provider_data_at timestamp with time zone
+catalog_items.provider_refetch_after timestamp with time zone
+catalog_items.popularity double precision
+catalog_match_log.id bigint not null identity always
+catalog_match_log.matched_at timestamp with time zone not null default now()
+catalog_match_log.item_id uuid not null
+catalog_match_log.source text not null
+catalog_match_log.external_id text not null
+catalog_match_log.before jsonb not null
+catalog_watchers.item_id uuid not null
+catalog_watchers.user_id uuid not null
+catalog_watchers.until timestamp with time zone not null
+companions.id uuid not null
+companions.owner_id uuid not null
+companions.name text not null
+companions.avatar_asset text
+companions.notes text
+companions.linked_user uuid
+companions.snapshot jsonb
+companions.is_self boolean not null default false
+companions.merged_into uuid
+companions.created_at timestamp with time zone not null
+companions.merge_record jsonb
+companions.removed_at timestamp with time zone
+connector_credentials.id uuid not null
+connector_credentials.connector_id text not null
+connector_credentials.scope text not null
+connector_credentials.user_id uuid
+connector_credentials.secret bytea not null
+connector_credentials.created_by uuid
+connector_credentials.created_at timestamp with time zone not null
+connector_credentials.last_tested_at timestamp with time zone
+connector_credentials.last_result text
+credentials.user_id uuid not null
+credentials.password_hash text
+credentials.totp_secret bytea
+credentials.totp_enabled boolean not null default false
+credentials.totp_last_step bigint
+credentials.totp_secret_enc bytea
+cron_schedules.name text not null
+cron_schedules.schedule text not null
+cron_schedules.lane smallint not null
+cron_schedules.kind text not null
+cron_schedules.payload jsonb not null default 'null'::jsonb
+cron_schedules.next_run_at timestamp with time zone not null
+entry_tags.entry_id uuid not null
+entry_tags.user_id uuid not null
+entry_tags.tag text not null
+entry_tags.tag_key text not null
+external_ids.item_id uuid not null
+external_ids.kind text not null
+external_ids.namespace text not null
+external_ids.value text not null
+game_group_members.group_id uuid not null
+game_group_members.companion_id uuid not null
+game_group_members.position integer not null
+game_groups.id uuid not null
+game_groups.owner_id uuid not null
+game_groups.name text not null
+game_groups.removed_at timestamp with time zone
+game_groups.created_at timestamp with time zone not null
+goals.id uuid not null
+goals.user_id uuid not null
+goals.year integer not null
+goals.kind_group text not null
+goals.metric text not null
+goals.target integer not null
+goals.created_at timestamp with time zone not null
+health_probes.id text not null
+health_probes.status text not null
+health_probes.detail text not null
+health_probes.args jsonb not null default '{}'::jsonb
+health_probes.checked_at timestamp with time zone not null
+http_cache.key text not null
+http_cache.entry jsonb not null
+http_cache.fresh_until timestamp with time zone not null
+import_rows.user_id uuid not null
+import_rows.format text not null
+import_rows.source_id text not null
+import_rows.item_id uuid not null
+imports.id uuid not null
+imports.user_id uuid not null
+imports.record jsonb not null
+imports.updated_at timestamp with time zone not null
+imports.cancel_requested boolean not null default false
+instance_settings.id boolean not null default true
+instance_settings.hosting text
+instance_settings.signup text
+instance_settings.session_days integer
+instance_settings.secure_cookies boolean
+instance_settings.storage_max_total_bytes bigint
+instance_settings.storage_high_watermark double precision
+instance_settings.storage_low_watermark double precision
+instance_settings.setup_completed_at timestamp with time zone
+instance_settings.setup_step text
+instance_settings.updated_at timestamp with time zone
+instance_settings.updated_by uuid
+instance_settings.mail_host text
+instance_settings.mail_port integer
+instance_settings.mail_security text
+instance_settings.mail_username text
+instance_settings.mail_from text
+instance_settings.mail_password bytea
+instance_settings.mail_last_test_at timestamp with time zone
+instance_settings.mail_last_test_result text
+instance_settings.sign_in_mode text
+instance_settings.usage_funnel boolean
+instance_settings.operator_contact text
+integrations.id uuid not null
+integrations.user_id uuid not null
+integrations.name text not null
+integrations.token_hash text not null
+integrations.created_at timestamp with time zone not null
+integrations.last_seen_at timestamp with time zone
+integrations.last_error text
+integrations.last_status smallint
+integrations.last_error_field text
+integrations.last_payload text
+integrations.last_item_id uuid
+integrations.last_item_title text
+invites.id uuid not null
+invites.companion_id uuid not null
+invites.invited_by uuid not null
+invites.email text
+invites.token_hash text not null
+invites.state text not null
+invites.expires_at timestamp with time zone not null
+invites.created_at timestamp with time zone not null
+jobs.id uuid not null
+jobs.lane smallint not null
+jobs.kind text not null
+jobs.payload jsonb not null default 'null'::jsonb
+jobs.dedupe_key text
+jobs.priority smallint not null default 0
+jobs.state text not null default 'queued'::text
+jobs.run_at timestamp with time zone not null default now()
+jobs.attempts integer not null default 0
+jobs.max_attempts integer not null default 5
+jobs.locked_until timestamp with time zone
+jobs.last_error text
+jobs.created_at timestamp with time zone not null default now()
+jobs.updated_at timestamp with time zone not null default now()
+library_entries.id uuid not null
+library_entries.user_id uuid not null
+library_entries.item_id uuid not null
+library_entries.kind text not null
+library_entries.status text not null
+library_entries.status_hlc text not null
+library_entries.rating smallint
+library_entries.rating_hlc text not null
+library_entries.notes text
+library_entries.notes_hlc text not null
+library_entries.added_at timestamp with time zone not null
+library_entries.last_event_at timestamp with time zone
+library_entries.plays integer not null default 0
+library_entries.completed_at timestamp with time zone
+library_entries.completed_undated boolean not null default false
+link_requests.id uuid not null
+link_requests.companion_id uuid not null
+link_requests.from_user uuid not null
+link_requests.to_user uuid not null
+link_requests.state text not null
+link_requests.created_at timestamp with time zone not null
+list_items.list_id uuid not null
+list_items.item_id uuid not null
+list_items.position integer not null
+list_items.note text
+list_items.added_at timestamp with time zone not null
+lists.id uuid not null
+lists.owner_id uuid not null
+lists.name text not null
+lists.description text
+lists.visibility jsonb not null
+lists.created_at timestamp with time zone not null
+lists.updated_at timestamp with time zone not null
+notify_channels.id uuid not null
+notify_channels.user_id uuid not null
+notify_channels.name text not null
+notify_channels.config jsonb not null
+notify_channels.enabled boolean not null
+notify_channels.created_at timestamp with time zone not null
+notify_channels.secret bytea
+notify_deliveries.id uuid not null
+notify_deliveries.user_id uuid not null
+notify_deliveries.channel_id uuid not null
+notify_deliveries.event text not null
+notify_deliveries.dedupe_key text not null
+notify_deliveries.title text not null
+notify_deliveries.body text not null
+notify_deliveries.link text
+notify_deliveries.state text not null
+notify_deliveries.attempts integer not null
+notify_deliveries.last_error text
+notify_deliveries.due_at timestamp with time zone not null
+notify_deliveries.created_at timestamp with time zone not null
+notify_deliveries.sent_at timestamp with time zone
+notify_inbox.id uuid not null
+notify_inbox.user_id uuid not null
+notify_inbox.event text not null
+notify_inbox.dedupe_key text not null
+notify_inbox.title text not null
+notify_inbox.body text not null
+notify_inbox.link text
+notify_inbox.created_at timestamp with time zone not null
+notify_inbox.read_at timestamp with time zone
+notify_subscriptions.id uuid not null
+notify_subscriptions.user_id uuid
+notify_subscriptions.event text not null
+notify_subscriptions.filter jsonb not null
+notify_subscriptions.targets jsonb not null
+notify_subscriptions.mode jsonb not null
+notify_subscriptions.quiet_hours jsonb
+notify_subscriptions.timezone text not null
+notify_subscriptions.rate_limit_per_hour integer
+notify_subscriptions.enabled boolean not null
+notify_subscriptions.locked boolean not null
+notify_templates.locale text not null
+notify_templates.key text not null
+notify_templates.text text not null
+oidc_identities.issuer text not null
+oidc_identities.subject text not null
+oidc_identities.user_id uuid not null
+oidc_identities.id uuid not null default gen_random_uuid()
+oidc_identities.provider_id uuid
+oidc_identities.sid text
+oidc_identities.linked_at timestamp with time zone not null default now()
+oidc_identities.last_claims_hash text
+oidc_identities.last_groups text[]
+oidc_providers.id uuid not null
+oidc_providers.slug text not null
+oidc_providers.display_name text not null
+oidc_providers.issuer text not null
+oidc_providers.client_id text not null
+oidc_providers.client_secret bytea
+oidc_providers.scopes text[] not null
+oidc_providers.enabled boolean not null default true
+oidc_providers.is_default boolean not null default false
+oidc_providers.auto_create boolean not null default false
+oidc_providers.groups_claim text not null default 'groups'::text
+oidc_providers.allowed_groups text[] not null default '{}'::text[]
+oidc_providers.admin_groups text[] not null default '{}'::text[]
+oidc_providers.role_source text not null default 'local'::text
+oidc_providers.provenance text not null default 'db'::text
+oidc_providers.discovery jsonb
+oidc_providers.discovery_fetched_at timestamp with time zone
+oidc_providers.capabilities jsonb not null default '{}'::jsonb
+oidc_providers.last_test jsonb
+oidc_providers.last_test_at timestamp with time zone
+oidc_providers.last_callback_at timestamp with time zone
+oidc_providers.last_callback_result text
+oidc_providers.created_by uuid
+oidc_providers.updated_by uuid
+oidc_providers.created_at timestamp with time zone not null
+oidc_providers.updated_at timestamp with time zone not null
+oidc_used_jti.jti_key text not null
+oidc_used_jti.expires_at timestamp with time zone not null
+oidc_used_states.state_hash text not null
+oidc_used_states.expires_at timestamp with time zone not null
+outbox.id bigint not null default nextval('outbox_id_seq'::regclass)
+outbox.entity text not null
+outbox.entity_id uuid not null
+outbox.op text not null
+outbox.user_id uuid
+outbox.created_at timestamp with time zone not null default now()
+outbox.processed_at timestamp with time zone
+password_resets.id uuid not null
+password_resets.user_id uuid not null
+password_resets.token_hash text not null
+password_resets.created_at timestamp with time zone not null
+password_resets.expires_at timestamp with time zone not null
+password_resets.used_at timestamp with time zone
+password_resets.purpose text not null default 'password'::text
+password_resets.binding text
+progress_events.id uuid not null
+progress_events.user_id uuid not null
+progress_events.item_id uuid not null
+progress_events.occurred_at timestamp with time zone not null
+progress_events.progress jsonb not null
+progress_events.client_op_id uuid
+progress_events.recorded_at timestamp with time zone not null default now()
+progress_events.status_change jsonb
+progress_events.undoes uuid
+reviews.id uuid not null
+reviews.user_id uuid not null
+reviews.item_id uuid not null
+reviews.body text not null
+reviews.contains_spoilers boolean not null
+reviews.visibility jsonb not null
+reviews.created_at timestamp with time zone not null
+reviews.updated_at timestamp with time zone not null
+search_docs.index_name text not null
+search_docs.id text not null
+search_docs.owner_id uuid
+search_docs.fields jsonb not null
+search_docs.body text not null
+search_docs.tsv tsvector not null
+secrets_keys.version integer not null
+secrets_keys.first_seen_at timestamp with time zone not null
+secrets_keys.backup_confirmed_at timestamp with time zone
+session_participants.session_id uuid not null
+session_participants.companion_id uuid not null
+session_participants.position integer not null
+session_participants.score double precision
+session_participants.winner boolean not null default false
+session_participants.rank integer
+session_participants.team text
+session_participants.faction text
+session_participants.starting_player boolean not null default false
+session_participants.first_play boolean not null default false
+session_secrets.id uuid not null
+session_secrets.token_hash text not null
+session_secrets.kind text not null
+session_secrets.value bytea not null
+session_secrets.created_at timestamp with time zone not null
+sessions.id uuid not null
+sessions.owner_id uuid not null
+sessions.item_id uuid not null
+sessions.started_at timestamp with time zone not null
+sessions.duration_minutes integer
+sessions.location text
+sessions.notes text
+sessions.coop_outcome text
+sessions.incomplete boolean not null default false
+sessions.game_group_id uuid
+signup_invites.id uuid not null
+signup_invites.token_hash text not null
+signup_invites.email text
+signup_invites.note text
+signup_invites.created_by uuid
+signup_invites.created_at timestamp with time zone not null
+signup_invites.expires_at timestamp with time zone not null
+signup_invites.used_by uuid
+signup_invites.used_at timestamp with time zone
+signup_invites.revoked_at timestamp with time zone
+source_licences.connector_id text not null
+source_licences.agreement_on_file boolean not null
+source_licences.recorded_by uuid
+source_licences.recorded_at timestamp with time zone not null
+source_pace.source text not null
+source_pace.next_free timestamp with time zone not null
+source_stats.connector text not null
+source_stats.last_ok_at timestamp with time zone
+source_stats.last_error_at timestamp with time zone
+source_stats.last_error text
+source_stats.last_auth_status smallint
+source_stats.last_auth_failure_at timestamp with time zone
+source_stats.last_rate_limited_at timestamp with time zone
+source_stats.circuit_opened_at timestamp with time zone
+source_stats.circuit_open_until timestamp with time zone
+source_stats.key_changed_at timestamp with time zone
+source_stats_hours.connector text not null
+source_stats_hours.hour bigint not null
+source_stats_hours.calls bigint not null default 0
+source_stats_hours.rate_limited bigint not null default 0
+source_switches.connector_id text not null
+source_switches.enabled boolean not null
+source_switches.changed_by uuid
+source_switches.changed_at timestamp with time zone not null
+stats_dirty.user_id uuid not null
+stats_dirty.item_id uuid not null
+stats_dirty.gen bigint not null default nextval('stats_dirty_gen'::regclass)
+stats_item_months.user_id uuid not null
+stats_item_months.item_id uuid not null
+stats_item_months.kind text not null
+stats_item_months.month text not null
+stats_item_months.events bigint not null
+stats_item_months.completions bigint not null
+stats_item_months.finished bigint not null
+stats_item_months.episodes bigint not null
+stats_item_months.pages bigint not null
+stats_item_months.plays bigint not null
+stats_item_months.seconds bigint not null
+stats_months.user_id uuid not null
+stats_months.kind text not null
+stats_months.month text not null
+stats_months.events bigint not null
+stats_months.completions bigint not null
+stats_months.finished bigint not null
+stats_months.episodes bigint not null
+stats_months.pages bigint not null
+stats_months.plays bigint not null
+stats_months.seconds bigint not null
+stats_users.user_id uuid not null
+stats_users.zone text not null
+stats_users.bucket_zone text not null default 'UTC'::text
+storage_ops.day date not null
+storage_ops.puts bigint not null default 0
+storage_ops.gets bigint not null default 0
+storage_ops.deletes bigint not null default 0
+storage_ops.egress_bytes bigint not null default 0
+stored_objects.key text not null
+stored_objects.class text not null
+stored_objects.tier text not null
+stored_objects.bytes bigint not null
+stored_objects.owner_id uuid
+stored_objects.asset_id uuid
+stored_objects.priority text not null
+stored_objects.last_accessed timestamp with time zone not null
+totp_recovery_codes.id uuid not null
+totp_recovery_codes.user_id uuid not null
+totp_recovery_codes.code_hash text not null
+totp_recovery_codes.created_at timestamp with time zone not null
+totp_recovery_codes.used_at timestamp with time zone
+usage_funnel_daily.day date not null
+usage_funnel_daily.flow text not null
+usage_funnel_daily.subject text not null default ''::text
+usage_funnel_daily.outcome text not null
+usage_funnel_daily.taps_bucket text not null default ''::text
+usage_funnel_daily.ms_bucket text not null default ''::text
+usage_funnel_daily.n bigint not null default 0
+user_change_seq.user_id uuid not null
+user_change_seq.last_seq bigint not null
+user_changes.user_id uuid not null
+user_changes.seq bigint not null
+user_changes.entity text not null
+user_changes.entity_id uuid not null
+user_changes.op text not null
+user_changes.at timestamp with time zone not null default now()
+user_disabled.user_id uuid not null
+user_disabled.disabled_by uuid
+user_disabled.disabled_at timestamp with time zone not null
+users.id uuid not null
+users.username text not null
+users.display_name text not null
+users.email text
+users.role text not null
+users.self_companion uuid not null
+users.created_at timestamp with time zone not null
+users.share_sessions boolean not null default true
+users.locale text
+users.time_zone text
+== constraints
+admin_audit admin_audit_action_not_null NOT NULL action
+admin_audit admin_audit_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
+admin_audit admin_audit_actor_kind_check CHECK ((actor_kind = ANY (ARRAY['user'::text, 'system'::text, 'cli'::text])))
+admin_audit admin_audit_actor_kind_not_null NOT NULL actor_kind
+admin_audit admin_audit_at_not_null NOT NULL at
+admin_audit admin_audit_detail_not_null NOT NULL detail
+admin_audit admin_audit_id_not_null NOT NULL id
+admin_audit admin_audit_pkey PRIMARY KEY (id)
+assets assets_created_at_not_null NOT NULL created_at
+assets assets_failed_not_null NOT NULL failed
+assets assets_hash_key UNIQUE (hash)
+assets assets_id_not_null NOT NULL id
+assets assets_kind_check CHECK ((kind = ANY (ARRAY['cover'::text, 'backdrop'::text, 'person'::text, 'avatar'::text, 'upload'::text])))
+assets assets_kind_not_null NOT NULL kind
+assets assets_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE SET NULL
+assets assets_pins_check CHECK ((pins >= 0))
+assets assets_pins_not_null NOT NULL pins
+assets assets_pkey PRIMARY KEY (id)
+assets assets_priority_check CHECK ((priority = ANY (ARRAY['visible'::text, 'library'::text, 'related'::text, 'catalog'::text])))
+assets assets_priority_not_null NOT NULL priority
+assets assets_source_url_key UNIQUE (source_url)
+auth_sessions auth_sessions_created_at_not_null NOT NULL created_at
+auth_sessions auth_sessions_expires_at_not_null NOT NULL expires_at
+auth_sessions auth_sessions_last_seen_at_not_null NOT NULL last_seen_at
+auth_sessions auth_sessions_pkey PRIMARY KEY (token_hash)
+auth_sessions auth_sessions_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES oidc_providers(id) ON DELETE SET NULL
+auth_sessions auth_sessions_token_hash_not_null NOT NULL token_hash
+auth_sessions auth_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+auth_sessions auth_sessions_user_id_not_null NOT NULL user_id
+catalog_episode_seasons catalog_episode_seasons_connector_not_null NOT NULL connector
+catalog_episode_seasons catalog_episode_seasons_episode_count_check CHECK ((episode_count >= 0))
+catalog_episode_seasons catalog_episode_seasons_episode_count_not_null NOT NULL episode_count
+catalog_episode_seasons catalog_episode_seasons_fetched_at_not_null NOT NULL fetched_at
+catalog_episode_seasons catalog_episode_seasons_item_id_fkey FOREIGN KEY (item_id) REFERENCES catalog_items(id) ON DELETE CASCADE
+catalog_episode_seasons catalog_episode_seasons_item_id_not_null NOT NULL item_id
+catalog_episode_seasons catalog_episode_seasons_pkey PRIMARY KEY (item_id, season)
+catalog_episode_seasons catalog_episode_seasons_season_check CHECK ((season > 0))
+catalog_episode_seasons catalog_episode_seasons_season_not_null NOT NULL season
+catalog_episodes catalog_episodes_item_id_not_null NOT NULL item_id
+catalog_episodes catalog_episodes_item_id_season_fkey FOREIGN KEY (item_id, season) REFERENCES catalog_episode_seasons(item_id, season) ON DELETE CASCADE
+catalog_episodes catalog_episodes_number_check CHECK ((number > 0))
+catalog_episodes catalog_episodes_number_not_null NOT NULL number
+catalog_episodes catalog_episodes_pkey PRIMARY KEY (item_id, season, number)
+catalog_episodes catalog_episodes_runtime_minutes_check CHECK ((runtime_minutes > 0))
+catalog_episodes catalog_episodes_season_not_null NOT NULL season
+catalog_items catalog_items_attributes_not_null NOT NULL attributes
+catalog_items catalog_items_id_not_null NOT NULL id
+catalog_items catalog_items_kind_not_null NOT NULL kind
+catalog_items catalog_items_pkey PRIMARY KEY (id)
+catalog_items catalog_items_provenance_not_null NOT NULL provenance
+catalog_items catalog_items_state_check CHECK ((state = ANY (ARRAY['stub'::text, 'partial'::text, 'full'::text, 'failed'::text])))
+catalog_items catalog_items_state_not_null NOT NULL state
+catalog_items catalog_items_title_not_null NOT NULL title
+catalog_items catalog_items_updated_at_not_null NOT NULL updated_at
+catalog_match_log catalog_match_log_before_not_null NOT NULL before
+catalog_match_log catalog_match_log_external_id_not_null NOT NULL external_id
+catalog_match_log catalog_match_log_id_not_null NOT NULL id
+catalog_match_log catalog_match_log_item_id_not_null NOT NULL item_id
+catalog_match_log catalog_match_log_matched_at_not_null NOT NULL matched_at
+catalog_match_log catalog_match_log_pkey PRIMARY KEY (id)
+catalog_match_log catalog_match_log_source_not_null NOT NULL source
+catalog_watchers catalog_watchers_item_id_fkey FOREIGN KEY (item_id) REFERENCES catalog_items(id) ON DELETE CASCADE
+catalog_watchers catalog_watchers_item_id_not_null NOT NULL item_id
+catalog_watchers catalog_watchers_pkey PRIMARY KEY (item_id, user_id)
+catalog_watchers catalog_watchers_until_not_null NOT NULL until
+catalog_watchers catalog_watchers_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+catalog_watchers catalog_watchers_user_id_not_null NOT NULL user_id
+companions companions_created_at_not_null NOT NULL created_at
+companions companions_id_not_null NOT NULL id
+companions companions_is_self_not_null NOT NULL is_self
+companions companions_linked_user_fkey FOREIGN KEY (linked_user) REFERENCES users(id) ON DELETE SET NULL
+companions companions_merged_into_fkey FOREIGN KEY (merged_into) REFERENCES companions(id) ON DELETE SET NULL
+companions companions_name_not_null NOT NULL name
+companions companions_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+companions companions_owner_id_not_null NOT NULL owner_id
+companions companions_pkey PRIMARY KEY (id)
+connector_credentials connector_credentials_check CHECK (((scope = 'user'::text) = (user_id IS NOT NULL)))
+connector_credentials connector_credentials_connector_id_not_null NOT NULL connector_id
+connector_credentials connector_credentials_created_at_not_null NOT NULL created_at
+connector_credentials connector_credentials_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+connector_credentials connector_credentials_id_not_null NOT NULL id
+connector_credentials connector_credentials_pkey PRIMARY KEY (id)
+connector_credentials connector_credentials_scope_check CHECK ((scope = ANY (ARRAY['instance'::text, 'user'::text])))
+connector_credentials connector_credentials_scope_not_null NOT NULL scope
+connector_credentials connector_credentials_secret_not_null NOT NULL secret
+connector_credentials connector_credentials_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+credentials credentials_pkey PRIMARY KEY (user_id)
+credentials credentials_totp_enabled_not_null NOT NULL totp_enabled
+credentials credentials_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+credentials credentials_user_id_not_null NOT NULL user_id
+cron_schedules cron_schedules_kind_not_null NOT NULL kind
+cron_schedules cron_schedules_lane_check CHECK (((lane >= 0) AND (lane <= 3)))
+cron_schedules cron_schedules_lane_not_null NOT NULL lane
+cron_schedules cron_schedules_name_not_null NOT NULL name
+cron_schedules cron_schedules_next_run_at_not_null NOT NULL next_run_at
+cron_schedules cron_schedules_payload_not_null NOT NULL payload
+cron_schedules cron_schedules_pkey PRIMARY KEY (name)
+cron_schedules cron_schedules_schedule_not_null NOT NULL schedule
+entry_tags entry_tags_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES library_entries(id) ON DELETE CASCADE
+entry_tags entry_tags_entry_id_not_null NOT NULL entry_id
+entry_tags entry_tags_pkey PRIMARY KEY (entry_id, tag_key)
+entry_tags entry_tags_tag_key_not_null NOT NULL tag_key
+entry_tags entry_tags_tag_not_null NOT NULL tag
+entry_tags entry_tags_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+entry_tags entry_tags_user_id_not_null NOT NULL user_id
+external_ids external_ids_item_id_fkey FOREIGN KEY (item_id) REFERENCES catalog_items(id) ON DELETE CASCADE
+external_ids external_ids_item_id_not_null NOT NULL item_id
+external_ids external_ids_kind_not_null NOT NULL kind
+external_ids external_ids_namespace_not_null NOT NULL namespace
+external_ids external_ids_pkey PRIMARY KEY (kind, namespace, value)
+external_ids external_ids_value_not_null NOT NULL value
+game_group_members game_group_members_companion_id_fkey FOREIGN KEY (companion_id) REFERENCES companions(id) ON DELETE CASCADE
+game_group_members game_group_members_companion_id_not_null NOT NULL companion_id
+game_group_members game_group_members_group_id_fkey FOREIGN KEY (group_id) REFERENCES game_groups(id) ON DELETE CASCADE
+game_group_members game_group_members_group_id_not_null NOT NULL group_id
+game_group_members game_group_members_pkey PRIMARY KEY (group_id, companion_id)
+game_group_members game_group_members_position_not_null NOT NULL "position"
+game_groups game_groups_created_at_not_null NOT NULL created_at
+game_groups game_groups_id_not_null NOT NULL id
+game_groups game_groups_name_not_null NOT NULL name
+game_groups game_groups_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+game_groups game_groups_owner_id_not_null NOT NULL owner_id
+game_groups game_groups_pkey PRIMARY KEY (id)
+goals goals_created_at_not_null NOT NULL created_at
+goals goals_id_not_null NOT NULL id
+goals goals_kind_group_not_null NOT NULL kind_group
+goals goals_metric_check CHECK ((metric = ANY (ARRAY['completions'::text, 'finished'::text, 'episodes'::text, 'pages'::text, 'plays'::text, 'minutes'::text])))
+goals goals_metric_not_null NOT NULL metric
+goals goals_pkey PRIMARY KEY (id)
+goals goals_target_check CHECK ((target > 0))
+goals goals_target_not_null NOT NULL target
+goals goals_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+goals goals_user_id_not_null NOT NULL user_id
+goals goals_user_id_year_kind_group_metric_key UNIQUE (user_id, year, kind_group, metric)
+goals goals_year_check CHECK (((year >= 2000) AND (year <= 2100)))
+goals goals_year_not_null NOT NULL year
+health_probes health_probes_args_not_null NOT NULL args
+health_probes health_probes_checked_at_not_null NOT NULL checked_at
+health_probes health_probes_detail_not_null NOT NULL detail
+health_probes health_probes_id_not_null NOT NULL id
+health_probes health_probes_pkey PRIMARY KEY (id)
+health_probes health_probes_status_not_null NOT NULL status
+http_cache http_cache_entry_not_null NOT NULL entry
+http_cache http_cache_fresh_until_not_null NOT NULL fresh_until
+http_cache http_cache_key_not_null NOT NULL key
+http_cache http_cache_pkey PRIMARY KEY (key)
+import_rows import_rows_format_not_null NOT NULL format
+import_rows import_rows_item_id_fkey FOREIGN KEY (item_id) REFERENCES catalog_items(id) ON DELETE CASCADE
+import_rows import_rows_item_id_not_null NOT NULL item_id
+import_rows import_rows_pkey PRIMARY KEY (user_id, format, source_id)
+import_rows import_rows_source_id_not_null NOT NULL source_id
+import_rows import_rows_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+import_rows import_rows_user_id_not_null NOT NULL user_id
+imports imports_cancel_requested_not_null NOT NULL cancel_requested
+imports imports_id_not_null NOT NULL id
+imports imports_pkey PRIMARY KEY (id)
+imports imports_record_not_null NOT NULL record
+imports imports_updated_at_not_null NOT NULL updated_at
+imports imports_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+imports imports_user_id_not_null NOT NULL user_id
+instance_settings instance_settings_hosting_check CHECK ((hosting = ANY (ARRAY['home'::text, 'hosted'::text])))
+instance_settings instance_settings_id_check CHECK (id)
+instance_settings instance_settings_id_not_null NOT NULL id
+instance_settings instance_settings_mail_port_check CHECK (((mail_port >= 1) AND (mail_port <= 65535)))
+instance_settings instance_settings_mail_security_check CHECK ((mail_security = ANY (ARRAY['tls'::text, 'starttls'::text, 'none'::text])))
+instance_settings instance_settings_operator_contact_check CHECK (((operator_contact IS NULL) OR ((char_length(operator_contact) >= 1) AND (char_length(operator_contact) <= 200))))
+instance_settings instance_settings_pkey PRIMARY KEY (id)
+instance_settings instance_settings_session_days_check CHECK ((session_days > 0))
+instance_settings instance_settings_sign_in_mode_check CHECK ((sign_in_mode = ANY (ARRAY['page'::text, 'auto'::text])))
+instance_settings instance_settings_signup_check CHECK ((signup = ANY (ARRAY['open'::text, 'invite'::text, 'closed'::text])))
+instance_settings instance_settings_storage_max_total_bytes_check CHECK ((storage_max_total_bytes > 0))
+instance_settings instance_settings_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+integrations integrations_created_at_not_null NOT NULL created_at
+integrations integrations_id_not_null NOT NULL id
+integrations integrations_last_item_id_fkey FOREIGN KEY (last_item_id) REFERENCES catalog_items(id) ON DELETE SET NULL
+integrations integrations_last_payload_check CHECK ((octet_length(last_payload) <= 4096))
+integrations integrations_name_not_null NOT NULL name
+integrations integrations_pkey PRIMARY KEY (id)
+integrations integrations_token_hash_key UNIQUE (token_hash)
+integrations integrations_token_hash_not_null NOT NULL token_hash
+integrations integrations_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+integrations integrations_user_id_not_null NOT NULL user_id
+invites invites_companion_id_fkey FOREIGN KEY (companion_id) REFERENCES companions(id) ON DELETE CASCADE
+invites invites_companion_id_not_null NOT NULL companion_id
+invites invites_created_at_not_null NOT NULL created_at
+invites invites_expires_at_not_null NOT NULL expires_at
+invites invites_id_not_null NOT NULL id
+invites invites_invited_by_fkey FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE CASCADE
+invites invites_invited_by_not_null NOT NULL invited_by
+invites invites_pkey PRIMARY KEY (id)
+invites invites_state_check CHECK ((state = ANY (ARRAY['pending'::text, 'accepted'::text, 'declined'::text, 'cancelled'::text])))
+invites invites_state_not_null NOT NULL state
+invites invites_token_hash_key UNIQUE (token_hash)
+invites invites_token_hash_not_null NOT NULL token_hash
+jobs jobs_attempts_not_null NOT NULL attempts
+jobs jobs_created_at_not_null NOT NULL created_at
+jobs jobs_id_not_null NOT NULL id
+jobs jobs_kind_not_null NOT NULL kind
+jobs jobs_lane_check CHECK (((lane >= 0) AND (lane <= 3)))
+jobs jobs_lane_not_null NOT NULL lane
+jobs jobs_max_attempts_not_null NOT NULL max_attempts
+jobs jobs_payload_not_null NOT NULL payload
+jobs jobs_pkey PRIMARY KEY (id)
+jobs jobs_priority_not_null NOT NULL priority
+jobs jobs_run_at_not_null NOT NULL run_at
+jobs jobs_state_check CHECK ((state = ANY (ARRAY['queued'::text, 'running'::text, 'done'::text, 'dead'::text])))
+jobs jobs_state_not_null NOT NULL state
+jobs jobs_updated_at_not_null NOT NULL updated_at
+library_entries library_entries_added_at_not_null NOT NULL added_at
+library_entries library_entries_completed_undated_not_null NOT NULL completed_undated
+library_entries library_entries_completion CHECK ((NOT (completed_undated AND (completed_at IS NOT NULL))))
+library_entries library_entries_id_not_null NOT NULL id
+library_entries library_entries_item_id_fkey FOREIGN KEY (item_id) REFERENCES catalog_items(id)
+library_entries library_entries_item_id_not_null NOT NULL item_id
+library_entries library_entries_kind_not_null NOT NULL kind
+library_entries library_entries_notes_hlc_not_null NOT NULL notes_hlc
+library_entries library_entries_pkey PRIMARY KEY (id)
+library_entries library_entries_plays_not_null NOT NULL plays
+library_entries library_entries_rating_check CHECK (((rating >= 0) AND (rating <= 100)))
+library_entries library_entries_rating_hlc_not_null NOT NULL rating_hlc
+library_entries library_entries_status_hlc_not_null NOT NULL status_hlc
+library_entries library_entries_status_not_null NOT NULL status
+library_entries library_entries_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+library_entries library_entries_user_id_item_id_key UNIQUE (user_id, item_id)
+library_entries library_entries_user_id_not_null NOT NULL user_id
+link_requests link_requests_companion_id_fkey FOREIGN KEY (companion_id) REFERENCES companions(id) ON DELETE CASCADE
+link_requests link_requests_companion_id_not_null NOT NULL companion_id
+link_requests link_requests_created_at_not_null NOT NULL created_at
+link_requests link_requests_from_user_fkey FOREIGN KEY (from_user) REFERENCES users(id) ON DELETE CASCADE
+link_requests link_requests_from_user_not_null NOT NULL from_user
+link_requests link_requests_id_not_null NOT NULL id
+link_requests link_requests_pkey PRIMARY KEY (id)
+link_requests link_requests_state_check CHECK ((state = ANY (ARRAY['pending'::text, 'accepted'::text, 'declined'::text, 'cancelled'::text])))
+link_requests link_requests_state_not_null NOT NULL state
+link_requests link_requests_to_user_fkey FOREIGN KEY (to_user) REFERENCES users(id) ON DELETE CASCADE
+link_requests link_requests_to_user_not_null NOT NULL to_user
+list_items list_items_added_at_not_null NOT NULL added_at
+list_items list_items_item_id_fkey FOREIGN KEY (item_id) REFERENCES catalog_items(id)
+list_items list_items_item_id_not_null NOT NULL item_id
+list_items list_items_list_id_fkey FOREIGN KEY (list_id) REFERENCES lists(id) ON DELETE CASCADE
+list_items list_items_list_id_not_null NOT NULL list_id
+list_items list_items_pkey PRIMARY KEY (list_id, item_id)
+list_items list_items_position_not_null NOT NULL "position"
+lists lists_created_at_not_null NOT NULL created_at
+lists lists_id_not_null NOT NULL id
+lists lists_name_not_null NOT NULL name
+lists lists_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+lists lists_owner_id_not_null NOT NULL owner_id
+lists lists_pkey PRIMARY KEY (id)
+lists lists_updated_at_not_null NOT NULL updated_at
+lists lists_visibility_not_null NOT NULL visibility
+notify_channels notify_channels_config_not_null NOT NULL config
+notify_channels notify_channels_created_at_not_null NOT NULL created_at
+notify_channels notify_channels_enabled_not_null NOT NULL enabled
+notify_channels notify_channels_id_not_null NOT NULL id
+notify_channels notify_channels_name_not_null NOT NULL name
+notify_channels notify_channels_pkey PRIMARY KEY (id)
+notify_channels notify_channels_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+notify_channels notify_channels_user_id_not_null NOT NULL user_id
+notify_deliveries notify_deliveries_attempts_not_null NOT NULL attempts
+notify_deliveries notify_deliveries_body_not_null NOT NULL body
+notify_deliveries notify_deliveries_channel_id_event_dedupe_key_key UNIQUE (channel_id, event, dedupe_key)
+notify_deliveries notify_deliveries_channel_id_fkey FOREIGN KEY (channel_id) REFERENCES notify_channels(id) ON DELETE CASCADE
+notify_deliveries notify_deliveries_channel_id_not_null NOT NULL channel_id
+notify_deliveries notify_deliveries_created_at_not_null NOT NULL created_at
+notify_deliveries notify_deliveries_dedupe_key_not_null NOT NULL dedupe_key
+notify_deliveries notify_deliveries_due_at_not_null NOT NULL due_at
+notify_deliveries notify_deliveries_event_not_null NOT NULL event
+notify_deliveries notify_deliveries_id_not_null NOT NULL id
+notify_deliveries notify_deliveries_pkey PRIMARY KEY (id)
+notify_deliveries notify_deliveries_state_not_null NOT NULL state
+notify_deliveries notify_deliveries_title_not_null NOT NULL title
+notify_deliveries notify_deliveries_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+notify_deliveries notify_deliveries_user_id_not_null NOT NULL user_id
+notify_inbox notify_inbox_body_not_null NOT NULL body
+notify_inbox notify_inbox_created_at_not_null NOT NULL created_at
+notify_inbox notify_inbox_dedupe_key_not_null NOT NULL dedupe_key
+notify_inbox notify_inbox_event_not_null NOT NULL event
+notify_inbox notify_inbox_id_not_null NOT NULL id
+notify_inbox notify_inbox_pkey PRIMARY KEY (id)
+notify_inbox notify_inbox_title_not_null NOT NULL title
+notify_inbox notify_inbox_user_id_event_dedupe_key_key UNIQUE (user_id, event, dedupe_key)
+notify_inbox notify_inbox_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+notify_inbox notify_inbox_user_id_not_null NOT NULL user_id
+notify_subscriptions notify_subscriptions_enabled_not_null NOT NULL enabled
+notify_subscriptions notify_subscriptions_event_not_null NOT NULL event
+notify_subscriptions notify_subscriptions_filter_not_null NOT NULL filter
+notify_subscriptions notify_subscriptions_id_not_null NOT NULL id
+notify_subscriptions notify_subscriptions_locked_not_null NOT NULL locked
+notify_subscriptions notify_subscriptions_mode_not_null NOT NULL mode
+notify_subscriptions notify_subscriptions_pkey PRIMARY KEY (id)
+notify_subscriptions notify_subscriptions_targets_not_null NOT NULL targets
+notify_subscriptions notify_subscriptions_timezone_not_null NOT NULL timezone
+notify_subscriptions notify_subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+notify_templates notify_templates_key_not_null NOT NULL key
+notify_templates notify_templates_locale_not_null NOT NULL locale
+notify_templates notify_templates_pkey PRIMARY KEY (locale, key)
+notify_templates notify_templates_text_not_null NOT NULL text
+oidc_identities oidc_identities_id_key UNIQUE (id)
+oidc_identities oidc_identities_id_not_null NOT NULL id
+oidc_identities oidc_identities_issuer_not_null NOT NULL issuer
+oidc_identities oidc_identities_linked_at_not_null NOT NULL linked_at
+oidc_identities oidc_identities_pkey PRIMARY KEY (issuer, subject)
+oidc_identities oidc_identities_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES oidc_providers(id) ON DELETE SET NULL
+oidc_identities oidc_identities_subject_not_null NOT NULL subject
+oidc_identities oidc_identities_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+oidc_identities oidc_identities_user_id_not_null NOT NULL user_id
+oidc_providers oidc_providers_admin_groups_not_null NOT NULL admin_groups
+oidc_providers oidc_providers_allowed_groups_not_null NOT NULL allowed_groups
+oidc_providers oidc_providers_auto_create_not_null NOT NULL auto_create
+oidc_providers oidc_providers_capabilities_not_null NOT NULL capabilities
+oidc_providers oidc_providers_check CHECK (((role_source = 'local'::text) OR (cardinality(admin_groups) > 0)))
+oidc_providers oidc_providers_client_id_not_null NOT NULL client_id
+oidc_providers oidc_providers_created_at_not_null NOT NULL created_at
+oidc_providers oidc_providers_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+oidc_providers oidc_providers_display_name_not_null NOT NULL display_name
+oidc_providers oidc_providers_enabled_not_null NOT NULL enabled
+oidc_providers oidc_providers_groups_claim_not_null NOT NULL groups_claim
+oidc_providers oidc_providers_id_not_null NOT NULL id
+oidc_providers oidc_providers_is_default_not_null NOT NULL is_default
+oidc_providers oidc_providers_issuer_not_null NOT NULL issuer
+oidc_providers oidc_providers_pkey PRIMARY KEY (id)
+oidc_providers oidc_providers_provenance_check CHECK ((provenance = ANY (ARRAY['db'::text, 'env'::text])))
+oidc_providers oidc_providers_provenance_not_null NOT NULL provenance
+oidc_providers oidc_providers_role_source_check CHECK ((role_source = ANY (ARRAY['local'::text, 'provider'::text])))
+oidc_providers oidc_providers_role_source_not_null NOT NULL role_source
+oidc_providers oidc_providers_scopes_not_null NOT NULL scopes
+oidc_providers oidc_providers_slug_check CHECK ((slug ~ '^[a-z0-9][a-z0-9-]{0,31}$'::text))
+oidc_providers oidc_providers_slug_key UNIQUE (slug)
+oidc_providers oidc_providers_slug_not_null NOT NULL slug
+oidc_providers oidc_providers_updated_at_not_null NOT NULL updated_at
+oidc_providers oidc_providers_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+oidc_used_jti oidc_used_jti_expires_at_not_null NOT NULL expires_at
+oidc_used_jti oidc_used_jti_jti_key_not_null NOT NULL jti_key
+oidc_used_jti oidc_used_jti_pkey PRIMARY KEY (jti_key)
+oidc_used_states oidc_used_states_expires_at_not_null NOT NULL expires_at
+oidc_used_states oidc_used_states_pkey PRIMARY KEY (state_hash)
+oidc_used_states oidc_used_states_state_hash_not_null NOT NULL state_hash
+outbox outbox_created_at_not_null NOT NULL created_at
+outbox outbox_entity_id_not_null NOT NULL entity_id
+outbox outbox_entity_not_null NOT NULL entity
+outbox outbox_id_not_null NOT NULL id
+outbox outbox_op_check CHECK ((op = ANY (ARRAY['upsert'::text, 'delete'::text])))
+outbox outbox_op_not_null NOT NULL op
+outbox outbox_pkey PRIMARY KEY (id)
+password_resets password_resets_created_at_not_null NOT NULL created_at
+password_resets password_resets_expires_at_not_null NOT NULL expires_at
+password_resets password_resets_id_not_null NOT NULL id
+password_resets password_resets_pkey PRIMARY KEY (id)
+password_resets password_resets_purpose_not_null NOT NULL purpose
+password_resets password_resets_token_hash_key UNIQUE (token_hash)
+password_resets password_resets_token_hash_not_null NOT NULL token_hash
+password_resets password_resets_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+password_resets password_resets_user_id_not_null NOT NULL user_id
+progress_events progress_events_id_not_null NOT NULL id
+progress_events progress_events_item_id_fkey FOREIGN KEY (item_id) REFERENCES catalog_items(id)
+progress_events progress_events_item_id_not_null NOT NULL item_id
+progress_events progress_events_occurred_at_not_null NOT NULL occurred_at
+progress_events progress_events_pkey PRIMARY KEY (id)
+progress_events progress_events_progress_not_null NOT NULL progress
+progress_events progress_events_recorded_at_not_null NOT NULL recorded_at
+progress_events progress_events_undoes_fkey FOREIGN KEY (undoes) REFERENCES progress_events(id)
+progress_events progress_events_user_id_client_op_id_key UNIQUE (user_id, client_op_id)
+progress_events progress_events_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+progress_events progress_events_user_id_not_null NOT NULL user_id
+reviews reviews_body_not_null NOT NULL body
+reviews reviews_contains_spoilers_not_null NOT NULL contains_spoilers
+reviews reviews_created_at_not_null NOT NULL created_at
+reviews reviews_id_not_null NOT NULL id
+reviews reviews_item_id_fkey FOREIGN KEY (item_id) REFERENCES catalog_items(id)
+reviews reviews_item_id_not_null NOT NULL item_id
+reviews reviews_pkey PRIMARY KEY (id)
+reviews reviews_updated_at_not_null NOT NULL updated_at
+reviews reviews_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+reviews reviews_user_id_item_id_key UNIQUE (user_id, item_id)
+reviews reviews_user_id_not_null NOT NULL user_id
+reviews reviews_visibility_not_null NOT NULL visibility
+search_docs search_docs_body_not_null NOT NULL body
+search_docs search_docs_fields_not_null NOT NULL fields
+search_docs search_docs_id_not_null NOT NULL id
+search_docs search_docs_index_name_not_null NOT NULL index_name
+search_docs search_docs_pkey PRIMARY KEY (index_name, id)
+search_docs search_docs_tsv_not_null NOT NULL tsv
+secrets_keys secrets_keys_first_seen_at_not_null NOT NULL first_seen_at
+secrets_keys secrets_keys_pkey PRIMARY KEY (version)
+secrets_keys secrets_keys_version_not_null NOT NULL version
+session_participants session_participants_companion_id_fkey FOREIGN KEY (companion_id) REFERENCES companions(id)
+session_participants session_participants_companion_id_not_null NOT NULL companion_id
+session_participants session_participants_first_play_not_null NOT NULL first_play
+session_participants session_participants_pkey PRIMARY KEY (session_id, companion_id)
+session_participants session_participants_position_not_null NOT NULL "position"
+session_participants session_participants_session_id_fkey FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+session_participants session_participants_session_id_not_null NOT NULL session_id
+session_participants session_participants_starting_player_not_null NOT NULL starting_player
+session_participants session_participants_winner_not_null NOT NULL winner
+session_secrets session_secrets_created_at_not_null NOT NULL created_at
+session_secrets session_secrets_id_not_null NOT NULL id
+session_secrets session_secrets_kind_check CHECK ((kind = ANY (ARRAY['id_token'::text, 'pending_action'::text])))
+session_secrets session_secrets_kind_not_null NOT NULL kind
+session_secrets session_secrets_pkey PRIMARY KEY (id)
+session_secrets session_secrets_token_hash_fkey FOREIGN KEY (token_hash) REFERENCES auth_sessions(token_hash) ON DELETE CASCADE
+session_secrets session_secrets_token_hash_kind_key UNIQUE (token_hash, kind)
+session_secrets session_secrets_token_hash_not_null NOT NULL token_hash
+session_secrets session_secrets_value_not_null NOT NULL value
+sessions sessions_coop_outcome_check CHECK ((coop_outcome = ANY (ARRAY['won'::text, 'lost'::text, 'none'::text])))
+sessions sessions_game_group_id_fkey FOREIGN KEY (game_group_id) REFERENCES game_groups(id) ON DELETE SET NULL
+sessions sessions_id_not_null NOT NULL id
+sessions sessions_incomplete_not_null NOT NULL incomplete
+sessions sessions_item_id_fkey FOREIGN KEY (item_id) REFERENCES catalog_items(id)
+sessions sessions_item_id_not_null NOT NULL item_id
+sessions sessions_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+sessions sessions_owner_id_not_null NOT NULL owner_id
+sessions sessions_pkey PRIMARY KEY (id)
+sessions sessions_started_at_not_null NOT NULL started_at
+signup_invites signup_invites_created_at_not_null NOT NULL created_at
+signup_invites signup_invites_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+signup_invites signup_invites_expires_at_not_null NOT NULL expires_at
+signup_invites signup_invites_id_not_null NOT NULL id
+signup_invites signup_invites_pkey PRIMARY KEY (id)
+signup_invites signup_invites_token_hash_key UNIQUE (token_hash)
+signup_invites signup_invites_token_hash_not_null NOT NULL token_hash
+signup_invites signup_invites_used_by_fkey FOREIGN KEY (used_by) REFERENCES users(id) ON DELETE SET NULL
+source_licences source_licences_agreement_on_file_not_null NOT NULL agreement_on_file
+source_licences source_licences_connector_id_not_null NOT NULL connector_id
+source_licences source_licences_pkey PRIMARY KEY (connector_id)
+source_licences source_licences_recorded_at_not_null NOT NULL recorded_at
+source_licences source_licences_recorded_by_fkey FOREIGN KEY (recorded_by) REFERENCES users(id) ON DELETE SET NULL
+source_pace source_pace_next_free_not_null NOT NULL next_free
+source_pace source_pace_pkey PRIMARY KEY (source)
+source_pace source_pace_source_not_null NOT NULL source
+source_stats source_stats_connector_not_null NOT NULL connector
+source_stats source_stats_pkey PRIMARY KEY (connector)
+source_stats_hours source_stats_hours_calls_not_null NOT NULL calls
+source_stats_hours source_stats_hours_connector_not_null NOT NULL connector
+source_stats_hours source_stats_hours_hour_not_null NOT NULL hour
+source_stats_hours source_stats_hours_pkey PRIMARY KEY (connector, hour)
+source_stats_hours source_stats_hours_rate_limited_not_null NOT NULL rate_limited
+source_switches source_switches_changed_at_not_null NOT NULL changed_at
+source_switches source_switches_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES users(id) ON DELETE SET NULL
+source_switches source_switches_connector_id_not_null NOT NULL connector_id
+source_switches source_switches_enabled_not_null NOT NULL enabled
+source_switches source_switches_pkey PRIMARY KEY (connector_id)
+stats_dirty stats_dirty_gen_not_null NOT NULL gen
+stats_dirty stats_dirty_item_id_not_null NOT NULL item_id
+stats_dirty stats_dirty_pkey PRIMARY KEY (user_id, item_id)
+stats_dirty stats_dirty_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+stats_dirty stats_dirty_user_id_not_null NOT NULL user_id
+stats_item_months stats_item_months_completions_not_null NOT NULL completions
+stats_item_months stats_item_months_episodes_not_null NOT NULL episodes
+stats_item_months stats_item_months_events_not_null NOT NULL events
+stats_item_months stats_item_months_finished_not_null NOT NULL finished
+stats_item_months stats_item_months_item_id_not_null NOT NULL item_id
+stats_item_months stats_item_months_kind_not_null NOT NULL kind
+stats_item_months stats_item_months_month_not_null NOT NULL month
+stats_item_months stats_item_months_pages_not_null NOT NULL pages
+stats_item_months stats_item_months_pkey PRIMARY KEY (user_id, item_id, month)
+stats_item_months stats_item_months_plays_not_null NOT NULL plays
+stats_item_months stats_item_months_seconds_not_null NOT NULL seconds
+stats_item_months stats_item_months_user_id_not_null NOT NULL user_id
+stats_months stats_months_completions_not_null NOT NULL completions
+stats_months stats_months_episodes_not_null NOT NULL episodes
+stats_months stats_months_events_not_null NOT NULL events
+stats_months stats_months_finished_not_null NOT NULL finished
+stats_months stats_months_kind_not_null NOT NULL kind
+stats_months stats_months_month_not_null NOT NULL month
+stats_months stats_months_pages_not_null NOT NULL pages
+stats_months stats_months_pkey PRIMARY KEY (user_id, kind, month)
+stats_months stats_months_plays_not_null NOT NULL plays
+stats_months stats_months_seconds_not_null NOT NULL seconds
+stats_months stats_months_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+stats_months stats_months_user_id_not_null NOT NULL user_id
+stats_users stats_users_bucket_zone_not_null NOT NULL bucket_zone
+stats_users stats_users_pkey PRIMARY KEY (user_id)
+stats_users stats_users_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+stats_users stats_users_user_id_not_null NOT NULL user_id
+stats_users stats_users_zone_not_null NOT NULL zone
+storage_ops storage_ops_day_not_null NOT NULL day
+storage_ops storage_ops_deletes_not_null NOT NULL deletes
+storage_ops storage_ops_egress_bytes_not_null NOT NULL egress_bytes
+storage_ops storage_ops_gets_not_null NOT NULL gets
+storage_ops storage_ops_pkey PRIMARY KEY (day)
+storage_ops storage_ops_puts_not_null NOT NULL puts
+stored_objects stored_objects_bytes_check CHECK ((bytes >= 0))
+stored_objects stored_objects_bytes_not_null NOT NULL bytes
+stored_objects stored_objects_class_check CHECK ((class = ANY (ARRAY['variant'::text, 'original'::text, 'http_cache'::text, 'upload'::text])))
+stored_objects stored_objects_class_not_null NOT NULL class
+stored_objects stored_objects_key_not_null NOT NULL key
+stored_objects stored_objects_last_accessed_not_null NOT NULL last_accessed
+stored_objects stored_objects_pkey PRIMARY KEY (key)
+stored_objects stored_objects_priority_check CHECK ((priority = ANY (ARRAY['visible'::text, 'library'::text, 'related'::text, 'catalog'::text])))
+stored_objects stored_objects_priority_not_null NOT NULL priority
+stored_objects stored_objects_tier_check CHECK ((tier = ANY (ARRAY['pinned'::text, 'cache'::text])))
+stored_objects stored_objects_tier_not_null NOT NULL tier
+totp_recovery_codes totp_recovery_codes_code_hash_not_null NOT NULL code_hash
+totp_recovery_codes totp_recovery_codes_created_at_not_null NOT NULL created_at
+totp_recovery_codes totp_recovery_codes_id_not_null NOT NULL id
+totp_recovery_codes totp_recovery_codes_pkey PRIMARY KEY (id)
+totp_recovery_codes totp_recovery_codes_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+totp_recovery_codes totp_recovery_codes_user_id_not_null NOT NULL user_id
+usage_funnel_daily usage_funnel_daily_day_not_null NOT NULL day
+usage_funnel_daily usage_funnel_daily_flow_not_null NOT NULL flow
+usage_funnel_daily usage_funnel_daily_ms_bucket_not_null NOT NULL ms_bucket
+usage_funnel_daily usage_funnel_daily_n_check CHECK ((n >= 0))
+usage_funnel_daily usage_funnel_daily_n_not_null NOT NULL n
+usage_funnel_daily usage_funnel_daily_outcome_not_null NOT NULL outcome
+usage_funnel_daily usage_funnel_daily_pkey PRIMARY KEY (day, flow, subject, outcome, taps_bucket, ms_bucket)
+usage_funnel_daily usage_funnel_daily_subject_not_null NOT NULL subject
+usage_funnel_daily usage_funnel_daily_taps_bucket_not_null NOT NULL taps_bucket
+user_change_seq user_change_seq_last_seq_not_null NOT NULL last_seq
+user_change_seq user_change_seq_pkey PRIMARY KEY (user_id)
+user_change_seq user_change_seq_user_id_not_null NOT NULL user_id
+user_changes user_changes_at_not_null NOT NULL at
+user_changes user_changes_entity_id_not_null NOT NULL entity_id
+user_changes user_changes_entity_not_null NOT NULL entity
+user_changes user_changes_op_check CHECK ((op = ANY (ARRAY['upsert'::text, 'delete'::text])))
+user_changes user_changes_op_not_null NOT NULL op
+user_changes user_changes_pkey PRIMARY KEY (user_id, seq)
+user_changes user_changes_seq_not_null NOT NULL seq
+user_changes user_changes_user_id_not_null NOT NULL user_id
+user_disabled user_disabled_disabled_at_not_null NOT NULL disabled_at
+user_disabled user_disabled_disabled_by_fkey FOREIGN KEY (disabled_by) REFERENCES users(id) ON DELETE SET NULL
+user_disabled user_disabled_pkey PRIMARY KEY (user_id)
+user_disabled user_disabled_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+user_disabled user_disabled_user_id_not_null NOT NULL user_id
+users users_created_at_not_null NOT NULL created_at
+users users_display_name_not_null NOT NULL display_name
+users users_id_not_null NOT NULL id
+users users_pkey PRIMARY KEY (id)
+users users_role_check CHECK ((role = ANY (ARRAY['admin'::text, 'member'::text])))
+users users_role_not_null NOT NULL role
+users users_self_companion_fk FOREIGN KEY (self_companion) REFERENCES companions(id) DEFERRABLE INITIALLY DEFERRED
+users users_self_companion_not_null NOT NULL self_companion
+users users_share_sessions_not_null NOT NULL share_sessions
+users users_username_key UNIQUE (username)
+users users_username_not_null NOT NULL username
+== indexes
+CREATE INDEX admin_audit_action ON public.admin_audit USING btree (action, at DESC)
+CREATE INDEX admin_audit_actor ON public.admin_audit USING btree (actor_id, at DESC)
+CREATE INDEX admin_audit_at ON public.admin_audit USING btree (at DESC, id DESC)
+CREATE INDEX auth_sessions_expiry ON public.auth_sessions USING btree (expires_at)
+CREATE INDEX auth_sessions_oidc_sid ON public.auth_sessions USING btree (provider_id, oidc_sid) WHERE (oidc_sid IS NOT NULL)
+CREATE INDEX auth_sessions_user ON public.auth_sessions USING btree (user_id)
+CREATE INDEX catalog_items_kind ON public.catalog_items USING btree (kind)
+CREATE INDEX catalog_items_kind_title ON public.catalog_items USING btree (kind, lower(btrim(title)))
+CREATE INDEX catalog_items_provider_data_at ON public.catalog_items USING btree (provider_data_at) WHERE (provider_data_at IS NOT NULL)
+CREATE INDEX catalog_items_provider_refetch_after ON public.catalog_items USING btree (provider_refetch_after) WHERE (provider_refetch_after IS NOT NULL)
+CREATE INDEX catalog_watchers_user ON public.catalog_watchers USING btree (user_id, until)
+CREATE INDEX companions_linked ON public.companions USING btree (linked_user) WHERE (linked_user IS NOT NULL)
+CREATE INDEX companions_owner ON public.companions USING btree (owner_id)
+CREATE INDEX entry_tags_user ON public.entry_tags USING btree (user_id, tag_key)
+CREATE INDEX external_ids_item ON public.external_ids USING btree (item_id)
+CREATE INDEX game_group_members_companion ON public.game_group_members USING btree (companion_id)
+CREATE INDEX game_groups_owner ON public.game_groups USING btree (owner_id)
+CREATE INDEX http_cache_fresh ON public.http_cache USING btree (fresh_until)
+CREATE INDEX imports_user ON public.imports USING btree (user_id)
+CREATE INDEX imports_user_newest ON public.imports USING btree (user_id, id DESC)
+CREATE INDEX integrations_user ON public.integrations USING btree (user_id)
+CREATE INDEX jobs_ready ON public.jobs USING btree (lane, priority DESC, run_at) WHERE (state = 'queued'::text)
+CREATE INDEX jobs_running ON public.jobs USING btree (locked_until) WHERE (state = 'running'::text)
+CREATE INDEX library_entries_completed ON public.library_entries USING btree (user_id, completed_at) WHERE ((completed_at IS NOT NULL) OR completed_undated)
+CREATE INDEX library_entries_item ON public.library_entries USING btree (item_id)
+CREATE INDEX library_entries_kind_status ON public.library_entries USING btree (user_id, kind, status)
+CREATE INDEX library_entries_recent ON public.library_entries USING btree (user_id, added_at DESC, id DESC)
+CREATE INDEX link_requests_from ON public.link_requests USING btree (from_user) WHERE (state = 'pending'::text)
+CREATE INDEX link_requests_to ON public.link_requests USING btree (to_user) WHERE (state = 'pending'::text)
+CREATE INDEX list_items_item ON public.list_items USING btree (item_id)
+CREATE INDEX lists_instance ON public.lists USING btree (updated_at DESC) WHERE ((visibility ->> 'type'::text) = 'instance'::text)
+CREATE INDEX lists_owner ON public.lists USING btree (owner_id)
+CREATE INDEX notify_channels_user ON public.notify_channels USING btree (user_id)
+CREATE INDEX notify_deliveries_digest ON public.notify_deliveries USING btree (channel_id, state, due_at)
+CREATE INDEX notify_deliveries_recent ON public.notify_deliveries USING btree (user_id, created_at DESC)
+CREATE INDEX notify_inbox_recent ON public.notify_inbox USING btree (user_id, created_at DESC)
+CREATE INDEX notify_subscriptions_user ON public.notify_subscriptions USING btree (user_id)
+CREATE INDEX oidc_identities_user ON public.oidc_identities USING btree (user_id)
+CREATE INDEX oidc_used_jti_expiry ON public.oidc_used_jti USING btree (expires_at)
+CREATE INDEX oidc_used_states_expiry ON public.oidc_used_states USING btree (expires_at)
+CREATE INDEX outbox_pending ON public.outbox USING btree (id) WHERE (processed_at IS NULL)
+CREATE INDEX password_resets_user ON public.password_resets USING btree (user_id)
+CREATE INDEX progress_events_item ON public.progress_events USING btree (item_id)
+CREATE INDEX progress_events_user_item ON public.progress_events USING btree (user_id, item_id, occurred_at)
+CREATE INDEX progress_events_user_recent ON public.progress_events USING btree (user_id, occurred_at DESC, id DESC)
+CREATE INDEX reviews_item ON public.reviews USING btree (item_id)
+CREATE INDEX search_docs_owner ON public.search_docs USING btree (index_name, owner_id)
+CREATE INDEX search_docs_trgm ON public.search_docs USING gin (body gin_trgm_ops)
+CREATE INDEX search_docs_tsv ON public.search_docs USING gin (tsv)
+CREATE INDEX session_participants_companion ON public.session_participants USING btree (companion_id)
+CREATE INDEX sessions_item ON public.sessions USING btree (item_id)
+CREATE INDEX sessions_owner_recent ON public.sessions USING btree (owner_id, started_at DESC, id DESC)
+CREATE INDEX stored_objects_asset ON public.stored_objects USING btree (asset_id) WHERE (asset_id IS NOT NULL)
+CREATE INDEX stored_objects_cache_lru ON public.stored_objects USING btree (last_accessed) WHERE (tier = 'cache'::text)
+CREATE INDEX stored_objects_uploads ON public.stored_objects USING btree (owner_id) WHERE (class = 'upload'::text)
+CREATE INDEX totp_recovery_codes_user ON public.totp_recovery_codes USING btree (user_id)
+CREATE UNIQUE INDEX admin_audit_pkey ON public.admin_audit USING btree (id)
+CREATE UNIQUE INDEX assets_hash_key ON public.assets USING btree (hash)
+CREATE UNIQUE INDEX assets_pkey ON public.assets USING btree (id)
+CREATE UNIQUE INDEX assets_source_url_key ON public.assets USING btree (source_url)
+CREATE UNIQUE INDEX auth_sessions_pkey ON public.auth_sessions USING btree (token_hash)
+CREATE UNIQUE INDEX catalog_episode_seasons_pkey ON public.catalog_episode_seasons USING btree (item_id, season)
+CREATE UNIQUE INDEX catalog_episodes_pkey ON public.catalog_episodes USING btree (item_id, season, number)
+CREATE UNIQUE INDEX catalog_items_pkey ON public.catalog_items USING btree (id)
+CREATE UNIQUE INDEX catalog_match_log_pkey ON public.catalog_match_log USING btree (id)
+CREATE UNIQUE INDEX catalog_watchers_pkey ON public.catalog_watchers USING btree (item_id, user_id)
+CREATE UNIQUE INDEX companions_one_self ON public.companions USING btree (owner_id) WHERE is_self
+CREATE UNIQUE INDEX companions_pkey ON public.companions USING btree (id)
+CREATE UNIQUE INDEX connector_credentials_instance ON public.connector_credentials USING btree (connector_id) WHERE (scope = 'instance'::text)
+CREATE UNIQUE INDEX connector_credentials_pkey ON public.connector_credentials USING btree (id)
+CREATE UNIQUE INDEX connector_credentials_user ON public.connector_credentials USING btree (connector_id, user_id) WHERE (scope = 'user'::text)
+CREATE UNIQUE INDEX credentials_pkey ON public.credentials USING btree (user_id)
+CREATE UNIQUE INDEX cron_schedules_pkey ON public.cron_schedules USING btree (name)
+CREATE UNIQUE INDEX entry_tags_pkey ON public.entry_tags USING btree (entry_id, tag_key)
+CREATE UNIQUE INDEX external_ids_pkey ON public.external_ids USING btree (kind, namespace, value)
+CREATE UNIQUE INDEX game_group_members_pkey ON public.game_group_members USING btree (group_id, companion_id)
+CREATE UNIQUE INDEX game_groups_pkey ON public.game_groups USING btree (id)
+CREATE UNIQUE INDEX goals_pkey ON public.goals USING btree (id)
+CREATE UNIQUE INDEX goals_user_id_year_kind_group_metric_key ON public.goals USING btree (user_id, year, kind_group, metric)
+CREATE UNIQUE INDEX health_probes_pkey ON public.health_probes USING btree (id)
+CREATE UNIQUE INDEX http_cache_pkey ON public.http_cache USING btree (key)
+CREATE UNIQUE INDEX import_rows_pkey ON public.import_rows USING btree (user_id, format, source_id)
+CREATE UNIQUE INDEX imports_pkey ON public.imports USING btree (id)
+CREATE UNIQUE INDEX instance_settings_pkey ON public.instance_settings USING btree (id)
+CREATE UNIQUE INDEX integrations_pkey ON public.integrations USING btree (id)
+CREATE UNIQUE INDEX integrations_token_hash_key ON public.integrations USING btree (token_hash)
+CREATE UNIQUE INDEX invites_pkey ON public.invites USING btree (id)
+CREATE UNIQUE INDEX invites_token_hash_key ON public.invites USING btree (token_hash)
+CREATE UNIQUE INDEX jobs_dedupe ON public.jobs USING btree (dedupe_key) WHERE (state = ANY (ARRAY['queued'::text, 'running'::text]))
+CREATE UNIQUE INDEX jobs_pkey ON public.jobs USING btree (id)
+CREATE UNIQUE INDEX library_entries_pkey ON public.library_entries USING btree (id)
+CREATE UNIQUE INDEX library_entries_user_id_item_id_key ON public.library_entries USING btree (user_id, item_id)
+CREATE UNIQUE INDEX link_requests_pkey ON public.link_requests USING btree (id)
+CREATE UNIQUE INDEX list_items_pkey ON public.list_items USING btree (list_id, item_id)
+CREATE UNIQUE INDEX lists_pkey ON public.lists USING btree (id)
+CREATE UNIQUE INDEX lists_share_token ON public.lists USING btree (((visibility ->> 'token'::text))) WHERE ((visibility ->> 'type'::text) = 'link'::text)
+CREATE UNIQUE INDEX notify_channels_pkey ON public.notify_channels USING btree (id)
+CREATE UNIQUE INDEX notify_deliveries_channel_id_event_dedupe_key_key ON public.notify_deliveries USING btree (channel_id, event, dedupe_key)
+CREATE UNIQUE INDEX notify_deliveries_pkey ON public.notify_deliveries USING btree (id)
+CREATE UNIQUE INDEX notify_inbox_pkey ON public.notify_inbox USING btree (id)
+CREATE UNIQUE INDEX notify_inbox_user_id_event_dedupe_key_key ON public.notify_inbox USING btree (user_id, event, dedupe_key)
+CREATE UNIQUE INDEX notify_subscriptions_pkey ON public.notify_subscriptions USING btree (id)
+CREATE UNIQUE INDEX notify_templates_pkey ON public.notify_templates USING btree (locale, key)
+CREATE UNIQUE INDEX oidc_identities_id_key ON public.oidc_identities USING btree (id)
+CREATE UNIQUE INDEX oidc_identities_pkey ON public.oidc_identities USING btree (issuer, subject)
+CREATE UNIQUE INDEX oidc_providers_one_default ON public.oidc_providers USING btree (is_default) WHERE is_default
+CREATE UNIQUE INDEX oidc_providers_pkey ON public.oidc_providers USING btree (id)
+CREATE UNIQUE INDEX oidc_providers_slug_key ON public.oidc_providers USING btree (slug)
+CREATE UNIQUE INDEX oidc_used_jti_pkey ON public.oidc_used_jti USING btree (jti_key)
+CREATE UNIQUE INDEX oidc_used_states_pkey ON public.oidc_used_states USING btree (state_hash)
+CREATE UNIQUE INDEX outbox_pkey ON public.outbox USING btree (id)
+CREATE UNIQUE INDEX password_resets_pkey ON public.password_resets USING btree (id)
+CREATE UNIQUE INDEX password_resets_token_hash_key ON public.password_resets USING btree (token_hash)
+CREATE UNIQUE INDEX progress_events_pkey ON public.progress_events USING btree (id)
+CREATE UNIQUE INDEX progress_events_undoes ON public.progress_events USING btree (undoes) WHERE (undoes IS NOT NULL)
+CREATE UNIQUE INDEX progress_events_user_id_client_op_id_key ON public.progress_events USING btree (user_id, client_op_id)
+CREATE UNIQUE INDEX reviews_pkey ON public.reviews USING btree (id)
+CREATE UNIQUE INDEX reviews_user_id_item_id_key ON public.reviews USING btree (user_id, item_id)
+CREATE UNIQUE INDEX search_docs_pkey ON public.search_docs USING btree (index_name, id)
+CREATE UNIQUE INDEX secrets_keys_pkey ON public.secrets_keys USING btree (version)
+CREATE UNIQUE INDEX session_participants_pkey ON public.session_participants USING btree (session_id, companion_id)
+CREATE UNIQUE INDEX session_secrets_pkey ON public.session_secrets USING btree (id)
+CREATE UNIQUE INDEX session_secrets_token_hash_kind_key ON public.session_secrets USING btree (token_hash, kind)
+CREATE UNIQUE INDEX sessions_pkey ON public.sessions USING btree (id)
+CREATE UNIQUE INDEX signup_invites_pkey ON public.signup_invites USING btree (id)
+CREATE UNIQUE INDEX signup_invites_token_hash_key ON public.signup_invites USING btree (token_hash)
+CREATE UNIQUE INDEX source_licences_pkey ON public.source_licences USING btree (connector_id)
+CREATE UNIQUE INDEX source_pace_pkey ON public.source_pace USING btree (source)
+CREATE UNIQUE INDEX source_stats_hours_pkey ON public.source_stats_hours USING btree (connector, hour)
+CREATE UNIQUE INDEX source_stats_pkey ON public.source_stats USING btree (connector)
+CREATE UNIQUE INDEX source_switches_pkey ON public.source_switches USING btree (connector_id)
+CREATE UNIQUE INDEX stats_dirty_pkey ON public.stats_dirty USING btree (user_id, item_id)
+CREATE UNIQUE INDEX stats_item_months_pkey ON public.stats_item_months USING btree (user_id, item_id, month)
+CREATE UNIQUE INDEX stats_months_pkey ON public.stats_months USING btree (user_id, kind, month)
+CREATE UNIQUE INDEX stats_users_pkey ON public.stats_users USING btree (user_id)
+CREATE UNIQUE INDEX storage_ops_pkey ON public.storage_ops USING btree (day)
+CREATE UNIQUE INDEX stored_objects_pkey ON public.stored_objects USING btree (key)
+CREATE UNIQUE INDEX totp_recovery_codes_pkey ON public.totp_recovery_codes USING btree (id)
+CREATE UNIQUE INDEX usage_funnel_daily_pkey ON public.usage_funnel_daily USING btree (day, flow, subject, outcome, taps_bucket, ms_bucket)
+CREATE UNIQUE INDEX user_change_seq_pkey ON public.user_change_seq USING btree (user_id)
+CREATE UNIQUE INDEX user_changes_pkey ON public.user_changes USING btree (user_id, seq)
+CREATE UNIQUE INDEX user_disabled_pkey ON public.user_disabled USING btree (user_id)
+CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id)
+CREATE UNIQUE INDEX users_username_key ON public.users USING btree (username)
+== triggers
+CREATE TRIGGER library_entries_init_activity BEFORE INSERT ON public.library_entries FOR EACH ROW EXECUTE FUNCTION library_entries_init_activity()
+CREATE TRIGGER library_entry_completion BEFORE UPDATE ON public.library_entries FOR EACH ROW EXECUTE FUNCTION library_entry_completion()
+CREATE TRIGGER progress_events_touch_entry AFTER INSERT ON public.progress_events FOR EACH ROW EXECUTE FUNCTION progress_events_touch_entry()
+CREATE TRIGGER stats_entry_changed AFTER INSERT OR DELETE OR UPDATE ON public.library_entries FOR EACH ROW EXECUTE FUNCTION stats_entry_changed()
+CREATE TRIGGER stats_events_deleted AFTER DELETE ON public.progress_events REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION stats_events_deleted()
+CREATE TRIGGER stats_events_inserted AFTER INSERT ON public.progress_events REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION stats_events_inserted()
+CREATE TRIGGER stats_events_updated AFTER UPDATE ON public.progress_events REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION stats_events_changed()
+CREATE TRIGGER stats_item_changed AFTER UPDATE ON public.catalog_items FOR EACH ROW WHEN (((old.kind IS DISTINCT FROM new.kind) OR ((old.attributes -> 'runtime_minutes'::text) IS DISTINCT FROM (new.attributes -> 'runtime_minutes'::text)) OR ((old.attributes -> 'episode_runtime_minutes'::text) IS DISTINCT FROM (new.attributes -> 'episode_runtime_minutes'::text)))) EXECUTE FUNCTION stats_item_changed()
+CREATE TRIGGER stats_sessions_deleted AFTER DELETE ON public.sessions FOR EACH ROW EXECUTE FUNCTION stats_sessions_changed()
+CREATE TRIGGER stats_sessions_inserted AFTER INSERT ON public.sessions FOR EACH ROW EXECUTE FUNCTION stats_sessions_changed()
+CREATE TRIGGER stats_sessions_updated AFTER UPDATE ON public.sessions FOR EACH ROW WHEN (((old.duration_minutes IS DISTINCT FROM new.duration_minutes) OR (old.item_id IS DISTINCT FROM new.item_id) OR (old.owner_id IS DISTINCT FROM new.owner_id))) EXECUTE FUNCTION stats_sessions_changed()
+CREATE TRIGGER stats_users_deleted AFTER DELETE ON public.stats_users FOR EACH ROW EXECUTE FUNCTION stats_users_deleted()
+== functions
+CREATE OR REPLACE FUNCTION public.jsonb_u64(j jsonb)
+ RETURNS bigint
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+    SELECT CASE WHEN jsonb_typeof(j) = 'number' AND (j #>> '{}') ~ '^[0-9]{1,18}$'
+                THEN (j #>> '{}')::bigint END
+$function$
+CREATE OR REPLACE FUNCTION public.library_activity(p_user uuid, p_item uuid, OUT last_at timestamp with time zone, OUT plays integer)
+ RETURNS record
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT max(x.occurred_at),
+           (COUNT(*) FILTER (WHERE x.progress ->> 'type' = 'session'))::integer
+    FROM progress_events x
+    WHERE x.user_id = p_user AND x.item_id = p_item AND x.undoes IS NULL
+      AND NOT EXISTS (SELECT 1 FROM progress_events u WHERE u.undoes = x.id)
+$function$
+CREATE OR REPLACE FUNCTION public.library_entries_init_activity()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    SELECT a.last_at, a.plays INTO NEW.last_event_at, NEW.plays
+    FROM library_activity(NEW.user_id, NEW.item_id) a;
+    RETURN NEW;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.library_entry_completion()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    IF OLD.status = 'completed' AND NEW.status = 'completed'
+       AND OLD.completed_at IS NOT NULL THEN
+        NEW.completed_at := OLD.completed_at;
+        NEW.completed_undated := false;
+    END IF;
+    RETURN NEW;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.progress_events_touch_entry()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    UPDATE library_entries e SET (last_event_at, plays) =
+        (SELECT a.last_at, a.plays FROM library_activity(NEW.user_id, NEW.item_id) a)
+    WHERE e.user_id = NEW.user_id AND e.item_id = NEW.item_id;
+    RETURN NULL;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.stats_entry_changed()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        IF (OLD.completed_at IS NOT NULL OR OLD.completed_undated)
+           AND EXISTS (SELECT 1 FROM users u WHERE u.id = OLD.user_id) THEN
+            INSERT INTO stats_dirty (user_id, item_id) VALUES (OLD.user_id, OLD.item_id)
+            ON CONFLICT (user_id, item_id) DO UPDATE SET gen = EXCLUDED.gen;
+        END IF;
+    ELSIF TG_OP = 'INSERT' THEN
+        IF NEW.completed_at IS NOT NULL OR NEW.completed_undated THEN
+            INSERT INTO stats_dirty (user_id, item_id) VALUES (NEW.user_id, NEW.item_id)
+            ON CONFLICT (user_id, item_id) DO UPDATE SET gen = EXCLUDED.gen;
+        END IF;
+    ELSIF OLD.completed_at IS DISTINCT FROM NEW.completed_at
+          OR OLD.completed_undated IS DISTINCT FROM NEW.completed_undated THEN
+        INSERT INTO stats_dirty (user_id, item_id) VALUES (NEW.user_id, NEW.item_id)
+        ON CONFLICT (user_id, item_id) DO UPDATE SET gen = EXCLUDED.gen;
+    END IF;
+    RETURN NULL;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.stats_events_changed()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    INSERT INTO stats_dirty (user_id, item_id)
+    SELECT DISTINCT p.user_id, p.item_id FROM (
+        SELECT o.user_id, o.item_id FROM old_rows o
+        UNION ALL
+        SELECT n.user_id, n.item_id FROM new_rows n
+    ) p
+    ORDER BY 1, 2
+    ON CONFLICT (user_id, item_id) DO UPDATE SET gen = EXCLUDED.gen;
+    RETURN NULL;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.stats_events_deleted()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    INSERT INTO stats_dirty (user_id, item_id)
+    SELECT DISTINCT o.user_id, o.item_id FROM old_rows o
+    WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = o.user_id)
+    ORDER BY 1, 2
+    ON CONFLICT (user_id, item_id) DO UPDATE SET gen = EXCLUDED.gen;
+    RETURN NULL;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.stats_events_inserted()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    INSERT INTO stats_dirty (user_id, item_id)
+    SELECT DISTINCT p.user_id, p.item_id FROM (
+        SELECT n.user_id, n.item_id FROM new_rows n
+        UNION ALL
+        SELECT n.user_id, t.item_id FROM new_rows n JOIN progress_events t ON t.id = n.undoes
+    ) p
+    ORDER BY 1, 2
+    ON CONFLICT (user_id, item_id) DO UPDATE SET gen = EXCLUDED.gen;
+    RETURN NULL;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.stats_item_changed()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    INSERT INTO stats_dirty (user_id, item_id)
+    SELECT p.user_id, NEW.id FROM (
+        SELECT x.user_id FROM progress_events x WHERE x.item_id = NEW.id
+        UNION
+        SELECT e.user_id FROM library_entries e
+        WHERE e.item_id = NEW.id AND (e.completed_at IS NOT NULL OR e.completed_undated)
+    ) p
+    ORDER BY 1, 2
+    ON CONFLICT (user_id, item_id) DO UPDATE SET gen = EXCLUDED.gen;
+    RETURN NULL;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.stats_sessions_changed()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    IF TG_OP IN ('UPDATE', 'DELETE') AND EXISTS (SELECT 1 FROM users u WHERE u.id = OLD.owner_id) THEN
+        INSERT INTO stats_dirty (user_id, item_id) VALUES (OLD.owner_id, OLD.item_id)
+        ON CONFLICT (user_id, item_id) DO UPDATE SET gen = EXCLUDED.gen;
+    END IF;
+    IF TG_OP IN ('INSERT', 'UPDATE') THEN
+        INSERT INTO stats_dirty (user_id, item_id) VALUES (NEW.owner_id, NEW.item_id)
+        ON CONFLICT (user_id, item_id) DO UPDATE SET gen = EXCLUDED.gen;
+    END IF;
+    RETURN NULL;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.stats_users_deleted()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    DELETE FROM stats_item_months WHERE user_id = OLD.user_id;
+    RETURN NULL;
+END
+$function$
+== views
+== sequences
+catalog_match_log_id_seq bigint start 1 min 1 max 9223372036854775807 by 1 cycle false cache 1 owned by catalog_match_log.id
+outbox_id_seq bigint start 1 min 1 max 9223372036854775807 by 1 cycle false cache 1 owned by outbox.id
+stats_dirty_gen bigint start 1 min 1 max 9223372036854775807 by 1 cycle false cache 1
+== comments
+== policies
+== rows
+admin_audit 0 d41d8cd98f00b204e9800998ecf8427e
+assets 0 d41d8cd98f00b204e9800998ecf8427e
+auth_sessions 0 d41d8cd98f00b204e9800998ecf8427e
+catalog_episode_seasons 0 d41d8cd98f00b204e9800998ecf8427e
+catalog_episodes 0 d41d8cd98f00b204e9800998ecf8427e
+catalog_items 0 d41d8cd98f00b204e9800998ecf8427e
+catalog_match_log 0 d41d8cd98f00b204e9800998ecf8427e
+catalog_watchers 0 d41d8cd98f00b204e9800998ecf8427e
+companions 0 d41d8cd98f00b204e9800998ecf8427e
+connector_credentials 0 d41d8cd98f00b204e9800998ecf8427e
+credentials 0 d41d8cd98f00b204e9800998ecf8427e
+cron_schedules 0 d41d8cd98f00b204e9800998ecf8427e
+entry_tags 0 d41d8cd98f00b204e9800998ecf8427e
+external_ids 0 d41d8cd98f00b204e9800998ecf8427e
+game_group_members 0 d41d8cd98f00b204e9800998ecf8427e
+game_groups 0 d41d8cd98f00b204e9800998ecf8427e
+goals 0 d41d8cd98f00b204e9800998ecf8427e
+health_probes 0 d41d8cd98f00b204e9800998ecf8427e
+http_cache 0 d41d8cd98f00b204e9800998ecf8427e
+import_rows 0 d41d8cd98f00b204e9800998ecf8427e
+imports 0 d41d8cd98f00b204e9800998ecf8427e
+instance_settings 1 fdd521137b61fc5924f150f5429a52e8
+integrations 0 d41d8cd98f00b204e9800998ecf8427e
+invites 0 d41d8cd98f00b204e9800998ecf8427e
+jobs 0 d41d8cd98f00b204e9800998ecf8427e
+library_entries 0 d41d8cd98f00b204e9800998ecf8427e
+link_requests 0 d41d8cd98f00b204e9800998ecf8427e
+list_items 0 d41d8cd98f00b204e9800998ecf8427e
+lists 0 d41d8cd98f00b204e9800998ecf8427e
+notify_channels 0 d41d8cd98f00b204e9800998ecf8427e
+notify_deliveries 0 d41d8cd98f00b204e9800998ecf8427e
+notify_inbox 0 d41d8cd98f00b204e9800998ecf8427e
+notify_subscriptions 0 d41d8cd98f00b204e9800998ecf8427e
+notify_templates 0 d41d8cd98f00b204e9800998ecf8427e
+oidc_identities 0 d41d8cd98f00b204e9800998ecf8427e
+oidc_providers 0 d41d8cd98f00b204e9800998ecf8427e
+oidc_used_jti 0 d41d8cd98f00b204e9800998ecf8427e
+oidc_used_states 0 d41d8cd98f00b204e9800998ecf8427e
+outbox 0 d41d8cd98f00b204e9800998ecf8427e
+password_resets 0 d41d8cd98f00b204e9800998ecf8427e
+progress_events 0 d41d8cd98f00b204e9800998ecf8427e
+reviews 0 d41d8cd98f00b204e9800998ecf8427e
+search_docs 0 d41d8cd98f00b204e9800998ecf8427e
+secrets_keys 0 d41d8cd98f00b204e9800998ecf8427e
+session_participants 0 d41d8cd98f00b204e9800998ecf8427e
+session_secrets 0 d41d8cd98f00b204e9800998ecf8427e
+sessions 0 d41d8cd98f00b204e9800998ecf8427e
+signup_invites 0 d41d8cd98f00b204e9800998ecf8427e
+source_licences 0 d41d8cd98f00b204e9800998ecf8427e
+source_pace 0 d41d8cd98f00b204e9800998ecf8427e
+source_stats 0 d41d8cd98f00b204e9800998ecf8427e
+source_stats_hours 0 d41d8cd98f00b204e9800998ecf8427e
+source_switches 0 d41d8cd98f00b204e9800998ecf8427e
+stats_dirty 0 d41d8cd98f00b204e9800998ecf8427e
+stats_item_months 0 d41d8cd98f00b204e9800998ecf8427e
+stats_months 0 d41d8cd98f00b204e9800998ecf8427e
+stats_users 0 d41d8cd98f00b204e9800998ecf8427e
+storage_ops 0 d41d8cd98f00b204e9800998ecf8427e
+stored_objects 0 d41d8cd98f00b204e9800998ecf8427e
+totp_recovery_codes 0 d41d8cd98f00b204e9800998ecf8427e
+usage_funnel_daily 0 d41d8cd98f00b204e9800998ecf8427e
+user_change_seq 0 d41d8cd98f00b204e9800998ecf8427e
+user_changes 0 d41d8cd98f00b204e9800998ecf8427e
+user_disabled 0 d41d8cd98f00b204e9800998ecf8427e
+users 0 d41d8cd98f00b204e9800998ecf8427e

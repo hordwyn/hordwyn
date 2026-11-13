@@ -1,4 +1,4 @@
-//! Catalog retention on Postgres (migration 0028, DEC-453): when connector data was obtained,
+//! Catalog retention on Postgres (v1 baseline migration, DEC-453): when connector data was obtained,
 //! which items are old, and what a purge keeps.
 
 mod common;

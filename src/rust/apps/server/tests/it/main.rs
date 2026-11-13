@@ -38,5 +38,6 @@ mod setup_page;
 mod sharing;
 mod shell;
 mod ssr_routes;
+mod upgrade_seed;
 mod usage;
 mod webhook;

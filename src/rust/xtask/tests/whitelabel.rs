@@ -25,3 +25,17 @@ fn brand_colours_not_hard_coded() {
         found.join("\n")
     );
 }
+
+/// v1-release item 2 (plan addendum 3): the short variables of the data sources carry the
+/// neutral prefix `SOURCE_`, not the initials of the former codename, in code, configuration,
+/// CI and the current docs; there is no alias for the old names.
+#[test]
+fn former_env_prefix_not_used() {
+    let found = xtask::whitelabel::former_env_prefix_offenders(&xtask::repo_root());
+    assert_eq!(
+        found.len(),
+        0,
+        "variables with the former prefix (path:line):\n{}",
+        found.join("\n")
+    );
+}

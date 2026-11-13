@@ -1,4 +1,4 @@
-//! WP4-6 on Postgres (migration 0026): goals stay one per year, group and measure; game
+//! WP4-6 on Postgres (v1 baseline migration): goals stay one per year, group and measure; game
 //! groups keep their members in order; a play keeps its group after the group is removed and
 //! after a member is merged; deleting a person without history drops the membership.
 

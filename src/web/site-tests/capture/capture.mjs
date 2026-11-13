@@ -118,7 +118,7 @@ async function startServices() {
   children.push(mock);
   await waitFor(`http://127.0.0.1:${mockPort}/health`, "catalogue mock", 20_000);
   // no setting of the caller's environment leaks in: no connector but the mock is configured
-  const inherited = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(APP__|KK_|LEPTOS_)/.test(k)));
+  const inherited = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(APP__|SOURCE_|LEPTOS_)/.test(k)));
   const env = {
     ...inherited,
     LEPTOS_SITE_ROOT: "target/site",

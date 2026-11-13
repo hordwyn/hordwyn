@@ -1,0 +1,141 @@
+= Staging
+
+Try every upgrade on a copy before the instance people use. The copy is a second compose
+project on the same host, the same shape as the
+xref:operations.adoc#_restore_rehearsal_beside_the_live_instance[restore rehearsal]: its own
+containers, network, volumes (all prefixed `tracker-staging`), image name and host port. It
+gets a fresh backup of production and is upgraded first; production follows only when the
+copy passed the checklist below. Production is not stopped or changed at any point of this
+page.
+
+The copy runs the *new* version, so it needs a checkout of its own: a git worktree next to
+the production checkout, at the tag you are going to install (`vX.Y.Z` below). Before a
+release is tagged, the project checks it here first: then the copy is built from the release
+candidate tag `vX.Y.Z-rc.N` (the release commit), in place of `vX.Y.Z` in every command of
+this page. The release tag is set on that same commit only after the copy passed.
+
+== Prepare
+
+Run these in the production checkout (the commands of this page use the `dc` helper of
+xref:operations.adoc#_the_admin_tool_in_a_container[Operations]):
+
+. Read the release notes of every version between the one you run and the new one
+  (xref:releases/index.adoc[Releases]), oldest first.
+. Take a backup as described in xref:operations.adoc#_backup[Backup]: the database dump and
+  the secrets key (and the import files, if you want to check them too).
+. Create the staging checkout at the new tag, with the production settings:
++
+[source,shell]
+----
+git fetch --tags
+git worktree add ../tracker-staging vX.Y.Z
+cp config/.env ../tracker-staging/config/.env
+chmod 600 ../tracker-staging/config/.env
+# only if you changed the brand directory of production
+cp -r config/brand/. ../tracker-staging/config/brand/
+# the backup of step 2, where the commands of Restore look for it (a link, not a copy)
+ln -s "$PWD/backup" ../tracker-staging/backup
+----
+. Only with the S3 storage backend (`APP__STORAGE__BACKEND=s3` in `config/.env`), and
+  required then: the copy must not use the production bucket. It runs a newer build, and its
+  imports, cover fetches and `cli storage` commands would write and delete objects of
+  production against the storage index of a database copy. Give it the `fs` backend on its
+  own volume before the first `dcs` command:
++
+[source,shell]
+----
+sed -i "s/^APP__STORAGE__BACKEND=.*/APP__STORAGE__BACKEND=fs/" ../tracker-staging/config/.env
+grep "^APP__STORAGE__BACKEND" ../tracker-staging/config/.env    # must say fs
+----
++
+A bucket of its own (`APP__STORAGE__S3__BUCKET`, with keys that cannot reach the production
+bucket) works too. Pictures and import files of production are then missing on the copy:
+covers are fetched again, the rest is not part of the check. The `fs` default needs
+nothing: the copy has its own `app-data` volume. Never run `cli storage evict` on the copy.
+
+From here on, work in the staging checkout:
+
+[source,shell]
+----
+cd ../tracker-staging
+dcs() {
+  APP_PUBLISH_ADDR=127.0.0.1 APP_PUBLISH_PORT=3002 APP_ROLE=web \
+  APP_IMAGE=localhost/tracker-staging-app:local \
+  docker compose -p tracker-staging --env-file config/.env -f src/docker/compose.yml "$@"
+}
+dcs build
+----
+
+`APP_ROLE=web` starts the copy without background work, as in the rehearsal: a second worker
+on a copy of your data would send every due notification a second time and ask the data
+sources again. Port 3002 keeps the copy apart from production (3000) and from a restore
+rehearsal (3001).
+
+== Upgrade the copy
+
+. Restore the production backup into the copy: steps 1 to 4 of
+  xref:operations.adoc#_restore[Restore] with `dcs` in place of `dc` (in step 1 this checkout
+  is already the new version with `config/.env`: what is left of it is starting the services).
+  The `backup` directory of this checkout is the link to the production backup made in
+  "Prepare".
+  Do not start the application yet.
+. See what the new version will do to the production data:
++
+[source,shell]
+----
+dcs run --rm --no-deps --entrypoint cli app migrate --dry-run
+----
++
+It lists the migrations the release notes name, nothing else.
+. Start it and watch the migrations run on a copy of the real data; note how long they take
+  (production will take about as long):
++
+[source,shell]
+----
+dcs up -d
+dcs logs -f app      # each migration, then `listening`; Ctrl+C to stop following
+----
+. Follow the release-specific upgrade steps of the release notes, with `dcs`.
+
+== Checklist
+
+The copy passes when every line holds:
+
+* [ ] `dcs ps` shows the three services healthy, and `curl -fsS
+  http://127.0.0.1:3002/healthz` answers.
+* [ ] The log shows every migration of the dry run, no error and no restart loop.
+* [ ] `dcs exec app cli secrets status` names no version as NOT LOADED.
+* [ ] `dcs exec -T postgres psql -U app -d app -c 'SELECT count(*) FROM users'` gives the
+  number of accounts of production.
+* [ ] `dcs exec app cli reindex --clear --now` ends with `indexed them`, then a search finds
+  a title you know. `--now` indexes in the command itself: the copy runs no worker, and
+  without it the documents would only be queued.
+* [ ] In a browser on the host (from another machine: `ssh -L 3002:127.0.0.1:3002 <host>`),
+  `http://127.0.0.1:3002`: sign in, open a title of your library and its history, open
+  Admin > Data sources (the keys are shown as set, not as locked). If the sign-in page simply
+  comes back, the browser dropped the session cookie over plain HTTP; the commands above are
+  the check then.
+* [ ] What the release notes name under "Highlights" and "Known issues" behaves as described.
+
+If a line fails, do not upgrade production: keep the copy for a look, and report it with the
+log (`dcs logs app`).
+
+== Then production
+
+Upgrade production with xref:operations.adoc#_upgrade[Operations, Upgrade], in the
+production checkout, with a backup taken right before (the one of "Prepare" is older than the
+data entered since).
+
+== Remove the copy
+
+[source,shell]
+----
+dcs down -v
+docker image rm localhost/tracker-staging-app:local
+cd ../tracker && git worktree remove --force ../tracker-staging
+----
+
+`dcs down -v` removes only what belongs to the project `tracker-staging`. The last line
+assumes the production checkout is `../tracker`; use its path. `--force` because the copy
+holds `config/.env` (and maybe a changed brand directory); it removes the staging checkout
+only.

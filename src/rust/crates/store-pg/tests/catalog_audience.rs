@@ -1,4 +1,4 @@
-//! Who hears about a change of a catalog item, on Postgres (migration 0031, DEC-490).
+//! Who hears about a change of a catalog item, on Postgres (v1 baseline migration, DEC-490).
 
 mod common;
 

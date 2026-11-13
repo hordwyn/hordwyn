@@ -1,4 +1,4 @@
-//! Postgres adapter of [`ProviderStore`] (migration `0018_oidc.sql`). The client secret is
+//! Postgres adapter of [`ProviderStore`] (migration `0001_v1_baseline.sql`). The client secret is
 //! stored in the envelope format of `auth::secrets` (purpose `oidc_client_secret`, row = the
 //! provider id, field `client_secret`) and re-wrapped by the rotation job ([`SecretRows`]).
 

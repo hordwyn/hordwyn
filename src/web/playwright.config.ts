@@ -118,7 +118,7 @@ export default defineConfig({
         APP__CONNECTORS__WIKIDATA__BASE_URL: `http://127.0.0.1:${wikidataPort}`,
         // an operator contact of the developer's shell never reaches the e2e server (an
         // empty value is "not set"; review BOOK-16)
-        KK_OPERATOR_CONTACT: "",
+        SOURCE_OPERATOR_CONTACT: "",
         APP__INSTANCE__OPERATOR_CONTACT: "",
         ...(serverLog ? { E2E_SERVER_LOG: serverLog } : {}),
       },

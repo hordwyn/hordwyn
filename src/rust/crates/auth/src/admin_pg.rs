@@ -1,4 +1,4 @@
-//! Postgres adapter for [`AdminStore`] (store-pg migration `0016_admin.sql`).
+//! Postgres adapter for [`AdminStore`] (store-pg migration `0001_v1_baseline.sql`).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

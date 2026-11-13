@@ -20,6 +20,13 @@ const USAGE: &str = "usage: cargo xtask <command>
                      build the project website (default <repo>/build/public); --strict
                      fails while anything blocks publishing (owner slots, security.txt,
                      the release gate; `cargo run -p website -- check` lists it)
+  upgrade-test [<previous-tag>]
+                     the database of the previous release (its migrations and seed from
+                     its tag), migrated by this build and read back; without a release
+                     tag below this build it skips (before v1)
+  upgrade-seed <database-url>
+                     write the upgrade seed of this build from the database the ignored
+                     server test `upgrade_seed::write_the_upgrade_seed` left (pg_dump)
   record <connector> re-record connector fixtures from the live API (needs its key)
   load [--release] [--clients N]
                      the ignored load test against the local services (not in ci;
@@ -47,6 +54,11 @@ fn main() -> Result<()> {
         "site" => site(),
         "sqlx-prepare" => sqlx_prepare(false),
         "load" => load(),
+        "upgrade-test" => upgrade_test(std::env::args().nth(2).as_deref()),
+        "upgrade-seed" => match std::env::args().nth(2) {
+            Some(url) => upgrade_seed(&url),
+            None => bail!("usage: cargo xtask upgrade-seed <database-url>"),
+        },
         "record" => match std::env::args().nth(2) {
             Some(id) => xtask::record::record(&id),
             None => bail!("usage: cargo xtask record <connector>"),
@@ -203,6 +215,68 @@ fn load() -> Result<()> {
         println!("xtask load: delete target/release when done (it is a second target tree)");
     }
     Ok(())
+}
+
+/// `cargo xtask upgrade-seed <database-url>` (REL-3): `pg_dump` of the seed database into
+/// the seed file of this build, see [`xtask::upgrade::seed_from_dump`].
+fn upgrade_seed(url: &str) -> Result<()> {
+    let out = std::process::Command::new("pg_dump")
+        .args(xtask::upgrade::pg_dump_args(url))
+        .output()
+        .context("running pg_dump (in the dev shell)")?;
+    if !out.status.success() {
+        bail!(
+            "pg_dump failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    let seed = xtask::upgrade::seed_from_dump(
+        &String::from_utf8_lossy(&out.stdout),
+        xtask::upgrade::SEED_HEADER,
+    );
+    let path = xtask::repo_root().join(xtask::upgrade::SEED);
+    std::fs::write(&path, &seed).with_context(|| path.display().to_string())?;
+    println!(
+        "upgrade-seed: {} lines in {}",
+        seed.lines().count(),
+        path.display()
+    );
+    Ok(())
+}
+
+/// `cargo xtask upgrade-test [<previous-tag>]` (v1-release item 6), see [`xtask::upgrade`].
+fn upgrade_test(given: Option<&str>) -> Result<()> {
+    let Some(tag) = xtask::upgrade::choose(given)? else {
+        println!(
+            "upgrade-test: no release tag (v<number>) below this build, so there is nothing to \
+             upgrade from (before v1, or on the v1 tag itself); skipped"
+        );
+        return Ok(());
+    };
+    let dest = xtask::workspace_root()
+        .join("target/upgrade-test")
+        .join(&tag);
+    let (migrations, seed) = xtask::upgrade::extract(&tag, &dest)?;
+    println!("upgrade-test: from {tag} ({})", migrations.display());
+    let test_db = if let Ok(url) = std::env::var("TEST_DATABASE_URL") {
+        url
+    } else {
+        xtask::services::up()?;
+        xtask::services::pg_admin_url()
+    };
+    let (migrations, seed) = (
+        migrations.to_string_lossy().into_owned(),
+        seed.to_string_lossy().into_owned(),
+    );
+    cargo(
+        &xtask::upgrade::cargo_args(),
+        &[
+            ("TEST_DATABASE_URL", test_db.as_str()),
+            ("REQUIRE_SERVICES", "1"),
+            ("UPGRADE_FROM_DIR", migrations.as_str()),
+            ("UPGRADE_SEED", seed.as_str()),
+        ],
+    )
 }
 
 /// Build the site with the dev gallery and run the Playwright suite against it.

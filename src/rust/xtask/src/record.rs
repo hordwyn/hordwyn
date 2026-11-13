@@ -2,7 +2,7 @@
 //! (KICKOFF section 5). Uses `curl` so xtask needs no HTTP client.
 //!
 //! A connector with a key needs it in the environment. Open Library has none: it asks
-//! clients to name a contact instead, so `KK_OPERATOR_CONTACT` must be set (it goes into the
+//! clients to name a contact instead, so `SOURCE_OPERATOR_CONTACT` must be set (it goes into the
 //! `User-Agent` of the recording requests, nowhere else), the requests are sent one per 1.2
 //! seconds (its limit without an agreement is 1 per second), synthetic fixtures are left
 //! alone, and an answer is trimmed to the top-level fields its fixture already holds.
@@ -28,14 +28,14 @@ struct Recording {
 const RECORDINGS: &[Recording] = &[
     Recording {
         connector: "tmdb",
-        env: "KK_TMDB_API_KEY",
+        env: "SOURCE_TMDB_API_KEY",
         header: Some("Authorization: Bearer {}"),
         pause_ms: 0,
         trim: false,
     },
     Recording {
         connector: "openlibrary",
-        env: "KK_OPERATOR_CONTACT",
+        env: "SOURCE_OPERATOR_CONTACT",
         header: None,
         pause_ms: 1200,
         trim: true,
@@ -211,7 +211,7 @@ mod tests {
             .find(|r| r.connector == "openlibrary")
             .unwrap();
         assert!(r.header.is_none() && r.trim);
-        assert_eq!(r.env, "KK_OPERATOR_CONTACT");
+        assert_eq!(r.env, "SOURCE_OPERATOR_CONTACT");
         assert!(r.pause_ms >= 1000, "at most one request per second");
     }
 }

@@ -38,6 +38,22 @@ pub(crate) fn shell_app(pool: &sqlx::PgPool) -> App {
     }
 }
 
+/// `cli reindex --now` (REL-1): index everything the outbox holds in this process and wait,
+/// as the worker's indexer would; for an instance without a worker (a staging copy runs
+/// `--role=web` so that it sends no notification). Returns the outbox rows handled.
+///
+/// # Errors
+/// Database or search index errors (what was indexed so far stays indexed).
+pub async fn index_now(
+    pool: &sqlx::PgPool,
+    index: Arc<dyn app::ports::SearchIndex>,
+) -> anyhow::Result<usize> {
+    search::indexer::Indexer::new(shell_app(pool), pool.clone(), index)
+        .drain()
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
+}
+
 /// One key version as `cli secrets status` shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyVersionRow {

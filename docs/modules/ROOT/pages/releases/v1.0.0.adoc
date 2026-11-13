@@ -1,0 +1,47 @@
+= Release notes 1.0.0
+
+Not released yet; the date and the tag `v1.0.0` are set when the owner tags it. Changes in
+detail: `CHANGELOG.md`, section 1.0.0.
+
+== Highlights
+
+* The first release: a home instance for one household, reachable from the internet behind a
+  reverse proxy with TLS. xref:v1-scope.adoc[What v1 covers] lists the kinds, their data
+  sources and the limits.
+* Movies, shows, video games, podcasts, books and board games can be found and added from a
+  data source; every kind can be added by hand.
+* Library, progress, game sessions, history, statistics, goals, lists, people, import and
+  export, notifications, a watched webhook and a REST API, single sign-on and two-factor
+  sign-in, light and dark, English and German.
+
+== Upgrade steps, routine
+
+None: there is no earlier release. Install it as described in
+xref:install.adoc[Install and first run]. From this release on, upgrades follow
+xref:operations.adoc#_upgrade[Operations, Upgrade].
+
+== Upgrade steps, release-specific
+
+The database starts from one migration, `0001_v1_baseline` (the schema of this release in
+one file). A database made by a build from before this release (a test installation) cannot
+be upgraded to it: start with an empty database, and bring the library over with the export
+of the older build (Settings > Imports and export) if it is worth keeping. The export carries
+no plays.
+
+The short environment variables of the data sources are named `SOURCE_<ID>_API_KEY` and
+`SOURCE_OPERATOR_CONTACT` (`config/.env.example`).
+
+== Known issues
+
+* The limits of xref:v1-scope.adoc#_limits_to_know[Limits to know]: the export is not a
+  backup (it carries no plays), the hours of shows need a runtime from the source, there is
+  no "owned" mark, covers can load from the sources' hosts.
+* One web process only (xref:operations.adoc#_roles[Roles]): live updates, the sign-in
+  throttle and the rate limits of the data sources are counted per process.
+* Board games: Wikidata knows about 4,700 board games, many with a title and a year only, and
+  is not asked until the admin has entered the operator contact.
+
+== Rollback
+
+There is no earlier release to go back to. Keep the database dump and the secrets key of
+xref:operations.adoc#_backup[Backup] from the first day.

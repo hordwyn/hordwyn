@@ -1,0 +1,53 @@
+= Release notes X.Y.Z (template)
+
+// Copy this file to releases/vX.Y.Z.adoc, replace X.Y.Z and every text in angle brackets,
+// remove "(template)" from the title and this comment, and keep every section: write
+// "None." where a section has nothing to say. Link the new page from releases/index.adoc
+// and nav.adoc (xref:releases/index.adoc[Releases], "Writing the notes of a release").
+
+Released <YYYY-MM-DD>, tag `vX.Y.Z`. Changes in detail: `CHANGELOG.md`, section X.Y.Z.
+
+== Highlights
+
+* <What a member or an admin notices first, one line each, most important first.>
+
+== Upgrade steps, routine
+
+From <previous version>: the steps of xref:operations.adoc#_upgrade[Operations, Upgrade],
+tried on xref:staging.adoc[a staging copy] first. In short: backup (database dump and secrets
+key), `git fetch --tags` and `git checkout vX.Y.Z`, `dc build`, `cli migrate --dry-run`,
+`dc up -d`, check.
+
+== Upgrade steps, release-specific
+
+Database migrations of this release:
+
+[cols="1,4"]
+|===
+|Migration |What it does, and what to know
+
+|`<NNNN_name>`
+|<Additive or not. Does it rewrite rows, how long on a large database, does it lock a table
+while it runs? Is it reversible without the dump (then how), or one-way for data written
+after it?>
+|===
+
+Other steps, in the order they are needed:
+
+. <A new or renamed setting in `config/.env`; a changed compose file; a `cli reindex` (and
+  why); a step on the reverse proxy.>
+
+Skipping versions: <whether an instance more than one version behind upgrades in one step,
+or goes through a named version first.>
+
+== Known issues
+
+* <What does not work yet or works differently than expected, the way around it, and where
+  it is tracked.>
+
+== Rollback
+
+Back to <previous version>: the database dump taken in the first upgrade step and
+xref:operations.adoc#_going_back[Going back]. Everything entered after that dump is lost.
+<Anything this release needs beyond that: a file to move back, a setting to remove. Or:
+"Nothing beyond Going back.">

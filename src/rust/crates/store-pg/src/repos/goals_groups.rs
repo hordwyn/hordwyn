@@ -1,4 +1,4 @@
-//! WP4-6 (migration 0026): yearly goals, game groups with their members, and the statistics
+//! WP4-6 (v1 baseline migration): yearly goals, game groups with their members, and the statistics
 //! of a time window (the current month of "this year so far").
 
 use std::collections::HashMap;

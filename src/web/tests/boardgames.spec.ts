@@ -84,3 +84,55 @@ test("a board game from Wikidata: facts in words, the credit, two links and no p
   await expect(page.getByTestId("banked-tile-games").locator("dd")).toHaveText(["2 hours", "One play"]);
   expect(wikimedia).toEqual([]);
 });
+
+// LB-33 (v1-release item 8): a game Wikidata does not have is added by hand from the same
+// search, and its page has the form of a game from Wikidata where that makes sense: it opens
+// on About (no play yet), its next step is "Log a play", and a play is counted the same way.
+// It has no facts in words (none were given), no credit of Wikidata and no links to it.
+test("a game Wikidata does not have is added by hand in the same search and gets the form of a game", async ({ page }) => {
+  test.setTimeout(180_000);
+  const stamp = Date.now();
+  const title = `Marsh Pieces ${stamp}`;
+  await signUp(page, `handgame${stamp}`, "Hand Gamer");
+  const before = (await asked(page)).length;
+  await page.keyboard.press("Control+k");
+  const dialog = page.getByRole("dialog", { name: "Search" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("radio", { name: "Play" }).click();
+  await dialog.getByRole("combobox").fill(title);
+  // the source answered (nothing) and the by-hand row is the last one
+  const offer = dialog.getByRole("option", { name: `Add "${title}" by hand...` });
+  await expect(offer).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.getByRole("option").last()).toHaveAttribute("id", (await offer.getAttribute("id"))!);
+  await expect.poll(async () => (await asked(page)).slice(before).some((r) => r.words === title), { timeout: 20_000 }).toBe(true);
+  await offer.click();
+  const add = page.getByRole("dialog", { name: "Add by hand" });
+  await expect(add).toBeVisible();
+  await add.getByLabel("Kind").selectOption({ label: "Board game" });
+  await add.getByLabel("Year").fill("2021");
+  await add.getByRole("button", { name: "Add to library" }).click();
+
+  await expect(page).toHaveURL(/\/items\/[0-9a-f-]{36}$/);
+  await hydrated(page);
+  await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
+  await expect(page.getByTestId("ip-kind")).toHaveText(/Board game/);
+  await expect(page.locator("article header")).toContainText("2021");
+  // like a game from Wikidata without a play: About first, then "Log a play"
+  await expect(page.getByRole("tab", { name: "About" })).toHaveAttribute("aria-selected", "true");
+  const about = page.getByRole("tabpanel", { name: "About" });
+  await expect(about.getByText("No details yet.")).toBeVisible();
+  await expect(about.getByText("Minimum players")).toHaveCount(0);
+  await expect(bar(page).getByRole("button", { name: "Log a play" })).toBeVisible();
+  await expect(page.getByTestId("item-links")).toHaveCount(0);
+  await expect(page.getByTestId("attribution").filter({ hasText: "Wikidata" })).toHaveCount(0);
+  await expectNoA11yViolations(page, "board game added by hand");
+
+  // a play with a score is counted like any other
+  await bar(page).getByRole("button", { name: "Log a play" }).click();
+  const sheet = page.getByRole("dialog", { name: "Log a play" });
+  await expect(sheet).toBeVisible();
+  await sheet.getByLabel("Score of Hand Gamer").fill("12");
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Logged: Play" })).toBeVisible();
+  await expect(bar(page)).toContainText("One play");
+});

@@ -150,6 +150,56 @@ rules and the decisions below.
 - **Owner review pages.** Decisions for the owner are collected on review pages (claude.ai
   artifacts, private to the owner) and read back before building; see section 9.
 
+### Release checklist (from v1 on, v1-release item 7)
+
+Release tags are `vX.Y.Z` (semver; the first is `v1.0.0`). Release candidate tags are
+`vX.Y.Z-rc.N` (N from 1): the commit the owner checks on staging before the release tag
+exists. The package tags of the build (`v1-polish`, `v1-books`, ...), the milestone tags
+`m<NN>` and the candidate tags are not releases; `cargo xtask upgrade-test` ignores them as
+a "previous release". On `main`, after the full gate (`cargo xtask ci`, `cargo xtask e2e`)
+is green, in this order:
+
+1. **Changelog.** `CHANGELOG.md`: the lines under `## [Unreleased]` move under
+   `## [X.Y.Z] - YYYY-MM-DD` (for v1: replace `unreleased` in `## [1.0.0] - unreleased` with
+   the date); an empty `## [Unreleased]` stays on top.
+2. **Release notes.** `docs/modules/ROOT/pages/releases/vX.Y.Z.adoc` from `template.adoc`,
+   every section filled ("None." where empty): highlights, upgrade steps (routine and
+   release-specific, with a row per new migration file), known issues, rollback; its row in
+   `releases/index.adoc` and its line in `nav.adoc`. For v1 the page exists; set the date.
+3. **Version.** `version` of `[workspace.package]` in `src/rust/Cargo.toml` (0.1.0 until v1)
+   becomes X.Y.Z; then `cargo check` in `src/rust`, so that `Cargo.lock` carries the new
+   version too: both files go into the same commit (a tag whose lock file is stale cannot be
+   built with `--locked`).
+4. **Website.** `src/rust/apps/website/content/release.toml`: `version` and `confirmed` are set
+   by the owner or the orchestrator after reading the features page against this commit (the
+   prepared list of ids is a comment in that file). For v1 also switch `book`, `board_game`
+   and `manual_entry` from "coming" to "shipped" in `features.toml` and `home.toml` (LV-8).
+   Then `cargo xtask site --strict`.
+5. **Migrations.** No migration file that is in an earlier release tag has changed:
+   `git diff --name-status <previous tag> -- src/rust/crates/store-pg/migrations` shows only
+   `A` lines, and the always-on store-pg test `released_migrations_have_not_changed` is
+   green. Append the lines of this release's new migration files to
+   `crates/store-pg/tests/fixtures/released-migrations.txt` (the test prints them). The stored
+   schema (`tests/fixtures/schema.txt`) was regenerated with `UPDATE_SCHEMA=1` in the change
+   that added a migration and reviewed; the upgrade seed (`tests/fixtures/upgrade-seed.sql`)
+   was regenerated when the schema changed (its header says how; the test
+   `the_seed_has_rows_in_every_table` names a table without rows).
+6. **Upgrade test.** `cargo xtask upgrade-test` is green: the previous tag's database and
+   seed, migrated by this build and read back (before v1 there is no previous tag and it
+   skips; CI runs it in every pipeline, job `upgrade-test`).
+7. **Release candidate.** Commit steps 1-5 on `main` (Conventional Commits, no attribution),
+   then `git tag -a vX.Y.Z-rc.N -m "vX.Y.Z-rc.N"` on that commit and
+   `git push origin main vX.Y.Z-rc.N`.
+8. **Staging (owner).** The owner upgrades the staging copy from a fresh production backup
+   (docs: Staging), built from `vX.Y.Z-rc.N` in place of `vX.Y.Z` as the page says, and
+   confirms its checklist. No release tag before that confirmation. When a line fails: fix
+   on `main`, then steps 1-7 again with the next candidate number.
+9. **Tag and push.** The release tag goes on the commit that passed, with nothing changed
+   after it: `git tag -a vX.Y.Z -m "vX.Y.Z" vX.Y.Z-rc.N^{commit}`, then
+   `git push origin vX.Y.Z`.
+10. **Production (owner).** The owner upgrades the instance with Operations, Upgrade, after
+    reading the release notes.
+
 ## 2. KICKOFF rules (verbatim)
 
 Copied from `docs/design/KICKOFF.md` sections 2 to 5 and 7. Section 4 of this file records
@@ -1013,6 +1063,13 @@ test by hand, commit, push, tag.
   `TEST_DATABASE_URL` / `REQUIRE_SERVICES=1` / `TEST_MEILI_*` / `TEST_S3_*`; `cargo xtask ci`
   sets them, plain `cargo test` silently skips them. The M17 load test is `#[ignore]` and must
   be run by hand.
+- **Kept test databases:** a passing test drops its `test_<UUIDv7>` database, a failing one
+  (or `KEEP_TEST_DB=1`) keeps it and prints its name (v1-release item 3). Nothing sweeps them
+  (parallel checkouts share the server). The UUIDv7 carries the creation time in its first
+  48 bits, so the names of a run you noted older than a day can be checked with
+  `select datname, to_timestamp((('x' || substr(datname, 6, 12))::bit(48)::bigint) / 1000.0)
+  from pg_database where datname like 'test\_%' order by 2` before `DROP DATABASE ... WITH
+  (FORCE)`; drop only the ones your own runs kept.
 - **Server integration tests:** one test binary `it` (`apps/server/tests/it/main.rs`, one module
   per former file, DEC-565; 25 binaries of 8.4 GB before). One module: `cargo test -p server
   --features gallery,all-connectors --test it -- item_page::` (several filters may follow);

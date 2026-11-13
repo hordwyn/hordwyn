@@ -1,4 +1,4 @@
-//! Postgres adapter for [`NotifyStore`] (store-pg migration `0010_notifications.sql`).
+//! Postgres adapter for [`NotifyStore`] (store-pg migration `0001_v1_baseline.sql`).
 
 use std::sync::Arc;
 
