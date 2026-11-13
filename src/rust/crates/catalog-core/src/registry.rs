@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
 
 use crate::connector::Connector;
+use crate::contact::{ContactUse, OperatorContact};
 use crate::credentials::CredentialState;
 use crate::model::{Attribution, Capability, ConnectorInfo};
 use crate::stats::SourceStats;
@@ -17,6 +18,9 @@ pub struct Registry {
     /// Sources an admin switched off (DEC-289); shared by clones like the states.
     disabled: Arc<RwLock<BTreeSet<String>>>,
     stats: Option<Arc<SourceStats>>,
+    /// The operator contact (shared by clones): a connector that requires it is not usable
+    /// without one.
+    contact: Option<OperatorContact>,
 }
 
 impl Registry {
@@ -24,6 +28,14 @@ impl Registry {
     #[must_use]
     pub fn with_stats(mut self, stats: Arc<SourceStats>) -> Self {
         self.stats = Some(stats);
+        self
+    }
+
+    /// Read the operator contact: a connector whose [`ConnectorInfo::contact`] is
+    /// `Required` is in state [`CredentialState::NeedsContact`] while none is set.
+    #[must_use]
+    pub fn with_contact(mut self, contact: OperatorContact) -> Self {
+        self.contact = Some(contact);
         self
     }
 
@@ -75,9 +87,19 @@ impl Registry {
         let rejected = self.stats.as_ref().is_some_and(|s| s.rejected(id));
         if rejected && matches!(state, CredentialState::Env | CredentialState::Db) {
             CredentialState::Invalid
+        } else if state.usable() && self.needs_contact(id) {
+            CredentialState::NeedsContact
         } else {
             state
         }
+    }
+
+    /// Does `id` require the operator contact while none is set?
+    fn needs_contact(&self, id: &str) -> bool {
+        self.connectors
+            .get(id)
+            .is_some_and(|c| c.info().contact == ContactUse::Required)
+            && self.contact.as_ref().is_none_or(|c| c.get().is_none())
     }
 
     /// Set the credential state (and the key, for `Env`/`Db`); a new key clears an earlier

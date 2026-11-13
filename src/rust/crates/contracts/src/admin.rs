@@ -4,7 +4,8 @@
 //!
 //! Error codes the pages translate (`admin-error-<code>` in the web app): `reauth_required`,
 //! `last_admin`, `self_role_change`, `self_disable`, `self_delete`,
-//! `secure_cookies_need_https`, `fixed_by_config`, `invalid_setting`, `unknown_setting`,
+//! `secure_cookies_need_https`, `fixed_by_config`, `invalid_setting`, `invalid_contact`,
+//! `unknown_setting`,
 //! `unknown_source`, `missing_field`, `unknown_field`, `setup_done`, `forbidden`.
 
 use std::collections::BTreeMap;
@@ -19,7 +20,8 @@ use utoipa::ToSchema;
 /// One data source as the palette footer, the no-results card and the admin table show it.
 ///
 /// `state` (admins): `working`, `not_set_up`, `key_rejected`, `key_unavailable`,
-/// `rate_limited`, `circuit_open`, `disabled`. Members see `working`, `not_set_up`,
+/// `rate_limited`, `circuit_open`, `disabled`, `needs_contact` (the source asks for the operator
+/// contact and none is set; members see `not_set_up`). Members see `working`, `not_set_up`,
 /// `needs_account`, `unavailable`, `slow`, `retrying`; disabled sources are hidden from them
 /// and the detail fields are empty.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -31,7 +33,7 @@ pub struct SourceStatusDto {
     /// Kind groups served (`watch`, `read`, `listen`, `play`, ...).
     pub groups: Vec<String>,
     pub state: String,
-    /// `missing`, `env`, `db`, `invalid`, `locked`, `not_needed` (admins only).
+    /// `missing`, `env`, `db`, `invalid`, `locked`, `not_needed`, `needs_contact` (admins only).
     #[serde(default)]
     pub credential: Option<String>,
     /// The variable that sets the key when it comes from the environment (admins only).

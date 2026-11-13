@@ -223,6 +223,13 @@ pub trait Backend: Send + Sync {
         item_id: &str,
         status: &str,
     ) -> BResult<LibraryEntryDto>;
+    /// Correct the page total of a paged item (v1-books).
+    async fn set_page_count(
+        &self,
+        token: &str,
+        item_id: &str,
+        pages: u32,
+    ) -> BResult<contracts::CatalogItemDto>;
     /// One operation on many library items (WP4-3), and its undo.
     async fn library_bulk(
         &self,

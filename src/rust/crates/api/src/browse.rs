@@ -559,6 +559,7 @@ pub async fn stats_totals(s: &ApiState, a: Actor) -> ApiResult<StatsTotalsDto> {
                 amounts: amounts(&k.amounts),
             })
             .collect(),
+        undated_completions: t.undated_completions,
     })
 }
 

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM stats_months WHERE user_id = $1 AND events = 0 AND completions = 0",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f47158f53f05858bc2732fcdff8b5e46ee638309217c79d0f6ed0413b6dddc4d"
+}

@@ -1,0 +1,31 @@
+{
+  "fixture": {
+    "synthetic": true,
+    "source": "a work whose covers list starts with -1 (the recorded lists hold -1 only further back) and that has no description, subjects or authors",
+    "checked": "2026-11-12"
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://openlibrary.org/works/OL999001W.json"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "content-type",
+      "application/json"
+    ]
+  ],
+  "body": {
+    "key": "/works/OL999001W",
+    "title": "A Book With Odd Covers",
+    "covers": [
+      -1,
+      null,
+      424242,
+      7
+    ],
+    "type": {
+      "key": "/type/work"
+    }
+  }
+}

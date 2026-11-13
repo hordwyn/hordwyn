@@ -79,7 +79,17 @@ pub struct SettingDef {
     pub next_session: bool,
 }
 
-pub const SETTINGS: [SettingDef; 14] = [
+/// Key of the operator contact (an e-mail address or https URL, `catalog_core::check_contact`).
+pub const OPERATOR_CONTACT: &str = "instance.operator_contact";
+
+pub const SETTINGS: [SettingDef; 15] = [
+    // v1-books: sent to the sources that ask clients to identify themselves
+    SettingDef {
+        key: OPERATOR_CONTACT,
+        env: "APP__INSTANCE__OPERATOR_CONTACT",
+        gated: false,
+        next_session: false,
+    },
     SettingDef {
         key: "instance.hosting",
         env: "APP__INSTANCE__HOSTING",
@@ -242,6 +252,8 @@ pub struct AdminApi {
     /// Live values the request path reads.
     pub secure_cookies: Arc<AtomicBool>,
     pub hosting: Arc<RwLock<String>>,
+    /// `instance.operator_contact` as the governed client and the source registry read it.
+    pub contact: catalog_core::OperatorContact,
     /// The email transport (swapped when the mail settings change); `None` without the
     /// email channel.
     pub mail: Option<SharedTransport>,
@@ -436,6 +448,7 @@ fn stored_value(st: &StoredSettings, key: &str) -> Option<Value> {
         "mail.username" => st.mail.username.clone().map(Value::String),
         "mail.from" => st.mail.from.clone().map(Value::String),
         "usage.funnel" => st.usage_funnel.map(Value::Bool),
+        OPERATOR_CONTACT => st.operator_contact.clone().map(Value::String),
         _ => None,
     }
 }
@@ -507,6 +520,18 @@ fn set_stored(st: &mut StoredSettings, key: &str, v: Option<&Value>) -> ApiResul
                 .map(|v| {
                     v.as_bool()
                         .ok_or_else(|| invalid("invalid_setting", "true or false"))
+                })
+                .transpose()?;
+        }
+        OPERATOR_CONTACT => {
+            // an empty text clears it, like `null`
+            st.operator_contact = v
+                .filter(|v| v.as_str().is_none_or(|s| !s.trim().is_empty()))
+                .map(|v| {
+                    v.as_str()
+                        .ok_or(catalog_core::ContactError::Form)
+                        .and_then(catalog_core::check_contact)
+                        .map_err(|e| invalid("invalid_contact", e.to_string()))
                 })
                 .transpose()?;
         }
@@ -689,6 +714,11 @@ pub fn apply(s: &ApiState, st: &StoredSettings) {
         *a.hosting
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = h.to_string();
+    }
+    // a value the check refuses (a configuration typo) leaves the sources without a contact
+    if let Err(e) = a.contact.set(get(OPERATOR_CONTACT).as_str()) {
+        tracing::warn!(error = %e, "instance.operator_contact is not usable; sending none");
+        let _ = a.contact.set(None);
     }
     if let Some(b) = &a.budget {
         let max = get("storage.max_total_bytes")

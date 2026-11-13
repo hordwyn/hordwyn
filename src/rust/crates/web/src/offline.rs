@@ -152,6 +152,17 @@ pub fn status_command(item_id: &str, status: &str, hlc: &str) -> SyncCommandDto 
     }
 }
 
+/// One change for the queue: a log and, behind it, the status that follows it ("Finished"
+/// on a book offline: the last page, then Completed; review BOOK-6). The order is the order
+/// the server gets them in, so the status is written after the page it should count.
+#[must_use]
+pub fn log_then_status(log: Queued, status: Option<SyncCommandDto>, now_ms: u64) -> Vec<Queued> {
+    let title = log.title.clone();
+    let mut change = vec![log];
+    change.extend(status.map(|cmd| Queued::new(cmd, &title, now_ms)));
+    change
+}
+
 /// Rate (0..=100, `None` clears) at the client stamp `hlc`.
 #[must_use]
 pub fn rate_command(item_id: &str, rating: Option<u8>, hlc: &str) -> SyncCommandDto {
@@ -632,6 +643,49 @@ mod tests {
                 field: None,
             }),
         }
+    }
+
+    /// Review BOOK-6: "Finished" on a book while offline queues the last page and, behind
+    /// it, Completed with a later stamp; a plain log queues itself alone.
+    #[test]
+    fn finished_offline_queues_the_page_and_then_the_completion() {
+        let mut clock = ClientClock::new(7);
+        let page = serde_json::json!({"type": "paged", "page": 412});
+        let log_stamp = clock.stamp(1_000);
+        let log = Queued::with_op_id(
+            "op-1".into(),
+            log_command("i1", page, None, Some(&log_stamp)),
+            "Dune",
+            1_000,
+        );
+        let status_stamp = clock.stamp(1_000);
+        let status = status_command("i1", "completed", &status_stamp);
+        let change = log_then_status(log.clone(), Some(status), 1_000);
+        assert_eq!(change.len(), 2);
+        assert_eq!(change[0], log);
+        assert_eq!(change[1].title, "Dune");
+        assert_ne!(change[1].envelope.op_id, "op-1");
+        match &change[1].envelope.command {
+            SyncCommandDto::SetStatus {
+                item_id,
+                status,
+                hlc,
+            } => {
+                assert_eq!((item_id.as_str(), status.as_str()), ("i1", "completed"));
+                assert!(*hlc > log_stamp, "the status is stamped after the log");
+            }
+            other => panic!("{other:?}"),
+        }
+        // both are one change of the queue and are sent in this order
+        let mut stored = Stored::default();
+        assert!(stored.push_all(change));
+        let sent = flush_batch(&stored.items).commands;
+        assert!(matches!(
+            sent[0].command,
+            SyncCommandDto::LogProgress { .. }
+        ));
+        assert!(matches!(sent[1].command, SyncCommandDto::SetStatus { .. }));
+        assert_eq!(log_then_status(log, None, 1_000).len(), 1);
     }
 
     /// Review OT2E-7 b: what the web queues when the start or the stop of a rewatch run

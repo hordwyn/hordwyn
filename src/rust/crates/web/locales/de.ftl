@@ -363,7 +363,21 @@ log-notes = Notizen
 log-play-step = Partie
 log-session-step = Sitzung
 log-page = Aktuelle Seite
-log-of-pages = von { $pages }
+log-of-pages = { $pages ->
+    [one] von { $pages } Seite
+   *[other] von { $pages } Seiten
+}
+log-of-pages-estimate = { $pages ->
+    [one] von { $pages } Seite (geschätzt)
+   *[other] von { $pages } Seiten (geschätzt)
+}
+log-pages-change = Ändern
+log-pages-change-label = Seitenzahl ändern
+log-pages-set = Seitenzahl festlegen
+log-pages-total = Seiten dieses Buchs
+log-pages-total-hint = Gilt für alle auf dieser Instanz. Bleibt erhalten, wenn die Datenquelle das Buch aktualisiert.
+log-pages-total-saved = Seitenzahl auf { $pages } gesetzt.
+log-error-pages-total = Gib eine Zahl von 1 bis 100000 ein.
 log-update = Aktualisieren
 log-plus-pages = +{ $count }
 log-finished = Fertig
@@ -845,6 +859,8 @@ stats-also-events = { $count ->
    *[other] { $count } eingetragene Schritte
 }
 stats-reading-note = Lesen wird in Seiten gezählt.
+stats-finished-note = Abgeschlossene Bücher ohne Seitenzahl zählen keine Seiten.
+stats-undated-note = Titel, die ohne einen eingetragenen Schritt auf Abgeschlossen gesetzt wurden, haben kein Datum: Sie zählen in den Summen, aber in keinem Monat, Jahr oder Ziel.
 stats-untimed-note = Titel ohne bekannte Länge zählen als 0.
 stats-library-heading = Bibliothek
 stats-library-by-status = Bibliothek nach Status
@@ -913,6 +929,7 @@ admin-error-self_delete = Dein eigenes Konto kannst du hier nicht löschen.
 admin-error-secure_cookies_need_https = Sichere Cookies brauchen eine öffentliche https-Adresse, sonst könnte sich niemand anmelden.
 admin-error-fixed_by_config = Dieser Wert ist in der Konfiguration festgelegt und lässt sich hier nicht ändern.
 admin-error-invalid_setting = Dieser Wert ist ungültig.
+admin-error-invalid_contact = Gib eine E-Mail-Adresse oder eine Adresse ein, die mit https:// beginnt, höchstens 200 Zeichen, ohne Leerzeichen.
 admin-error-unknown_setting = Diese Einstellung gibt es nicht.
 admin-error-unknown_source = Diese Datenquelle gibt es nicht.
 admin-error-missing_field = Fülle alle Felder aus.
@@ -947,6 +964,7 @@ source-state-needs_account = Braucht dein Konto
 source-state-unavailable = Vorübergehend nicht verfügbar
 source-state-slow = Gerade langsam
 source-state-retrying = Antwortet nicht, neuer Versuch folgt
+source-state-needs_contact = Betreiberkontakt fehlt
 source-test-ok = Funktioniert ({ $ms } ms).
 source-test-key_rejected = Schlüssel abgelehnt.
 source-test-unreachable = Der Dienst war nicht erreichbar.
@@ -1175,6 +1193,10 @@ admin-users-delete-named = Löschen: { $name }
 admin-users-delete-title = { $name } löschen?
 admin-users-delete-body = Das Konto und seine Bibliothek werden gelöscht. Gemeinsam eingetragene Sitzungen bleiben im Verlauf der anderen, mit dieser Person als Begleitung.
 admin-sources-lead = Woher Titel, Cover und Folgen kommen. Schlüssel werden verschlüsselt gespeichert und nie wieder angezeigt.
+admin-contact-label = Betreiberkontakt
+admin-contact-hint = Deine E-Mail-Adresse (bevorzugt: die Quellen nennen eine E-Mail-Adresse) oder eine https-Adresse. Wird bei jeder Anfrage an Open Library und Wikidata mitgeschickt, damit sie den Betreiber erreichen können; es ist dein Kontakt, nicht der eines Mitglieds.
+admin-contact-cleared = Entfernt. Anfragen tragen jetzt keinen Kontakt mehr.
+admin-sources-note-openlibrary = Open Library ist ein gemeinschaftlicher Bibliotheksdienst mit niedrigem Anfragelimit. Ein kommerzieller Dienst mit viel Verkehr darf sich nicht auf diese Quelle stützen.
 admin-sources-attention = { $count ->
     [one] Eine Datenquelle braucht Aufmerksamkeit
    *[other] { $count } Datenquellen brauchen Aufmerksamkeit
@@ -2039,6 +2061,7 @@ imports-errors = { $count ->
 }
 imports-error-line = Zeile { $line }:
 imports-result = Importiert { $imported }, übersprungen { $skipped }, nicht zugeordnet { $unmatched }.
+imports-completed-note = Ein Titel, den die Datei als abgeschlossen führt, gilt am Tag seines neuesten Verlaufseintrags als beendet. Ohne Verlauf hat er kein Datum und zählt nur in den Summen, nicht in einem Monat, Jahr oder Ziel.
 imports-stopped-at = Angehalten nach { $done } von { $total } Zeilen. Was schon importiert ist, bleibt.
 imports-unmatched = Nicht zugeordnete Zeilen
 imports-unmatched-body = Diese Zeilen haben keine ID, die diese App nachschlagen kann. Such jede heraus; sie wird importiert, sobald du den Titel wählst.

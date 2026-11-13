@@ -210,6 +210,14 @@ impl KindDescriptor {
             .chain(self.extra_statuses.iter().map(String::as_str))
     }
 
+    /// Do the kind's attributes have a field `name` (a property of the schema)?
+    #[must_use]
+    pub fn has_attribute(&self, name: &str) -> bool {
+        self.attributes_schema
+            .get("properties")
+            .is_some_and(|p| p.get(name).is_some())
+    }
+
     /// # Errors
     /// If `status` is neither a core status nor one of the kind's extra statuses.
     pub fn check_status(&self, status: &Status) -> Result<(), DomainError> {

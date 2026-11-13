@@ -135,7 +135,38 @@ pub async fn item_page(s: &ApiState, a: Actor, id: &str) -> ApiResult<ItemPageDt
         episodes,
         plays,
         play_totals,
+        can_edit: may_edit_items(s, a),
+        page_total_editable: may_edit_items(s, a) && s.app.takes_page_total(&item.kind),
     })
+}
+
+/// May the actor correct data of a shared catalog item (the page total of a book)? Everybody
+/// on a home instance; on a hosted one only admins, because the item is everybody's.
+#[must_use]
+pub fn may_edit_items(s: &ApiState, a: Actor) -> bool {
+    a.is_admin() || !s.admin.as_ref().is_some_and(crate::admin::AdminApi::hosted)
+}
+
+/// Set the page total of a paged item; the value is marked as set by a person, so a refresh
+/// from the source keeps it.
+///
+/// # Errors
+/// `forbidden` for a member of a hosted instance; unknown item; a kind without pages; a
+/// total outside 1 to 100000.
+pub async fn set_page_count(
+    s: &ApiState,
+    a: Actor,
+    item_id: &str,
+    pages: u32,
+) -> ApiResult<contracts::CatalogItemDto> {
+    if !may_edit_items(s, a) {
+        return Err(app::AppError::Forbidden.into());
+    }
+    let item = s
+        .app
+        .set_item_page_count(parse_id(item_id, ItemId)?, pages)
+        .await?;
+    Ok(dto::item(s, &item).await)
 }
 
 /// The kinds a search covers: one kind, the enabled kinds of one kind group (the palette's

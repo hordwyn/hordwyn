@@ -91,6 +91,7 @@ impl Igdb {
             },
             hosts: vec![host_of(&api_base), host_of(token_url), host_of(&image_base)],
             cache_ttl_secs: 7 * 24 * 3600,
+            contact: catalog_core::ContactUse::None,
         };
         Self {
             info,

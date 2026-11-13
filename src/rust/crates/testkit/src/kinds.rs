@@ -27,7 +27,8 @@ fn descriptor(id: &str, model: ProgressModel, extra: &[&str]) -> KindDescriptor 
         extra_statuses: extra.iter().map(ToString::to_string).collect(),
         attributes_schema: if id == "book" {
             serde_json::json!({"type": "object", "properties": {
-                "series": {"type": "string"}, "series_position": {"type": "number"}}})
+                "series": {"type": "string"}, "series_position": {"type": "number"},
+                "page_count": {"type": "integer"}}})
         } else {
             serde_json::json!({"type": "object"})
         },

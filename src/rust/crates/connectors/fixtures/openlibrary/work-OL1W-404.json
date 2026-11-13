@@ -1,0 +1,23 @@
+{
+  "fixture": {
+    "synthetic": false,
+    "source": "recorded from https://openlibrary.org/works/OL1W.json",
+    "checked": "2026-11-12",
+    "note": "recorded 2026-11-12 with one request; untrimmed"
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://openlibrary.org/works/OL1W.json"
+  },
+  "status": 404,
+  "headers": [
+    [
+      "content-type",
+      "application/json"
+    ]
+  ],
+  "body": {
+    "error": "notfound",
+    "key": "/works/OL1W"
+  }
+}

@@ -12,9 +12,10 @@ use ui::{
     SecretField, StatusDot, Switch, Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 };
 
+use super::contact::{KEY as CONTACT_KEY, OperatorContact};
 use super::{AdminFrame, Attention, ConfirmDialog};
 use crate::admin_api;
-use crate::admin_state::{key_guide, source_state};
+use crate::admin_state::{find_setting, key_guide, source_note, source_state};
 use crate::i18n::{kind_label, t, use_i18n};
 use crate::reauth::{gated, use_reauth};
 use crate::rest;
@@ -47,7 +48,11 @@ fn card_open(s: &AdminSourceDto) -> RwSignal<bool> {
 #[component]
 fn SourcesBody() -> impl IntoView {
     let data: Sources = Resource::new(|| (), |()| admin_api::admin_sources());
+    let settings = Resource::new(|| (), |()| admin_api::admin_settings());
     view! {
+        {loaded(settings, move |s| find_setting(&s.settings, CONTACT_KEY).cloned().map(|c| view! {
+            <OperatorContact s=c sources=data/>
+        }))}
         {loaded(data, move |list| {
             let attention: Vec<AdminSourceDto> = list.iter().filter(|s| needs_attention(s)).cloned().collect();
             let licence = list.iter().any(|s| s.licence_warning);
@@ -97,7 +102,7 @@ fn SourcesAttention(list: Vec<AdminSourceDto>) -> impl IntoView {
             view! {
                 <li class="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <span>{line}</span>
-                    <a class="text-sm font-medium underline" href=href on:click=move |_| open.set(true)>{action}</a>
+                    <a class="inline-flex min-h-6 items-center text-sm font-medium underline" href=href on:click=move |_| open.set(true)>{action}</a>
                 </li>
             }
         })
@@ -181,6 +186,7 @@ fn usage_lines(s: &AdminSourceDto) -> Vec<String> {
 #[component]
 fn SourceCard(s: AdminSourceDto, data: Sources) -> impl IntoView {
     let lines = usage_lines(&s);
+    let note = source_note(&s.status.id);
     // "Agreement on file" belongs to hosted mode (design.md 4.1, UX2-W2): the server
     // warns while nothing is recorded there, and a recorded answer stays visible
     let licence = s.licence_warning || s.agreement_on_file.is_some();
@@ -189,6 +195,7 @@ fn SourceCard(s: AdminSourceDto, data: Sources) -> impl IntoView {
             <ul class="grid gap-0.5 text-sm text-muted-foreground">
                 {lines.into_iter().map(|l| view! { <li>{l}</li> }).collect_view()}
             </ul>
+            {note.map(|n| view! { <p class="text-sm" data-testid="src-note">{t(n)}</p> })}
             <EnabledSwitch s=s.clone() data=data/>
             <KeyHowTo s=s.clone()/>
             <Credential s=s.clone() data=data/>

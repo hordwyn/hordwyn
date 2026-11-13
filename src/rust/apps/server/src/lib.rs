@@ -3,6 +3,7 @@
 #![deny(unsafe_code)]
 
 mod admin_wiring;
+pub mod book_stubs;
 mod csrf;
 pub mod escape;
 mod handlers;
@@ -193,6 +194,12 @@ fn default_registry(cfg: &AppConfig) -> (Registry, Vec<(String, String, Vec<Stri
     }));
     #[cfg(feature = "igdb")]
     all.push(Arc::new(connectors::igdb::Igdb::new(key("igdb"))));
+    // no key; `base_url` moves the API and the covers to one other host (tests, a mirror)
+    #[cfg(feature = "openlibrary")]
+    all.push(Arc::new(match base("openlibrary") {
+        Some(b) => connectors::openlibrary::OpenLibrary::with_base_urls(&b, &b),
+        None => connectors::openlibrary::OpenLibrary::new(),
+    }));
     #[cfg(feature = "podcastindex")]
     all.push(Arc::new(match base("podcastindex") {
         Some(b) => connectors::podcastindex::PodcastIndex::with_base_url(key("podcastindex"), &b),
@@ -292,7 +299,16 @@ impl Server {
             Some(r) => (r, Vec::new()),
             None => default_registry(&config),
         };
-        let registry = registry.with_stats(stats.clone());
+        // `instance.operator_contact`, shared by the admin API (which changes it), the registry
+        // (a source that requires it is skipped without one) and the governed client (which
+        // sends it to the sources that ask for it, and to no other)
+        let contact = catalog_core::OperatorContact::default();
+        contact
+            .set(config.instance.operator_contact.as_deref())
+            .map_err(|e| anyhow::anyhow!("instance.operator_contact: {e}"))?;
+        let registry = registry
+            .with_stats(stats.clone())
+            .with_contact(contact.clone());
         // `instance.hosting`, shared by the admin API (which changes it) and the governed
         // client (fair share of the interactive lane in hosted mode, design.md 4.1)
         let hosting = Arc::new(std::sync::RwLock::new(
@@ -308,7 +324,10 @@ impl Server {
                 &pool,
                 budget.clone(),
                 stats,
-                hosting.clone(),
+                LiveSettings {
+                    hosting: hosting.clone(),
+                    contact: contact.clone(),
+                },
             )
         };
         let assets = Arc::new(assets::AssetService::new(
@@ -388,6 +407,7 @@ impl Server {
                 disabled_sources,
                 mailer,
                 hosting,
+                contact,
             },
         )
         .await?;
@@ -626,6 +646,14 @@ async fn serve_asset(
     }
 }
 
+/// Instance settings the governed client reads with every request.
+struct LiveSettings {
+    /// `instance.hosting`.
+    hosting: Arc<std::sync::RwLock<String>>,
+    /// `instance.operator_contact`.
+    contact: catalog_core::OperatorContact,
+}
+
 /// The production `HttpFetch`: governed client with HTTP cache in the storage budget and one
 /// policy (allowlist, rate limit) per connector, plus the OIDC connector whose allowlist
 /// follows the configured providers at run time (the returned handle).
@@ -636,13 +664,14 @@ fn governed_http(
     pool: &sqlx::PgPool,
     budget: Arc<assets::StorageBudget>,
     stats: Arc<catalog_core::SourceStats>,
-    hosting: Arc<std::sync::RwLock<String>>,
+    live: LiveSettings,
 ) -> (Arc<dyn HttpFetch>, Option<Arc<catalog_core::HostList>>) {
     let cache = HttpCache {
         index: Arc::new(catalog_core::pg::PgCacheIndex::new(pool.clone())),
         blobs: budget,
     };
-    let ua = brand.user_agent(env!("CARGO_PKG_VERSION"));
+    let version = env!("CARGO_PKG_VERSION");
+    let ua = brand.user_agent(version);
     let mut g = GovernedHttp::new(&ua, Some(cache));
     for info in registry.infos() {
         g.add_connector(&info.id, ConnectorPolicy::from_info(&info));
@@ -664,7 +693,13 @@ fn governed_http(
         .collect();
     g.add_connector(auth::oidc::CONNECTOR, policy);
     let hosts = g.host_list(auth::oidc::CONNECTOR);
-    (Arc::new(g.with_stats(stats).with_hosting(hosting)), hosts)
+    let g = g
+        .with_stats(stats)
+        .with_hosting(live.hosting)
+        .with_contact(&format!("{}/{version}", brand.ident()), live.contact)
+        // one pace per keyless source for every process on this database (BOOK-8)
+        .with_shared_pace(Arc::new(catalog_core::pg::PgPace::new(pool.clone())));
+    (Arc::new(g), hosts)
 }
 
 fn auth_settings(config: &AppConfig, brand: &brand::Brand) -> auth::AuthSettings {

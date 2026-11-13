@@ -484,7 +484,8 @@ async fn stats_scenario(app: &app::App) -> domain::user::Actor {
     s.duration_minutes = Some(45);
     app.log_play(me, s).await.unwrap();
     // a show completed by hand, then a rewatch run that is stopped (its marker gives
-    // Completed back and is no completion, DEC-590) and one that is finished (one completion)
+    // Completed back and is no completion, DEC-590) and one that is finished (a second
+    // completion beside the one set by hand, LB-14)
     let again = item(
         app,
         "show",
@@ -535,7 +536,10 @@ async fn stats_on_postgres_match_the_in_memory_rules() {
     assert_eq!(expected.overall.amounts.finished, 3);
     let years = mem.app.stats_series(mem_me, None, Bucket::Year).await;
     let completions: u64 = years.unwrap().iter().map(|p| p.amounts.completions).sum();
-    assert_eq!(completions, 3, "two movies and the finished rewatch run");
+    assert_eq!(
+        completions, 4,
+        "two movies, the show completed by hand and its finished rewatch run"
+    );
     for group in [None, Some(KindGroup::Watch), Some(KindGroup::Read)] {
         for bucket in [Bucket::Month, Bucket::Year] {
             let pg = env.app.stats_series(pg_me, group, bucket).await.unwrap();
@@ -561,9 +565,14 @@ async fn rust_rules(
     user: domain::ids::UserId,
     zone: app::time_zone::Tz,
 ) -> Vec<app::MonthAmounts> {
-    use app::ports::{CatalogRepo, ProgressRepo, SessionRepo};
+    use app::ports::{CatalogRepo, LibraryRepo, ProgressRepo, SessionRepo};
     let events = ProgressRepo::by_user(&env.store, user).await.unwrap();
-    let mut ids: Vec<_> = events.iter().map(|e| e.item_id).collect();
+    let entries = LibraryRepo::by_user(&env.store, user).await.unwrap();
+    let mut ids: Vec<_> = events
+        .iter()
+        .map(|e| e.item_id)
+        .chain(entries.iter().map(|e| e.item_id))
+        .collect();
     ids.sort();
     ids.dedup();
     let items = CatalogRepo::get_many(&env.store, &ids)
@@ -578,7 +587,7 @@ async fn rust_rules(
         .into_iter()
         .map(|s| (s.id, u64::from(s.duration_minutes.unwrap_or(0))))
         .collect::<std::collections::HashMap<_, _>>();
-    app::month_amounts(&items, &events, &durations, zone)
+    app::month_amounts(&items, &events, &entries, &durations, zone)
 }
 
 /// The cached read equals the full statement and the Rust rules, twice (the second read
@@ -1182,4 +1191,319 @@ async fn play_totals_on_postgres_match_the_rule_in_rust() {
             .len(),
         0
     );
+}
+
+/// LB-13 (dated by LB-15): an entry that is Completed while no event completed it is a
+/// completion, on its newest logged step or undated. The full statement, the per-item cache
+/// (marked by the trigger on library entries) and the goal window answer what the Rust rules
+/// answer, after every step.
+#[tokio::test]
+async fn completions_set_by_hand_count_on_postgres_like_the_rust_rules() {
+    use app::ports::ProgressRepo;
+    let Some(env) = common::env().await else {
+        return;
+    };
+    let (_, me) = common::user(&env.app, "alice").await;
+    let none = || serde_json::json!({});
+    let book = item(&env.app, "book", "Dune", None, none()).await;
+    let other = item(&env.app, "book", "Emma", None, none()).await;
+    let movie = item(&env.app, "movie", "Heat", None, none()).await;
+    let page = Progress::Paged {
+        page: Some(100),
+        chapter: None,
+        volume: None,
+    };
+    env.app
+        .log_progress(me, book.id, page, None, None)
+        .await
+        .unwrap();
+    // the cache is filled before the first status is set by hand
+    same_stats(&env, me.user_id, "a page").await;
+    env.app
+        .set_status(me, book.id, Status::completed(), None)
+        .await
+        .unwrap();
+    same_stats(&env, me.user_id, "a book with pages, completed by hand").await;
+    env.app
+        .set_status(me, other.id, Status::completed(), None)
+        .await
+        .unwrap();
+    same_stats(&env, me.user_id, "a book without any event, completed").await;
+    env.app
+        .log_progress(me, movie.id, Progress::Finished, None, None)
+        .await
+        .unwrap();
+    same_stats(&env, me.user_id, "a film finished by an event").await;
+
+    let of = |t: &app::StatsTotals, g: KindGroup| {
+        let group = t.groups.iter().find(|x| x.group == g).unwrap();
+        group.totals.amounts.completions
+    };
+    let t = env.app.stats_totals(me).await.unwrap();
+    assert_eq!(of(&t, KindGroup::Read), 2);
+    assert_eq!(of(&t, KindGroup::Watch), 1, "not the event and the entry");
+    assert_eq!(t.overall.amounts.events, 2, "a status is no logged step");
+    // the book with a page lies on that page (logged now, by the clock of this environment);
+    // the one without a logged step is in no window
+    let set = env.app.entry(me, book.id).await.unwrap().unwrap();
+    let ms = i64::try_from(set.status.stamp.wall_ms).unwrap();
+    let now = chrono::DateTime::from_timestamp_millis(ms).unwrap();
+    let day = chrono::Duration::days(1);
+    let books = |rows: Vec<app::KindAmounts>| {
+        rows.into_iter()
+            .find(|k| k.kind.as_str() == "book")
+            .map_or(0, |k| k.amounts.completions)
+    };
+    let inside = env.store.window_amounts(me.user_id, now - day, now + day);
+    assert_eq!(books(inside.await.unwrap()), 1);
+    let before = env
+        .store
+        .window_amounts(me.user_id, now - day - day, now - day);
+    assert_eq!(books(before.await.unwrap()), 0);
+
+    // moved away by hand: the cached answer follows
+    env.app
+        .set_status(me, other.id, Status::in_progress(), None)
+        .await
+        .unwrap();
+    same_stats(&env, me.user_id, "moved back to In progress").await;
+    let t = env.app.stats_totals(me).await.unwrap();
+    assert_eq!(of(&t, KindGroup::Read), 1);
+}
+
+/// The months that hold a completion, with their number.
+async fn completion_months(env: &common::PgEnv, me: domain::user::Actor) -> Vec<(String, u64)> {
+    let series = env.app.stats_series(me, None, Bucket::Month).await.unwrap();
+    let done = series.into_iter().filter(|p| p.amounts.completions > 0);
+    done.map(|p| (p.bucket, p.amounts.completions)).collect()
+}
+
+/// BOOK-1, BOOK-3 and BOOK-11 on Postgres (LB-14, LB-15): a completion set by hand lies on
+/// the newest logged step and stays there when Completed is written again (by the
+/// application or by a plain UPDATE: the row trigger keeps it), through a rewatch that is
+/// started and stopped, and through a removal that is undone; without a logged step it is
+/// undated; a deleted entry and an undone event leave the cache; a zone change moves the
+/// month. After every step the cache, the full statement and the Rust rules agree.
+#[tokio::test]
+async fn a_completion_by_hand_keeps_its_day_on_postgres() {
+    use app::ports::ProgressRepo;
+    use chrono::TimeZone;
+    let Some(env) = common::env().await else {
+        return;
+    };
+    let app = &env.app;
+    let (_, me) = common::user(app, "alice").await;
+    let uid = me.user_id;
+    let at = |y, m, d| chrono::Utc.with_ymd_and_hms(y, m, d, 20, 0, 0).unwrap();
+    let none = || serde_json::json!({});
+    let month = |m: &str, n: u64| (m.to_string(), n);
+    let page = |page| Progress::Paged {
+        page: Some(page),
+        chapter: None,
+        volume: None,
+    };
+    let complete = |id| app.set_status(me, id, Status::completed(), None);
+
+    let book = item(app, "book", "Dune", None, none()).await;
+    app.log_progress(me, book.id, page(100), Some(at(2025, 3, 31)), None)
+        .await
+        .unwrap();
+    same_stats(&env, uid, "a page").await;
+    complete(book.id).await.unwrap();
+    same_stats(&env, uid, "completed by hand").await;
+    assert_eq!(completion_months(&env, me).await, [month("2025-03", 1)]);
+
+    // written again: by the application, and behind its back
+    complete(book.id).await.unwrap();
+    same_stats(&env, uid, "completed again").await;
+    sqlx::query(
+        "UPDATE library_entries SET completed_at = now(), completed_undated = false,
+                status_hlc = '0000020000000000-00000000-00000001' WHERE item_id = $1",
+    )
+    .bind(book.id.0)
+    .execute(env.store.pool())
+    .await
+    .unwrap();
+    same_stats(&env, uid, "a plain UPDATE of a Completed row").await;
+    assert_eq!(completion_months(&env, me).await, [month("2025-03", 1)]);
+
+    // without a logged step: in the totals, in no month and in no window
+    let emma = item(app, "book", "Emma", None, none()).await;
+    app.add_to_library(me, emma.id, Some(Status::completed()))
+        .await
+        .unwrap();
+    same_stats(&env, uid, "an undated completion").await;
+    assert_eq!(completion_months(&env, me).await, [month("2025-03", 1)]);
+    let totals = app.stats_totals(me).await.unwrap().overall;
+    assert_eq!(totals.amounts.completions, 2);
+    let store = &env.store;
+    let books = |from, to| async move {
+        let rows = store.window_amounts(uid, from, to).await.unwrap();
+        let book = rows.into_iter().find(|k| k.kind.as_str() == "book");
+        book.map_or(0, |k| k.amounts.completions)
+    };
+    assert_eq!(books(at(2025, 3, 1), at(2025, 4, 1)).await, 1);
+    assert_eq!(books(at(1990, 1, 1), at(2090, 1, 1)).await, 1, "not Emma");
+    assert_eq!(books(at(2025, 4, 1), at(2090, 1, 1)).await, 0);
+
+    // a zone east of UTC: 20:00 UTC on March 31 is April 1 there (a full rebuild)
+    let zone = app::time_zone::parse_zone("Pacific/Auckland");
+    app.set_time_zone(me, zone).await.unwrap();
+    same_stats(&env, uid, "another zone").await;
+    assert_eq!(completion_months(&env, me).await, [month("2025-04", 1)]);
+    app.set_time_zone(me, None).await.unwrap();
+    same_stats(&env, uid, "the default zone again").await;
+
+    // a show completed by hand, a rewatch started and stopped: the completion stays
+    let seasons = serde_json::json!({ "seasons": [{"number": 1, "episode_count": 2}] });
+    let show = item(app, "show", "Dark", None, seasons).await;
+    for e in 1..=2 {
+        let ep = Progress::Episode {
+            season: 1,
+            episode: e,
+        };
+        app.log_progress(me, show.id, ep, Some(at(2024, 7, e)), None)
+            .await
+            .unwrap();
+    }
+    complete(show.id).await.unwrap();
+    let with_show = [month("2024-07", 1), month("2025-03", 1)];
+    assert_eq!(completion_months(&env, me).await, with_show);
+    for marker in [Progress::Rewatch, Progress::RewatchStop] {
+        app.log_progress(me, show.id, marker.clone(), None, None)
+            .await
+            .unwrap();
+        same_stats(&env, uid, &format!("{marker:?}")).await;
+        assert_eq!(completion_months(&env, me).await, with_show, "{marker:?}");
+    }
+
+    // an entry deleted while Completed leaves the cache; the undo brings it back as it was
+    let undo = app.remove_from_library(me, book.id).await.unwrap();
+    same_stats(&env, uid, "removed while Completed").await;
+    assert_eq!(completion_months(&env, me).await, [month("2024-07", 1)]);
+    app.undo_bulk(me, &undo).await.unwrap();
+    same_stats(&env, uid, "the removal undone").await;
+    assert_eq!(completion_months(&env, me).await, with_show);
+
+    // an event that completed an entry is taken back: its completion goes with it
+    let film = item(app, "movie", "Heat", None, none()).await;
+    let seen = app
+        .log_progress(me, film.id, Progress::Finished, None, None)
+        .await
+        .unwrap();
+    same_stats(&env, uid, "a film finished").await;
+    assert_eq!(
+        app.stats_totals(me)
+            .await
+            .unwrap()
+            .overall
+            .amounts
+            .completions,
+        4
+    );
+    app.undo_progress(me, seen.id).await.unwrap();
+    same_stats(&env, uid, "the finish undone").await;
+    assert_eq!(
+        app.stats_totals(me)
+            .await
+            .unwrap()
+            .overall
+            .amounts
+            .completions,
+        3
+    );
+
+    // moved away by hand: gone
+    app.set_status(me, show.id, Status::new(Status::DROPPED), None)
+        .await
+        .unwrap();
+    same_stats(&env, uid, "dropped").await;
+    assert_eq!(completion_months(&env, me).await, [month("2025-03", 1)]);
+}
+
+/// Review BOOK-4: a database that held Completed entries before the completion columns
+/// existed. The migration dates them by the rule (the newest effective event, else undated;
+/// none for an entry an event completed) and makes every user's cache rebuild, so the
+/// statistics show them at the next read and not entry by entry as each is touched.
+#[tokio::test]
+async fn the_completion_migration_dates_existing_entries_and_rebuilds_the_cache() {
+    use chrono::TimeZone;
+    use domain::library::HandCompletion;
+    let Some(env) = common::env().await else {
+        return;
+    };
+    let app = &env.app;
+    let (_, me) = common::user(app, "alice").await;
+    let none = || serde_json::json!({});
+    let read = chrono::Utc.with_ymd_and_hms(2025, 3, 31, 20, 0, 0).unwrap();
+    let dune = item(app, "book", "Dune", None, none()).await;
+    let emma = item(app, "book", "Emma", None, none()).await;
+    let heat = item(app, "movie", "Heat", None, none()).await;
+    let page = Progress::Paged {
+        page: Some(100),
+        chapter: None,
+        volume: None,
+    };
+    app.log_progress(me, dune.id, page, Some(read), None)
+        .await
+        .unwrap();
+    for book in [&dune, &emma] {
+        app.set_status(me, book.id, Status::completed(), None)
+            .await
+            .unwrap();
+    }
+    app.log_progress(me, heat.id, Progress::Finished, None, None)
+        .await
+        .unwrap();
+    same_stats(&env, me.user_id, "before").await;
+
+    // back to the state before the migration: no columns, and a cache that was built
+    // without the completions of the two books
+    let migration = store_pg::MIGRATOR
+        .iter()
+        .find(|m| m.description == "hand completions")
+        .expect("the migration of this package");
+    sqlx::raw_sql(
+        "DROP TRIGGER stats_entry_changed ON library_entries;
+         DROP TRIGGER library_entry_completion ON library_entries;
+         DROP FUNCTION stats_entry_changed();
+         DROP FUNCTION library_entry_completion();
+         ALTER TABLE library_entries DROP COLUMN completed_at, DROP COLUMN completed_undated;
+         UPDATE stats_item_months SET completions = 0 WHERE kind = 'book';
+         UPDATE stats_months SET completions = 0 WHERE kind = 'book';
+         DELETE FROM stats_item_months WHERE month = '';
+         DELETE FROM stats_months WHERE month = '';
+         DELETE FROM stats_dirty;",
+    )
+    .execute(env.store.pool())
+    .await
+    .unwrap();
+    sqlx::raw_sql(migration.sql.clone())
+        .execute(env.store.pool())
+        .await
+        .unwrap();
+
+    let completed = |id: domain::ids::ItemId| async move {
+        let e = app.entry(me, id).await.unwrap().unwrap();
+        e.completed
+    };
+    assert_eq!(completed(dune.id).await, Some(HandCompletion::At(read)));
+    assert_eq!(completed(emma.id).await, Some(HandCompletion::Undated));
+    assert_eq!(
+        completed(heat.id).await,
+        None,
+        "the event is its completion"
+    );
+    same_stats(&env, me.user_id, "after the migration").await;
+    assert_eq!(
+        app.stats_totals(me)
+            .await
+            .unwrap()
+            .overall
+            .amounts
+            .completions,
+        3
+    );
+    let books = completion_months(&env, me).await;
+    assert!(books.contains(&("2025-03".to_string(), 1)), "{books:?}");
 }

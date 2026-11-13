@@ -34,6 +34,7 @@ impl Fake {
                 },
                 hosts: vec![],
                 cache_ttl_secs: 0,
+                contact: catalog_core::ContactUse::None,
             },
             key: KeySlot::new(key.map(String::from)),
         }
@@ -223,4 +224,34 @@ async fn a_disabled_source_is_not_asked_for_details() {
         env.app.catalog_item(item.id).await.unwrap().title,
         "Heat (refreshed)"
     );
+}
+
+/// v1-books 3.1.1: a source that requires the operator contact is not asked without one,
+/// and says why.
+#[test]
+fn a_source_that_requires_the_contact_is_skipped_until_one_is_set() {
+    use catalog_core::{ContactUse, OperatorContact};
+    let mut needs = Fake::new("strict", Some("k"));
+    needs.info.contact = ContactUse::Required;
+    let mut likes = Fake::new("polite", Some("k"));
+    likes.info.contact = ContactUse::Preferred;
+    let contact = OperatorContact::default();
+    let mut r = Registry::default().with_contact(contact.clone());
+    r.register(Arc::new(needs)).register(Arc::new(likes));
+    assert_eq!(r.credential("strict"), CredentialState::NeedsContact);
+    assert_eq!(r.credential("polite"), CredentialState::Env);
+    let ids = |r: &Registry| -> Vec<String> {
+        r.for_kind("movie", Capability::Search)
+            .iter()
+            .map(|c| c.info().id.clone())
+            .collect()
+    };
+    assert_eq!(ids(&r), ["polite"]);
+    assert_eq!(
+        r.skipped(&["movie".into()], Capability::Search),
+        [("strict".to_string(), CredentialState::NeedsContact)]
+    );
+    contact.set(Some("ops@example.org")).unwrap();
+    assert_eq!(r.credential("strict"), CredentialState::Env);
+    assert_eq!(ids(&r), ["strict", "polite"]);
 }

@@ -23,6 +23,21 @@ impl app::ports::Notifications for Silent {
     async fn emit(&self, _n: Notification) {}
 }
 
+/// The application as a shell command uses it: the database and the job queue of the server,
+/// every built-in kind, events that reach nobody (no browser is connected to this process)
+/// and no notifications.
+pub(crate) fn shell_app(pool: &sqlx::PgPool) -> App {
+    App {
+        repos: crate::pg_repos(pool),
+        kinds: Arc::new(kinds::Registry::with_builtins()),
+        clock: Arc::new(crate::infra::SystemClock::default()),
+        ids: Arc::new(crate::infra::SystemIds),
+        events: Arc::new(realtime::Bus::local()),
+        jobs: Arc::new(jobs::PgQueue::new(pool.clone())),
+        notifications: Arc::new(Silent),
+    }
+}
+
 /// One key version as `cli secrets status` shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyVersionRow {
@@ -91,16 +106,7 @@ impl Escape {
             Some(r) => r.clone(),
             None => Arc::new(KeyRing::generate().0),
         };
-        let queue = jobs::PgQueue::new(pool.clone());
-        let app = App {
-            repos: crate::pg_repos(&pool),
-            kinds: Arc::new(kinds::Registry::with_builtins()),
-            clock: Arc::new(crate::infra::SystemClock::default()),
-            ids: Arc::new(crate::infra::SystemIds),
-            events: Arc::new(realtime::Bus::local()),
-            jobs: Arc::new(queue),
-            notifications: Arc::new(Silent),
-        };
+        let app = shell_app(&pool);
         let auth_store = Arc::new(auth::pg::PgAuthStore::new(pool.clone(), cipher.clone()));
         let auth = auth::Auth::new(
             app.clone(),

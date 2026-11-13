@@ -29,10 +29,11 @@ use crate::api;
 use crate::history_state::Day;
 use crate::i18n::{I18n, t, use_i18n};
 use crate::log_form::{
-    CoopResult, DateChip, FormError, PlayForm, Player, WatchedForm, WinnerChoice, format_duration,
-    format_position, group_players, page_progress, position_progress,
+    CoopResult, DateChip, FormError, PageTotal, PlayForm, Player, WatchedForm, WinnerChoice,
+    finish_page, format_duration, format_position, group_players, page_progress, parse_page_total,
+    position_progress,
 };
-use crate::next_step::{LoggedStep, StepCtx, run_step, toast_logged};
+use crate::next_step::{LoggedStep, StepCtx, Then, run_step, run_step_then, toast_logged};
 use crate::widgets::{CompanionPicker, RatingInput, progress_label};
 
 /// Id of the action bar's button that opens the watched dialog: it gets the focus back when
@@ -1129,6 +1130,12 @@ pub struct InlineDraft {
     /// What the person typed while it differs from the stored value; `None` shows the stored one.
     pub text: RwSignal<Option<String>>,
     pub error: RwSignal<Option<String>>,
+    /// The text of the page total editor while it is open ("Change" next to the page
+    /// field); `None`: closed.
+    pub total: RwSignal<Option<String>>,
+    /// The page total was just saved: the action bar is rendered afresh with the refetched
+    /// page, and the new "Change" button takes the focus the old one had.
+    pub refocus: RwSignal<bool>,
 }
 
 impl InlineDraft {
@@ -1137,6 +1144,8 @@ impl InlineDraft {
         Self {
             text: RwSignal::new(None),
             error: RwSignal::new(None),
+            total: RwSignal::new(None),
+            refocus: RwSignal::new(false),
         }
     }
 
@@ -1144,6 +1153,7 @@ impl InlineDraft {
     pub fn clear(self) {
         self.text.set(None);
         self.error.set(None);
+        self.total.set(None);
     }
 
     /// The field's signal: starts from the draft (else `stored`) and keeps the draft in step.
@@ -1175,32 +1185,60 @@ impl Default for InlineDraft {
 }
 
 /// Mark the entry completed (the "Finished" of pages and positions); a page or position at
-/// the end does not complete an entry on its own.
-fn complete(item_id: String, ctx: &StepCtx, refresh: Callback<()>) {
+/// the end does not complete an entry on its own. Offline the status goes into the queue
+/// (review BOOK-6), which says "Saved offline, will sync".
+fn complete(item: (String, String), ctx: &StepCtx, refresh: Callback<()>) {
     let word = ctx.i18n.t("status-completed");
     let done = ctx
         .i18n
         .t_args("library-status-changed", &[("status", word.into())]);
-    let toasts = ctx.toasts;
+    let ctx = ctx.clone();
     leptos::task::spawn_local(async move {
-        if api::set_status(item_id, "completed".into()).await.is_ok() {
-            toasts.push(done, None, ui::ToastVariant::Default);
+        let (item_id, title) = item;
+        match api::set_status(item_id.clone(), COMPLETED.into()).await {
+            Ok(_) => {
+                ctx.toasts.push(done, None, ui::ToastVariant::Default);
+            }
+            Err(e) if crate::offline::network_error(&e) => {
+                ctx.queue_field(title, |hlc| {
+                    crate::offline::status_command(&item_id, COMPLETED, hlc)
+                });
+            }
+            Err(_) => {}
         }
         refresh.run(());
     });
 }
 
-/// Page field with Update, +10, +25 and Finished (design.md 5.4 Pages); Enter saves.
+/// The status "Finished" sets.
+const COMPLETED: &str = "completed";
+
+/// Page field with Update, +10, +25 and Finished (design.md 5.4 Pages); Enter saves. With a
+/// known total the field is followed by "of N pages" ("(estimate)" for a median the source
+/// gave), and whoever may change the shared item gets "Change" (or "Set page total") there.
 #[component]
-pub fn PagesInline(info: ItemInfo, step: NextStepDto, draft: InlineDraft) -> impl IntoView {
+pub fn PagesInline(
+    info: ItemInfo,
+    step: NextStepDto,
+    draft: InlineDraft,
+    #[prop(optional)] total: PageTotal,
+) -> impl IntoView {
     let i18n = use_i18n();
     let ctx = StepCtx::current();
     let value = draft.field(step.page.map(|p| p.to_string()).unwrap_or_default());
     let (busy, error) = (RwSignal::new(false), draft.error);
-    let pages = step.pages;
+    let (pages, at) = (step.pages, step.page);
+    Effect::new(move |_| {
+        if draft.refocus.get_untracked() {
+            draft.refocus.set(false);
+            request_animation_frame(|| crate::auth_pages::focus(TOTAL_OPENER));
+        }
+    });
     let info = StoredValue::new(info);
     let i2 = i18n.clone();
-    let log = move |text: String| match page_progress(&text, pages) {
+    // `then`: "Finished" completes once the page is logged (not after an undo), or queues
+    // Completed behind the page when offline
+    let log = move |text: String, then: Option<Then>| match page_progress(&text, pages) {
         Err(e) => error.set(Some(error_message(&i2, &e))),
         Ok(progress) => {
             let ItemInfo {
@@ -1217,7 +1255,11 @@ pub fn PagesInline(info: ItemInfo, step: NextStepDto, draft: InlineDraft) -> imp
                 progress,
                 verb: None,
             };
-            run_step(ctx.clone(), step, busy, error, Some(draft.done(refresh)));
+            let done = Some(draft.done(refresh));
+            match then {
+                Some(then) => run_step_then(ctx.clone(), step, busy, error, done, then),
+                None => run_step(ctx.clone(), step, busy, error, done),
+            }
         }
     };
     let log = StoredValue::new(log);
@@ -1225,34 +1267,165 @@ pub fn PagesInline(info: ItemInfo, step: NextStepDto, draft: InlineDraft) -> imp
         let now = value.get_untracked().trim().parse::<u32>().unwrap_or(0);
         let next = pages.map_or(now + n, |p| (now + n).min(p));
         value.set(next.to_string());
-        log.with_value(|l| l(next.to_string()));
+        log.with_value(|l| l(next.to_string(), None));
     };
     let ctx2 = StepCtx::current();
+    // with a known total, finishing counts the pages that were left: the last page is logged
+    // first, then the entry is completed (v1-books, G16)
     let finish = move |_| {
-        if let Some(p) = pages {
-            log.with_value(|l| l(p.to_string()));
-        }
         let ItemInfo {
-            item_id, refresh, ..
+            item_id,
+            title,
+            refresh,
+            ..
         } = info.get_value();
-        complete(item_id, &ctx2, refresh);
+        let ctx = ctx2.clone();
+        let online =
+            Callback::new(move |()| complete((item_id.clone(), title.clone()), &ctx, refresh));
+        let then = Then {
+            online,
+            status: COMPLETED,
+        };
+        match finish_page(at, pages) {
+            Some(last) => log.with_value(|l| l(last.to_string(), Some(then))),
+            None => online.run(()),
+        }
     };
-    let of = pages.map(|p| i18n.t_args("log-of-pages", &[("pages", p.into())]));
     let initial = value.get_untracked();
+    // the total stands beside the field: it is part of what the field is about
+    let described = if pages.is_some() {
+        "pages-at-error pages-of"
+    } else {
+        "pages-at-error"
+    };
     view! {
-        <form class="grid gap-2" novalidate on:submit=move |ev| { ev.prevent_default(); log.with_value(|l| l(value.get_untracked())); }>
+        <div class="grid gap-2">
+            <form class="grid gap-2" novalidate on:submit=move |ev| { ev.prevent_default(); log.with_value(|l| l(value.get_untracked(), None)); }>
+                <div class="flex flex-wrap items-end gap-2">
+                    <FormField id="pages-at" label=t("log-page")>
+                        <Input id="pages-at" value=value inputmode="numeric" autocomplete="off" class="w-24"
+                            invalid=Signal::derive(move || error.with(Option::is_some)) described_by=described attr:value=initial/>
+                    </FormField>
+                    <PageTotalLine pages=pages total=total draft=draft/>
+                    <Button r#type="submit" size=ButtonSize::Lg loading=busy>{t("log-update")}</Button>
+                    <Button variant=ButtonVariant::Outline size=ButtonSize::Lg on:click=move |_| plus(10)>{use_i18n().t_args("log-plus-pages", &[("count", 10.into())])}</Button>
+                    <Button variant=ButtonVariant::Outline size=ButtonSize::Lg on:click=move |_| plus(25)>{use_i18n().t_args("log-plus-pages", &[("count", 25.into())])}</Button>
+                    <Button variant=ButtonVariant::Outline size=ButtonSize::Lg disabled=busy on:click=finish>{t("log-finished")}</Button>
+                </div>
+                <p id="pages-at-error" role="alert" class="text-sm text-destructive-text">{move || error.get()}</p>
+            </form>
+            {move || draft.total.with(Option::is_some).then(|| view! { <PageTotalForm info=info.get_value() draft=draft/> })}
+        </div>
+    }
+}
+
+/// "of N pages" after the page field ("(estimate)" for a source's median), and for whoever
+/// may change the shared item the button that opens the page total form: "Change", or
+/// "Set page total" when the item has none.
+#[component]
+fn PageTotalLine(pages: Option<u32>, total: PageTotal, draft: InlineDraft) -> impl IntoView {
+    let of = pages.map(|p| {
+        let key = if total.estimated {
+            "log-of-pages-estimate"
+        } else {
+            "log-of-pages"
+        };
+        use_i18n().t_args(key, &[("pages", p.into())])
+    });
+    let change = total.can_edit.then(|| {
+        let label = if pages.is_some() {
+            t("log-pages-change")
+        } else {
+            t("log-pages-set")
+        };
+        // "Change" alone does not say what; the name does (WCAG 2.5.3 keeps the visible word)
+        let aria = pages.is_some().then(|| t("log-pages-change-label"));
+        let open = move |_| {
+            draft
+                .total
+                .set(Some(pages.map(|p| p.to_string()).unwrap_or_default()));
+            request_animation_frame(|| crate::auth_pages::focus(TOTAL_FIELD));
+        };
+        view! {
+            <Button variant=ButtonVariant::Link size=ButtonSize::Sm attr:id=TOTAL_OPENER class="mb-1"
+                attr:aria-label=aria
+                attr:aria-expanded=move || if draft.total.with(Option::is_some) { "true" } else { "false" }
+                on:click=open>{label}</Button>
+        }
+    });
+    view! {
+        {of.map(|o| view! { <span id="pages-of" class="pb-2 text-sm text-muted-foreground" data-testid="pages-of">{o}</span> })}
+        {change}
+    }
+}
+
+/// DOM ids of the page total editor and of the button that opens it.
+const TOTAL_FIELD: &str = "pages-total";
+const TOTAL_OPENER: &str = "pages-total-open";
+
+/// The small form behind "Change": one number, Save and Cancel. Saving writes the total to
+/// the shared item as set by a person (it survives the source's refreshes) and refetches.
+#[component]
+fn PageTotalForm(info: ItemInfo, draft: InlineDraft) -> impl IntoView {
+    let i18n = use_i18n();
+    let value = RwSignal::new(draft.total.get_untracked().unwrap_or_default());
+    // the typed text lives with the page, like the page field's (DEC-477)
+    Effect::new(move |_| {
+        let v = value.get();
+        if draft
+            .total
+            .with_untracked(|t| t.as_ref().is_some_and(|t| *t != v))
+        {
+            draft.total.set(Some(v));
+        }
+    });
+    let (busy, error) = (RwSignal::new(false), RwSignal::new(None::<String>));
+    let close = move || {
+        draft.total.set(None);
+        crate::auth_pages::focus(TOTAL_OPENER);
+    };
+    let toasts = ui::use_toasts();
+    let ItemInfo {
+        item_id, refresh, ..
+    } = info;
+    let save = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        let Some(pages) = parse_page_total(&value.get_untracked()) else {
+            error.set(Some(i18n.t("log-error-pages-total")));
+            return;
+        };
+        error.set(None);
+        busy.set(true);
+        let (item_id, i18n) = (item_id.clone(), i18n.clone());
+        leptos::task::spawn_local(async move {
+            match api::set_page_count(item_id, pages).await {
+                Ok(_) => {
+                    toasts.push(
+                        i18n.t_args("log-pages-total-saved", &[("pages", pages.into())]),
+                        None,
+                        ui::ToastVariant::Default,
+                    );
+                    close();
+                    draft.refocus.set(true);
+                    refresh.run(());
+                }
+                Err(e) => error.set(Some(crate::pages::error_text(&e))),
+            }
+            busy.set(false);
+        });
+    };
+    view! {
+        <form class="grid gap-2" novalidate on:submit=save data-testid="pages-total-form">
             <div class="flex flex-wrap items-end gap-2">
-                <FormField id="pages-at" label=t("log-page")>
-                    <Input id="pages-at" value=value inputmode="numeric" autocomplete="off" class="w-24"
-                        invalid=Signal::derive(move || error.with(Option::is_some)) described_by="pages-at-error" attr:value=initial/>
+                <FormField id=TOTAL_FIELD label=t("log-pages-total") description=t("log-pages-total-hint")>
+                    <Input id=TOTAL_FIELD value=value inputmode="numeric" autocomplete="off" class="w-24"
+                        invalid=Signal::derive(move || error.with(Option::is_some))
+                        described_by=format!("{} pages-total-error", ui::field_described_by(TOTAL_FIELD))/>
                 </FormField>
-                {of.map(|o| view! { <span class="pb-2 text-sm text-muted-foreground">{o}</span> })}
-                <Button r#type="submit" size=ButtonSize::Lg loading=busy>{t("log-update")}</Button>
-                <Button variant=ButtonVariant::Outline size=ButtonSize::Lg on:click=move |_| plus(10)>{use_i18n().t_args("log-plus-pages", &[("count", 10.into())])}</Button>
-                <Button variant=ButtonVariant::Outline size=ButtonSize::Lg on:click=move |_| plus(25)>{use_i18n().t_args("log-plus-pages", &[("count", 25.into())])}</Button>
-                <Button variant=ButtonVariant::Outline size=ButtonSize::Lg on:click=finish>{t("log-finished")}</Button>
+                <Button r#type="submit" loading=busy>{t("log-save")}</Button>
+                <Button variant=ButtonVariant::Outline on:click=move |_| close()>{t("log-cancel")}</Button>
             </div>
-            <p id="pages-at-error" role="alert" class="text-sm text-destructive-text">{move || error.get()}</p>
+            <p id="pages-total-error" role="alert" class="text-sm text-destructive-text">{move || error.get()}</p>
         </form>
     }
 }
@@ -1301,9 +1474,12 @@ pub fn PositionInline(info: ItemInfo, step: NextStepDto, draft: InlineDraft) -> 
             log.with_value(|l| l(format_position(t)));
         }
         let ItemInfo {
-            item_id, refresh, ..
+            item_id,
+            title,
+            refresh,
+            ..
         } = info.get_value();
-        complete(item_id, &ctx2, refresh);
+        complete((item_id, title), &ctx2, refresh);
     };
     let of = total.map(|t| i18n.t_args("log-of-time", &[("time", format_position(t).into())]));
     view! {

@@ -1,0 +1,22 @@
+{
+  "fixture": {
+    "synthetic": true,
+    "source": "an ISBN nobody holds, in the shape of the recorded 404 of /works/OL1W.json; not requested",
+    "checked": "2026-11-12"
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://openlibrary.org/isbn/9780306406157.json"
+  },
+  "status": 404,
+  "headers": [
+    [
+      "content-type",
+      "application/json"
+    ]
+  ],
+  "body": {
+    "error": "notfound",
+    "key": "/isbn/9780306406157"
+  }
+}

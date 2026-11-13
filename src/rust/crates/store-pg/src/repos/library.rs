@@ -9,7 +9,7 @@ use domain::Timestamp;
 use domain::hlc::Lww;
 use domain::ids::{EntryId, EventId, ItemId, ReviewId, UserId};
 use domain::kind::{KindId, Status};
-use domain::library::{LibraryEntry, Rating};
+use domain::library::{HandCompletion, LibraryEntry, Rating};
 use domain::progress::{Progress, ProgressEvent};
 use domain::review::Review;
 use domain::tag::tag_key;
@@ -26,6 +26,8 @@ pub(super) struct EntryRow {
     pub(super) kind: String,
     pub(super) status: String,
     pub(super) status_hlc: String,
+    pub(super) completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub(super) completed_undated: bool,
     pub(super) rating: Option<i16>,
     pub(super) rating_hlc: String,
     pub(super) notes: Option<String>,
@@ -54,6 +56,11 @@ impl TryFrom<EntryRow> for LibraryEntry {
             rating: Lww::new(rating, hlc(&r.rating_hlc)?),
             notes: Lww::new(r.notes, hlc(&r.notes_hlc)?),
             added_at: r.added_at,
+            completed: match (r.completed_at, r.completed_undated) {
+                (Some(at), _) => Some(HandCompletion::At(at)),
+                (None, true) => Some(HandCompletion::Undated),
+                (None, false) => None,
+            },
         })
     }
 }
@@ -63,7 +70,8 @@ impl LibraryRepo for PgStore {
     async fn get(&self, user: UserId, item: ItemId) -> Res<Option<LibraryEntry>> {
         sqlx::query_as!(
             EntryRow,
-            "SELECT id, user_id, item_id, kind, status, status_hlc, rating, rating_hlc, notes,
+            "SELECT id, user_id, item_id, kind, status, status_hlc, completed_at,
+                    completed_undated, rating, rating_hlc, notes,
                     notes_hlc, added_at FROM library_entries WHERE user_id = $1 AND item_id = $2",
             user.0,
             item.0
@@ -78,7 +86,8 @@ impl LibraryRepo for PgStore {
     async fn get_by_id(&self, id: EntryId) -> Res<Option<LibraryEntry>> {
         sqlx::query_as!(
             EntryRow,
-            "SELECT id, user_id, item_id, kind, status, status_hlc, rating, rating_hlc, notes,
+            "SELECT id, user_id, item_id, kind, status, status_hlc, completed_at,
+                    completed_undated, rating, rating_hlc, notes,
                     notes_hlc, added_at FROM library_entries WHERE id = $1",
             id.0
         )
@@ -106,7 +115,8 @@ impl LibraryRepo for PgStore {
         let items: Vec<uuid::Uuid> = items.iter().map(|i| i.0).collect();
         sqlx::query_as!(
             EntryRow,
-            "SELECT id, user_id, item_id, kind, status, status_hlc, rating, rating_hlc, notes,
+            "SELECT id, user_id, item_id, kind, status, status_hlc, completed_at,
+                    completed_undated, rating, rating_hlc, notes,
                     notes_hlc, added_at FROM library_entries
              WHERE user_id = $1 AND item_id = ANY($2)",
             user.0,
@@ -141,7 +151,8 @@ impl LibraryRepo for PgStore {
     async fn by_user(&self, user: UserId) -> Res<Vec<LibraryEntry>> {
         sqlx::query_as!(
             EntryRow,
-            "SELECT id, user_id, item_id, kind, status, status_hlc, rating, rating_hlc, notes,
+            "SELECT id, user_id, item_id, kind, status, status_hlc, completed_at,
+                    completed_undated, rating, rating_hlc, notes,
                     notes_hlc, added_at FROM library_entries WHERE user_id = $1 ORDER BY added_at, id",
             user.0
         )
@@ -399,6 +410,14 @@ impl PgStore {
                  JOIN catalog_items c ON c.id = x.item_id
                  WHERE x.user_id = $1 AND x.undoes IS NULL
                    AND NOT EXISTS (SELECT 1 FROM progress_events u WHERE u.undoes = x.id)
+                 UNION ALL
+                 -- LB-14: the completion no event made is one completion on its day; one
+                 -- without a day (LB-15) is in no month (the empty month)
+                 SELECT e.id, e.item_id, e.completed_at, jsonb_build_object('to', 'completed'),
+                        c.kind, c.attributes, 'status', NULL, NULL, NULL
+                 FROM library_entries e
+                 JOIN catalog_items c ON c.id = e.item_id
+                 WHERE e.user_id = $1 AND (e.completed_at IS NOT NULL OR e.completed_undated)
                ), moves AS (
                  SELECT l.*,
                         COALESCE(lag(page) OVER (PARTITION BY item_id, page IS NULL
@@ -408,8 +427,8 @@ impl PgStore {
                  FROM live l
                )
                SELECT kind AS "kind!",
-                      to_char(occurred_at AT TIME ZONE $2, 'YYYY-MM') AS "month!",
-                      COUNT(*) AS events,
+                      COALESCE(to_char(occurred_at AT TIME ZONE $2, 'YYYY-MM'), '') AS "month!",
+                      COUNT(*) FILTER (WHERE t <> 'status') AS events,
                       COUNT(*) FILTER (WHERE status_change ->> 'to' = 'completed'
                                         AND t <> 'rewatch_stop') AS completions,
                       COUNT(*) FILTER (WHERE t = 'finished') AS finished,

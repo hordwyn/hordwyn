@@ -50,7 +50,12 @@ fn serving(state: &str) -> bool {
 fn failing(state: &str) -> bool {
     matches!(
         state,
-        "key_rejected" | "key_unavailable" | "circuit_open" | "unavailable" | "retrying"
+        "key_rejected"
+            | "key_unavailable"
+            | "circuit_open"
+            | "unavailable"
+            | "retrying"
+            | "needs_contact"
     )
 }
 
@@ -257,6 +262,22 @@ mod tests {
             name: id.to_uppercase(),
             state: state.into(),
         }
+    }
+
+    /// v1-books 3.1.1: a source that waits for the operator contact is named, with Set up.
+    #[test]
+    fn a_source_without_the_operator_contact_is_shown_with_set_up() {
+        let sources = vec![src("tmdb", "working"), src("wikidata", "needs_contact")];
+        let admin = footer_items(&page(true, sources, &[]));
+        assert_eq!(admin.len(), 2);
+        assert!(matches!(
+            &admin[1],
+            FooterItem::Source { state, action: Some(HintAction::SetUp), .. } if state == "needs_contact"
+        ));
+        assert_eq!(
+            crate::admin_state::source_state("needs_contact"),
+            ui::StatusState::Bad
+        );
     }
 
     #[test]

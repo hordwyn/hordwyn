@@ -479,6 +479,38 @@ impl CatalogRepo for MemStore {
             .collect())
     }
 
+    async fn unfetched_items(&self, kind: Option<&KindId>) -> RepoResult<Vec<ItemId>> {
+        let s = self.state();
+        let mut ids: Vec<ItemId> = s
+            .catalog
+            .values()
+            .filter(|i| {
+                kind.is_none_or(|k| &i.kind == k)
+                    && (i.state == domain::catalog::EntityState::Failed
+                        || (i.fetched_at.is_none()
+                            && s.library.values().any(|e| e.item_id == i.id)))
+            })
+            .map(|i| i.id)
+            .collect();
+        ids.sort_by_key(|i| i.0);
+        Ok(ids)
+    }
+
+    async fn items_without_namespace(
+        &self,
+        kind: &KindId,
+        namespace: &str,
+    ) -> RepoResult<Vec<ItemId>> {
+        let s = self.state();
+        let mut items: Vec<&CatalogItem> = s
+            .catalog
+            .values()
+            .filter(|i| &i.kind == kind && i.external_ids.iter().all(|e| e.namespace != namespace))
+            .collect();
+        items.sort_by(|a, b| (&a.title, a.id.0).cmp(&(&b.title, b.id.0)));
+        Ok(items.into_iter().map(|i| i.id).collect())
+    }
+
     async fn episode_seasons(&self, item: ItemId) -> RepoResult<Vec<EpisodeSeason>> {
         Ok(self
             .state()
@@ -884,7 +916,15 @@ impl ProgressRepo for MemStore {
             .filter(|x| x.owner == user)
             .map(|x| (x.id, u64::from(x.duration_minutes.unwrap_or(0))))
             .collect();
-        Ok(app::month_amounts(&s.catalog, &events, &durations, zone))
+        let entries: Vec<LibraryEntry> = s
+            .library
+            .values()
+            .filter(|e| e.user_id == user)
+            .cloned()
+            .collect();
+        Ok(app::month_amounts(
+            &s.catalog, &events, &entries, &durations, zone,
+        ))
     }
 
     async fn window_amounts(
@@ -901,8 +941,14 @@ impl ProgressRepo for MemStore {
             .filter(|x| x.owner == user)
             .map(|x| (x.id, u64::from(x.duration_minutes.unwrap_or(0))))
             .collect();
+        let entries: Vec<LibraryEntry> = s
+            .library
+            .values()
+            .filter(|e| e.user_id == user)
+            .cloned()
+            .collect();
         Ok(app::window_amounts(
-            &s.catalog, &events, &durations, from, to,
+            &s.catalog, &events, &entries, &durations, from, to,
         ))
     }
 

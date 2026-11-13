@@ -94,6 +94,7 @@ impl PodcastIndex {
                 // target by the browser, not by the server
                 hosts: vec![host_of(&api_base)],
                 cache_ttl_secs: 24 * 3600,
+                contact: catalog_core::ContactUse::None,
             },
             api_base,
             key: KeySlot::new(key),

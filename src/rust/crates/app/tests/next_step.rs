@@ -56,6 +56,7 @@ fn entry(kind: &str, status: &str) -> LibraryEntry {
         rating: Lww::new(None, Hlc::default()),
         notes: Lww::new(None, Hlc::default()),
         added_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+        completed: None,
     }
 }
 

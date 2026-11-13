@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id FROM catalog_items c\n             WHERE c.kind = $1\n               AND NOT EXISTS (SELECT 1 FROM external_ids e\n                               WHERE e.item_id = c.id AND e.namespace = $2)\n             ORDER BY c.title, c.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "catalog_items",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b1df7263232eee03ea2df3efbebc85e5554251f0af72910e3cfd4196a684f039"
+}

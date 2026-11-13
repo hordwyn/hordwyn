@@ -363,7 +363,21 @@ log-notes = Notes
 log-play-step = Play
 log-session-step = Session
 log-page = Current page
-log-of-pages = of { $pages }
+log-of-pages = { $pages ->
+    [one] of { $pages } page
+   *[other] of { $pages } pages
+}
+log-of-pages-estimate = { $pages ->
+    [one] of { $pages } page (estimate)
+   *[other] of { $pages } pages (estimate)
+}
+log-pages-change = Change
+log-pages-change-label = Change the page total
+log-pages-set = Set page total
+log-pages-total = Pages in this book
+log-pages-total-hint = For everyone on this instance. It stays when the data source updates the book.
+log-pages-total-saved = Page total set to { $pages }.
+log-error-pages-total = Enter a number from 1 to 100000.
 log-update = Update
 log-plus-pages = +{ $count }
 log-finished = Finished
@@ -845,6 +859,8 @@ stats-also-events = { $count ->
    *[other] { $count } logged steps
 }
 stats-reading-note = Reading is counted in pages.
+stats-finished-note = Books finished without a page count add no pages.
+stats-undated-note = Titles set to Completed without a logged step have no date: they count in the totals, not in a month, a year or a goal.
 stats-untimed-note = Titles without a known length count as 0.
 stats-library-heading = Library
 stats-library-by-status = Library by status
@@ -914,6 +930,7 @@ admin-error-self_delete = You cannot delete your own account here.
 admin-error-secure_cookies_need_https = Secure cookies need an https public address, or nobody could sign in.
 admin-error-fixed_by_config = This value is set by the configuration and cannot be changed here.
 admin-error-invalid_setting = This value is not valid.
+admin-error-invalid_contact = Enter an e-mail address or an address that starts with https://, at most 200 characters, without spaces.
 admin-error-unknown_setting = This setting does not exist.
 admin-error-unknown_source = This data source does not exist.
 admin-error-missing_field = Fill in every field.
@@ -951,6 +968,7 @@ source-state-needs_account = Needs your account
 source-state-unavailable = Temporarily unavailable
 source-state-slow = Slow right now
 source-state-retrying = Not answering, retrying
+source-state-needs_contact = Operator contact missing
 # Results of Test (`source-test-<result>`).
 source-test-ok = Works ({ $ms } ms).
 source-test-key_rejected = Key rejected.
@@ -1184,6 +1202,10 @@ admin-users-delete-named = Delete: { $name }
 admin-users-delete-title = Delete { $name }?
 admin-users-delete-body = The account and its library are deleted. Sessions logged with others stay in their history, with this person as a companion.
 admin-sources-lead = Where titles, covers and episodes come from. Keys are stored encrypted and never shown again.
+admin-contact-label = Operator contact
+admin-contact-hint = Your e-mail address (preferred: the sources name an e-mail address) or an https address. Sent to Open Library and Wikidata with every request so they can reach the operator; it is your contact, not a member's.
+admin-contact-cleared = Removed. Requests carry no contact now.
+admin-sources-note-openlibrary = Open Library is a shared library service with a low request limit. A high-traffic commercial service must not rely on this source.
 admin-sources-attention = { $count ->
     [one] One data source needs attention
    *[other] { $count } data sources need attention
@@ -2048,6 +2070,7 @@ imports-errors = { $count ->
 }
 imports-error-line = Row { $line }:
 imports-result = Imported { $imported }, skipped { $skipped }, without a match { $unmatched }.
+imports-completed-note = A title the file calls Completed is finished on the day of its newest history entry. Without any it has no date and counts in the totals only, not in a month, a year or a goal.
 imports-stopped-at = Stopped after { $done } of { $total } rows. Rows imported so far stay.
 imports-unmatched = Rows without a match
 imports-unmatched-body = These rows had no id this app can look up. Find each one; it is imported as soon as you choose the item.

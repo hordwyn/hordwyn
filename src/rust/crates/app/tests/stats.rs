@@ -245,3 +245,85 @@ async fn totals_per_kind_add_up_to_the_hero_figure() {
     );
     assert_eq!(group(KindGroup::Play).entries, 2);
 }
+
+/// LB-13: a completion is an entry that reached Completed. An event that moved it there
+/// counts as before; an entry that is Completed while no event completed it (a book is
+/// always completed by hand, an import brings a status only) counts once, on the day its
+/// status was set, and no longer once it is moved away again.
+#[tokio::test]
+async fn a_status_set_to_completed_by_hand_is_a_completion() {
+    use app::ports::{Clock, ProgressRepo};
+    let env = TestEnv::new();
+    let (_, me) = common::user(&env, "alice").await;
+    let book = common::item(&env.app, "book", "Dune").await;
+    let other = common::item(&env.app, "book", "Emma").await;
+    let movie = common::item(&env.app, "movie", "Heat").await;
+    let page = Progress::Paged {
+        page: Some(100),
+        chapter: None,
+        volume: None,
+    };
+    env.app
+        .log_progress(me, book.id, page, None, None)
+        .await
+        .unwrap();
+    for b in [&book, &other] {
+        env.app
+            .set_status(me, b.id, Status::completed(), None)
+            .await
+            .unwrap();
+    }
+    env.app
+        .log_progress(me, movie.id, Progress::Finished, None, None)
+        .await
+        .unwrap();
+    let of = |t: &app::StatsTotals, g: KindGroup| {
+        let group = t.groups.iter().find(|x| x.group == g).unwrap();
+        group.totals.amounts.completions
+    };
+
+    let t = env.app.stats_totals(me).await.unwrap();
+    assert_eq!(of(&t, KindGroup::Read), 2, "both books are finished");
+    assert_eq!(
+        of(&t, KindGroup::Watch),
+        1,
+        "the event counts, the entry not a second time"
+    );
+    assert_eq!(t.overall.amounts.completions, 3);
+    assert_eq!(t.overall.amounts.events, 2, "a status is no logged step");
+    assert_eq!(t.overall.amounts.pages, 100);
+    // the book with a logged step: in the month, and in a goal's window, of that step; the
+    // one without any is undated (LB-15): in the totals only
+    let months = env
+        .app
+        .stats_series(me, Some(KindGroup::Read), Bucket::Month)
+        .await
+        .unwrap();
+    let now = env.clock.now();
+    assert_eq!(months.len(), 1);
+    assert_eq!(months[0].bucket, now.format("%Y-%m").to_string());
+    assert_eq!(months[0].amounts.completions, 1);
+    let hour = chrono::Duration::hours(1);
+    let window = |from, to| {
+        let store = env.store.clone();
+        async move {
+            ProgressRepo::window_amounts(&*store, me.user_id, from, to)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|k| k.kind.as_str() == "book")
+                .map_or(0, |k| k.amounts.completions)
+        }
+    };
+    assert_eq!(window(now - hour, now + hour).await, 1);
+    assert_eq!(window(now - hour - hour, now - hour).await, 0);
+
+    // moved away by hand: it is not finished any more
+    env.app
+        .set_status(me, other.id, Status::in_progress(), None)
+        .await
+        .unwrap();
+    let t = env.app.stats_totals(me).await.unwrap();
+    assert_eq!(of(&t, KindGroup::Read), 1);
+    assert_eq!(t.overall.amounts.completions, 2);
+}

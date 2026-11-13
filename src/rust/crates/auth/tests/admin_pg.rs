@@ -59,12 +59,14 @@ async fn settings_audit_and_encrypted_credentials_on_postgres() {
         hosting: Some("hosted".into()),
         session_days: Some(7),
         storage_max_total_bytes: Some(5 << 30),
+        operator_contact: Some("ops@example.org".into()),
         updated_by: Some(user.id),
         ..StoredSettings::default()
     };
     set.updated_at = Some(Utc::now());
     s.put_settings(&set, &[]).await.unwrap();
     let back = s.settings().await.unwrap();
+    assert_eq!(back.operator_contact.as_deref(), Some("ops@example.org"));
     assert_eq!(
         (back.hosting, back.session_days),
         (Some("hosted".into()), Some(7))

@@ -366,7 +366,9 @@ pub struct ActivityQueryDto {
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct AmountsDto {
     pub events: u64,
-    /// Events that completed an entry.
+    /// Completed entries as the person sees them: every event that moved an entry to
+    /// Completed, and every entry that is Completed while no event moved it there (set by
+    /// hand or by an import), counted on the day its status was set.
     pub completions: u64,
     pub finished: u64,
     pub episodes: u64,
@@ -409,6 +411,10 @@ pub struct StatsTotalsDto {
     /// group and to `overall`; `minutes` is 0 for a kind without any known length.
     #[serde(default)]
     pub kinds: Vec<KindTotalsDto>,
+    /// Completions without a day (an entry set to Completed that has no logged step): they
+    /// are part of the totals above and of no month, year or goal.
+    #[serde(default)]
+    pub undated_completions: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

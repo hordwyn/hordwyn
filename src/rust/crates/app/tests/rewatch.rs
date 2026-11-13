@@ -377,7 +377,12 @@ async fn a_stop_marker_ends_the_run_for_good() {
         Some((2, false))
     );
     assert_eq!(times(&env, me, show).await, 1);
-    assert_eq!(completions(&env, me).await, 0, "a stop is no completion");
+    // the show was completed by hand before the run: that is its one completion (LB-13)
+    assert_eq!(
+        completions(&env, me).await,
+        1,
+        "a stop is no completion; the one set by hand counts"
+    );
 
     // "Again" on a favourite episode next week: an extra view, not the run's
     env.clock.advance(chrono::Duration::days(7));
@@ -426,6 +431,50 @@ async fn a_stop_marker_ends_the_run_for_good() {
         .await;
     assert!(matches!(again, Err(AppError::Conflict(_))), "{again:?}");
     assert_eq!(env.app.progress(me, show).await.unwrap().len(), stored);
+}
+
+/// BOOK-3 (LB-14): the completion a show had before a rewatch stays where it was while the
+/// run runs and after it was stopped (a stop completes nothing, DEC-590); a run watched to
+/// the end adds its own.
+#[tokio::test]
+async fn a_rewatch_keeps_the_first_completion_where_it_was() {
+    async fn months(env: &TestEnv, me: Actor) -> Vec<(String, u64)> {
+        let months = env.app.stats_series(me, None, Bucket::Month).await.unwrap();
+        let done = months.into_iter().filter(|p| p.amounts.completions > 0);
+        done.map(|p| (p.bucket, p.amounts.completions)).collect()
+    }
+    let env = TestEnv::new();
+    let (_, me) = common::user(&env, "alice").await;
+    let show = completed_show(&env, me, 3).await;
+    let first = months(&env, me).await;
+    assert_eq!(first.len(), 1, "{first:?}");
+
+    // more than a year later: a run is started ...
+    env.clock.advance(chrono::Duration::days(400));
+    log(&env, me, show, Progress::Rewatch).await;
+    assert_eq!(status(&env, me, show).await, "in_progress");
+    assert_eq!(
+        months(&env, me).await,
+        first,
+        "the start takes nothing away"
+    );
+    // ... and stopped after one episode
+    log(&env, me, show, ep(1)).await;
+    log(&env, me, show, Progress::RewatchStop).await;
+    assert_eq!(status(&env, me, show).await, "completed");
+    assert_eq!(months(&env, me).await, first, "a stop completes nothing");
+
+    // a second run watched to the end is a second completion, in its own month
+    env.clock.advance(chrono::Duration::days(400));
+    log(&env, me, show, Progress::Rewatch).await;
+    for e in 1..=3 {
+        log(&env, me, show, ep(e)).await;
+    }
+    assert_eq!(status(&env, me, show).await, "completed");
+    let now = months(&env, me).await;
+    assert_eq!(now.len(), 2, "{now:?}");
+    assert_eq!(now[0], first[0]);
+    assert_eq!(completions(&env, me).await, 2);
 }
 
 /// The stop can be undone like the start: the run runs again.

@@ -4,6 +4,7 @@
 //! server refuses them anyway (`forbidden`).
 
 mod audit;
+mod contact;
 mod instance;
 mod overview;
 mod security;

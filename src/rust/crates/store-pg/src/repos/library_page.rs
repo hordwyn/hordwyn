@@ -10,7 +10,7 @@ use app::ports::{
 };
 use domain::Timestamp;
 use domain::ids::{EntryId, UserId};
-use domain::library::LibraryEntry;
+use domain::library::{HandCompletion, LibraryEntry};
 use domain::tag::tag_key;
 use sqlx::{Postgres, Transaction};
 
@@ -25,12 +25,14 @@ pub(super) async fn write_entry(
 ) -> Res<uuid::Uuid> {
     sqlx::query_scalar!(
         "INSERT INTO library_entries (id, user_id, item_id, kind, status, status_hlc, rating,
-                                      rating_hlc, notes, notes_hlc, added_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                                      rating_hlc, notes, notes_hlc, added_at, completed_at,
+                                      completed_undated)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          ON CONFLICT (user_id, item_id) DO UPDATE SET status = EXCLUDED.status,
              status_hlc = EXCLUDED.status_hlc, rating = EXCLUDED.rating,
              rating_hlc = EXCLUDED.rating_hlc, notes = EXCLUDED.notes,
-             notes_hlc = EXCLUDED.notes_hlc
+             notes_hlc = EXCLUDED.notes_hlc, completed_at = EXCLUDED.completed_at,
+             completed_undated = EXCLUDED.completed_undated
          RETURNING id",
         e.id.0,
         e.user_id.0,
@@ -42,7 +44,9 @@ pub(super) async fn write_entry(
         e.rating.stamp.to_string(),
         e.notes.value,
         e.notes.stamp.to_string(),
-        e.added_at
+        e.added_at,
+        e.completed.and_then(HandCompletion::at),
+        e.completed == Some(HandCompletion::Undated)
     )
     .fetch_one(&mut **tx)
     .await
@@ -83,6 +87,8 @@ struct HitRow {
     kind: String,
     status: String,
     status_hlc: String,
+    completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    completed_undated: bool,
     rating: Option<i16>,
     rating_hlc: String,
     notes: Option<String>,
@@ -137,7 +143,8 @@ impl PgStore {
         // `added_at <= $2` lets the scan of `library_entries_recent` start at the cursor
         let mut rows = sqlx::query_as!(
             EntryRow,
-            "SELECT id, user_id, item_id, kind, status, status_hlc, rating, rating_hlc, notes,
+            "SELECT id, user_id, item_id, kind, status, status_hlc, completed_at,
+                    completed_undated, rating, rating_hlc, notes,
                     notes_hlc, added_at FROM library_entries
              WHERE user_id = $1
                AND ($2::timestamptz IS NULL
@@ -232,7 +239,8 @@ impl PgStore {
         sqlx::query_as!(
             HitRow,
             r#"WITH hits AS (
-                 SELECT e.id, e.user_id, e.item_id, e.kind, e.status, e.status_hlc, e.rating,
+                 SELECT e.id, e.user_id, e.item_id, e.kind, e.status, e.status_hlc,
+                        e.completed_at, e.completed_undated, e.rating,
                         e.rating_hlc, e.notes, e.notes_hlc, e.added_at,
                         GREATEST(e.added_at, COALESCE(e.last_event_at, e.added_at))
                             AS last_activity,
@@ -267,7 +275,8 @@ impl PgStore {
                    AND ($6::uuid[] IS NULL OR e.item_id = ANY($6))
                )
                SELECT id AS "id!", user_id AS "user_id!", item_id AS "item_id!", kind AS "kind!",
-                      status AS "status!", status_hlc AS "status_hlc!", rating,
+                      status AS "status!", status_hlc AS "status_hlc!", completed_at,
+                      completed_undated AS "completed_undated!", rating,
                       rating_hlc AS "rating_hlc!", notes, notes_hlc AS "notes_hlc!",
                       added_at AS "added_at!", last_activity AS "last_activity!",
                       key_text, key_time, key_int,
@@ -349,6 +358,8 @@ fn hit_from(r: HitRow) -> Res<LibraryHit> {
         kind: r.kind,
         status: r.status,
         status_hlc: r.status_hlc,
+        completed_at: r.completed_at,
+        completed_undated: r.completed_undated,
         rating: r.rating,
         rating_hlc: r.rating_hlc,
         notes: r.notes,

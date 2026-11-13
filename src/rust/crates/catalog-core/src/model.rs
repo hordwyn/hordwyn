@@ -61,6 +61,9 @@ pub struct ConnectorInfo {
     pub hosts: Vec<String>,
     /// Default HTTP cache TTL for responses without `Cache-Control: max-age`.
     pub cache_ttl_secs: u64,
+    /// Does the source get the operator contact in the `User-Agent`?
+    #[serde(default)]
+    pub contact: crate::contact::ContactUse,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

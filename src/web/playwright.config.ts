@@ -8,6 +8,8 @@ const oidcPort = Number(process.env.OIDC_MOCK_PORT ?? 3012);
 // the mail sink (tests/mail-sink.mjs): SMTP for the server, HTTP for the specs
 const mailSmtpPort = Number(process.env.MAIL_SINK_SMTP_PORT ?? 3013);
 const mailHttpPort = Number(process.env.MAIL_SINK_HTTP_PORT ?? 3014);
+// the Open Library mock (tests/openlibrary-mock.mjs): the API and the covers on one host
+const openLibraryPort = Number(process.env.OPENLIBRARY_MOCK_PORT ?? 3015);
 const repo = `${require("node:path").resolve(__dirname, "../..")}/`;
 const serverCmd = process.env.E2E_SERVER_CMD ?? "../rust/target/debug/server";
 // UX3-25 panic guard (DEC-384): with E2E_SERVER_LOG set (`cargo xtask e2e` sets it to a file
@@ -51,6 +53,12 @@ export default defineConfig({
       env: { TMDB_MOCK_PORT: String(tmdbPort) },
     },
     {
+      command: "node tests/openlibrary-mock.mjs",
+      url: `http://127.0.0.1:${openLibraryPort}/health`,
+      reuseExistingServer: !process.env.CI,
+      env: { OPENLIBRARY_MOCK_PORT: String(openLibraryPort) },
+    },
+    {
       command: "node tests/oidc-mock.mjs",
       url: `http://127.0.0.1:${oidcPort}/health`,
       reuseExistingServer: !process.env.CI,
@@ -87,6 +95,12 @@ export default defineConfig({
         APP__BRAND__DIR: process.env.E2E_BRAND_DIR ?? `${repo}config/brand/default`,
         APP__CONNECTORS__TMDB__BASE_URL: `http://127.0.0.1:${tmdbPort}`,
         APP__CONNECTORS__TMDB__API_KEY: "e2e-not-a-real-key",
+        // no key; without this the server would ask openlibrary.org itself
+        APP__CONNECTORS__OPENLIBRARY__BASE_URL: `http://127.0.0.1:${openLibraryPort}`,
+        // an operator contact of the developer's shell never reaches the e2e server (an
+        // empty value is "not set"; review BOOK-16)
+        KK_OPERATOR_CONTACT: "",
+        APP__INSTANCE__OPERATOR_CONTACT: "",
         ...(serverLog ? { E2E_SERVER_LOG: serverLog } : {}),
       },
     },

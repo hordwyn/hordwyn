@@ -11,6 +11,7 @@
 mod breaker;
 pub mod cache;
 mod connector;
+mod contact;
 mod credentials;
 mod gate;
 mod http;
@@ -27,9 +28,10 @@ mod stats;
 
 pub use breaker::Breaker;
 pub use connector::{Connector, Ctx, Details, Episodes, Images, Search};
+pub use contact::{ContactError, ContactUse, MAX_CONTACT_CHARS, OperatorContact, check_contact};
 pub use credentials::{CredentialSpec, CredentialState, KeySlot};
 pub use gate::Gate;
-pub use http::{ConnectorPolicy, GovernedHttp, HostList};
+pub use http::{ConnectorPolicy, GovernedHttp, HostList, SharedPace};
 pub use model::{
     Attribution, Auth, Capability, ConnectorError, ConnectorInfo, DetailsRequest, EpisodesRequest,
     ImageKind, ImageRef, RateLimit, SearchRequest, Snapshot,

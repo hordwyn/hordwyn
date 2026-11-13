@@ -20,6 +20,7 @@ use tracing::Instrument;
 
 use crate::breaker::Breaker;
 use crate::cache::{CacheEntry, HttpCache, cache_key, ttl_secs};
+use crate::contact::{ContactUse, OperatorContact};
 use crate::gate::Gate;
 use crate::model::{ConnectorInfo, RateLimit};
 use crate::singleflight::SingleFlight;
@@ -37,6 +38,22 @@ pub struct ConnectorPolicy {
     /// Longest `Retry-After` we wait for inside one request; longer pauses fail fast.
     pub max_retry_wait: Duration,
     pub max_retries: u32,
+    /// Does the source get the operator contact in the `User-Agent`?
+    pub contact: ContactUse,
+    /// The source limits per address, not per key (it has none): every process of the
+    /// instance takes its turn from one [`SharedPace`], so the web role, a separate worker
+    /// and the shell commands together stay inside `rate_limit.per_second`.
+    pub shared_pace: bool,
+}
+
+/// One pace per source for every process of an instance (review BOOK-8): the token bucket of
+/// a [`GovernedHttp`] lives in its process, and a source without a key counts the requests
+/// of an address, whoever sent them.
+#[async_trait]
+pub trait SharedPace: Send + Sync {
+    /// Returns when the caller may send one request to `source`: the turns of all callers
+    /// are at least `every` apart.
+    async fn turn(&self, source: &str, every: Duration);
 }
 
 impl ConnectorPolicy {
@@ -60,6 +77,8 @@ impl ConnectorPolicy {
             breaker_cooldown: Duration::from_secs(30),
             max_retry_wait: Duration::from_secs(5),
             max_retries: 1,
+            contact: ContactUse::None,
+            shared_pace: false,
         }
     }
 
@@ -73,6 +92,8 @@ impl ConnectorPolicy {
             breaker_cooldown: Duration::from_secs(30),
             max_retry_wait: Duration::from_secs(10),
             max_retries: 2,
+            contact: info.contact,
+            shared_pace: matches!(info.auth, crate::model::Auth::None),
         }
     }
 }
@@ -171,6 +192,12 @@ pub struct GovernedHttp {
     /// `instance.hosting`, read per request: `hosted` shares the interactive lane fairly per
     /// user (design.md 4.1).
     hosting: Option<Arc<std::sync::RwLock<String>>>,
+    /// The `<ident>/<version>` product and the operator contact, for the connectors whose
+    /// policy asks for it.
+    contact: Option<(String, OperatorContact)>,
+    /// The pace the processes of the instance share, for the connectors whose policy asks
+    /// for it.
+    pace: Option<Arc<dyn SharedPace>>,
 }
 
 enum Step {
@@ -222,7 +249,17 @@ impl GovernedHttp {
             upstream_calls: AtomicU64::new(0),
             stats: None,
             hosting: None,
+            contact: None,
+            pace: None,
         }
+    }
+
+    /// Take a turn from `pace` before every request to a connector whose policy says
+    /// [`ConnectorPolicy::shared_pace`] (after this client's own token bucket).
+    #[must_use]
+    pub fn with_shared_pace(mut self, pace: Arc<dyn SharedPace>) -> Self {
+        self.pace = Some(pace);
+        self
     }
 
     pub fn add_connector(&mut self, id: &str, policy: ConnectorPolicy) -> &mut Self {
@@ -250,6 +287,29 @@ impl GovernedHttp {
     pub fn with_hosting(mut self, hosting: Arc<std::sync::RwLock<String>>) -> Self {
         self.hosting = Some(hosting);
         self
+    }
+
+    /// Send `<product> (<contact>)` as the `User-Agent` of the connectors whose policy asks
+    /// for the operator contact (`product` is `<ident>/<version>`); every other connector
+    /// keeps the client's own header and never carries the contact.
+    #[must_use]
+    pub fn with_contact(mut self, product: &str, contact: OperatorContact) -> Self {
+        self.contact = Some((product.to_string(), contact));
+        self
+    }
+
+    /// The operator contact, if one is set.
+    fn contact_value(&self) -> Option<String> {
+        self.contact.as_ref().and_then(|(_, c)| c.get())
+    }
+
+    /// The `User-Agent` of a connector that gets the contact: `<product> (<contact>)`.
+    fn contact_agent(&self, g: &Governed) -> Option<String> {
+        if g.policy.contact == ContactUse::None {
+            return None;
+        }
+        let (product, contact) = self.contact.as_ref()?;
+        Some(format!("{product} ({})", contact.get()?))
     }
 
     /// Hosted mode: interactive waiters are served round-robin per user.
@@ -333,6 +393,10 @@ impl GovernedHttp {
             return Step::Done(Err(e));
         }
         g.limiter.until_ready().await;
+        if let Some(pace) = self.pace.as_ref().filter(|_| g.policy.shared_pace) {
+            let per_second = g.policy.rate_limit.per_second.max(1);
+            pace.turn(&g.id, Duration::from_secs(1) / per_second).await;
+        }
         self.upstream_calls.fetch_add(1, Ordering::Relaxed);
         self.note(|s| s.record_call(&g.id));
 
@@ -341,6 +405,9 @@ impl GovernedHttp {
         let mut rb = self.client.request(method, &req.url);
         for (k, v) in &req.headers {
             rb = rb.header(k, v);
+        }
+        if let Some(agent) = self.contact_agent(g) {
+            rb = rb.header(reqwest::header::USER_AGENT, agent);
         }
         if let Some((entry, _)) = cached {
             if let Some(etag) = &entry.etag {
@@ -501,6 +568,13 @@ impl HttpFetch for GovernedHttp {
             let g = self.connectors.get(&req.connector).ok_or_else(|| {
                 HttpError::Blocked(format!("unknown connector `{}`", req.connector))
             })?;
+            // a source that requires the operator contact is not asked without one
+            if g.policy.contact == ContactUse::Required && self.contact_value().is_none() {
+                return Err(HttpError::Blocked(format!(
+                    "connector `{}` needs the operator contact and none is set",
+                    req.connector
+                )));
+            }
             let url = url::Url::parse(&req.url)
                 .map_err(|e| HttpError::Blocked(format!("bad url: {e}")))?;
             if !g.allows_host(&url) {

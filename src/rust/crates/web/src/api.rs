@@ -503,6 +503,19 @@ pub async fn library_bulk_undo(undo: String) -> Result<(), ServerFnError> {
     b.library_bulk_undo(&t, &undo).await.map_err(server::code)
 }
 
+/// Correct the page total of a paged item; it then survives refreshes from the source.
+#[server(prefix = "/_fn")]
+pub async fn set_page_count(
+    item_id: String,
+    pages: u32,
+) -> Result<contracts::CatalogItemDto, ServerFnError> {
+    let b = server::backend()?;
+    let t = server::require_token(b.as_ref()).await?;
+    b.set_page_count(&t, &item_id, pages)
+        .await
+        .map_err(server::code)
+}
+
 #[server(prefix = "/_fn")]
 pub async fn set_status(item_id: String, status: String) -> Result<LibraryEntryDto, ServerFnError> {
     let b = server::backend()?;

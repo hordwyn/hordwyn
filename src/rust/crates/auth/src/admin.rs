@@ -30,6 +30,8 @@ pub struct StoredSettings {
     pub storage_low_watermark: Option<f64>,
     /// `usage.funnel` (WP4-5): count the logging funnel.
     pub usage_funnel: Option<bool>,
+    /// `instance.operator_contact`: an e-mail address or https URL (v1-books).
+    pub operator_contact: Option<String>,
     pub setup_completed_at: Option<DateTime<Utc>>,
     /// Last completed wizard step (resumable wizard).
     pub setup_step: Option<String>,

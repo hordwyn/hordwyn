@@ -459,6 +459,12 @@ pub struct InstanceConfig {
     /// `home` or `hosted`. When set here or in the environment the admin area shows it
     /// read-only; otherwise the setup wizard and Admin > Instance store it in the database.
     pub hosting: Hosting,
+    /// Contact of the person who runs the instance: an e-mail address (preferred) or an
+    /// https URL, at most 200 characters. Sent in the `User-Agent` of requests to the data
+    /// sources that ask clients to identify themselves (Open Library), to no other source.
+    /// Short form: `KK_OPERATOR_CONTACT`. When set here or in the environment the admin area
+    /// shows it read-only; otherwise Admin > Data sources stores it in the database.
+    pub operator_contact: Option<String>,
 }
 
 /// Encryption of secrets at rest (addendum-1 section 2).
@@ -572,6 +578,9 @@ fn leaf_paths(table: &toml::Table, prefix: &str, out: &mut BTreeMap<String, Orig
     }
 }
 
+/// Short form of `APP__INSTANCE__OPERATOR_CONTACT`.
+pub const OPERATOR_CONTACT_ENV: &str = "KK_OPERATOR_CONTACT";
+
 /// Apply `APP__A__B=value` overrides onto a TOML table, recording each key's variable.
 fn apply_env(
     table: &mut toml::Table,
@@ -657,6 +666,15 @@ impl AppConfig {
                     );
                 }
             }
+        }
+        // the short form of `instance.operator_contact`
+        if cfg.instance.operator_contact.is_none()
+            && let Some((k, v)) = env
+                .iter()
+                .find(|(k, v)| k == OPERATOR_CONTACT_ENV && !v.trim().is_empty())
+        {
+            cfg.instance.operator_contact = Some(v.trim().to_string());
+            origins.insert("instance.operator_contact".into(), Origin::Env(k.clone()));
         }
         cfg.origins = origins;
         cfg.validate()?;
@@ -979,6 +997,43 @@ mod tests {
         assert_eq!(c.origin("secrets.key_file"), None);
         assert_eq!(c.origin("instance.hosting"), None);
         assert!(!c.connectors.contains_key("tmdb") || c.connectors["tmdb"].api_key.is_none());
+    }
+
+    /// v1-books 3.1.1: the operator contact comes from the file, from its `APP__` variable or
+    /// from the short form; the long form wins, an empty value is "not set".
+    #[test]
+    fn the_operator_contact_has_a_short_variable() {
+        let c = AppConfig::from_sources("", env(&[])).unwrap();
+        assert_eq!(c.instance.operator_contact, None);
+        assert_eq!(c.origin("instance.operator_contact"), None);
+        let c = AppConfig::from_sources("", env(&[("KK_OPERATOR_CONTACT", "")])).unwrap();
+        assert_eq!(c.instance.operator_contact, None);
+        let c = AppConfig::from_sources("", env(&[("KK_OPERATOR_CONTACT", "ops@example.org")]))
+            .unwrap();
+        assert_eq!(
+            c.instance.operator_contact.as_deref(),
+            Some("ops@example.org")
+        );
+        assert_eq!(
+            c.origin("instance.operator_contact"),
+            Some(&Origin::Env("KK_OPERATOR_CONTACT".into()))
+        );
+        let c = AppConfig::from_sources(
+            "",
+            env(&[
+                ("KK_OPERATOR_CONTACT", "ops@example.org"),
+                ("APP__INSTANCE__OPERATOR_CONTACT", "https://example.org/me"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            c.instance.operator_contact.as_deref(),
+            Some("https://example.org/me")
+        );
+        assert_eq!(
+            c.origin("instance.operator_contact"),
+            Some(&Origin::Env("APP__INSTANCE__OPERATOR_CONTACT".into()))
+        );
     }
 
     /// UX2-1: the temporary key is an explicit switch, never implied by the asset backend.

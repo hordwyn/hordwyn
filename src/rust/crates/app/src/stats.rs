@@ -8,6 +8,7 @@ use domain::Timestamp;
 use domain::catalog::CatalogItem;
 use domain::ids::{ItemId, SessionId};
 use domain::kind::{KindGroup, KindId, Status};
+use domain::library::LibraryEntry;
 use domain::progress::{Progress, ProgressEvent, effective};
 use domain::user::Actor;
 use serde_json::Value;
@@ -21,7 +22,8 @@ use crate::{App, AppResult};
 pub struct Amounts {
     /// Effective progress events.
     pub events: u64,
-    /// Events that moved an entry to Completed.
+    /// Events that moved an entry to Completed, plus the completions no event made
+    /// (LB-13, LB-14, [`history`]).
     pub completions: u64,
     /// `Finished` events (including rewatches).
     pub finished: u64,
@@ -79,6 +81,9 @@ pub struct StatsTotals {
     /// The kinds with activity, sorted by kind. Their amounts add up to those of their
     /// group and to `overall` (minutes too: seconds become whole minutes per kind).
     pub kinds: Vec<KindTotals>,
+    /// The completions among `overall` that have no day ([`UNDATED`]): in these totals and
+    /// in no month, year or goal. The page says so when there are any.
+    pub undated_completions: u64,
 }
 
 /// Time-series bucket size (calendar of the user's zone, `bucket_of`).
@@ -102,7 +107,7 @@ pub struct SeriesPoint {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MonthAmounts {
     pub kind: KindId,
-    /// `2026-03`.
+    /// `2026-03`; [`UNDATED`] for what has no day.
     pub month: String,
     pub amounts: Amounts,
     pub seconds: u64,
@@ -168,35 +173,73 @@ fn contributions<T: BuildHasher>(
     out
 }
 
+/// Everything one user's history adds, as `(kind, when, amounts, seconds)`: what each
+/// effective event adds ([`contributions`]), and one completion for every entry of
+/// `entries` (the user's own) that holds a completion no event made
+/// ([`LibraryEntry::completed`], LB-14): a book is always completed by a status and an
+/// import brings a status without an event; such an entry is finished as the person sees
+/// it. `when` is `None` for a completion without a day (LB-15): it belongs to no period.
+fn history<S: BuildHasher, T: BuildHasher>(
+    items: &HashMap<ItemId, CatalogItem, S>,
+    events: &[ProgressEvent],
+    entries: &[LibraryEntry],
+    durations: &HashMap<SessionId, u64, T>,
+) -> Vec<(KindId, Option<Timestamp>, Amounts, u64)> {
+    let mut by_item: BTreeMap<ItemId, Vec<ProgressEvent>> = BTreeMap::new();
+    for e in events {
+        by_item.entry(e.item_id).or_default().push(e.clone());
+    }
+    let mut out = Vec::new();
+    for (id, events) in &by_item {
+        let Some(item) = items.get(id) else { continue };
+        let mut live = effective(events);
+        live.sort_by_key(|e| (e.occurred_at, e.id));
+        let parts = contributions(item, &live, durations);
+        let parts = parts.into_iter();
+        out.extend(parts.map(|(at, a, secs)| (item.kind.clone(), Some(at), a, secs)));
+    }
+    let one = Amounts {
+        completions: 1,
+        ..Amounts::default()
+    };
+    for entry in entries {
+        let (Some(done), Some(item)) = (entry.completed, items.get(&entry.item_id)) else {
+            continue;
+        };
+        out.push((item.kind.clone(), done.at(), one, 0));
+    }
+    out
+}
+
+/// [`MonthAmounts::month`] of what has no day: a completion set by a status on an entry
+/// without any logged step (LB-15). It counts in the all-time totals and in no month, year
+/// or goal.
+pub const UNDATED: &str = "";
+
 /// The statistics rules over one user's events (all of them, undo events included): each
 /// effective event counts once; `Finished` and episodes add the item's `runtime_minutes` /
 /// `episode_runtime_minutes` (whole numbers only), pages and positions count forward moves
 /// per item in `(occurred_at, id)` order, sessions add their duration (from `durations`,
 /// the user's own sessions). Events of items missing from `items` are left out. Sorted by
-/// kind and month.
+/// kind and month. `entries` are the user's library entries: see [`history`] for the
+/// completions they add.
 #[must_use]
 pub fn month_amounts<S: BuildHasher, T: BuildHasher>(
     items: &HashMap<ItemId, CatalogItem, S>,
     events: &[ProgressEvent],
+    entries: &[LibraryEntry],
     durations: &HashMap<SessionId, u64, T>,
     zone: crate::time_zone::Tz,
 ) -> Vec<MonthAmounts> {
-    let mut by_item: BTreeMap<ItemId, Vec<ProgressEvent>> = BTreeMap::new();
-    for e in events {
-        by_item.entry(e.item_id).or_default().push(e.clone());
-    }
     let mut out: BTreeMap<(KindId, String), (Amounts, u64)> = BTreeMap::new();
-    for (id, events) in &by_item {
-        let Some(item) = items.get(id) else { continue };
-        let mut live = effective(events);
-        live.sort_by_key(|e| (e.occurred_at, e.id));
-        for (at, a, secs) in contributions(item, &live, durations) {
-            let (sum, s) = out
-                .entry((item.kind.clone(), bucket_of(at, zone, Bucket::Month)))
-                .or_default();
-            sum.add(&a);
-            *s += secs;
-        }
+    for (kind, at, a, secs) in history(items, events, entries, durations) {
+        let month = at.map_or_else(
+            || UNDATED.to_string(),
+            |at| bucket_of(at, zone, Bucket::Month),
+        );
+        let (sum, s) = out.entry((kind, month)).or_default();
+        sum.add(&a);
+        *s += secs;
     }
     out.into_iter()
         .map(|((kind, month), (amounts, seconds))| MonthAmounts {
@@ -223,27 +266,20 @@ pub struct KindAmounts {
 pub fn window_amounts<S: BuildHasher, T: BuildHasher>(
     items: &HashMap<ItemId, CatalogItem, S>,
     events: &[ProgressEvent],
+    entries: &[LibraryEntry],
     durations: &HashMap<SessionId, u64, T>,
     from: Timestamp,
     to: Timestamp,
 ) -> Vec<KindAmounts> {
-    let mut by_item: BTreeMap<ItemId, Vec<ProgressEvent>> = BTreeMap::new();
-    for e in events {
-        by_item.entry(e.item_id).or_default().push(e.clone());
-    }
     let mut out: BTreeMap<KindId, (Amounts, u64)> = BTreeMap::new();
-    for (id, events) in &by_item {
-        let Some(item) = items.get(id) else { continue };
-        let mut live = effective(events);
-        live.sort_by_key(|e| (e.occurred_at, e.id));
-        for (at, a, secs) in contributions(item, &live, durations) {
-            if at < from || at >= to {
-                continue;
-            }
-            let (sum, s) = out.entry(item.kind.clone()).or_default();
-            sum.add(&a);
-            *s += secs;
+    for (kind, at, a, secs) in history(items, events, entries, durations) {
+        // what has no day is in no window
+        if at.is_none_or(|at| at < from || at >= to) {
+            continue;
         }
+        let (sum, s) = out.entry(kind).or_default();
+        sum.add(&a);
+        *s += secs;
     }
     out.into_iter()
         .map(|(kind, (amounts, seconds))| KindAmounts {
@@ -286,12 +322,16 @@ impl App {
         }
         let zone = self.user_zone(actor.user_id).await?;
         let mut per_kind: BTreeMap<KindId, (Amounts, u64)> = BTreeMap::new();
+        let mut undated_completions = 0;
         for m in self
             .repos
             .progress
             .month_amounts(actor.user_id, zone.name())
             .await?
         {
+            if m.month == UNDATED {
+                undated_completions += m.amounts.completions;
+            }
             let (a, secs) = per_kind.entry(m.kind).or_default();
             a.add(&m.amounts);
             *secs += m.seconds;
@@ -328,6 +368,7 @@ impl App {
             overall,
             groups,
             kinds,
+            undated_completions,
         })
     }
 
@@ -350,7 +391,8 @@ impl App {
             .month_amounts(actor.user_id, zone.name())
             .await?
         {
-            if group.is_some_and(|g| g != self.group_of(&m.kind)) {
+            // what has no day is in no bucket (LB-15)
+            if m.month == UNDATED || group.is_some_and(|g| g != self.group_of(&m.kind)) {
                 continue;
             }
             let key = match bucket {

@@ -1,0 +1,28 @@
+{
+  "fixture": {
+    "synthetic": true,
+    "source": "a work the search index does not hold, in the shape of the recorded answers",
+    "checked": "2026-11-12"
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://openlibrary.org/search.json?q=key%3A%2Fworks%2FOL999001W&fields=key%2Ctitle%2Cauthor_name%2Cfirst_publish_year%2Ccover_i%2Cedition_count%2Cnumber_of_pages_median&limit=1"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "content-type",
+      "application/json"
+    ]
+  ],
+  "body": {
+    "numFound": 0,
+    "start": 0,
+    "numFoundExact": true,
+    "num_found": 0,
+    "documentation_url": "https://openlibrary.org/dev/docs/api/search",
+    "q": "key:/works/OL999001W",
+    "offset": null,
+    "docs": []
+  }
+}

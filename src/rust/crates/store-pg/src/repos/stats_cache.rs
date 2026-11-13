@@ -144,10 +144,11 @@ impl PgStore {
         .execute(&mut *tx)
         .await
         .map_err(be)?;
-        // ... the new ones join them, and months without any item row go
+        // ... the new ones join them, and months without any item row go (a month can hold a
+        // completion set by hand and no event, LB-13)
         insert_item_months(&mut tx, user, &bucket_zone, items).await?;
         sqlx::query!(
-            "DELETE FROM stats_months WHERE user_id = $1 AND events = 0",
+            "DELETE FROM stats_months WHERE user_id = $1 AND events = 0 AND completions = 0",
             user.0
         )
         .execute(&mut *tx)
@@ -242,6 +243,15 @@ async fn insert_item_months(
              WHERE x.user_id = $1 AND x.undoes IS NULL
                AND ($3::uuid[] IS NULL OR x.item_id = ANY($3))
                AND NOT EXISTS (SELECT 1 FROM progress_events u WHERE u.undoes = x.id)
+             UNION ALL
+             -- LB-14: the completion no event made is one completion on its day; one without
+             -- a day (LB-15) is in no month (the empty month)
+             SELECT e.id, e.item_id, e.completed_at, jsonb_build_object('to', 'completed'),
+                    c.kind, c.attributes, 'status', NULL, NULL, NULL
+             FROM library_entries e
+             JOIN catalog_items c ON c.id = e.item_id
+             WHERE e.user_id = $1 AND (e.completed_at IS NOT NULL OR e.completed_undated)
+               AND ($3::uuid[] IS NULL OR e.item_id = ANY($3))
            ), moves AS (
              SELECT l.*,
                     COALESCE(lag(page) OVER (PARTITION BY item_id, page IS NULL
@@ -252,8 +262,9 @@ async fn insert_item_months(
            ), added AS (
              INSERT INTO stats_item_months (user_id, item_id, kind, month, events, completions,
                                             finished, episodes, pages, plays, seconds)
-             SELECT $1, item_id, kind, to_char(occurred_at AT TIME ZONE $2, 'YYYY-MM'),
-                    COUNT(*),
+             SELECT $1, item_id, kind,
+                    COALESCE(to_char(occurred_at AT TIME ZONE $2, 'YYYY-MM'), ''),
+                    COUNT(*) FILTER (WHERE t <> 'status'),
                     COUNT(*) FILTER (WHERE status_change ->> 'to' = 'completed'
                                         AND t <> 'rewatch_stop'),
                     COUNT(*) FILTER (WHERE t = 'finished'),

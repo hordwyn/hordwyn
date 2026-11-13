@@ -39,7 +39,9 @@ pub use browse::{
 pub use bulk::{
     BulkFailure, BulkOp, BulkOutcome, BulkUndo, EntrySnapshot, MAX_BULK, MAX_UNDO_BYTES, StatusBack,
 };
-pub use catalog::{CatalogRefresh, ITEM_WATCH_SECS, NewCatalogItem, REFRESH_JOB};
+pub use catalog::{
+    CatalogRefresh, ITEM_WATCH_SECS, MAX_PAGE_COUNT, NewCatalogItem, REFRESH_JOB, USER_PROVENANCE,
+};
 pub use episodes::{EPISODES_JOB, SeasonFetch, SeasonKey, season_keys, season_needs_fetch};
 pub use error::{AppError, AppResult};
 pub use game_groups::{GameGroupInput, GameGroupView};
@@ -51,7 +53,7 @@ pub use plays::PlayTotals;
 pub use sessions::NewSession;
 pub use stats::{
     Amounts, Bucket, GroupTotals, KindAmounts, KindTotals, MonthAmounts, SeriesPoint, StatsTotals,
-    Totals, month_amounts, window_amounts,
+    Totals, UNDATED, month_amounts, window_amounts,
 };
 
 use domain::Timestamp;

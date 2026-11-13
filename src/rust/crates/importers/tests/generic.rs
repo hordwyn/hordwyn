@@ -116,6 +116,35 @@ async fn importing_twice_creates_no_duplicates() {
     assert_eq!(first.0, 2);
 }
 
+/// BOOK-1 (1), LB-15: a title the file says is Completed is finished on the day of its
+/// newest history row, whenever and however often the file is imported; one without any
+/// history is undated (in the totals, in no month).
+#[tokio::test]
+async fn importing_twice_keeps_every_completion_in_its_month() {
+    const DONE: &str = r#"{"format":"library-export","version":1}
+{"source_id":"m1","kind":"movie","title":"Heat","year":1995,"status":"completed","history":[{"date":"2024-05-01"},{"date":"2025-01-02T20:00:00Z"}]}
+{"source_id":"b1","kind":"book","title":"Dune","year":1965,"status":"completed"}
+"#;
+    async fn run(e: &Env) -> (Vec<(String, u64)>, u64) {
+        let file = DONE.as_bytes().to_vec();
+        let r = e.importer.start(e.actor, "generic-jsonl", file, false);
+        e.importer.run(r.await.unwrap().id).await.unwrap();
+        let series = e.t.app.stats_series(e.actor, None, app::Bucket::Month);
+        let done = series.await.unwrap().into_iter();
+        let months = done
+            .filter(|p| p.amounts.completions > 0)
+            .map(|p| (p.bucket, p.amounts.completions))
+            .collect();
+        let totals = e.t.app.stats_totals(e.actor).await.unwrap();
+        (months, totals.overall.amounts.completions)
+    }
+    let e = env().await;
+    let first = run(&e).await;
+    assert_eq!(first, (vec![("2025-01".to_string(), 1)], 2));
+    e.t.clock.advance(chrono::Duration::days(40));
+    assert_eq!(run(&e).await, first);
+}
+
 #[tokio::test]
 async fn a_crash_mid_import_resumes_and_finishes() {
     let e = env().await;
