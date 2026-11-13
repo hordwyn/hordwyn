@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use app::ports::{HttpError, HttpFetch, HttpRequest, Lane};
 use catalog_core::cache::{HttpCache, MemCacheIndex};
-use catalog_core::{ConnectorPolicy, GovernedHttp, RateLimit};
+use catalog_core::{ConnectorPolicy, GovernedHttp, PrivateRule, RateLimit};
 use testkit::MemBlobs;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -23,6 +23,8 @@ fn policy(server: &MockServer) -> ConnectorPolicy {
         breaker_cooldown: Duration::from_secs(60),
         max_retry_wait: Duration::from_secs(5),
         max_retries: 2,
+        // the test servers listen on a loopback address
+        private: PrivateRule::Allowed,
     }
 }
 
@@ -304,6 +306,7 @@ async fn network_errors_do_not_carry_the_url() {
     drop(listener);
     let mut p = ConnectorPolicy {
         hosts: vec![addr.to_string()],
+        private: PrivateRule::Allowed,
         ..ConnectorPolicy::oidc("127.0.0.1", Some(addr.port()))
     };
     p.max_retries = 0;
@@ -360,4 +363,179 @@ async fn host_allowlist_changes_at_run_time() {
         .fetch(get(&server, "/.well-known/openid-configuration"))
         .await;
     assert!(matches!(r, Err(HttpError::Blocked(_))), "{r:?}");
+}
+
+// ---- sec2 (SEC-4): redirects are checked hop by hop, private addresses are refused ----
+
+/// A client whose connector `fake` may reach `hosts`; only the hosts in `private` may be on a
+/// private address.
+fn confined(hosts: &[&MockServer], private: &[&MockServer]) -> GovernedHttp {
+    let first = hosts.first().expect("a host");
+    let mut p = policy(first);
+    p.hosts = hosts.iter().map(|s| s.address().to_string()).collect();
+    p.private = PrivateRule::Blocked;
+    p.max_retries = 0;
+    let mut h = GovernedHttp::new("test-agent/1", None)
+        .with_private_hosts(private.iter().map(|s| s.address().to_string()).collect());
+    h.add_connector("fake", p);
+    h
+}
+
+async fn redirecting(from: &MockServer, at: &str, to: &str) {
+    Mock::given(method("GET"))
+        .and(path(at))
+        .respond_with(ResponseTemplate::new(302).insert_header("Location", to))
+        .mount(from)
+        .await;
+}
+
+#[tokio::test]
+async fn a_redirect_to_a_private_address_is_not_followed() {
+    let front = MockServer::start().await;
+    let internal = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("secret"))
+        .mount(&internal)
+        .await;
+    redirecting(&front, "/cover.jpg", &format!("{}/admin", internal.uri())).await;
+    // the allowlist names both hosts: it is the private address that refuses the hop
+    let http = confined(&[&front, &internal], &[&front]);
+    let err = http.fetch(get(&front, "/cover.jpg")).await.unwrap_err();
+    assert!(matches!(err, HttpError::Blocked(_)), "{err:?}");
+    assert_eq!(internal.received_requests().await.unwrap().len(), 0);
+    assert!(!http.circuit_open("fake"));
+}
+
+#[tokio::test]
+async fn a_redirect_to_a_host_outside_the_allowlist_is_not_followed() {
+    let front = MockServer::start().await;
+    let other = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&other)
+        .await;
+    redirecting(&front, "/a", &format!("{}/b", other.uri())).await;
+    let http = confined(&[&front], &[&front, &other]);
+    let err = http.fetch(get(&front, "/a")).await.unwrap_err();
+    assert!(matches!(err, HttpError::Blocked(_)), "{err:?}");
+    assert!(!err.to_string().contains("/b"), "host only: {err}");
+    assert_eq!(other.received_requests().await.unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn a_redirect_to_an_allowed_host_is_followed_without_the_callers_headers() {
+    let front = MockServer::start().await;
+    let files = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/file"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("picture"))
+        .mount(&files)
+        .await;
+    redirecting(&front, "/cover.jpg", "/moved.jpg").await;
+    redirecting(&front, "/moved.jpg", &format!("{}/file", files.uri())).await;
+    let http = confined(&[&front, &files], &[&front, &files]);
+    let mut req = get(&front, "/cover.jpg");
+    req.headers = vec![("X-Api-Key".into(), "k3y".into())];
+    let resp = http.fetch(req).await.unwrap();
+    assert_eq!((resp.status, resp.body.as_slice()), (200, &b"picture"[..]));
+    // a relative hop stays on the host and keeps the headers; the other host gets none
+    let at_front = front.received_requests().await.unwrap();
+    assert_eq!(at_front.len(), 2);
+    assert!(at_front.iter().all(|r| r.headers.contains_key("x-api-key")));
+    let at_files = files.received_requests().await.unwrap();
+    assert_eq!(at_files.len(), 1);
+    assert!(!at_files[0].headers.contains_key("x-api-key"));
+}
+
+#[tokio::test]
+async fn a_redirect_loop_ends() {
+    let front = MockServer::start().await;
+    redirecting(&front, "/a", "/a").await;
+    let http = confined(&[&front], &[&front]);
+    let err = http.fetch(get(&front, "/a")).await.unwrap_err();
+    assert!(matches!(err, HttpError::Blocked(_)), "{err:?}");
+    assert!(front.received_requests().await.unwrap().len() <= 6);
+}
+
+#[tokio::test]
+async fn a_post_is_not_redirected() {
+    let front = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(307).insert_header("Location", "/elsewhere"))
+        .mount(&front)
+        .await;
+    let http = confined(&[&front], &[&front]);
+    let mut req = get(&front, "/token");
+    req.method = "POST".into();
+    req.body = Some(b"client_secret=x".to_vec());
+    let resp = http.fetch(req).await.unwrap();
+    assert_eq!(resp.status, 307, "handed to the caller as it is");
+    assert_eq!(front.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_private_address_is_refused_unless_the_host_is_allowlisted() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    // on the connector's host list, but nobody said it may be private
+    let http = confined(&[&server], &[]);
+    let err = http.fetch(get(&server, "/x")).await.unwrap_err();
+    assert!(matches!(err, HttpError::Blocked(_)), "{err:?}");
+    assert_eq!(http.upstream_calls(), 0);
+    assert_eq!(server.received_requests().await.unwrap().len(), 0);
+    let http = confined(&[&server], &[&server]);
+    assert_eq!(http.fetch(get(&server, "/x")).await.unwrap().status, 200);
+}
+
+#[tokio::test]
+async fn a_name_that_resolves_to_a_private_address_is_refused_at_connect_time() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    let port = server.address().port();
+    let name = format!("localhost:{port}");
+    let mut p = policy(&server);
+    p.hosts = vec![name.clone()];
+    p.private = PrivateRule::Blocked;
+    let mut strict = GovernedHttp::new("test-agent/1", None);
+    strict.add_connector("fake", p.clone());
+    let mut req = get(&server, "/x");
+    req.url = format!("http://{name}/x");
+    let err = strict.fetch(req.clone()).await.unwrap_err();
+    assert!(matches!(err, HttpError::Blocked(_)), "{err:?}");
+    // refused, not failed: no retry, and the circuit does not count it
+    assert_eq!(strict.upstream_calls(), 1);
+    assert!(!strict.circuit_open("fake"));
+    assert_eq!(server.received_requests().await.unwrap().len(), 0);
+
+    let mut lan = GovernedHttp::new("test-agent/1", None).with_private_hosts(vec![name]);
+    lan.add_connector("fake", p);
+    assert_eq!(lan.fetch(req).await.unwrap().status, 200);
+}
+
+#[tokio::test]
+async fn a_connector_can_follow_a_switch_for_private_addresses() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    let allowed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut p = policy(&server);
+    p.cache_ttl_secs = 0;
+    p.private = PrivateRule::when({
+        let allowed = allowed.clone();
+        move || allowed.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    let mut h = GovernedHttp::new("test-agent/1", None);
+    h.add_connector("fake", p);
+    let r = h.fetch(get(&server, "/x")).await;
+    assert!(matches!(r, Err(HttpError::Blocked(_))), "{r:?}");
+    allowed.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(h.fetch(get(&server, "/x")).await.unwrap().status, 200);
 }

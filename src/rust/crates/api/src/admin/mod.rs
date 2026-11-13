@@ -1754,7 +1754,7 @@ async fn secrets_row(s: &ApiState) -> ApiResult<HealthRowDto> {
     Ok(secrets)
 }
 
-/// Admin > Overview: eight health rows as the probe job stored them (never probed in the
+/// Admin > Overview: nine health rows as the probe job stored them (never probed in the
 /// request, DEC-285), the attention block, the last three admin actions and the brand card.
 ///
 /// # Errors

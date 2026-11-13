@@ -5,6 +5,14 @@
 //! bucket -> send (conditional if a stale cached copy has validators) -> retry 429/5xx/network
 //! with `Retry-After` or jittered backoff -> store in cache. Every call runs in a tracing span
 //! with connector, op, cache status and HTTP status.
+//!
+//! Confinement (SEC-4): the client follows no redirect by itself. A redirect of a `GET` or
+//! `HEAD` is followed here, at most [`MAX_REDIRECTS`] times, and each hop is checked like the
+//! first request: the host must be on the connector's list, and it must not be on a private,
+//! loopback or link-local address unless the connector's [`PrivateRule`] or the operator's
+//! host list ([`GovernedHttp::with_private_hosts`]) allows that. Names are checked when they
+//! are resolved for the connection, so a DNS answer cannot change in between. The caller's
+//! headers (API keys) go only to the host the request was made for.
 
 use std::collections::HashMap;
 use std::num::NonZeroU32;
@@ -28,7 +36,8 @@ use crate::stats::SourceStats;
 /// Limits and allowlist for one connector.
 #[derive(Debug, Clone)]
 pub struct ConnectorPolicy {
-    /// `host` or `host:port`.
+    /// `host` or `host:port`, or `.suffix` for a domain and all of its subdomains on the
+    /// default port (`.archive.org`: the numbered download hosts a cover redirects to).
     pub hosts: Vec<String>,
     pub rate_limit: RateLimit,
     pub cache_ttl_secs: u64,
@@ -37,6 +46,46 @@ pub struct ConnectorPolicy {
     /// Longest `Retry-After` we wait for inside one request; longer pauses fail fast.
     pub max_retry_wait: Duration,
     pub max_retries: u32,
+    /// May the hosts of this connector be on private addresses ([`PrivateRule`])?
+    pub private: PrivateRule,
+}
+
+/// May a connector reach hosts on private, loopback or link-local addresses (SEC-4)? Hosts
+/// named with [`GovernedHttp::with_private_hosts`] may, whatever the rule says.
+#[derive(Clone, Default)]
+pub enum PrivateRule {
+    /// No: the documented hosts of a data source are public.
+    #[default]
+    Blocked,
+    /// Yes.
+    Allowed,
+    /// Ask per request (sign-in providers follow the hosting mode, DEC-534).
+    When(Arc<dyn Fn() -> bool + Send + Sync>),
+}
+
+impl PrivateRule {
+    /// A rule that is asked for every request.
+    pub fn when(f: impl Fn() -> bool + Send + Sync + 'static) -> Self {
+        Self::When(Arc::new(f))
+    }
+
+    fn allows(&self) -> bool {
+        match self {
+            Self::Blocked => false,
+            Self::Allowed => true,
+            Self::When(f) => f(),
+        }
+    }
+}
+
+impl std::fmt::Debug for PrivateRule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Blocked => "Blocked",
+            Self::Allowed => "Allowed",
+            Self::When(_) => "When(..)",
+        })
+    }
 }
 
 impl ConnectorPolicy {
@@ -60,6 +109,7 @@ impl ConnectorPolicy {
             breaker_cooldown: Duration::from_secs(30),
             max_retry_wait: Duration::from_secs(5),
             max_retries: 1,
+            private: PrivateRule::Blocked,
         }
     }
 
@@ -73,6 +123,7 @@ impl ConnectorPolicy {
             breaker_cooldown: Duration::from_secs(30),
             max_retry_wait: Duration::from_secs(10),
             max_retries: 2,
+            private: PrivateRule::Blocked,
         }
     }
 }
@@ -98,6 +149,25 @@ impl HostList {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
+}
+
+/// Redirects followed for one request.
+pub const MAX_REDIRECTS: usize = 5;
+
+/// Does the list entry `entry` (`host`, `host:port`, or `*.domain` for every subdomain of
+/// `domain`) cover the host of `url`? An entry without a port covers the default port of
+/// the scheme only; entries are compared in lower case (review SEC2-11). The same rules as
+/// the operator's private hosts ([`domain::net::PrivateHosts`]).
+fn host_matches(entry: &str, url: &url::Url) -> bool {
+    url.host_str()
+        .is_some_and(|host| domain::net::PrivateHosts::new([entry]).covers(host, url.port()))
+}
+
+/// Why nothing came back from upstream.
+enum Refused {
+    /// Confinement said no; nothing to retry and no sign of trouble upstream.
+    Blocked(String),
+    Network(String),
 }
 
 struct Governed {
@@ -127,14 +197,31 @@ impl Governed {
     }
 
     fn allows_host(&self, url: &url::Url) -> bool {
-        let Some(host) = url.host_str() else {
-            return false;
-        };
-        let with_port = url.port().map(|p| format!("{host}:{p}"));
-        self.hosts
-            .get()
-            .iter()
-            .any(|h| h == host && url.port().is_none() || with_port.as_deref() == Some(h.as_str()))
+        self.hosts.get().iter().any(|h| host_matches(h, url))
+    }
+
+    /// Where a redirect from `from` to `location` leads, if the connector may go there:
+    /// http(s) only, never from https down to http, and only to a host on its list.
+    fn next_hop(&self, from: &url::Url, location: &str) -> Result<url::Url, Refused> {
+        let next = from
+            .join(location)
+            .map_err(|e| Refused::Blocked(format!("bad redirect target: {e}")))?;
+        let downgrade = from.scheme() == "https" && next.scheme() != "https";
+        if !matches!(next.scheme(), "http" | "https") || downgrade {
+            return Err(Refused::Blocked(format!(
+                "redirect to a {} address is not followed",
+                next.scheme()
+            )));
+        }
+        if !self.allows_host(&next) {
+            // the host only: paths and query strings may carry credentials
+            return Err(Refused::Blocked(format!(
+                "redirect to host {} is not allowed for connector `{}`",
+                next.host_str().unwrap_or_default(),
+                self.id
+            )));
+        }
+        Ok(next)
     }
 
     fn pause_for(&self, d: Duration) {
@@ -162,7 +249,10 @@ impl Governed {
 }
 
 pub struct GovernedHttp {
+    /// Resolves names to public addresses only.
     client: reqwest::Client,
+    /// For hosts that may be on a private address.
+    lan_client: reqwest::Client,
     connectors: HashMap<String, Governed>,
     cache: Option<HttpCache>,
     flights: SingleFlight<Result<HttpResponse, HttpError>>,
@@ -171,6 +261,8 @@ pub struct GovernedHttp {
     /// `instance.hosting`, read per request: `hosted` shares the interactive lane fairly per
     /// user (design.md 4.1).
     hosting: Option<Arc<std::sync::RwLock<String>>>,
+    /// Hosts that may be on a private address for any connector (the operator's list).
+    private_hosts: domain::net::PrivateHosts,
 }
 
 enum Step {
@@ -208,20 +300,32 @@ impl GovernedHttp {
     /// If the TLS backend cannot be initialised.
     #[must_use]
     pub fn new(user_agent: &str, cache: Option<HttpCache>) -> Self {
-        let client = reqwest::Client::builder()
-            .user_agent(user_agent)
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30))
+        let builder = || {
+            reqwest::Client::builder()
+                .user_agent(user_agent)
+                .connect_timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(30))
+                // redirects are followed in `send`, one checked hop at a time
+                .redirect(reqwest::redirect::Policy::none())
+                // no proxy from the environment: it would resolve the names itself, out of
+                // reach of the private-address check (review SEC2-9)
+                .no_proxy()
+        };
+        let client = builder()
+            .dns_resolver(Arc::new(crate::resolve::PublicOnly))
             .build()
             .expect("http client");
+        let lan_client = builder().build().expect("http client");
         Self {
             client,
+            lan_client,
             connectors: HashMap::new(),
             cache,
             flights: SingleFlight::default(),
             upstream_calls: AtomicU64::new(0),
             stats: None,
             hosting: None,
+            private_hosts: domain::net::PrivateHosts::default(),
         }
     }
 
@@ -235,6 +339,14 @@ impl GovernedHttp {
     #[must_use]
     pub fn host_list(&self, id: &str) -> Option<Arc<HostList>> {
         self.connectors.get(id).map(|g| g.hosts.clone())
+    }
+
+    /// Hosts (`host` or `host:port`, as a connector's list names them) that may be on a
+    /// private, loopback or link-local address: the operator's allowlist.
+    #[must_use]
+    pub fn with_private_hosts(mut self, hosts: Vec<String>) -> Self {
+        self.private_hosts = domain::net::PrivateHosts::new(hosts);
+        self
     }
 
     /// Record calls, answers and circuit changes per connector (source status, design.md 4.4).
@@ -336,59 +448,121 @@ impl GovernedHttp {
         self.upstream_calls.fetch_add(1, Ordering::Relaxed);
         self.note(|s| s.record_call(&g.id));
 
-        let method =
-            reqwest::Method::from_bytes(req.method.as_bytes()).unwrap_or(reqwest::Method::GET);
-        let mut rb = self.client.request(method, &req.url);
-        for (k, v) in &req.headers {
-            rb = rb.header(k, v);
-        }
-        if let Some((entry, _)) = cached {
-            if let Some(etag) = &entry.etag {
-                rb = rb.header("If-None-Match", etag);
-            }
-            if let Some(lm) = &entry.last_modified {
-                rb = rb.header("If-Modified-Since", lm);
-            }
-        }
-        if let Some(body) = &req.body {
-            rb = rb.body(body.clone());
-        }
-        let sent = rb.send().await;
-        let resp = match sent {
-            Ok(r) => r,
-            Err(e) => {
-                drop(permit);
-                self.note(|s| s.record_error(&g.id, "network"));
-                self.failed(g);
-                return if retries_left {
-                    Step::RetryAfter(jittered(attempt))
-                } else {
-                    Step::Done(Err(HttpError::Network(e.without_url().to_string())))
-                };
-            }
-        };
-        let status = resp.status().as_u16();
-        let headers: Vec<(String, String)> = resp
-            .headers()
-            .iter()
-            .filter_map(|(k, v)| Some((k.as_str().to_string(), v.to_str().ok()?.to_string())))
-            .collect();
-        let body = match resp.bytes().await {
-            Ok(b) => b.to_vec(),
-            Err(e) => {
-                drop(permit);
-                self.note(|s| s.record_error(&g.id, "network"));
-                self.failed(g);
-                return if retries_left {
-                    Step::RetryAfter(jittered(attempt))
-                } else {
-                    Step::Done(Err(HttpError::Network(e.without_url().to_string())))
-                };
-            }
-        };
+        let sent = self.send(g, req, cached).await;
         drop(permit);
+        let (status, headers, body) = match sent {
+            Ok(received) => received,
+            Err(Refused::Blocked(why)) => {
+                tracing::warn!(connector = %g.id, %why, "outbound request refused");
+                return Step::Done(Err(HttpError::Blocked(why)));
+            }
+            Err(Refused::Network(e)) => {
+                self.note(|s| s.record_error(&g.id, "network"));
+                self.failed(g);
+                return if retries_left {
+                    Step::RetryAfter(jittered(attempt))
+                } else {
+                    Step::Done(Err(HttpError::Network(e)))
+                };
+            }
+        };
         self.classify(g, req, key, cached, attempt, status, headers, body)
             .await
+    }
+
+    /// The client for `url`: the one that may reach private addresses when the connector's
+    /// rule or the operator's list allows the host, else the public-only one, which is not
+    /// asked at all for an IP literal in a private range.
+    fn client_for(&self, g: &Governed, url: &url::Url) -> Result<&reqwest::Client, Refused> {
+        let listed = url
+            .host_str()
+            .is_some_and(|h| self.private_hosts.covers(h, url.port()));
+        if g.policy.private.allows() || listed {
+            return Ok(&self.lan_client);
+        }
+        let literal = match url.host() {
+            Some(url::Host::Ipv4(a)) => Some(std::net::IpAddr::V4(a)),
+            Some(url::Host::Ipv6(a)) => Some(std::net::IpAddr::V6(a)),
+            Some(url::Host::Domain(_)) | None => None,
+        };
+        if literal.is_some_and(domain::net::is_private_ip) {
+            return Err(Refused::Blocked(format!(
+                "host {} is on a private address",
+                url.host_str().unwrap_or_default()
+            )));
+        }
+        Ok(&self.client)
+    }
+
+    /// Send `req` and follow the redirects of a `GET` or `HEAD`, each hop checked against
+    /// the connector's host list and the private-address rule. Other methods get a redirect
+    /// back as the answer. The caller's headers and the cache validators only go to the
+    /// origin the request was made for.
+    async fn send(
+        &self,
+        g: &Governed,
+        req: &HttpRequest,
+        cached: Option<&(CacheEntry, Vec<u8>)>,
+    ) -> Result<(u16, Vec<(String, String)>, Vec<u8>), Refused> {
+        let method =
+            reqwest::Method::from_bytes(req.method.as_bytes()).unwrap_or(reqwest::Method::GET);
+        let follow = matches!(method, reqwest::Method::GET | reqwest::Method::HEAD);
+        let first =
+            url::Url::parse(&req.url).map_err(|e| Refused::Blocked(format!("bad url: {e}")))?;
+        let mut url = first.clone();
+        for hop in 0..=MAX_REDIRECTS {
+            let client = self.client_for(g, &url)?;
+            let mut rb = client.request(method.clone(), url.clone());
+            if url.origin() == first.origin() {
+                for (k, v) in &req.headers {
+                    rb = rb.header(k, v);
+                }
+            }
+            if hop == 0 {
+                if let Some((entry, _)) = cached {
+                    if let Some(etag) = &entry.etag {
+                        rb = rb.header("If-None-Match", etag);
+                    }
+                    if let Some(lm) = &entry.last_modified {
+                        rb = rb.header("If-Modified-Since", lm);
+                    }
+                }
+                if let Some(body) = &req.body {
+                    rb = rb.body(body.clone());
+                }
+            }
+            let resp = rb.send().await.map_err(|e| {
+                if crate::resolve::refused_as_private(&e) {
+                    Refused::Blocked(format!(
+                        "host {} resolves to a private address",
+                        url.host_str().unwrap_or_default()
+                    ))
+                } else {
+                    Refused::Network(e.without_url().to_string())
+                }
+            })?;
+            let status = resp.status().as_u16();
+            let headers: Vec<(String, String)> = resp
+                .headers()
+                .iter()
+                .filter_map(|(k, v)| Some((k.as_str().to_string(), v.to_str().ok()?.to_string())))
+                .collect();
+            let target = matches!(status, 301 | 302 | 303 | 307 | 308)
+                .then(|| header(&headers, "location"))
+                .flatten()
+                .filter(|_| follow);
+            let Some(location) = target else {
+                let body = resp
+                    .bytes()
+                    .await
+                    .map_err(|e| Refused::Network(e.without_url().to_string()))?;
+                return Ok((status, headers, body.to_vec()));
+            };
+            url = g.next_hop(&url, location)?;
+        }
+        Err(Refused::Blocked(format!(
+            "more than {MAX_REDIRECTS} redirects"
+        )))
     }
 
     /// Decide what a received response means: done, retry after a pause, cache update.
@@ -516,6 +690,12 @@ impl HttpFetch for GovernedHttp {
                     req.connector
                 )));
             }
+            // an IP literal in a private range is refused here, before the cache and the
+            // limits; a name is checked when it is resolved for the connection
+            if let Err(Refused::Blocked(why)) = self.client_for(g, &url) {
+                tracing::warn!(connector = %req.connector, %why, "outbound request refused");
+                return Err(HttpError::Blocked(why));
+            }
             let cacheable = req.method == "GET" && req.body.is_none();
             let key = cache_key(&req.method, &req.url);
             let cached = match (&self.cache, cacheable) {
@@ -554,6 +734,38 @@ impl HttpFetch for GovernedHttp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_entries_cover_a_host_a_port_or_a_domain_with_its_subdomains() {
+        let m = |entry: &str, url: &str| host_matches(entry, &url::Url::parse(url).unwrap());
+        assert!(m("api.example.org", "https://api.example.org/v1"));
+        assert!(!m("api.example.org", "https://api.example.org:8443/v1"));
+        assert!(m("api.example.org:8443", "https://api.example.org:8443/v1"));
+        assert!(!m("api.example.org:8443", "https://api.example.org/v1"));
+        assert!(
+            !m("example.org", "https://api.example.org/"),
+            "no subdomains by itself"
+        );
+        // a wildcard entry (review SEC2-11): every subdomain, default port only; the domain
+        // itself is an entry of its own
+        assert!(m(
+            "*.archive.org",
+            "https://ia800703.us.archive.org/view_archive.php"
+        ));
+        assert!(!m("*.archive.org", "https://archive.org/download/x"));
+        assert!(!m("*.archive.org", "https://notarchive.org/"));
+        assert!(!m("*.archive.org", "https://archive.org.example.net/"));
+        assert!(!m("*.archive.org", "https://ia800703.us.archive.org:8080/"));
+        // a bare leading dot is no syntax: it covers nothing
+        assert!(!m(".archive.org", "https://ia800703.us.archive.org/"));
+        assert!(!m(".archive.org", "https://archive.org/"));
+        assert!(
+            m("API.Example.org", "https://api.example.org/v1"),
+            "lower case"
+        );
+        assert!(m("127.0.0.1:3011", "http://127.0.0.1:3011/x"));
+        assert!(m("[::1]:3011", "http://[::1]:3011/x"));
+    }
 
     #[test]
     fn retry_after_seconds_and_date() {

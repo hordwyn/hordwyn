@@ -531,7 +531,7 @@ integrations-url = Webhook URL
 integrations-example = The same call with curl
 integrations-empty = No senders yet.
 integrations-revoke = Revoke
-auth-error-too_many_attempts = Too many failed sign-ins. Please wait a few minutes.
+auth-error-too_many_attempts = Too many failed attempts. Wait a moment and try again.
 auth-error-username_too_short = Use at least 3 characters for the username.
 auth-error-username_too_long = Use at most 32 characters for the username.
 auth-error-username_space = The username has a space. Use - or _ instead.
@@ -678,8 +678,12 @@ notify-event-admin-local_sign_in = Local sign-in used (admin)
 
 # ---- UX phase 0 review (docs/reviews/2026-11-06-ux0-review.md) ----
 auth-lockout-minutes = { $minutes ->
-    [one] Too many failed sign-ins. Try again in 1 minute.
-   *[other] Too many failed sign-ins. Try again in { $minutes } minutes.
+    [one] Too many failed attempts. Try again in 1 minute.
+   *[other] Too many failed attempts. Try again in { $minutes } minutes.
+}
+auth-wait-seconds = { $seconds ->
+    [one] Too many failed attempts. Try again in 1 second.
+   *[other] Too many failed attempts. Try again in { $seconds } seconds.
 }
 auth-check-throttled = Too many checks right now; you can still create the account.
 auth-offline = You are offline
@@ -970,6 +974,8 @@ admin-health-data_sources-some_not_working = { $working } of { $total } working
 admin-health-data_sources-none_working = No data source works
 admin-health-identity_provider-configured = Configured
 admin-health-identity_provider-off = Not configured
+admin-health-reverse_proxy-fine = No forwarded requests from an unlisted proxy
+admin-health-reverse_proxy-untrusted = Requests with X-Forwarded-For come from { $peer }, which is not in APP__SERVER__TRUSTED_PROXIES: every visitor counts as that address, also for the sign-in limits (last { $at })
 admin-health-secrets-active = Key v{ $version } active
 admin-health-secrets-locked = { $count } secrets cannot be decrypted
 admin-health-secrets-rotation_due = Key v{ $version } is older than two years: consider a new one
@@ -1090,6 +1096,7 @@ admin-health-name-jobs = Background jobs
 admin-health-name-mail = Mail
 admin-health-name-data_sources = Data sources
 admin-health-name-identity_provider = Identity provider
+admin-health-name-reverse_proxy = Reverse proxy
 admin-health-name-secrets = Secrets at rest
 admin-overview-lead = What members cannot see: the parts this instance depends on.
 admin-overview-attention = { $count ->
@@ -1467,6 +1474,12 @@ admin-mail-test-ok = The test message was sent.
 admin-mail-test-failed = The test failed: { $reason }
 admin-mail-last-ok = Last test { $at }: it worked.
 admin-mail-last-failed = Last test { $at }: { $reason }
+admin-mail-reason-not_configured = Mail is not set up.
+admin-mail-reason-connection = The mail server could not be reached. Check the server, the port and the connection security.
+admin-mail-reason-auth = The mail server refused the username or the password.
+admin-mail-reason-rejected = The mail server refused the message.
+admin-mail-reason-send_failed = The message could not be sent.
+admin-mail-reason-private_target = The mail server's address is in a private network, and this instance does not connect to those.
 admin-mail-security-tls = TLS
 admin-mail-security-starttls = STARTTLS
 admin-mail-security-none = None (local relay only)
@@ -1541,6 +1554,9 @@ admin-sso-test-at = ({ $at })
 admin-sso-test-discovery = Discovery
 admin-sso-test-discovery-ok = works
 admin-sso-test-discovery-failed = failed: { $reason }
+admin-sso-reason-oidc_unavailable = the provider did not answer
+admin-sso-reason-oidc_failed = the provider's answer could not be used; check the issuer address
+admin-sso-reason-oidc_blocked_target = its address is in a private network, and this instance does not connect to those
 admin-sso-test-end-session = Sign-out at the provider
 admin-sso-test-backchannel = Back-channel logout
 admin-sso-test-frontchannel = Front-channel logout
@@ -2322,6 +2338,7 @@ admin-health-mail-result-connection = the mail server could not be reached
 admin-health-mail-result-auth = the mail server refused the sign-in
 admin-health-mail-result-rejected = the mail server refused the message
 admin-health-mail-result-send_failed = sending failed
+admin-health-mail-result-private_target = the mail server is in a private network, which this instance does not connect to
 log-coop-result = How it ended
 log-coop-none = No result
 log-coop-lost = We lost

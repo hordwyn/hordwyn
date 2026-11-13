@@ -116,6 +116,9 @@ async fn a_body_without_a_declared_length_is_read_up_to_the_limit_only() {
     assert_eq!(read, JSON_BODY_LIMIT);
 }
 
+/// A declared length over the limit is refused on every path. Without a declared length a
+/// page, a file or a path without a route does not read the body at all (sec2, DEC-653:
+/// only server functions have theirs collected), so nothing of it is held.
 #[tokio::test]
 async fn pages_and_unknown_paths_have_the_limit_too() {
     let Some(app) = app().await else { return };
@@ -123,9 +126,12 @@ async fn pages_and_unknown_paths_have_the_limit_too() {
         let (status, read, text) = post(&app, uri, JSON_BODY_LIMIT + 1, true).await;
         assert_eq!(status, 413, "{uri}: {text}");
         assert_eq!(read, 0, "{uri}");
-        let (status, read, _) = post(&app, uri, 3 * JSON_BODY_LIMIT, false).await;
-        assert_eq!(status, 413, "{uri} without a declared length");
-        assert!(read <= JSON_BODY_LIMIT + PIECE, "{uri}: {read} bytes read");
+        let (status, read, text) = post(&app, uri, 3 * JSON_BODY_LIMIT, false).await;
+        assert_eq!(read, 0, "{uri} without a declared length: status {status}");
+        assert!(
+            !text.contains("aaaa"),
+            "{uri}: nothing of the body comes back"
+        );
     }
 }
 

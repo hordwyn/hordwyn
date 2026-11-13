@@ -97,7 +97,7 @@ async fn setup_admin_and_source_server_functions() {
     )
     .await;
     assert_eq!(status, 200, "{body}");
-    assert_eq!(json(&body)["health"].as_array().unwrap().len(), 8);
+    assert_eq!(json(&body)["health"].as_array().unwrap().len(), 9);
     let values = serde_json::json!({"values": {"storage.max_total_bytes": "2GiB"}}).to_string();
     let (status, body, _) = send(
         &app,

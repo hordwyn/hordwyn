@@ -101,6 +101,9 @@ pub enum FailureCode {
     ReauthNotFresh,
     /// Re-authentication: the account has no identity at an enabled provider.
     NoLinkedProvider,
+    /// The provider (its issuer, or an endpoint its discovery document names) is on a private
+    /// address and this instance does not call those (SEC-4, DEC-534).
+    BlockedTarget,
 }
 
 impl FailureCode {
@@ -117,6 +120,7 @@ impl FailureCode {
             Self::NotFound => "not_found",
             Self::ReauthNotFresh => "reauth_not_fresh",
             Self::NoLinkedProvider => "no_linked_provider",
+            Self::BlockedTarget => "oidc_blocked_target",
         }
     }
 }
@@ -219,6 +223,10 @@ pub struct OidcParts {
     pub audit: Option<Arc<dyn crate::admin::AdminStore>>,
     /// `<public_url>` without a trailing slash.
     pub public_url: String,
+    /// May a provider host be on a private, loopback or link-local address right now
+    /// (DEC-534: the hosting mode decides unless the operator said so either way; a host on
+    /// `outbound.allow_private_hosts` always may, review SEC2-3)? Asked per request.
+    pub allow_private: domain::net::PrivateAllow,
 }
 
 /// The environment's provider (`auth.oidc`), installed as a read-only row.
@@ -250,6 +258,22 @@ fn host_of(url: &str) -> Option<String> {
     Some(match u.port() {
         Some(p) => format!("{host}:{p}"),
         None => host.to_string(),
+    })
+}
+
+/// Is the host of `url` an IP address in a private, loopback or link-local range that `allow`
+/// does not allow (neither private targets as a whole nor this host and port on the
+/// operator's list)? Names are checked by the HTTP client when it resolves them for the
+/// connection, against the same list.
+fn blocked_literal(allow: &domain::net::PrivateAllow, url: &str) -> bool {
+    use openidconnect::url::Host;
+    openidconnect::url::Url::parse(url).is_ok_and(|u| {
+        let private = match u.host() {
+            Some(Host::Ipv4(a)) => domain::net::is_private_ip(std::net::IpAddr::V4(a)),
+            Some(Host::Ipv6(a)) => domain::net::is_private_ip(std::net::IpAddr::V6(a)),
+            Some(Host::Domain(_)) | None => false,
+        };
+        private && !allow.host(u.host_str().unwrap_or_default(), u.port())
     })
 }
 
@@ -434,6 +458,9 @@ impl Oidc {
             .clone();
         let mut set = BTreeSet::new();
         let mut origins = BTreeSet::new();
+        // a host on a private address is not even listed where those are not called (SEC-4)
+        let allow = &self.parts.allow_private;
+        let host_of = |url: &str| host_of(url).filter(|_| !blocked_literal(allow, url));
         for p in providers.iter().filter(|p| p.enabled) {
             set.extend(host_of(&p.issuer));
             let doc = cache.get(&p.id).map(|d| &d.doc).or(p.discovery.as_ref());
@@ -473,9 +500,14 @@ impl Oidc {
         >,
     > + use<> {
         let fetch = self.parts.http.clone();
+        let allow_private = self.parts.allow_private.clone();
         move |req: openidconnect::HttpRequest| {
             let fetch = fetch.clone();
+            let blocked = blocked_literal(&allow_private, &req.uri().to_string());
             Box::pin(async move {
+                if blocked {
+                    return Err(OidcHttpError("blocked: a private address".into()));
+                }
                 let headers = req
                     .headers()
                     .iter()
@@ -505,6 +537,15 @@ impl Oidc {
     }
 
     async fn get_json(&self, url: &str, op: &str, bearer: Option<&str>) -> Result<Value, Failure> {
+        let blocked = || {
+            Failure::new(
+                FailureCode::BlockedTarget,
+                format!("{op}: a private address"),
+            )
+        };
+        if blocked_literal(&self.parts.allow_private, url) {
+            return Err(blocked());
+        }
         let mut headers = vec![("accept".to_string(), "application/json".to_string())];
         if let Some(t) = bearer {
             headers.push(("authorization".into(), format!("Bearer {t}")));
@@ -524,7 +565,11 @@ impl Oidc {
                 user: None,
             })
             .await
-            .map_err(|e| Failure::new(FailureCode::Unavailable, format!("{op}: {e}")))?;
+            .map_err(|e| match e {
+                // refused by the client: not on the list, or a name on a private address
+                app::ports::HttpError::Blocked(_) => blocked(),
+                e => Failure::new(FailureCode::Unavailable, format!("{op}: {e}")),
+            })?;
         if resp.status >= 500 {
             return Err(Failure::new(
                 FailureCode::Unavailable,

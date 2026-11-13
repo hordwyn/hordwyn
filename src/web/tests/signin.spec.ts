@@ -220,6 +220,38 @@ test("break-glass /sign-in/local signs an admin in with the password and is audi
   await context.close();
 });
 
+// sec2 (SEC-5, DEC-535): the local sign-in is slowed, never locked. The wait is counted for
+// the account and the client address, so it ends: the right password gets in after it.
+test("break-glass /sign-in/local: wrong guesses meet a wait in seconds, the right password gets in after it", async ({ page, browser }) => {
+  await ensureProvider(page);
+  const { context, page: p } = await person(browser);
+  await visit(p, "/sign-in/local");
+  await p.getByLabel("Username").fill(ADMIN);
+  await p.getByLabel("Password").fill(`not ${PASSWORD}`);
+  const submit = p.getByRole("button", { name: "Sign in", exact: true });
+  const alert = p.getByRole("alert");
+  const answered = () => p.waitForResponse((r) => r.url().includes("/auth/sign-in/local"));
+  // the admin name may have a failure from an earlier spec: go on until the wait starts
+  let waiting = false;
+  for (let i = 0; i < 5 && !waiting; i++) {
+    const answer = answered();
+    await submit.click();
+    waiting = (await answer).status() === 429;
+    if (!waiting) await expect(alert).toHaveText("Wrong username or password.");
+  }
+  expect(waiting).toBeTruthy();
+  await expect(alert).toHaveText(/^Too many failed attempts\. Try again in \d+ seconds?\.$/);
+  // the right password: refused while the wait runs, accepted after it (2 s at most here)
+  await p.getByLabel("Password").fill(PASSWORD);
+  await expect(async () => {
+    const answer = answered();
+    await submit.click();
+    expect((await answer).status()).toBe(200);
+  }).toPass({ timeout: 15_000, intervals: [1_000] });
+  await expect(p).toHaveURL(/127\.0\.0\.1:\d+\/$/);
+  await context.close();
+});
+
 test("a verified address of an existing account asks 'Is this your account?' once", async ({ page, browser }) => {
   await ensureProvider(page);
   const user = `ana${Date.now()}`;

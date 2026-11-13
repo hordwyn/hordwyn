@@ -20,6 +20,7 @@ pub mod pg;
 mod plain;
 pub mod refresh;
 mod registry;
+mod resolve;
 pub mod retention;
 pub mod search;
 mod singleflight;
@@ -29,7 +30,7 @@ pub use breaker::Breaker;
 pub use connector::{Connector, Ctx, Details, Episodes, Images, Search};
 pub use credentials::{CredentialSpec, CredentialState, KeySlot};
 pub use gate::Gate;
-pub use http::{ConnectorPolicy, GovernedHttp, HostList};
+pub use http::{ConnectorPolicy, GovernedHttp, HostList, PrivateRule};
 pub use model::{
     Attribution, Auth, Capability, ConnectorError, ConnectorInfo, DetailsRequest, EpisodesRequest,
     ImageKind, ImageRef, RateLimit, SearchRequest, Snapshot,

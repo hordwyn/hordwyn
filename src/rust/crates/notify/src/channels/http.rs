@@ -3,8 +3,9 @@
 //!
 //! Requests go out through the `HttpFetch` port (D-5.2); the server plugs in a plain client
 //! without provider allowlists, because targets are user-supplied URLs. For the same reason
-//! addresses in private, loopback and link-local ranges are refused here unless the admin
-//! allows them (`allow_private`, for LAN setups).
+//! addresses in private, loopback and link-local ranges are refused here unless the operator
+//! allows them (`allow_private`: `notify.allow_private_targets` for all targets, or single
+//! hosts on `outbound.allow_private_hosts`, for LAN setups).
 
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -27,7 +28,7 @@ const DISCORD_MAX: usize = 2000;
 
 pub struct HttpChannels {
     http: Arc<dyn HttpFetch>,
-    allow_private: bool,
+    allow_private: domain::net::PrivateAllow,
 }
 
 use domain::net::is_private_ip as is_private;
@@ -72,23 +73,27 @@ fn text(m: &Message) -> String {
     s
 }
 
-/// Parse a user-supplied target URL; refuse non-HTTP schemes and, unless `allow_private`,
-/// hosts that are or resolve to private, loopback or link-local addresses. (A DNS answer
-/// that changes between this check and the request is not caught.)
+/// Parse a user-supplied target URL; refuse non-HTTP schemes and, unless `allow_private`
+/// allows the host, hosts that are or resolve to private, loopback or link-local addresses.
+/// (The plain client resolves names again at connect time with the same rule.)
 ///
 /// # Errors
 /// [`SendError::Permanent`] for refused targets, [`SendError::Retry`] if DNS fails.
-pub async fn check_target(url: &str, allow_private: bool) -> Result<Url, SendError> {
+pub async fn check_target(
+    url: &str,
+    allow_private: &domain::net::PrivateAllow,
+) -> Result<Url, SendError> {
     let u = Url::parse(url).map_err(|e| SendError::Permanent(format!("invalid URL: {e}")))?;
     if !matches!(u.scheme(), "http" | "https") {
         return Err(SendError::Permanent("only http and https URLs".into()));
     }
-    if allow_private {
-        return Ok(u);
-    }
     let host = u
         .host_str()
         .ok_or_else(|| SendError::Permanent("URL without host".into()))?;
+    // private targets allowed as a whole, or this host on the operator's list (review SEC2-3)
+    if allow_private.host(host, u.port()) {
+        return Ok(u);
+    }
     let port = u.port_or_known_default().unwrap_or(443);
     let host = host.trim_start_matches('[').trim_end_matches(']');
     let addrs: Vec<IpAddr> = match host.parse::<IpAddr>() {
@@ -121,7 +126,7 @@ fn push_path(mut u: Url, segments: &[&str]) -> Result<Url, SendError> {
 
 impl HttpChannels {
     #[must_use]
-    pub fn new(http: Arc<dyn HttpFetch>, allow_private: bool) -> Self {
+    pub fn new(http: Arc<dyn HttpFetch>, allow_private: domain::net::PrivateAllow) -> Self {
         Self {
             http,
             allow_private,
@@ -129,7 +134,7 @@ impl HttpChannels {
     }
 
     async fn target(&self, url: &str) -> Result<Url, SendError> {
-        check_target(url, self.allow_private).await
+        check_target(url, &self.allow_private).await
     }
 
     async fn run(

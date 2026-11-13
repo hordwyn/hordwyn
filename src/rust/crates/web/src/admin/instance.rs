@@ -184,6 +184,20 @@ fn field_text(v: &Value) -> String {
     }
 }
 
+/// Why a mail test failed, in words: the server answers with a category only (`failed:
+/// connection`, DEC-534), never with the mail server's own text. An unknown category is shown
+/// as it is.
+fn mail_reason(texts: &crate::i18n::I18n, result: &str) -> String {
+    let category = result.strip_prefix("failed: ").unwrap_or(result);
+    let key = format!("admin-mail-reason-{category}");
+    let text = texts.t(&key);
+    if text == key {
+        category.to_string()
+    } else {
+        text
+    }
+}
+
 /// The last test line ("Last test: 7 Nov 2026, 10:12: worked.").
 fn last_test(m: &MailSettingsDto) -> Option<String> {
     let i18n = use_i18n();
@@ -194,7 +208,7 @@ fn last_test(m: &MailSettingsDto) -> Option<String> {
     } else {
         "admin-mail-last-failed"
     };
-    let reason = result.strip_prefix("failed: ").unwrap_or(result);
+    let reason = mail_reason(&i18n, result);
     Some(i18n.t_args(
         key,
         &[("at", i18n.datetime(at).into()), ("reason", reason.into())],
@@ -235,7 +249,7 @@ fn test_message(texts: &crate::i18n::I18n, test: &MailTestDto) -> Result<String,
     if test.ok {
         Ok(texts.t("admin-mail-test-ok"))
     } else {
-        let reason = test.result.trim_start_matches("failed: ").to_string();
+        let reason = mail_reason(texts, &test.result);
         Err(texts.t_args("admin-mail-test-failed", &[("reason", reason.into())]))
     }
 }

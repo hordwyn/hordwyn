@@ -13,6 +13,7 @@ pub mod pg;
 mod recovery;
 pub mod secrets;
 mod store;
+pub mod throttle;
 
 use std::sync::Arc;
 
@@ -32,6 +33,8 @@ use domain::ids::UserId;
 use domain::user::{Actor, Role, User};
 use thiserror::Error;
 
+use throttle::{Attempt, Throttle};
+
 pub use fresh::{
     OIDC_AUTH_TIME_MAX_AGE_SECS, PENDING_ACTION_MAX_BYTES, PENDING_ACTION_MINUTES,
     REAUTH_CAP_MINUTES, REAUTH_SLIDE_MINUTES, RECOVERY_CODES, ReauthStatus,
@@ -41,6 +44,7 @@ pub use store::{
     AuthStore, Credentials, InviteStore, MemAuthStore, MemInviteStore, OidcIdentity, PasswordReset,
     RecoveryCode, Session, SessionSecret, SignupInvite,
 };
+pub use throttle::{AttemptCounters, Count, MemCounters, Restart, ThrottleSettings, client};
 
 /// Minimum password length (from the shared rules in `contracts::auth`).
 pub const MIN_PASSWORD_LEN: usize = contracts::auth::PASSWORD_MIN_LEN;
@@ -60,6 +64,8 @@ pub struct AuthSettings {
     pub session_days: u32,
     /// Shown in authenticator apps (from the brand config).
     pub totp_issuer: String,
+    /// How guesses are slowed down (SEC-5).
+    pub throttle: ThrottleSettings,
 }
 
 impl Default for AuthSettings {
@@ -68,6 +74,7 @@ impl Default for AuthSettings {
             signup: SignupMode::Invite,
             session_days: 30,
             totp_issuer: "app".into(),
+            throttle: ThrottleSettings::default(),
         }
     }
 }
@@ -101,7 +108,8 @@ pub enum AuthError {
     Store(String),
     #[error("oidc: {0}")]
     Oidc(String),
-    /// Too many failed sign-ins for this name; try again later (G2-4).
+    /// Too many failed attempts from this address or for this account from it; try again
+    /// after the wait (SEC-5).
     #[error("too many failed attempts, try again in {retry_after_secs} s")]
     TooManyAttempts { retry_after_secs: i64 },
     #[error("this account is disabled")]
@@ -189,65 +197,6 @@ impl Window {
     }
 }
 
-/// Failed sign-ins per username allowed within [`THROTTLE_WINDOW_MINUTES`].
-pub const MAX_FAILED_SIGN_INS: u32 = 10;
-pub const THROTTLE_WINDOW_MINUTES: i64 = 15;
-/// Names tracked at most (oldest windows are dropped first).
-const THROTTLE_CAPACITY: usize = 10_000;
-
-/// Failed sign-ins per lowercased username: (count, window start). In memory, per process.
-#[derive(Default)]
-struct Throttle(std::sync::Mutex<std::collections::HashMap<String, (u32, DateTime<Utc>)>>);
-
-impl Throttle {
-    fn check(&self, name: &str, now: DateTime<Utc>) -> Result<(), AuthError> {
-        let window = Duration::minutes(THROTTLE_WINDOW_MINUTES);
-        let map = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        match map.get(name) {
-            Some((n, start)) if *n >= MAX_FAILED_SIGN_INS && now < *start + window => {
-                Err(AuthError::TooManyAttempts {
-                    retry_after_secs: (*start + window - now).num_seconds().max(1),
-                })
-            }
-            _ => Ok(()),
-        }
-    }
-
-    fn failed(&self, name: &str, now: DateTime<Utc>) {
-        let window = Duration::minutes(THROTTLE_WINDOW_MINUTES);
-        let mut map = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if map.len() >= THROTTLE_CAPACITY && !map.contains_key(name) {
-            map.retain(|_, (_, start)| now < *start + window);
-            if map.len() >= THROTTLE_CAPACITY
-                && let Some(oldest) = map
-                    .iter()
-                    .min_by_key(|(_, (_, s))| *s)
-                    .map(|(k, _)| k.clone())
-            {
-                map.remove(&oldest);
-            }
-        }
-        let e = map.entry(name.to_string()).or_insert((0, now));
-        if now >= e.1 + window {
-            *e = (0, now);
-        }
-        e.0 += 1;
-    }
-
-    fn succeeded(&self, name: &str) {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(name);
-    }
-}
-
 impl From<app::ports::PortError> for AuthError {
     fn from(e: app::ports::PortError) -> Self {
         Self::Store(e.0)
@@ -292,6 +241,8 @@ async fn hash_password(password: String) -> Result<String, AuthError> {
     .map_err(|e| AuthError::Store(e.to_string()))?
 }
 
+/// One argon2 verification, off the worker threads. Callers go through [`Auth::verify`], which
+/// limits how many run at once.
 async fn verify_password(password: String, hash: String) -> bool {
     tokio::task::spawn_blocking(move || {
         PasswordHash::new(&hash).is_ok_and(|h| {
@@ -352,8 +303,11 @@ impl Auth {
             store,
             invites: Arc::new(MemInviteStore::default()),
             clock,
+            throttle: Arc::new(Throttle::new(
+                Arc::new(MemCounters::default()),
+                settings.throttle.verify_concurrency,
+            )),
             settings: Arc::new(std::sync::RwLock::new(settings)),
-            throttle: Arc::default(),
             username_checks: Arc::default(),
         }
     }
@@ -377,6 +331,56 @@ impl Auth {
 
     fn now(&self) -> DateTime<Utc> {
         self.clock.now()
+    }
+
+    /// Keep the failure counts in `counters` instead of this process (a store shared by
+    /// several web processes, DEC-535).
+    #[must_use]
+    pub fn with_counters(mut self, counters: Arc<dyn AttemptCounters>) -> Self {
+        self.throttle = Arc::new(Throttle::new(
+            counters,
+            self.settings().throttle.verify_concurrency,
+        ));
+        self
+    }
+
+    /// May a secret of `account` (a normalised username; `None` when the secret names no
+    /// account) be checked now, from the address of the current request (SEC-5)?
+    pub(crate) async fn attempt(&self, account: Option<&str>) -> Result<Attempt, AuthError> {
+        self.throttle
+            .begin(&self.settings().throttle, account, self.now())
+            .await
+    }
+
+    /// Count the outcome of a check: a wrong secret is a failure, a right one clears the
+    /// account's count for this address, any other error counts as neither.
+    pub(crate) async fn settle<T>(
+        &self,
+        attempt: Attempt,
+        result: Result<T, AuthError>,
+    ) -> Result<T, AuthError> {
+        match &result {
+            Err(AuthError::InvalidCredentials | AuthError::InvalidTotp) => {
+                self.attempt_failed(attempt).await?;
+            }
+            Ok(_) => self.throttle.succeeded(attempt).await?,
+            Err(_) => {}
+        }
+        result
+    }
+
+    /// The secret of `attempt` was wrong.
+    pub(crate) async fn attempt_failed(&self, attempt: Attempt) -> Result<(), AuthError> {
+        self.throttle
+            .failed(&self.settings().throttle, attempt, self.now())
+            .await
+    }
+
+    /// Verify `secret` against an argon2 `hash`; at most
+    /// [`ThrottleSettings::verify_concurrency`] verifications run at once, the others wait.
+    pub(crate) async fn verify(&self, secret: &str, hash: String) -> bool {
+        let _slot = self.throttle.gate.enter().await;
+        verify_password(secret.to_string(), hash).await
     }
 
     /// Create an account. The very first account is always allowed and becomes admin;
@@ -538,24 +542,17 @@ impl Auth {
     ///
     /// # Errors
     /// [`AuthError::InvalidCredentials`], [`AuthError::TotpRequired`],
-    /// [`AuthError::InvalidTotp`].
+    /// [`AuthError::InvalidTotp`]; [`AuthError::TooManyAttempts`] while the account waits for
+    /// this address or the address is over its budget (nothing is verified then).
     pub async fn sign_in(
         &self,
         username: &str,
         password: &str,
         totp: Option<&str>,
     ) -> Result<SessionToken, AuthError> {
-        let key = normalize_username(username);
-        self.throttle.check(&key, self.now())?;
+        let attempt = self.attempt(Some(&normalize_username(username))).await?;
         let result = self.sign_in_checked(username, password, totp).await;
-        match &result {
-            Err(AuthError::InvalidCredentials | AuthError::InvalidTotp) => {
-                self.throttle.failed(&key, self.now());
-            }
-            Ok(_) => self.throttle.succeeded(&key),
-            Err(_) => {}
-        }
-        result
+        self.settle(attempt, result).await
     }
 
     async fn sign_in_checked(
@@ -577,7 +574,7 @@ impl Auth {
             .as_ref()
             .and_then(|c| c.password_hash.clone())
             .unwrap_or_else(|| DUMMY_HASH.to_string());
-        let ok = verify_password(password.to_string(), hash).await;
+        let ok = self.verify(password, hash).await;
         let (Some(user), Some(mut creds)) = (user, creds) else {
             return Err(AuthError::InvalidCredentials);
         };
@@ -606,12 +603,17 @@ impl Auth {
             return Err(AuthError::TotpLocked);
         }
         let code = code.ok_or(AuthError::TotpRequired)?;
-        if fresh::looks_like_recovery_code(code) {
-            self.use_recovery(creds.user_id, code).await?;
+        let s = self.settings().throttle;
+        self.throttle.code_begin(&s, account, self.now()).await?;
+        let checked = if fresh::looks_like_recovery_code(code) {
+            self.use_recovery(creds.user_id, code).await
         } else {
-            self.check_totp(creds, code, account).await?;
-        }
-        Ok("password+totp")
+            self.check_totp(creds, code, account).await
+        };
+        self.throttle
+            .code_settle(&s, account, &checked, self.now())
+            .await?;
+        checked.map(|()| "password+totp")
     }
 
     async fn check_totp(
@@ -738,11 +740,20 @@ impl Auth {
     /// recovery codes (OD-08), shown once; only their hashes are stored.
     ///
     /// # Errors
-    /// [`AuthError::InvalidTotp`] or storage errors.
+    /// [`AuthError::InvalidTotp`], [`AuthError::TooManyAttempts`] or storage errors.
     pub async fn totp_confirm(&self, actor: Actor, code: &str) -> Result<Vec<String>, AuthError> {
         let user = self.app.user(actor.user_id).await?;
         let mut creds = self.credentials_or_default(actor.user_id).await?;
-        self.check_totp(&mut creds, code, &user.username).await?;
+        let attempt = self.attempt(Some(&user.username)).await?;
+        let s = self.settings().throttle;
+        self.throttle
+            .code_begin(&s, &user.username, self.now())
+            .await?;
+        let checked = self.check_totp(&mut creds, code, &user.username).await;
+        self.throttle
+            .code_settle(&s, &user.username, &checked, self.now())
+            .await?;
+        self.settle(attempt, checked).await?;
         creds.totp_enabled = true;
         self.store.put_credentials(&creds).await?;
         self.new_recovery_codes(actor.user_id).await
@@ -757,7 +768,7 @@ impl Auth {
     }
 
     /// Change the password (signs out every other session). Wrong current passwords count
-    /// against the same per-name budget as sign-in (UX2-S6).
+    /// like wrong passwords at sign-in (UX2-S6, SEC-5).
     ///
     /// # Errors
     /// Wrong current password, [`AuthError::TooManyAttempts`] or a weak new one.
@@ -769,14 +780,15 @@ impl Auth {
     ) -> Result<SessionToken, AuthError> {
         check_password(new)?;
         let key = self.app.user(actor.user_id).await?.username;
-        self.throttle.check(&key, self.now())?;
         let mut creds = self.credentials_or_default(actor.user_id).await?;
         if let Some(h) = &creds.password_hash {
-            if !verify_password(current.to_string(), h.clone()).await {
-                self.throttle.failed(&key, self.now());
-                return Err(AuthError::InvalidCredentials);
-            }
-            self.throttle.succeeded(&key);
+            let attempt = self.attempt(Some(&key)).await?;
+            let ok = self.verify(current, h.clone()).await;
+            self.settle(
+                attempt,
+                ok.then_some(()).ok_or(AuthError::InvalidCredentials),
+            )
+            .await?;
         }
         creds.password_hash = Some(hash_password(new.to_string()).await?);
         self.store.put_credentials(&creds).await?;

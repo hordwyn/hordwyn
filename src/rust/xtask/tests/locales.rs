@@ -99,6 +99,10 @@ const WEB_FAMILIES: &[&str] = &[
     "admin-health-mail-result-",
     // OT-5: the past-tense twin of a `next-step-*` label, for the toast and the dialog title
     "logged-step-",
+    // sec2 (DEC-534): a failed mail test and a failed provider Test answer with a category;
+    // the page says it in a sentence
+    "admin-mail-reason-",
+    "admin-sso-reason-",
 ];
 
 #[test]

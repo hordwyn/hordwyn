@@ -107,7 +107,7 @@ impl Oidc {
     ///
     /// # Errors
     /// [`LinkError::Ticket`], [`LinkError::Code`], [`LinkError::InUse`], [`LinkError::NoEmail`]
-    /// (a password was set since), [`AuthError::AccountDisabled`].
+    /// (a password was set since), [`AuthError::AccountDisabled`], [`AuthError::TooManyAttempts`].
     pub async fn confirm_email_link(
         &self,
         auth: &Auth,
@@ -129,14 +129,18 @@ impl Oidc {
             return Err(AuthError::AccountDisabled.into());
         }
         let now = self.clock().now();
+        // a wrong code is a wrong secret of this account (SEC-5)
+        let attempt = auth.attempt(Some(&user.username)).await?;
         let claimed = auth
             .store
             .claim_sign_in_link(&token_hash(code.trim()), &binding(&t), now)
             .await
             .map_err(AuthError::from)?;
         if claimed != Some(user.id) {
+            auth.attempt_failed(attempt).await?;
             return Err(LinkError::Code);
         }
+        drop(attempt);
         let once_key = cookie::used_key(LINK_KIND, &t.id);
         let expires = now + Duration::minutes(EMAIL_LINK_MINUTES + 1);
         if !self

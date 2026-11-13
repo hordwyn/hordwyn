@@ -555,8 +555,108 @@ The REST API is described by an OpenAPI document at `/api/v1/openapi.json` (titl
 product name). Sign in with `POST /api/v1/auth/sign-in` and send the returned token as
 `Authorization: Bearer <token>`. Browsers use the session cookie instead; state-changing
 requests from other sites are refused (checked with `Origin` and `Sec-Fetch-Site`).
-Sign-in is throttled after 10 failed attempts for a name within 15 minutes. JSON request
-bodies are limited to 2 MiB, import uploads to 64 MiB.
+Failed sign-ins are slowed down (<<sign-in-limits>>); a refused attempt answers `429` with
+`Retry-After` and `retry_after_secs` in the body. JSON request bodies are limited to 2 MiB,
+import uploads to 64 MiB; a request body that stalls is answered `408`
+(xref:reverse-proxy.adoc#limits[time limits]).
+
+[#sign-in-limits]
+== Sign-in limits
+
+Every place that checks a password, a code from an authenticator, a recovery code, a
+password-reset link or an emailed sign-in link is slowed down after failures. Nothing locks
+an account, so nobody can keep someone out by guessing at their name.
+
+* *Per account and client address:* the first 3 failures cost nothing. After the next one
+  the pair waits 1 second, then 2, 4, 8 and so on, up to 5 minutes. During a wait the
+  answer is "Too many failed attempts. Try again in N seconds" (`429`), also for the right
+  password; nothing is checked. A successful sign-in, or 15 minutes without a failure,
+  starts the pair again. The wait belongs to the pair: guesses at `admin` from one address
+  never make the owner wait at another one. This holds for the local sign-in
+  `/sign-in/local` too, the door that stays open when a sign-in provider is down.
+* *Per client address:* 30 failures across all names within 15 minutes; then every attempt
+  from that address is refused until the 15 minutes are over. IPv6 addresses are counted
+  per /64 network.
+* *At once:* 8 password checks run at a time (each takes about 19 MiB and some tens of
+  milliseconds of one core); further ones wait their turn.
+
+The values are settings (`auth.throttle` in the
+xref:configuration.adoc[configuration reference]), read at start. The counts are kept in
+the memory of the web process: a restart clears them, and they are not shared between
+several web processes (one web process is the supported shape).
+
+What it does not do: guesses at a password of one account that come from many addresses
+are limited per address only. Long passwords (at least 10 characters are required) and an
+authenticator on admin accounts are what stands against that. Wrong one-time codes and
+recovery codes are counted for the account itself, whatever the address: they can only be
+sent after the right password, so the same growing wait applies to everyone who has it,
+and a stranger without it cannot make the owner wait there.
+
+The client address is the address of the connection, or behind a reverse proxy the one the
+proxy passes on, if the proxy is listed in `server.trusted_proxies`
+(xref:reverse-proxy.adoc[Behind a reverse proxy]). An instance behind a proxy that is not
+listed sees one address for everybody: the budget per address is then one budget for all
+visitors, and 30 wrong passwords by anyone close the sign-in for everyone for up to 15
+minutes. To get in again at once in that case: correct the setting and restart (the counts
+are gone with the restart).
+
+== What the server connects to
+
+Besides its own Postgres, search and storage, the server opens connections only to:
+
+* the documented hosts of each enabled data source (search, details, covers), listed in
+  xref:connectors.adoc[Data sources]. A redirect is followed only to a host on the same
+  list, at most 5 times, never from HTTPS to HTTP, and API keys are not sent along to
+  another host. Everything else is refused before a connection is made;
+* the sign-in providers an admin configured: the issuer and the hosts its discovery
+  document names for tokens, keys and user info;
+* the mail server of Admin > Instance > Mail;
+* notification targets people entered (ntfy, Gotify, webhooks and the like).
+
+None of these may be an address in a private, loopback, link-local or other special network
+(`10.x`, `172.16-31.x`, `192.168.x`, `127.x`, `169.254.x`, `100.64.x`, `0.x`, `192.0.0.x`,
+`198.18-19.x`, `224.x` and above, `fc00::/7`, `fe80::/10`, `fec0::/10`, `ff00::/8`, `::1`,
+and IPv6 forms that carry such an IPv4 address: `::ffff:a.b.c.d`, `::a.b.c.d`,
+`64:ff9b::a.b.c.d` (NAT64), `2002:` (6to4)), with these exceptions. One setting names single
+hosts for all of them: `outbound.allow_private_hosts` (`APP__OUTBOUND__ALLOW_PRIVATE_HOSTS`),
+a list of `host` (default port; for the mail server the ports 25, 465 and 587),
+`host:port`, an IP address (`10.0.0.5:8443`, `[fd00::1]:8080`) or `*.home.arpa` (every
+subdomain); entries are compared in lower case.
+
+[cols="2,4"]
+|===
+|What |May it be on a private address?
+
+|Data sources
+|No. Yes for the host of a `connectors.<id>.base_url` you set (a mirror or a test server),
+and for hosts in `outbound.allow_private_hosts`.
+
+|Sign-in providers and the mail server
+|On a home instance (`instance.hosting = "home"`, the default): yes, an identity provider
+or a mail relay at home is usually on one. On a hosted instance: no, an admin of the
+instance is then not the operator of the network. `notify.allow_private_targets = true` or
+`false` decides it for both modes. Single hosts: `outbound.allow_private_hosts`, for a
+provider given by name or by address. The mail server of `[notify.smtp]` (file or
+environment) counts as listed; one set in Admin > Instance > Mail does not.
+
+|Notification targets
+|No, unless `notify.allow_private_targets = true` (all of them: any member can enter one)
+or the host is in `outbound.allow_private_hosts` (that host and port only; the hosting
+mode does not matter here).
+|===
+
+Proxy variables of the environment (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`) are not used
+for any of these requests: a proxy would resolve the names itself, out of reach of these
+checks. The server needs a direct way out for data sources, sign-in providers and mail.
+
+A name is checked when it is resolved for the connection, so a DNS answer that changes
+between a check and the request does not get through. A refused sign-in provider shows
+"its address is in a private network" on the provider's Test; a refused mail server shows
+the same on "Send a test". Both tests name a category of failure only, not the remote
+side's text; the full text of a mail failure is in the server log.
+
+Pictures that a browser loads straight from a data source (covers that are not stored yet)
+are requests of the browser, not of the server.
 
 == Behind a TLS-inspecting proxy
 

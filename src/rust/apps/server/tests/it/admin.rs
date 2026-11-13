@@ -241,7 +241,7 @@ async fn wizard_then_locked_and_admin_routes_are_admin_only() {
         );
     }
     let r = call(&t, "GET", "/admin/overview", a, None).await;
-    assert_eq!(r.body["health"].as_array().unwrap().len(), 8, "{}", r.body);
+    assert_eq!(r.body["health"].as_array().unwrap().len(), 9, "{}", r.body);
     assert_eq!(r.body["hosting"], "hosted");
     assert_eq!(r.body["hosted_banner"], true, "no licence recorded yet");
     let r = call(&t, "GET", "/admin/audit?action=wizard.completed", a, None).await;
@@ -938,7 +938,7 @@ fn health_row<'a>(o: &'a Value, id: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("no row {id} in {o}"))
 }
 
-/// WP4-2 (DEC-285, addendum-1 3.4): the `admin.probes` job writes the eight health rows; the
+/// WP4-2 (DEC-285, addendum-1 3.4): the `admin.probes` job writes the nine health rows; the
 /// Overview reads them from the table and makes no call of its own; a row older than three
 /// minutes says so; times come with the admin's local time.
 #[tokio::test]
@@ -976,12 +976,12 @@ async fn overview_reads_the_probe_rows_and_never_probes() {
 
     // the job writes one row per health row
     let n = api::admin::run_probes(&t.srv.api).await.unwrap();
-    assert_eq!(n, 8);
+    assert_eq!(n, 9);
     let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM health_probes")
         .fetch_one(&t.srv.pool)
         .await
         .unwrap();
-    assert_eq!(rows, 8);
+    assert_eq!(rows, 9);
 
     // the Overview shows what the table says, not what it would find now
     sqlx::query(
@@ -997,7 +997,7 @@ async fn overview_reads_the_probe_rows_and_never_probes() {
         before,
         "no call"
     );
-    assert_eq!(o["health"].as_array().unwrap().len(), 8, "{o}");
+    assert_eq!(o["health"].as_array().unwrap().len(), 9, "{o}");
     assert_eq!(health_row(&o, "database")["status"], "error", "{o}");
     assert!(o["attention"].to_string().contains("database"), "{o}");
     assert_eq!(health_row(&o, "search")["stale"], false, "{o}");

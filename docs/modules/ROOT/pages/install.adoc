@@ -56,7 +56,10 @@ The default `http://localhost:3000` only fits a browser on the host itself.
 |`APP__SERVER__TRUSTED_PROXIES`
 |behind a proxy
 |The proxy's address or network as a list: `["192.168.1.10"]` or `["172.16.0.0/12"]`.
-Without it the audit log records the proxy's address instead of the visitor's.
+The owner must set it behind a proxy: without it every visitor has the proxy's address, in
+the audit log and for the sign-in limits, and thirty wrong passwords by anyone close the
+sign-in for everybody for 15 minutes. Admin > Overview shows a warning row while requests
+with `X-Forwarded-For` arrive from a private address that is not listed.
 
 |`APP__AUTH__SECURE_COOKIES`
 |plain HTTP only

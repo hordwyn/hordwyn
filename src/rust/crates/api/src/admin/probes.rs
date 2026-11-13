@@ -1,4 +1,4 @@
-//! Health probes (addendum-1 3.4, DEC-285; WP4-2): the `admin.probes` job computes the eight
+//! Health probes (addendum-1 3.4, DEC-285; WP4-2): the `admin.probes` job computes the nine
 //! Overview rows every 60 s on the background lane and stores them (`health_probes`); the
 //! Overview only reads the table, so the page never waits on a probe. A row older than
 //! [`STALE_SECS`] says "not checked recently". The admin's own changes (mail settings and
@@ -17,7 +17,7 @@ use crate::ApiState;
 use crate::error::ApiResult;
 
 /// The rows in Overview order.
-pub const PROBE_IDS: [&str; 8] = [
+pub const PROBE_IDS: [&str; 9] = [
     "database",
     "search",
     "storage",
@@ -25,6 +25,7 @@ pub const PROBE_IDS: [&str; 8] = [
     "mail",
     "data_sources",
     "identity_provider",
+    "reverse_proxy",
     "secrets",
 ];
 
@@ -59,8 +60,30 @@ async fn compute(s: &ApiState, id: &str) -> ApiResult<HealthRowDto> {
         "mail" => mail::health_row(a, &a.store.settings().await.map_err(pe)?),
         "data_sources" => sources_row(s, system()).await?,
         "identity_provider" => oidc::health_row(s).await,
+        "reverse_proxy" => reverse_proxy_row(
+            crate::request_meta::UNTRUSTED_FORWARDER.last(),
+            s.app.clock.now(),
+        ),
         _ => secrets_row(s).await?,
     })
+}
+
+/// Review SEC2-4: requests with `X-Forwarded-For` from a private address that is not in
+/// `server.trusted_proxies` (a reverse proxy that is not listed: every visitor then shares
+/// its address for the sign-in limits) within the last day are a warning.
+fn reverse_proxy_row(
+    seen: Option<(std::net::IpAddr, DateTime<Utc>)>,
+    now: DateTime<Utc>,
+) -> HealthRowDto {
+    match seen.filter(|(_, at)| now - *at < chrono::Duration::hours(24)) {
+        Some((peer, at)) => row(
+            "reverse_proxy",
+            "warning",
+            "untrusted",
+            &[("peer", peer.to_string()), ("at", ts(at))],
+        ),
+        None => row("reverse_proxy", "ok", "fine", &[]),
+    }
 }
 
 fn stored(h: HealthRowDto, at: DateTime<Utc>) -> ProbeRow {
@@ -156,4 +179,33 @@ pub(crate) async fn stored_rows(
             }
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Review SEC2-4: the Overview names a reverse proxy that is missing from
+    /// `server.trusted_proxies` while its requests keep arriving.
+    #[test]
+    fn the_reverse_proxy_row_warns_while_an_unlisted_proxy_is_seen() {
+        let now = Utc::now();
+        let ok = reverse_proxy_row(None, now);
+        assert_eq!(
+            (ok.id.as_str(), ok.status.as_str()),
+            ("reverse_proxy", "ok")
+        );
+        let peer: std::net::IpAddr = "172.18.0.1".parse().unwrap();
+        let w = reverse_proxy_row(Some((peer, now - chrono::Duration::minutes(5))), now);
+        assert_eq!(
+            (w.status.as_str(), w.detail.as_str()),
+            ("warning", "untrusted")
+        );
+        assert_eq!(w.args["peer"], "172.18.0.1");
+        assert!(w.args.contains_key("at"));
+        // a day without such requests: fine again
+        let old = reverse_proxy_row(Some((peer, now - chrono::Duration::hours(25))), now);
+        assert_eq!(old.status, "ok");
+        assert!(PROBE_IDS.contains(&"reverse_proxy"));
+    }
 }

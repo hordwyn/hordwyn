@@ -272,16 +272,14 @@ pub async fn send_test_mail(
             Err(err) => Err(err),
         },
     };
-    // the admin sees the transport's own text now; only its category is stored (UX4-22)
-    let result = match &outcome {
-        Ok(()) => "ok".to_string(),
-        Err(err) => format!("failed: {err}"),
-    };
+    // the admin sees the category, as it is stored (UX4-22, DEC-534): the transport's own
+    // text can name hosts and say what answered on a port, so it goes to the log only
+    if let Err(err) = &outcome {
+        tracing::warn!(error = %err, "the mail test failed");
+    }
+    let result = stored_result(&outcome);
     let at = s.app.clock.now();
-    adm.store
-        .record_mail_test(at, &stored_result(&outcome))
-        .await
-        .map_err(pe)?;
+    adm.store.record_mail_test(at, &result).await.map_err(pe)?;
     super::probes::refresh_probe(s, "mail").await;
     Ok(MailTestDto {
         ok: outcome.is_ok(),
@@ -291,7 +289,7 @@ pub async fn send_test_mail(
 }
 
 /// What is stored of a mail test (and read into `health_probes.args`): `ok` or `failed: <category>`
-/// with one of `not_configured`, `connection`, `auth`, `rejected`, `send_failed`; never the
+/// with one of `not_configured`, `private_target`, `connection`, `auth`, `rejected`, `send_failed`; never the
 /// transport's text, which can name the SMTP host (UX4-22).
 fn stored_result(outcome: &Result<(), String>) -> String {
     let Err(err) = outcome else {
@@ -300,6 +298,9 @@ fn stored_result(outcome: &Result<(), String>) -> String {
     let e = err.to_ascii_lowercase();
     let code = if e.contains("not configured") {
         "not_configured"
+    } else if e.contains("private address") {
+        // `notify::channels::email::PRIVATE_ADDRESS` (SEC-4)
+        "private_target"
     } else if e.contains("authentication") || e.contains("(535)") || e.contains("(534)") {
         "auth"
     } else if e.contains("connection") || e.contains("timed out") || e.contains("dns") {
@@ -396,6 +397,7 @@ mod stored_result_tests {
             ),
             ("mail is not configured", "not_configured"),
             ("something else at host.example.org", "send_failed"),
+            ("the mail server is on a private address", "private_target"),
         ];
         for (text, code) in raw {
             let stored = stored_result(&Err(text.to_string()));
