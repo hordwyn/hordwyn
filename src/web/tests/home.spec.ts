@@ -610,3 +610,31 @@ test("covers stay while an import runs: cards keep their pictures, refetches are
   expect(await kept(picture), "the picture after the menu was used").toBe("1");
   await expectNoA11yViolations(page, "library after a background change");
 });
+
+test("history keeps the counts of its side panel while a refetch is on its way", async ({ page }) => {
+  // race package F6 (diagnosis 4 and 5): the side panel read the refetched rows under a
+  // Suspense and showed its skeleton for as long as every refetch took
+  test.setTimeout(120_000);
+  await signUp(page, `hside${Date.now()}`, "Sidney");
+  const ids = await seed(page);
+  await open(page, "/history");
+  const counts = page.getByTestId("history-side").locator("dl").first();
+  await expect(counts).toBeVisible();
+  await counts.evaluate((el) => ((el as HTMLElement).dataset.same = "1"));
+  let release = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  await page.route("**/_fn/activity_feed*", async (route) => {
+    await held;
+    await route.continue();
+  });
+  const asked = page.waitForRequest((r) => r.url().includes("/_fn/activity_feed"));
+  expect((await page.request.post(`/api/v1/library/${ids["Harbour Lights"]}/tags`, { data: { tag: "rainy" } })).ok()).toBeTruthy();
+  await asked;
+  await frames(page);
+  await expect(page.locator('[data-testid="history-side"] dl[data-same="1"]')).toBeVisible();
+  const answered = page.waitForResponse((r) => r.url().includes("/_fn/activity_feed"));
+  release();
+  await answered;
+  await page.unroute("**/_fn/activity_feed*");
+  await expect(page.getByTestId("history-side").locator("dl").first()).toBeVisible();
+});

@@ -52,7 +52,8 @@ fn count_and_kinds(i18n: &I18n, count: u32, kinds: &[String]) -> String {
 #[component]
 pub fn Lists() -> impl IntoView {
     let data = Resource::new(|| (), |()| api::lists_overview());
-    refetch_on_update(move || data.refetch());
+    // nothing on the overview reads it again by itself: no own refresh to pace (LR-5)
+    let _ = refetch_on_update(move || data.refetch());
     let new = RwSignal::new(false);
     // the palette's "New list" (`?new=1`, WP4-4) opens the sheet once the page is in the
     // browser; read in the effect (a client-side navigation builds the page first)
@@ -200,7 +201,8 @@ fn NewList(open: RwSignal<bool>) -> impl IntoView {
 /// The page's live messages: a move ("Alpha is now number 3 of 3."), an add, a removal.
 #[derive(Clone, Copy)]
 struct Page {
-    data: Resource<Result<ListPageDto, ServerFnError>>,
+    /// Read the page again after an own change (paced with the events, LR-5).
+    refresh: Callback<()>,
     outcome: RwSignal<Option<Result<String, String>>>,
     status: RwSignal<String>,
     /// After a move the button of the moved row gets focus back: `lst-up-<item>` etc.
@@ -214,9 +216,10 @@ pub fn ListPage() -> impl IntoView {
     let params = use_params_map();
     let id = move || params.with(|p| p.get("id").unwrap_or_default());
     let data = Resource::new(id, api::list_page);
-    refetch_on_update(move || data.refetch());
+    let own = refetch_on_update(move || data.refetch());
+    let refresh = own.wrap(Callback::new(move |()| data.refetch()));
     let page = Page {
-        data,
+        refresh,
         outcome: RwSignal::new(None),
         status: RwSignal::new(String::new()),
         focus: RwSignal::new(None),
@@ -235,7 +238,7 @@ pub fn ListPage() -> impl IntoView {
             <p role="status" class="sr-only" data-testid="lst-status">{move || page.status.get()}</p>
             {loaded(data, move |l: ListPageDto| view! { <ListBody l=l/> })}
         </div>
-        <ShareDialog open=page.share meta=page.meta on_saved=Callback::new(move |()| data.refetch())/>
+        <ShareDialog open=page.share meta=page.meta on_saved=refresh/>
     }
 }
 
@@ -365,7 +368,7 @@ fn EditForm(l: ListPageDto, editing: RwSignal<bool>) -> impl IntoView {
                 Ok(()) => {
                     editing.set(false);
                     page.outcome.set(Some(Ok(t("lists-saved"))));
-                    page.data.refetch();
+                    page.refresh.run(());
                 }
                 Err(e) => error.set(Some(share_error(&e))),
             }
@@ -467,7 +470,7 @@ fn move_action(list: String, item: String, title: String, count: usize) -> MoveA
                             std::time::Duration::from_secs(FOCUS_KEEP_SECS),
                         );
                     }
-                    page.data.refetch();
+                    page.refresh.run(());
                 }
                 Err(e) => page.outcome.set(Some(Err(share_error(&e)))),
             }
@@ -510,7 +513,7 @@ fn RowControls(
                     Ok(()) => Ok(i18n.t_args("lists-removed", &[("title", title.into())])),
                     Err(e) => Err(share_error(&e)),
                 }));
-                page.data.refetch();
+                page.refresh.run(());
             }
         }
     });

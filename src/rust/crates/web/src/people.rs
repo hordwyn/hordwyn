@@ -17,13 +17,17 @@ use crate::i18n::{I18n, t, use_i18n};
 use crate::pages::PageTitle;
 use crate::people_dialogs::{MergePair, PersonDialogs, Ui};
 use crate::rest;
-use crate::settings::{Lead, Outcome, kept, loaded};
+use crate::settings::{Lead, Outcome, kept, kept_menu, loaded};
 
 /// Refetch for `entity.updated` events (people, sessions and links change elsewhere), paced
 /// like Home and Library: an import announces every item it writes, and People, a person's
-/// page and the list pages refetched and rendered again for each of them (OT1B-11).
-pub(crate) fn refetch_on_update(refetch: impl Fn() + Send + Sync + 'static) {
-    crate::events::refresh_on_updates(Callback::new(move |()| refetch()));
+/// page and the list pages refetched and rendered again for each of them (OT1B-11). The
+/// answer is for the page's own refreshes (LR-5).
+#[must_use = "the page's own refreshes go through `OwnRefresh::wrap` (LR-5)"]
+pub(crate) fn refetch_on_update(
+    refetch: impl Fn() + Send + Sync + 'static,
+) -> crate::events::OwnRefresh {
+    crate::events::refresh_on_updates(Callback::new(move |()| refetch()))
 }
 
 /// Win rate in whole percent, `None` before the first decided play.
@@ -46,8 +50,8 @@ pub(crate) fn day_words(i18n: &I18n, day: &str) -> String {
 #[component]
 pub fn People() -> impl IntoView {
     let data = Resource::new(|| (), |()| api::people_page());
-    refetch_on_update(move || data.refetch());
-    let ui = Ui::new(Callback::new(move |()| data.refetch()));
+    let own = refetch_on_update(move || data.refetch());
+    let ui = Ui::new(own.wrap(Callback::new(move |()| data.refetch())));
     provide_context(ui);
     let groups = crate::game_groups::GroupUi::new(Callback::new(move |r| ui.report(r)));
     provide_context(groups);
@@ -99,10 +103,10 @@ fn PeopleBody(page: PeoplePageDto) -> impl IntoView {
                 <TabsTrigger value="groups">{groups_label}</TabsTrigger>
             </TabsList>
             <TabsContent value="all">
-                {move || view! { <Cards people=all.get_value() empty=t("companions-empty")/> }}
+                {move || view! { <Cards people=all.get_value() empty=t("companions-empty") panel="all"/> }}
             </TabsContent>
             <TabsContent value="linked">
-                {move || view! { <Cards people=linked.get_value() empty=t("companions-empty-linked")/> }}
+                {move || view! { <Cards people=linked.get_value() empty=t("companions-empty-linked") panel="linked"/> }}
             </TabsContent>
             <TabsContent value="groups">
                 {move || view! { <crate::game_groups::GroupsTab groups=groups.get_value()/> }}
@@ -197,7 +201,13 @@ fn Suggestions(list: Vec<MergeSuggestionDto>) -> impl IntoView {
 }
 
 #[component]
-fn Cards(people: Vec<PersonDto>, #[prop(into)] empty: String) -> impl IntoView {
+fn Cards(
+    people: Vec<PersonDto>,
+    #[prop(into)] empty: String,
+    /// The tab the cards are in: a person on two tabs has a menu on each, each with its own
+    /// kept state (one shared open flag would open both, and a press in one closed the other).
+    panel: &'static str,
+) -> impl IntoView {
     if people.is_empty() {
         return view! { <EmptyState title=empty icon=IconName::Users level=2/> }.into_any();
     }
@@ -205,7 +215,7 @@ fn Cards(people: Vec<PersonDto>, #[prop(into)] empty: String) -> impl IntoView {
         // a third column where the cards have 80 rem or more (a wide screen, DEC-541)
         <div class="@container mt-2">
             <ul class="grid gap-3 md:grid-cols-2 @7xl:grid-cols-3" aria-label=t("companions-title")>
-                {people.into_iter().map(|p| view! { <PersonCard p=p/> }).collect_view()}
+                {people.into_iter().map(|p| view! { <PersonCard p=p panel=panel/> }).collect_view()}
             </ul>
         </div>
     }
@@ -343,7 +353,7 @@ fn log_with_button(p: &PersonDto) -> impl IntoView + use<> {
 }
 
 #[component]
-fn PersonCard(p: PersonDto) -> impl IntoView {
+fn PersonCard(p: PersonDto, panel: &'static str) -> impl IntoView {
     let i18n = use_i18n();
     let ui = expect_context::<Ui>();
     let (last, most) = last_and_most(&i18n, &p);
@@ -367,6 +377,7 @@ fn PersonCard(p: PersonDto) -> impl IntoView {
     });
     let log_with = log_with_button(&p);
     let items = menu_items(ui, &p);
+    let menu = kept_menu(&format!("pp-menu-{panel}-{}", p.id));
     view! {
         <li class="grid gap-3 rounded-xl border border-border bg-card p-4 shadow-elevation-1" data-testid="pp-card">
             <div class="flex items-start gap-3">
@@ -377,7 +388,8 @@ fn PersonCard(p: PersonDto) -> impl IntoView {
                     </h3>
                     <LinkBadge p=p.clone()/>
                 </div>
-                <DropdownMenu label=menu_label id=format!("pp-menu-{}", p.id) items=items/>
+                <DropdownMenu label=menu_label id=format!("pp-menu-{}", p.id) items=items
+                    open=menu.open active=menu.active/>
             </div>
             <Numbers p=p.clone()/>
             {last.map(|l| view! { <p class="text-sm text-muted-foreground">{l}</p> })}
@@ -413,8 +425,8 @@ pub fn PersonPage() -> impl IntoView {
         data.refetch();
         history.refetch();
     };
-    refetch_on_update(refresh);
-    let mut ui = Ui::new(Callback::new(move |()| refresh()));
+    let own = refetch_on_update(refresh);
+    let mut ui = Ui::new(own.wrap(Callback::new(move |()| refresh())));
     ui.leave_on_delete = true;
     provide_context(ui);
     view! {
@@ -447,6 +459,8 @@ fn PersonBody(
     let (last, most) = last_and_most(&i18n, &p);
     let menu_label = i18n.t_args("companions-menu-named", &[("name", p.name.clone().into())]);
     let items = menu_items(ui, &p);
+    // one menu per person: the page keeps its `loaded` when the route shows another person
+    let menu = kept_menu(&format!("pp-page-menu-{}", p.id));
     let invite = (p.link_state == "none").then(|| {
         let target = p.clone();
         view! { <Button variant=ButtonVariant::Outline on:click=move |_| ui.open_invite(&target)>{t("companions-invite")}</Button> }
@@ -460,7 +474,8 @@ fn PersonBody(
                     <PageTitle text=p.name.clone()/>
                     <LinkBadge p=p.clone()/>
                 </div>
-                <DropdownMenu label=menu_label id="pp-page-menu" items=items/>
+                <DropdownMenu label=menu_label id="pp-page-menu" items=items
+                    open=menu.open active=menu.active/>
             </div>
             {p.notes.clone().map(|n| view! { <p class="text-sm">{n}</p> })}
             <Numbers p=p.clone()/>

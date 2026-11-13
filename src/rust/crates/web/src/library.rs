@@ -23,7 +23,7 @@ use crate::library_state::{
     status_tabs,
 };
 use crate::next_step::{NextStepButton, progress_text};
-use crate::pages::{bad_query, error_text, fresh, go, needs_sign_in};
+use crate::pages::{bad_query, derived, error_text, fresh, go, needs_sign_in};
 use crate::widgets::{PosterCard, QuickMenu, TagBadges, TagEditor};
 
 type Res<T> = Resource<Result<T, ServerFnError>>;
@@ -54,6 +54,14 @@ struct Lib {
 impl Lib {
     fn kinds_now(&self) -> Option<KindsDto> {
         self.kinds.get().and_then(Result::ok)
+    }
+
+    /// Kinds and counts for the header rows (kind chips, status tabs). Both are read on every
+    /// call, never one behind the other's `?`: each read registers with the Suspense around
+    /// it on the first pass of the server's render.
+    fn header(&self) -> Option<(KindsDto, LibraryCountsDto)> {
+        let (kinds, counts) = (self.kinds.get(), self.counts.get());
+        Some((kinds?.ok()?, counts?.ok()?))
     }
 
     fn counts_now(&self) -> Option<LibraryCountsDto> {
@@ -135,11 +143,15 @@ pub fn Library() -> impl IntoView {
     let counts = Resource::new(|| (), |()| api::library_counts());
     let tags = Resource::new(|| (), |()| api::tags());
     let rows = Resource::new(move || (state.get(), limit.get()), |(s, n)| load_rows(s, n));
-    let refresh = Callback::new(move |()| {
+    let refetch = Callback::new(move |()| {
         counts.refetch();
         tags.refetch();
         rows.refetch();
     });
+    // paced: an import announces every item it writes (OT-21); the page's own refreshes (a
+    // card, the tag editor, the list picker, the bulk bar) tell the same pace (LR-5)
+    let own = crate::events::refresh_on_updates(crate::offline::refresh_when_online(refetch));
+    let refresh = own.wrap(refetch);
     let editing = RwSignal::new(None::<LibraryRowDto>);
     let list_pick = bulk_state(state);
     let lib = Lib {
@@ -154,8 +166,6 @@ pub fn Library() -> impl IntoView {
         edit_tags: Callback::new(move |r| editing.set(Some(r))),
     };
     remember_group(state, replace);
-    // paced: an import announces every item it writes (OT-21)
-    crate::events::refresh_on_updates(crate::offline::refresh_when_online(refresh));
     slash_focuses_the_filter();
     let known = Signal::derive(move || {
         tags.get()
@@ -171,23 +181,23 @@ pub fn Library() -> impl IntoView {
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div class="flex items-baseline gap-3">
                 <h1 class="text-2xl font-semibold tracking-tight">{title}</h1>
-                <Suspense fallback=|| ()>
+                <Transition fallback=|| ()>
                     {move || counts.get().and_then(Result::ok).map(|c| view! {
                         <span class="text-sm text-muted-foreground">{use_i18n().t_args("library-count", &[("count", c.total.into())])}</span>
                     })}
-                </Suspense>
+                </Transition>
             </div>
             <Button size=ButtonSize::Sm on:click=move |_| palette.set(true)>
                 <Icon name=IconName::Plus/> {i18n.t("library-add")}
             </Button>
         </div>
         <Toolbar lib=lib/>
-        <Suspense fallback=|| view! { <Skeleton class="mb-3 h-8 w-2/3"/> }>
+        <Transition fallback=|| view! { <Skeleton class="mb-3 h-8 w-2/3"/> }>
             <KindChips lib=lib/>
-        </Suspense>
-        <Suspense fallback=|| view! { <Skeleton class="mb-3 h-9 w-full"/> }>
+        </Transition>
+        <Transition fallback=|| view! { <Skeleton class="mb-3 h-9 w-full"/> }>
             <StatusTabs lib=lib/>
-        </Suspense>
+        </Transition>
         <FilterBar lib=lib/>
         <Results lib=lib shown=shown limit=limit/>
         <TagEditor target=editing known=known on_change=refresh/>
@@ -346,12 +356,13 @@ fn Toolbar(lib: Lib) -> impl IntoView {
 /// Row 2: the kind chips of the group with their counts ("All kinds" first).
 #[component]
 fn KindChips(lib: Lib) -> impl IntoView {
-    let chips = Memo::new(move |_| {
-        let (k, c) = (lib.kinds_now()?, lib.counts_now()?);
+    // `derived`, not a memo: on the server no memo reads a resource (LR-1)
+    let chips = derived(move || {
+        let (k, c) = lib.header()?;
         Some(lib.state.with(|s| kind_chips(&k, &c, s)))
     });
-    let all_count = Memo::new(move |_| {
-        let (k, c) = (lib.kinds_now()?, lib.counts_now()?);
+    let all_count = derived(move || {
+        let (k, c) = lib.header()?;
         let s = lib
             .state
             .with(LibraryState::without_kinds)
@@ -434,8 +445,8 @@ fn StatusTabs(lib: Lib) -> impl IntoView {
         |s, v| s.with_status(Some(v)),
         lib,
     );
-    let tabs = Memo::new(move |_| {
-        let (k, c) = (lib.kinds_now()?, lib.counts_now()?);
+    let tabs = derived(move || {
+        let (k, c) = lib.header()?;
         Some(lib.state.with(|s| status_tabs(&k, &c, s)))
     });
     move || {
@@ -492,9 +503,9 @@ fn FilterBar(lib: Lib) -> impl IntoView {
         <ActiveFilters lib=lib/>
         <div id="lib-filters" hidden=move || !open.get() class="mb-4 grid gap-4 rounded-xl border border-border bg-card p-4">
             <TagFilter lib=lib/>
-            <Suspense fallback=|| ()>
+            <Transition fallback=|| ()>
                 <FacetFilters lib=lib/>
-            </Suspense>
+            </Transition>
         </div>
     }
 }
@@ -609,7 +620,7 @@ fn TagFilter(lib: Lib) -> impl IntoView {
     view! {
         <fieldset class="grid gap-2">
             <legend class="mb-2 text-sm font-semibold">{i18n.t("library-tags")}</legend>
-            <Suspense fallback=|| view! { <Skeleton class="h-8 w-1/2"/> }>
+            <Transition fallback=|| view! { <Skeleton class="h-8 w-1/2"/> }>
                 {move || lib.tags.get().and_then(Result::ok).map(|list| {
                     if list.is_empty() {
                         return view! { <p class="text-sm text-muted-foreground">{t("library-tags-none")}</p> }.into_any();
@@ -637,7 +648,7 @@ fn TagFilter(lib: Lib) -> impl IntoView {
                         </ul>
                     }.into_any()
                 })}
-            </Suspense>
+            </Transition>
         </fieldset>
     }
 }

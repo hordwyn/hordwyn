@@ -1,5 +1,18 @@
 import { test, expect, type Page } from "./fixtures";
-import { addPerson, expectNoA11yViolations, expectReflow, hydrated, signUp, importDone } from "./helpers";
+import {
+  addPerson,
+  changeMine,
+  expectNoA11yViolations,
+  expectReflow,
+  gateEntityEvents,
+  heldEvents,
+  holdEvents,
+  hydrated,
+  importDone,
+  requestStarts,
+  signUp,
+  twoFrames,
+} from "./helpers";
 
 // People (WP3-6, design.md 6.7, 5.11; mockup companions.html): person cards with initials,
 // link state and the stats (together, plays, win rate with a tie, last time, most played),
@@ -340,4 +353,181 @@ test("card actions grow to 40 px on a phone, all of them", async ({ page }) => {
     expect((await action.boundingBox())!.height).toBe(40);
   }
   await expectReflow(page, "people card 390");
+});
+
+// Race package (docs/fable/round2/race-diagnosis.md 3): a refetch renders the cards afresh.
+// An open menu must survive that (F4), an equal answer must not render anything again (F3),
+// and the event that announces an own action must not refetch a second time at once (F5).
+
+test("a change from elsewhere keeps the open menu of a card, of a game group and of the person page", async ({ page }) => {
+  test.setTimeout(120_000);
+  await signUp(page, `pmenu${Date.now()}`, "Menu Tester");
+  const zed = await person(page, "Zed");
+  const yan = await person(page, "Yan");
+  const created = await page.request.post("/api/v1/game-groups", { data: { name: "Harbour crew", members: [zed, yan] } });
+  expect(created.ok(), `group: ${created.status()}`).toBeTruthy();
+
+  // a person card: someone is added elsewhere, the answer differs, the cards are rendered again
+  await page.goto("/people");
+  await hydrated(page);
+  await page.getByRole("button", { name: "More actions for Zed" }).click();
+  let menu = page.getByRole("menu", { name: "More actions for Zed" });
+  await expect(menu).toBeVisible();
+  await person(page, "Elsewhere");
+  await expect(card(page, "Elsewhere")).toBeVisible({ timeout: 20_000 });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("menuitem", { name: "Edit" }).click({ timeout: 5_000 });
+  const edit = page.getByRole("dialog", { name: "Edit Zed" });
+  await expect(edit).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(edit).toHaveCount(0);
+
+  // a game group's card
+  await page.getByRole("tab", { name: "Game groups 1" }).click();
+  await page.getByRole("button", { name: "Actions for Harbour crew" }).click();
+  menu = page.getByRole("menu", { name: "Actions for Harbour crew" });
+  await expect(menu).toBeVisible();
+  const all = page.getByRole("tab", { name: /^All \d+$/ });
+  const before = (await all.textContent()) ?? "";
+  await person(page, "Elsewhere Two");
+  await expect(all).not.toHaveText(before, { timeout: 20_000 });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("menuitem", { name: "Edit" }).click({ timeout: 5_000 });
+  await expect(page.getByRole("dialog", { name: "Edit Harbour crew" })).toBeVisible();
+
+  // the person page: a note written elsewhere shows under the open menu
+  await page.goto(`/people/${zed}`);
+  await hydrated(page);
+  await page.getByRole("button", { name: "More actions for Zed" }).click();
+  menu = page.getByRole("menu", { name: "More actions for Zed" });
+  await expect(menu).toBeVisible();
+  const noted = await page.request.patch(`/api/v1/companions/${zed}`, { data: { name: "Zed", notes: "Thursday group" } });
+  expect(noted.ok(), `note: ${noted.status()}`).toBeTruthy();
+  await expect(page.getByText("Thursday group")).toBeVisible({ timeout: 20_000 });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("menuitem", { name: "Edit" }).click({ timeout: 5_000 });
+  await expect(page.getByRole("dialog", { name: "Edit Zed" })).toBeVisible();
+});
+
+test("a menu kept open across a refetch leaves the focus where the person is, and keeps its item", async ({ page }) => {
+  // RACE-2: the menu kept open by a refetch took the focus on every differing answer, also
+  // from a field the person was typing in, and put a keyboard user back on its first item
+  test.setTimeout(120_000);
+  await signUp(page, `pfocus${Date.now()}`, "Focus Tester");
+  await person(page, "Zed");
+  await page.goto("/people");
+  await hydrated(page);
+  const trigger = page.getByRole("button", { name: "More actions for Zed" });
+  await trigger.focus();
+  await page.keyboard.press("ArrowDown");
+  const menu = page.getByRole("menu", { name: "More actions for Zed" });
+  await expect(menu.getByRole("menuitem").first()).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  const label = (await menu.getByRole("menuitem").nth(1).textContent()) ?? "";
+  await expect(menu.getByRole("menuitem", { name: label })).toBeFocused();
+  // an answer that differs: the card is rendered again, its menu with the same item focused
+  await person(page, "Elsewhere");
+  await expect(card(page, "Elsewhere")).toBeVisible({ timeout: 20_000 });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: label })).toBeFocused();
+
+  // the search opened over the open menu: typing goes on while an answer arrives
+  await page.keyboard.press("Control+k");
+  const field = page.getByRole("dialog", { name: "Search" }).getByRole("combobox");
+  await expect(field).toBeFocused();
+  await field.pressSequentially("harb");
+  await person(page, "Elsewhere Two");
+  await expect(card(page, "Elsewhere Two")).toBeAttached({ timeout: 20_000 });
+  await expect(field).toBeFocused();
+  await field.pressSequentially("our");
+  await expect(field).toHaveValue("harbour");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Search" })).toHaveCount(0);
+
+  // a click outside closes a menu, as menus do
+  if ((await menu.count()) === 0) await trigger.click();
+  await expect(menu).toBeVisible();
+  await page.getByRole("heading", { level: 1 }).click();
+  await expect(menu).toHaveCount(0);
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  // a click on the trigger opens it, Escape closes it with the focus on the trigger
+  await trigger.click();
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
+
+test("an open menu does not come back with its card, nor with another person's page", async ({ page }) => {
+  // RACE-6: the open flag of a card that left the answer stayed set, and the person page used
+  // one flag for every person
+  test.setTimeout(120_000);
+  await signUp(page, `pgone${Date.now()}`, "Gone Tester");
+  const zed = await person(page, "Zed");
+  const yan = await person(page, "Yan");
+  await page.goto("/people");
+  await hydrated(page);
+  await page.getByRole("button", { name: "More actions for Zed" }).click();
+  await expect(page.getByRole("menu", { name: "More actions for Zed" })).toBeVisible();
+  // Zed is merged into Yan elsewhere, then the merge is undone: Zed is back with its id
+  const merged = await page.request.post(`/api/v1/companions/${yan}/merge`, { data: { remove: zed } });
+  expect(merged.ok(), `merge: ${merged.status()}`).toBeTruthy();
+  await expect(card(page, "Zed")).toHaveCount(0, { timeout: 20_000 });
+  const undone = await page.request.post(`/api/v1/companions/${zed}/unmerge`);
+  expect(undone.ok(), `unmerge: ${undone.status()}`).toBeTruthy();
+  await expect(card(page, "Zed")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("menu", { name: "More actions for Zed" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "More actions for Zed" })).toHaveAttribute("aria-expanded", "false");
+
+  // the person page: the open menu of Zed's page is not open on Yan's page (history
+  // navigation inside the app, as back and forward do)
+  await page.goto(`/people/${zed}`);
+  await hydrated(page);
+  await page.getByRole("button", { name: "More actions for Zed" }).click();
+  await expect(page.getByRole("menu", { name: "More actions for Zed" })).toBeVisible();
+  await page.evaluate((to) => {
+    history.pushState(null, "", to);
+    dispatchEvent(new PopStateEvent("popstate", { state: null }));
+  }, `/people/${yan}`);
+  await expect(page.getByRole("heading", { level: 1, name: "Yan" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("menu", { name: "More actions for Yan" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "More actions for Yan" })).toHaveAttribute("aria-expanded", "false");
+});
+
+test("a refetch with the same answer leaves the cards as they are", async ({ page }) => {
+  test.setTimeout(120_000);
+  await signUp(page, `psame${Date.now()}`, "Same Tester");
+  await person(page, "Zed");
+  await page.goto("/people");
+  await hydrated(page);
+  const zed = card(page, "Zed");
+  await zed.evaluate((el) => ((el as HTMLElement).dataset.same = "1"));
+  const history = zed.getByRole("link", { name: "History with Zed" });
+  await history.focus();
+  // a change of the user's own data that People does not show
+  const refetched = page.waitForResponse((r) => r.url().includes("/_fn/people_page"), { timeout: 60_000 });
+  await changeMine(page);
+  await (await refetched).finished();
+  await twoFrames(page);
+  await expect(page.locator('[data-testid="pp-card"][data-same="1"]')).toHaveCount(1);
+  await expect(history).toBeFocused();
+});
+
+test("the event that announces an own action is answered at the end of the quiet time, not at once", async ({ page }) => {
+  test.setTimeout(120_000);
+  await signUp(page, `ppace${Date.now()}`, "Pace Tester");
+  await gateEntityEvents(page);
+  await page.goto("/people");
+  await hydrated(page);
+  const starts = requestStarts(page, "/_fn/people_page");
+  // the page's own refetch first, then the event of the same action
+  await holdEvents(page, true);
+  await addPerson(page, "Zed");
+  await expect.poll(() => starts.length, { timeout: 20_000 }).toBe(1);
+  await expect.poll(() => heldEvents(page), { timeout: 20_000 }).toBeGreaterThan(0);
+  await holdEvents(page, false);
+  // the event is answered: one more read, nothing lost
+  await expect.poll(() => starts.length, { timeout: 20_000 }).toBe(2);
+  // one read per quiet time (2 s, `Pace::QUIET_MS`), counted from the own refetch
+  expect(starts[1] - starts[0]).toBeGreaterThanOrEqual(1_900);
 });

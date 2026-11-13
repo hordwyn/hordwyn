@@ -19,7 +19,7 @@ use crate::admin_api;
 use crate::admin_state::{Origin, days_value, find_setting, origin, setting_label_key};
 use crate::i18n::{t, use_i18n};
 use crate::reauth::{gated, gated_settings, use_reauth};
-use crate::settings::{Outcome, kept, loaded};
+use crate::settings::{Outcome, kept, loaded, render_again};
 
 pub(super) type Data = Resource<Result<SecurityDto, ServerFnError>>;
 
@@ -118,6 +118,7 @@ fn Sessions(settings: Vec<SettingDto>, warnings: Vec<String>, data: Data) -> imp
     let reauth = use_reauth();
     let busy = RwSignal::new(false);
     let message = kept("security-sessions", || None::<Result<String, String>>);
+    let again = render_again();
     let i18n = use_i18n();
     let days = find_setting(&settings, "auth.session_days").cloned();
     let cookies = find_setting(&settings, "auth.secure_cookies").cloned();
@@ -157,6 +158,10 @@ fn Sessions(settings: Vec<SettingDto>, warnings: Vec<String>, data: Data) -> imp
             busy,
             values,
             Callback::new(move |r: Result<_, String>| {
+                // the field shows what is stored, also when it equals the last answer (RACE-5)
+                if r.is_ok() {
+                    again();
+                }
                 message.set(Some(r.map(|_| saved.clone())));
                 data.refetch();
             }),

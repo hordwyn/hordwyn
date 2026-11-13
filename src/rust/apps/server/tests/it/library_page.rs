@@ -131,6 +131,57 @@ fn count(haystack: &str, needle: &str) -> usize {
     haystack.matches(needle).count()
 }
 
+/// Race package F1 (race diagnosis 2.2, T1b): a detector, not a proof. The header rows read
+/// the kinds and the counts; a memo between a resource and the view could miss the resource's
+/// answer when it arrived on another worker thread, and the server then sent the page without
+/// the status tabs (or the chips) while the browser rendered them: a hydration panic. Every
+/// one of many pages rendered at the same time must carry all three header rows.
+///
+/// Seen red (review RACE-1, 2026-11-13): with F1 reverted (the three header memos `Memo::new`
+/// again) and the host under `stress -c 4`, 6 of 97 runs failed ("the kind chips is missing"
+/// 4 times, "the status tabs is missing" twice, batches 0 to 18). The fixed code under the same
+/// load: LR-1 in `docs/fable/round2/race-decisions.md`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn every_page_of_many_at_once_has_its_header_rows() {
+    if !services() {
+        return;
+    }
+    let srv = server().await;
+    let app = router(&srv);
+    let cookie = sign_up(&app, "stella").await;
+    for row in [
+        ("movie", "Harbour Lights", "planned", Some("cosy")),
+        ("show", "Downstream", "in_progress", None),
+    ] {
+        seed(&srv, &app, &cookie, row).await;
+    }
+    let mut pages = 0;
+    for batch in 0..19 {
+        let calls: Vec<_> = (0..16)
+            .map(|_| {
+                let (app, cookie) = (app.clone(), cookie.clone());
+                tokio::spawn(async move {
+                    call(&app, "GET", "/library?view=list", Some(&cookie), None).await
+                })
+            })
+            .collect();
+        for c in calls {
+            let (status, html) = c.await.expect("the page render does not panic");
+            assert_eq!(status, 200);
+            for (part, what) in [
+                ("2 items", "the count next to the title"),
+                ("aria-label=\"Kinds\"", "the kind chips"),
+                ("id=\"lib-status-all\"", "the status tabs"),
+                ("Planned 1", "the planned tab with its count"),
+            ] {
+                assert!(html.contains(part), "batch {batch}: {what} is missing");
+            }
+            pages += 1;
+        }
+    }
+    assert_eq!(pages, 304);
+}
+
 // multi-threaded like production (thread-local page state aborts the stream there)
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_library_renders_groups_chips_and_counts() {

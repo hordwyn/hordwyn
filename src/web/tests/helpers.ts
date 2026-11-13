@@ -270,3 +270,70 @@ export async function token(page: Page, name: string): Promise<string> {
     return colour;
   }, name);
 }
+
+/**
+ * Let a test hold back the `entity.updated` events of the page's stream (call before `goto`):
+ * `holdEvents(page, true)` keeps them, `holdEvents(page, false)` delivers the kept ones in
+ * order and lets the next ones through. A test decides with it whether the answer of an own
+ * action or the event that announces the same action reaches the page first.
+ */
+export async function gateEntityEvents(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __holdEvents: boolean; __heldEvents: (() => void)[] };
+    w.__holdEvents = false;
+    w.__heldEvents = [];
+    const Source = window.EventSource;
+    window.EventSource = class extends Source {
+      addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) {
+        if (type !== "entity.updated" || typeof listener !== "function") {
+          super.addEventListener(type, listener, options);
+          return;
+        }
+        super.addEventListener(
+          type,
+          (e: Event) => {
+            if (w.__holdEvents) w.__heldEvents.push(() => listener.call(this, e));
+            else listener.call(this, e);
+          },
+          options,
+        );
+      }
+    } as typeof EventSource;
+  });
+}
+
+/** See `gateEntityEvents`. Answers how many events had been kept. */
+export function holdEvents(page: Page, hold: boolean): Promise<number> {
+  return page.evaluate((hold) => {
+    const w = window as unknown as { __holdEvents: boolean; __heldEvents: (() => void)[] };
+    w.__holdEvents = hold;
+    const kept = hold ? [] : w.__heldEvents.splice(0);
+    kept.forEach((deliver) => deliver());
+    return hold ? w.__heldEvents.length : kept.length;
+  }, hold);
+}
+
+/** Events kept by `holdEvents(page, true)` so far. */
+export function heldEvents(page: Page): Promise<number> {
+  return page.evaluate(() => (window as unknown as { __heldEvents?: unknown[] }).__heldEvents?.length ?? 0);
+}
+
+/** Two animation frames: an answer is rendered a few microtasks after its response. */
+export function twoFrames(page: Page) {
+  return page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+}
+
+/**
+ * The start times (browser clock, ms) of the page's requests whose URL contains `part`, in
+ * the order they were sent; filled as the requests finish (call before the first of them).
+ */
+export function requestStarts(page: Page, part: string): number[] {
+  const starts: number[] = [];
+  page.on("requestfinished", (r) => {
+    if (r.url().includes(part)) {
+      starts.push(r.timing().startTime);
+      starts.sort((a, b) => a - b);
+    }
+  });
+  return starts;
+}

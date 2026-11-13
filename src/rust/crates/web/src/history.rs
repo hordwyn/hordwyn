@@ -428,15 +428,17 @@ pub fn History() -> impl IntoView {
     let more = RwSignal::new(More::default());
     // an event or an undo fetches again the rows on screen, "Show more" pages included, in one
     // answer: the pages stay and the stream keeps its rendering (DEC-490; it reset the pages)
-    let refresh = Callback::new(move |()| {
+    let refetch = Callback::new(move |()| {
         if let Some((href, Ok(page))) = first.get_untracked() {
             let n = more.with_untracked(|m| shown_rows(m, &href, &page).0.len());
             want.set_value((href, n));
         }
         first.refetch();
     });
-    // paced: an import announces every item it writes (OT-21)
-    crate::events::refresh_on_updates(crate::offline::refresh_when_online(refresh));
+    // paced: an import announces every item it writes (OT-21); the own refreshes (an undo, a
+    // change on a row) tell the same pace (LR-5)
+    let own = crate::events::refresh_on_updates(crate::offline::refresh_when_online(refetch));
+    let refresh = own.wrap(refetch);
     let h = Hist {
         state,
         go: go_cb,
@@ -905,7 +907,7 @@ fn Side(h: Hist) -> impl IntoView {
     view! {
         <aside aria-labelledby="hist-side-title" class="flex flex-col gap-3 self-start rounded-xl border border-border p-4" data-testid="history-side">
             <h2 id="hist-side-title" class="text-sm font-semibold">{i18n.t("history-side-title")}</h2>
-            <Suspense fallback=|| view! { <Skeleton class="h-24 w-full"/> }>
+            <Transition fallback=|| view! { <Skeleton class="h-24 w-full"/> }>
                 {move || h.first.get().and_then(|(href, r)| r.ok().map(|f| (href, f))).map(|(href, first)| {
                     let (rows, _) = h.shown(&href, &first);
                     let i = use_i18n();
@@ -932,7 +934,7 @@ fn Side(h: Hist) -> impl IntoView {
                         </dl>
                     }
                 })}
-            </Suspense>
+            </Transition>
             <crate::stats_extras::SideCompare/>
             <a href="/stats" class="text-sm font-medium text-primary underline underline-offset-2">{i18n.t("home-all-stats")}</a>
         </aside>
