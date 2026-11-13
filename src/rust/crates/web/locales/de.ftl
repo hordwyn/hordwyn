@@ -34,9 +34,9 @@ auth-error-signup_closed = Registrierung ist auf dieser Instanz nicht offen.
 auth-error-invalid_invite = Diese Einladung ist nicht mehr gültig.
 error-generic = Etwas ist schiefgelaufen. Bitte versuche es erneut.
 # eine Seite, deren Start fehlschlug (Hydration, Race-Paket RACE-4, RACE-13)
-app-start-failed = Diese Seite ist nicht richtig gestartet. Lade sie neu; wenn das nicht hilft, sag der Person Bescheid, die diese Instanz betreibt.
-app-start-reload = Neu laden
-app-start-reloaded = Diese Seite ist nicht richtig gestartet und wurde neu geladen.
+boot-failed = Diese Seite ist nicht richtig gestartet. Lade sie neu; wenn das nicht hilft, sag der Person Bescheid, die diese Instanz betreibt.
+boot-reload = Neu laden
+boot-reloaded = Diese Seite ist nicht richtig gestartet und wurde neu geladen.
 
 library-title = Bibliothek
 library-empty = Deine Bibliothek ist leer

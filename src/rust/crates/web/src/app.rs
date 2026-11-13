@@ -168,9 +168,9 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
             // the words the browser shows without the app when a page fails to start
             // (`crate::hydration`, RACE-4, RACE-13): the app is not there to translate them
             <body class="min-h-screen bg-background text-foreground antialiased"
-                data-start-failed=crate::i18n::t("app-start-failed")
-                data-start-reload=crate::i18n::t("app-start-reload")
-                data-start-reloaded=crate::i18n::t("app-start-reloaded")>
+                data-start-failed=crate::i18n::t("boot-failed")
+                data-start-reload=crate::i18n::t("boot-reload")
+                data-start-reloaded=crate::i18n::t("boot-reloaded")>
                 <App/>
             </body>
         </html>

@@ -35,9 +35,9 @@ auth-error-invalid_invite = This invite is not valid any more.
 error-generic = Something went wrong. Please try again.
 # a page whose start failed (hydration, race package RACE-4, RACE-13): written by the server
 # into the page, shown by the browser without the app
-app-start-failed = This page did not start properly. Reload it; if that does not help, tell the person who runs this instance.
-app-start-reload = Reload
-app-start-reloaded = This page did not start properly and was loaded again.
+boot-failed = This page did not start properly. Reload it; if that does not help, tell the person who runs this instance.
+boot-reload = Reload
+boot-reloaded = This page did not start properly and was loaded again.
 
 library-title = Library
 library-empty = Your library is empty
