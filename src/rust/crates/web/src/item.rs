@@ -254,6 +254,8 @@ fn remember_recent(page: &ItemPageDto, kind: Option<&KindDto>) {
             None => crate::i18n::title_text(&page.item.title),
         },
         plays: kind.is_some_and(|k| k.progress_model == "sessions"),
+        kind: page.item.kind.clone(),
+        cover: crate::palette::thumb(&page.item),
     };
     Effect::new(move |_| crate::recent::remember(&username, item.clone()));
 }

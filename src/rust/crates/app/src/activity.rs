@@ -46,7 +46,7 @@ pub struct ActivityQuery {
     pub types: Vec<ActivityType>,
     /// Only sessions shared with the actor.
     pub shared_only: bool,
-    /// Only this calendar year (UTC).
+    /// Only this calendar year, in the actor's time zone (UTC without one).
     pub year: Option<i32>,
 }
 
@@ -108,7 +108,7 @@ pub struct ActivityRow {
     pub undoable: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ActivityPage {
     pub rows: Vec<ActivityRow>,
     /// `before` of the next page; `None` at the end.
@@ -210,13 +210,31 @@ const MAX_WINDOW: u32 = 2_000;
 /// Rows read near a window end (pairs are logged together, so a handful at most).
 const EDGE_LIMIT: u32 = 64;
 
-fn year_bounds(year: i32) -> Option<(Timestamp, Timestamp)> {
+/// The first instant of `year` and of the next one on the clocks of `zone` (P2 of v1-polish:
+/// a play late on New Year's Eve belongs to the year the person lived it in). `None` for a
+/// year the calendar cannot hold: the caller then lists nothing, it does not drop the filter.
+fn year_bounds(year: i32, zone: chrono_tz::Tz) -> Option<(Timestamp, Timestamp)> {
+    let first = |y: i32| first_instant(zone, chrono::NaiveDate::from_ymd_opt(y, 1, 1)?);
+    Some((first(year)?, first(year.checked_add(1)?)?))
+}
+
+/// The first instant of `day` on the clocks of `zone`: its midnight, the earlier one when the
+/// zone has that midnight twice, and when the clocks skip it the first time after it that
+/// they do show (01:00 where daylight time starts at midnight; the next midnight where a
+/// whole day is left out).
+fn first_instant(zone: chrono_tz::Tz, day: chrono::NaiveDate) -> Option<Timestamp> {
     use chrono::TimeZone;
-    let start = chrono::Utc.with_ymd_and_hms(year, 1, 1, 0, 0, 0).single()?;
-    let end = chrono::Utc
-        .with_ymd_and_hms(year + 1, 1, 1, 0, 0, 0)
-        .single()?;
-    Some((start, end))
+    /// Clock changes are whole quarters of an hour in today's zones.
+    const STEP_MINUTES: i64 = 15;
+    /// No zone of the tz database skips more than a day.
+    const STEPS: i64 = 25 * 60 / STEP_MINUTES;
+    let midnight = day.and_hms_opt(0, 0, 0)?;
+    (0..=STEPS).find_map(|n| {
+        let local = midnight.checked_add_signed(chrono::Duration::minutes(n * STEP_MINUTES))?;
+        zone.from_local_datetime(&local)
+            .earliest()
+            .map(|t| t.with_timezone(&chrono::Utc))
+    })
 }
 
 impl App {
@@ -238,19 +256,21 @@ impl App {
             _ => self.selected_kinds(q.group, &q.kind.iter().cloned().collect::<Vec<_>>()),
         };
         let Some(kinds) = kinds else {
-            return Ok(ActivityPage {
-                rows: vec![],
-                next: None,
-            });
+            return Ok(ActivityPage::default());
         };
-        let bounds = q.year.and_then(year_bounds);
+        let me = self.user(actor.user_id).await?;
+        let zone = crate::time_zone::zone_of(&me);
+        let bounds = q.year.map(|y| year_bounds(y, zone));
+        if bounds == Some(None) {
+            return Ok(ActivityPage::default());
+        }
+        let bounds = bounds.flatten();
         let end = bounds.map(|(_, e)| (e, uuid::Uuid::nil()));
         let mut before = match (q.before, end) {
             (Some(b), Some(e)) => Some(b.min(e)),
             (b, e) => b.or(e),
         };
         let since = bounds.map(|(s, _)| s);
-        let me = self.user(actor.user_id).await?;
         let people = match q.person {
             Some(p) => Some(self.person_ids(actor, p).await?),
             None => None,
@@ -737,4 +757,50 @@ fn keep(
         && (q.types.is_empty() || q.types.contains(&r.row_type))
         && (!q.shared_only || r.shared)
         && people.is_none_or(|p| r.participants.iter().any(|x| p.contains(&x.companion_id)))
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+
+    use super::*;
+
+    fn day(y: i32, m: u32, d: u32) -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    /// Review POL-9: a day starts at the first instant the zone's clocks show of it.
+    #[test]
+    fn a_day_starts_at_its_first_instant_on_the_zones_clocks() {
+        let utc = |y, mo, d, h, mi| chrono::Utc.with_ymd_and_hms(y, mo, d, h, mi, 0).unwrap();
+        // an ordinary midnight
+        assert_eq!(
+            first_instant(chrono_tz::Europe::Berlin, day(2026, 1, 1)),
+            Some(utc(2025, 12, 31, 23, 0))
+        );
+        // midnight twice (Havana set its clocks from 01:00 back to 00:00 on 2018-11-04): the
+        // first of the two
+        assert_eq!(
+            first_instant(chrono_tz::America::Havana, day(2018, 11, 4)),
+            Some(utc(2018, 11, 4, 4, 0))
+        );
+        // midnight skipped (Sao Paulo went to daylight time at 00:00 on 2018-11-04): the day
+        // starts at 01:00, not a day later
+        assert_eq!(
+            first_instant(chrono_tz::America::Sao_Paulo, day(2018, 11, 4)),
+            Some(utc(2018, 11, 4, 3, 0))
+        );
+        // a whole day skipped (Apia crossed the date line, no 2011-12-30): the next day
+        assert_eq!(
+            first_instant(chrono_tz::Pacific::Apia, day(2011, 12, 30)),
+            Some(utc(2011, 12, 30, 10, 0))
+        );
+        // a year has bounds in every zone, in order
+        let (start, end) = year_bounds(2026, chrono_tz::Australia::Sydney).unwrap();
+        assert_eq!(
+            (start, end),
+            (utc(2025, 12, 31, 13, 0), utc(2026, 12, 31, 13, 0))
+        );
+        assert_eq!(year_bounds(i32::MAX, chrono_tz::UTC), None);
+    }
 }

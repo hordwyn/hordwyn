@@ -69,10 +69,14 @@ fn srcset(img: &ImageDto, mime: &str) -> String {
 /// while the picture loads and when it fails, which read as flashing text when covers were
 /// loaded again (OT-21). The text stays the picture's name for assistive technology.
 ///
+/// A picture that does not load (the provider's host is down or blocked, DEC-640) is taken
+/// away and the box shows what an item without a cover shows: the title, under the same name
+/// (v1-polish P5). A failure from before the page was hydrated is found when the cover is
+/// mounted.
+///
 /// Rule for callers (OT1B-13): show the title as text next to or under every cover. A
-/// picture that fails to load or is blocked leaves an empty box, so a view of covers alone
-/// (a poster wall, a mosaic) would show a sighted person nothing; such a view has to bring
-/// the title back itself (a caption, or the text colour restored when the picture fails).
+/// picture that is still loading shows an empty box, so a view of covers alone (a poster
+/// wall, a mosaic) has to bring the title itself (a caption).
 #[component]
 pub fn Cover(
     #[prop(into)] title: String,
@@ -110,12 +114,29 @@ pub fn Cover(
             let avif = srcset(&img, "image/avif");
             let webp = srcset(&img, "image/webp");
             let sizes = sizes.unwrap_or_else(|| "(min-width: 768px) 200px, 45vw".into());
+            let failed = RwSignal::new(false);
+            let node = NodeRef::<leptos::html::Img>::new();
+            // the picture may have failed before this code ran (a server-rendered page)
+            Effect::new(move |_| {
+                if node.get().is_some_and(|i| i.complete() && i.natural_width() == 0) {
+                    failed.set(true);
+                }
+            });
+            let style = move || if failed.get() { String::new() } else { style.clone() };
+            let name = alt.clone();
             view! {
-                <div class=base style=style>
-                    <picture>
+                <div class=base style=style role=move || failed.get().then_some("img")
+                    aria-label=move || failed.get().then(|| name.clone())>
+                    {move || failed.get().then(|| view! {
+                        <span class="absolute inset-0 flex items-center justify-center p-2 text-center text-xs text-muted-foreground">{title.clone()}</span>
+                    })}
+                    <picture class:hidden=move || failed.get()>
                         {(!avif.is_empty()).then(|| view! { <source type="image/avif" srcset=avif.clone() sizes=sizes.clone()/> })}
                         {(!webp.is_empty()).then(|| view! { <source type="image/webp" srcset=webp.clone() sizes=sizes.clone()/> })}
                         <img
+                            node_ref=node
+                            on:error=move |_| failed.set(true)
+                            on:load=move |_| failed.set(false)
                             src=img.url.clone()
                             alt=alt
                             loading="lazy"

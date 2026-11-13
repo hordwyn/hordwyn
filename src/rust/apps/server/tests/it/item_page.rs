@@ -240,6 +240,67 @@ async fn a_show_has_its_next_episode_seasons_episodes_tags_and_note() {
     assert!(html.contains("data-testid=\"attribution\""));
 }
 
+/// v1-polish P3: the episodes of a podcast are listened to; the tab said "Watched" and
+/// "Mark S1 E2 watched" (DEC-564).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_episode_rows_of_a_podcast_say_listened() {
+    if !services() {
+        return;
+    }
+    let srv = server().await;
+    let app = router(&srv);
+    let cookie = sign_up(&app, "pod").await;
+    let podcast = seed(
+        &srv,
+        &app,
+        &cookie,
+        (
+            "podcast",
+            "Signal Fires",
+            "planned",
+            serde_json::json!({"episode_count": 3}),
+        ),
+    )
+    .await;
+    log(
+        &app,
+        &cookie,
+        &podcast,
+        serde_json::json!({"type": "episode", "season": 1, "episode": 1}),
+    )
+    .await;
+    let (status, html) = call(
+        &app,
+        "GET",
+        &format!("/items/{podcast}"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let tab = part(&html, "episode-row");
+    assert_eq!(count(&html, "data-testid=\"episode-row\""), 3, "rows");
+    assert!(tab.contains(">Listened<"), "the state of the first row");
+    assert!(
+        tab.contains("aria-label=\"Listen to S1 E1 again\""),
+        "a row that is done"
+    );
+    assert!(
+        tab.contains("aria-label=\"Mark S1 E2 listened\""),
+        "an open row"
+    );
+    assert!(html.contains(">Mark season listened<"), "bulk action");
+    assert!(html.contains(">Mark podcast listened<"), "bulk action");
+    for old in [
+        ">Watched<",
+        "Mark S1 E2 watched",
+        "Mark season watched",
+        "Mark show watched",
+    ] {
+        assert!(!html.contains(old), "{old}");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_action_bar_follows_the_progress_model() {
     if !services() {

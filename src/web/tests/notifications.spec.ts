@@ -70,11 +70,33 @@ test("channels, rules with the defaults offer, the log and the inbox", async ({ 
     await expect(cell(page, "Lent game due back", "Automation")).toHaveAttribute("aria-checked", "true");
     await cell(page, "Link request", "Automation").click();
     await expect(cell(page, "Link request", "Automation")).toHaveAttribute("aria-checked", "true");
+    // v1-polish (sec0 "left open"): the matrix is built anew from the answer; the switch
+    // that was pressed has the focus again, so a keyboard goes on from there
+    await expect(cell(page, "Link request", "Automation")).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(cell(page, "Link request", "Automation")).toHaveAttribute("aria-checked", "false");
+    await expect(cell(page, "Link request", "Automation")).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(cell(page, "Link request", "Automation")).toHaveAttribute("aria-checked", "true");
+    // review POL-4: where a click does not focus a button (Safari, Firefox on macOS) the
+    // switch is pressed without the focus on it; then none is put there afterwards (the
+    // page would scroll back to it). A click that is only dispatched focuses nothing.
+    const frames = () => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(null)))));
+    for (const state of ["false", "true"]) {
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await cell(page, "Link request", "Automation").dispatchEvent("click");
+      await expect(cell(page, "Link request", "Automation")).toHaveAttribute("aria-checked", state);
+      await expect(cell(page, "Link request", "Automation")).toBeEnabled();
+      await frames();
+      expect(await page.evaluate(() => document.activeElement?.tagName), "no focus where none was").toBe("BODY");
+    }
     await cell(page, "Lent game due back", "Automation").click();
     await expect(cell(page, "Lent game due back", "Automation")).toHaveAttribute("aria-checked", "false");
+    await expect(cell(page, "Lent game due back", "Automation")).toBeFocused();
     await expect(page.getByRole("row").filter({ has: page.getByRole("rowheader", { name: /Lent game due back/ }) })).not.toContainText(
       "Instance default",
     );
+
 
     // a second channel: its first switch offers the instance's suggestion
     await tab(page, "Channels");
@@ -84,9 +106,16 @@ test("channels, rules with the defaults offer, the log and the inbox", async ({ 
     await cell(page, "Link request", "Phone").click();
     const offer = page.getByRole("status").filter({ hasText: "Phone is new" });
     await expect(offer).toContainText("Lent game due back");
+    // review POL-4: the offer waits while the person looks at another tab; its answer
+    // still hands the focus to the switch that asked (asserted below)
+    await tab(page, "Channels");
+    await tab(page, "Rules");
+    await expect(offer).toContainText("Lent game due back");
     await offer.getByRole("button", { name: "Use the suggestions" }).click();
     await expect(cell(page, "Link request", "Phone")).toHaveAttribute("aria-checked", "true");
     await expect(cell(page, "Lent game due back", "Phone")).toHaveAttribute("aria-checked", "true");
+    // the answer button is gone with the offer: the focus is on the switch that asked
+    await expect(cell(page, "Link request", "Phone")).toBeFocused();
     await expect(cell(page, "Link request", "Automation")).toHaveAttribute("aria-checked", "true");
     await expect(cell(page, "Lent game due back", "Automation")).toHaveAttribute("aria-checked", "false");
 
@@ -171,6 +200,15 @@ test("a channel is edited in place keeping its secret; a rule for one item (DEC-
   expect(body.config).toMatchObject({ kind: "ntfy", topic: "second-topic", token: "********" });
   const pocket = card(page, "Pocket");
   await expect(pocket).toContainText("second-topic");
+  // v1-polish (sec0 "left open"): Save and Cancel hand the focus back to "Edit"
+  const edit = pocket.getByRole("button", { name: "Edit Pocket" });
+  await expect(pocket.getByRole("button", { name: "Save" })).toHaveCount(0);
+  await expect(edit).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(pocket.getByLabel("Name", { exact: true })).toHaveValue("Pocket");
+  await pocket.getByRole("button", { name: "Cancel" }).click();
+  await expect(pocket.getByRole("button", { name: "Save" })).toHaveCount(0);
+  await expect(edit).toBeFocused();
   const channels = await (await page.request.get("/api/v1/notifications/channels")).json();
   const saved = channels.find((c: { name: string }) => c.name === "Pocket");
   expect(saved.config.token, "the stored token is kept (still set, shown redacted)").toBe("********");

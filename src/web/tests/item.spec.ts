@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { expectNoA11yViolations, expectReflow, hydrated, signUp, importDone } from "./helpers";
+import { contrast, expectNoA11yViolations, expectReflow, hydrated, signUp, importDone } from "./helpers";
 
 // UX phase 1 item page (design.md 6.3, 5.4, 5.5, 3.4; addendum-1 1.3 Item row): the next step
 // with Undo, the "With..." sheet with a person and a rating, the play sheet with players and
@@ -323,7 +323,7 @@ test("a video game session: played with, the scores wait behind More", async ({ 
   await expect(sheet.getByLabel("Score of Pad Tester")).toBeVisible();
   await sheet.getByLabel("Duration", { exact: true }).fill("6:00");
   await sheet.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByRole("status").filter({ hasText: "Logged: Play" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Logged: Session" })).toBeVisible();
   const feed = await (await page.request.get("/api/v1/activity")).json();
   expect(feed.rows[0].play.duration_minutes).toBe(360);
   // OT-7: plays are counted in the header too
@@ -433,7 +433,10 @@ test("a bulk mark on watched episodes asks to log them again; a mixed range says
     await page.getByRole("menuitem", { name: "Mark up to here" }).click();
   };
   await upToFirst();
-  await expect(ask).toContainText("This episode is already watched. Log it again as a rewatch?");
+  // v1-polish P6: the show is In progress, so the answer logs a further view and starts no
+  // rewatch run (DEC-589); the question said "as a rewatch" here too
+  await expect(page.getByLabel("Status")).toHaveValue("in_progress");
+  await expect(ask).toContainText("This episode is already watched. Log it again as a further view?");
   // the question takes the focus, so a keyboard and a screen reader land on it
   await expect(ask.getByRole("button", { name: "Log it again" })).toBeFocused();
   expect(await events()).toBe(before);
@@ -452,7 +455,7 @@ test("a bulk mark on watched episodes asks to log them again; a mixed range says
   await tab.getByRole("button", { name: /^Season 1/ }).click();
   await expect(tab.getByRole("button", { name: /^Season 1/ })).toHaveAttribute("aria-pressed", "true");
   await tab.getByRole("button", { name: "Mark season watched" }).click();
-  const seasonAgain = "These 10 episodes are already watched. Log them again as a rewatch?";
+  const seasonAgain = "These 10 episodes are already watched. Log them again as further views?";
   await expect(ask).toContainText(seasonAgain);
   const markSeason = tab.getByRole("button", { name: "Mark season watched" });
   await expect(ask.getByRole("button", { name: "Log 10 again" })).toBeFocused();
@@ -500,7 +503,7 @@ test("a bulk mark on watched episodes asks to log them again; a mixed range says
   await expect(page.getByLabel("Status")).toHaveValue("in_progress");
   await expect(upTo).toBeVisible();
   await upTo.click();
-  await expect(ask).toContainText("This episode is already watched. Log it again as a rewatch?");
+  await expect(ask).toContainText("This episode is already watched. Log it again as a further view?");
   // the answer logs it; once the list is back the focus is on what asked
   await ask.getByRole("button", { name: "Log it again" }).click();
   await expect(page.locator("[role=status][aria-live] > div").filter({ hasText: "Logged: Watched S1 E1" }).first()).toBeVisible();
@@ -511,7 +514,7 @@ test("a bulk mark on watched episodes asks to log them again; a mixed range says
   // another show whose first episode is watched as well (the page component stays, only its
   // id changes), so only a cleared question is gone there
   await upToFirst();
-  await expect(ask).toContainText("This episode is already watched. Log it again as a rewatch?");
+  await expect(ask).toContainText("This episode is already watched. Log it again as a further view?");
   await page.keyboard.press("Control+k");
   const palette = page.getByRole("dialog", { name: "Search" });
   await palette.getByRole("combobox").fill("Lantern Coast");
@@ -709,6 +712,9 @@ test("a play shows its people, scores, winner and duration on the item History t
   await page.getByRole("tab", { name: /^History/ }).click();
   const panel = page.getByRole("tabpanel", { name: /^History/ });
   const mine = panel.getByTestId("activity-row").first();
+  // a board game is played in plays: the row does not call it a session (v1-polish, LC-22)
+  await expect(mine).toContainText("Play logged");
+  await expect(mine).not.toContainText("Session logged");
   await expect(mine).toContainText("with Ben");
   await expect(mine).toContainText("Ben won");
   await expect(mine).toContainText("Scores: You 31, Ben 42.5");
@@ -716,7 +722,13 @@ test("a play shows its people, scores, winner and duration on the item History t
 
   await open(page, "/history");
   const feedRow = page.getByTestId("activity-row").filter({ hasText: "Meeple Harbour" }).first();
+  await expect(feedRow).toContainText("Play logged");
   await expect(feedRow).toContainText("Ben won");
+  // Home "Recent activity" shows the same row
+  await open(page, "/");
+  const homeRow = page.getByTestId("activity-row").filter({ hasText: "Meeple Harbour" }).first();
+  await expect(homeRow).toContainText("Play logged");
+  await expect(homeRow).not.toContainText("Session logged");
   await expect(feedRow).toContainText("Scores: You 31, Ben 42.5");
   await expect(feedRow).toContainText("45 min");
 
@@ -735,6 +747,58 @@ test("a play shows its people, scores, winner and duration on the item History t
   const alone = panel.getByTestId("activity-row").filter({ hasText: "Score: 12" });
   await expect(alone).toHaveCount(1);
   await expect(alone).toContainText("You won");
+});
+
+test("the winner radios of the play sheet are rings with an edge one can see, in light and dark", async ({ page }) => {
+  // v1-polish, LC-21 (screenshots of the app): in the dark theme a radio that is not chosen
+  // was drawn by the browser as a solid white disc. The radios are drawn by the page now:
+  // an empty ring, a thick ring when chosen, both 3:1 against what is behind them
+  // (WCAG 1.4.11)
+  test.setTimeout(150_000);
+  await signUp(page, `radio${Date.now()}`, "Ring Tester");
+  const ids = await seed(page);
+  for (const theme of ["light", "dark"] as const) {
+    await page.evaluate((t) => localStorage.setItem("app-theme", t), theme);
+    await open(page, `/items/${ids["Meeple Harbour"]}`);
+    await expect(page.locator("html")).toHaveClass(theme === "dark" ? /dark/ : /^(?!.*\bdark\b)/);
+    await bar(page).getByRole("button", { name: "Log a play" }).click();
+    const sheet = page.getByRole("dialog", { name: "Log a play" });
+    const people = sheet.getByRole("combobox", { name: "Add a person" });
+    await people.fill("Ben");
+    await people.press("Enter");
+    const scores = sheet.getByRole("table", { name: "Scores" });
+    const chosen = scores.getByRole("radio", { name: "No winner" });
+    const open_ = scores.getByRole("radio", { name: "Ben won" });
+    await expect(chosen).toBeChecked();
+    await expect(open_).not.toBeChecked();
+    const look = (radio: typeof chosen) =>
+      radio.evaluate((el) => {
+        const s = getComputedStyle(el);
+        // what is painted behind the radio: the nearest surface with a colour of its own
+        let behind = "rgba(0, 0, 0, 0)";
+        for (let p = el.parentElement; p && behind === "rgba(0, 0, 0, 0)"; p = p.parentElement) {
+          behind = getComputedStyle(p).backgroundColor;
+        }
+        return { appearance: s.appearance, background: s.backgroundColor, edge: s.borderTopColor, width: parseFloat(s.borderTopWidth), size: el.getBoundingClientRect().width, behind };
+      });
+    const [off, on] = [await look(open_), await look(chosen)];
+    expect(off.appearance, `${theme}: drawn by the page`).toBe("none");
+    expect(off.background, `${theme}: an empty ring, not a disc`).toBe("rgba(0, 0, 0, 0)");
+    expect(off.width, `${theme}: a thin edge`).toBeLessThanOrEqual(2);
+    expect(off.size).toBe(16);
+    expect(await contrast(page, off.edge, off.behind), `${theme}: the ring against ${off.behind}`).toBeGreaterThanOrEqual(3);
+    expect(on.width, `${theme}: the chosen one is a thick ring`).toBeGreaterThanOrEqual(4);
+    expect(await contrast(page, on.edge, on.behind), `${theme}: the chosen ring against ${on.behind}`).toBeGreaterThanOrEqual(3);
+    // it still is a radio group: the choice moves
+    await open_.check();
+    await expect(chosen).not.toBeChecked();
+    expect((await look(open_)).width).toBeGreaterThanOrEqual(4);
+    expect((await look(chosen)).width).toBeLessThanOrEqual(2);
+    await expectNoA11yViolations(page, `play sheet radios, ${theme}`);
+    await page.keyboard.press("Escape");
+    await sheet.getByRole("button", { name: "Discard" }).click();
+    await expect(sheet).toHaveCount(0);
+  }
 });
 
 test("pages: +10 and a typed page log, a bad page says why, Finished completes", async ({ page }) => {
@@ -1347,7 +1411,7 @@ test("a game has a Plays tab with time and the win rate; a co-op play can end wi
   await expect(sheet.getByRole("table", { name: "Scores" }).getByRole("columnheader")).toHaveText(["Player", "Score"]);
   await expectNoA11yViolations(page, "play dialog, co-op");
   await sheet.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByRole("status").filter({ hasText: "Logged: Play" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Logged: Session" })).toBeVisible();
   const stored = await (await page.request.get(`/api/v1/items/${game}/page`)).json();
   expect(stored.plays[0].play).toMatchObject({ duration_minutes: 90, coop: "none" });
   expect(stored.play_totals).toMatchObject({ plays: 1, minutes: 90, decided: 0, wins: 0 });

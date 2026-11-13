@@ -970,7 +970,7 @@ fn Scores(state: PlayState) -> impl IntoView {
                             </td>
                             <td class="px-2 py-1">
                                 <label r#for=WON_NONE class="flex size-9 cursor-pointer items-center justify-center">
-                                    <input id=WON_NONE type="radio" name="play-winner" class="size-4 accent-primary"
+                                    <input id=WON_NONE type="radio" name="play-winner" class=ui::cn(&["size-4", ui::RADIO])
                                         aria-labelledby="play-won-none-label"
                                         prop:checked=move || winner.get().is_none()
                                         on:change=move |_| s.winner.set(WinnerChoice::Nobody)/>
@@ -1035,7 +1035,7 @@ fn ScoreRow(state: PlayState, id: String, winner: Memo<Option<String>>) -> impl 
                         <td class="px-2 py-1">
                             // 36 px around the radio: the target size of WCAG 2.5.8
                             <label r#for=radio.clone() class="flex size-9 cursor-pointer items-center justify-center">
-                                <input id=radio.clone() type="radio" name="play-winner" class="size-4 accent-primary"
+                                <input id=radio.clone() type="radio" name="play-winner" class=ui::cn(&["size-4", ui::RADIO])
                                     prop:checked=move || winner.get().as_deref() == Some(mine.as_str())
                                     on:change=move |_| s.winner.set(WinnerChoice::Player(pick.clone()))/>
                                 <span class="sr-only">{won_label}</span>
@@ -1092,6 +1092,8 @@ fn save_play(s: &PlayState, info: ItemInfo, ctx: StepCtx, i18n: std::sync::Arc<I
     s.show_errors(&[], &[]);
     s.busy.set(true);
     leptos::task::spawn_local(async move {
+        // a board game is played in plays, a video game in sessions (v1-polish P3)
+        let label = i18n.t(crate::item_words::play_step_key(info.board_game));
         let ItemInfo {
             item_id,
             title,
@@ -1102,7 +1104,6 @@ fn save_play(s: &PlayState, info: ItemInfo, ctx: StepCtx, i18n: std::sync::Arc<I
             Ok(event) => {
                 ctx.funnel.saved();
                 ctx.funnel.logged();
-                let label = i18n.t("log-play-step");
                 toast_logged(&ctx, &label, title, vec![event.id], Some(refresh));
                 s.initial.set(s.form());
                 s.open.set(false);

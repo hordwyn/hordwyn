@@ -35,6 +35,9 @@ struct Offer {
     first: SubscriptionDto,
     /// The instance's suggested events that do not reach the channel yet.
     events: Vec<String>,
+    /// The switch that asked, when it had the focus ([`switch_selector`]): the answer hands
+    /// the focus back to it, also when the view was rendered afresh in between.
+    switch: Option<String>,
 }
 
 /// Save rules one after the other, then reload the page; the first error is kept.
@@ -73,6 +76,30 @@ type Base = (
     Vec<ChannelDto>,
 );
 
+/// The selector of the switch of `event` for the channel `channel`. The matrix is built anew
+/// when a rule changes and a switch is disabled while its rule is saved; either takes the
+/// focus away from the switch that was pressed, and this is how it is found again.
+#[must_use]
+pub fn switch_selector(event: &str, channel: &str) -> String {
+    format!("[data-nf-switch=\"{}\"]", switch_key(event, channel))
+}
+
+/// Event names are dotted words with `*` and channel ids are UUIDs: neither holds a quote.
+fn switch_key(event: &str, channel: &str) -> String {
+    format!("{event}|{channel}")
+}
+
+/// Put the focus back on `selector` on the next frame, unless the person has moved it to
+/// another control meanwhile. The page is not scrolled: whoever scrolled on while the rule
+/// was saved stays there (review POL-4).
+fn refocus_soon(selector: String) {
+    request_animation_frame(move || {
+        if crate::keyboard::focus_is_nowhere() {
+            let _ = crate::keyboard::focus_in_place(&selector);
+        }
+    });
+}
+
 fn own_rules(subscriptions: &[SubscriptionDto]) -> Vec<SubscriptionDto> {
     subscriptions
         .iter()
@@ -95,6 +122,26 @@ pub fn Rules(state: NotifyState) -> impl IntoView {
     let error = RwSignal::new(None::<String>);
     let offer = kept("nf-offer", || None::<Offer>);
     let save = save(state, error);
+    // the switch that was pressed last, when it had the focus then: it gets the focus back
+    // when its rule is saved and once more when the matrix is built from the answer (sec0
+    // "left open", v1-polish). Where a click does not focus a button (Safari, Firefox on
+    // macOS) nothing is remembered and no focus is put where none was (review POL-4)
+    let pressed = StoredValue::new(None::<String>);
+    let pending = save.pending();
+    Effect::new(move |was: Option<bool>| {
+        let now = pending.get();
+        if was == Some(true)
+            && !now
+            && let Some(selector) = pressed.get_value()
+        {
+            // a refused rule changes nothing: no new matrix will ask for the focus
+            if error.get_untracked().is_some() {
+                pressed.set_value(None);
+            }
+            refocus_soon(selector);
+        }
+        now
+    });
     let toggle = Callback::new(move |(row, channel, on): (usize, usize, bool)| {
         let (events, subscriptions, channels) = base.get_untracked();
         let (rows, own) = (rows(&events, &subscriptions), own_rules(&subscriptions));
@@ -102,6 +149,9 @@ pub fn Rules(state: NotifyState) -> impl IntoView {
             return;
         };
         let first = toggled(r, &channels, &c.id, on, &zone());
+        let selector = switch_selector(&r.event, &c.id);
+        let switch = crate::keyboard::focus_is_on(&selector).then_some(selector);
+        pressed.set_value(switch.clone());
         if on && is_new(&rows, &own, &c.id) {
             let mut events = suggested_off(&rows, &c.id);
             events.retain(|e| *e != r.event);
@@ -111,6 +161,7 @@ pub fn Rules(state: NotifyState) -> impl IntoView {
                     name: c.name.clone(),
                     first,
                     events,
+                    switch,
                 }));
                 return;
             }
@@ -122,6 +173,8 @@ pub fn Rules(state: NotifyState) -> impl IntoView {
             return;
         };
         offer.set(None);
+        // the offer outlives a render of this view (`kept`); the switch is kept with it
+        pressed.set_value(o.switch.clone());
         let (events, subscriptions, channels) = base.get_untracked();
         let mut subs = vec![o.first.clone()];
         if all_of_them {
@@ -144,6 +197,13 @@ pub fn Rules(state: NotifyState) -> impl IntoView {
             {move || error.get().map(|e| view! { <Alert variant=AlertVariant::Destructive role=AlertRole::Alert>{e}</Alert> })}
             {move || {
                 let (events, subscriptions, channels) = base.get();
+                // a matrix built while a rule is being saved is not the answer to that save
+                if !pending.get_untracked()
+                    && let Some(selector) = pressed.get_value()
+                {
+                    pressed.set_value(None);
+                    refocus_soon(selector);
+                }
                 view! {
                     <Matrix rows=rows(&events, &subscriptions) channels=channels toggle=toggle busy=Signal::from(save.pending())/>
                 }
@@ -271,6 +331,7 @@ fn MatrixRow(
                 &[("event", label.clone().into()), ("channel", c.name.clone().into())],
             );
             let state = t(if on { "notify-on" } else { "notify-off" });
+            let key = switch_key(&r.event, &c.id);
             if locked {
                 view! {
                     <TableCell>
@@ -285,6 +346,7 @@ fn MatrixRow(
                     <TableCell>
                         <button type="button" role="switch" aria-checked=if on { "true" } else { "false" }
                             aria-label=name disabled=move || busy.get()
+                            data-nf-switch=key
                             on:click=move |_| toggle.run((index, ci, !on))
                             class=if on { SWITCH_ON } else { SWITCH_OFF }>
                             <span class=if on { KNOB_ON } else { KNOB_OFF }></span>

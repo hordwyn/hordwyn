@@ -101,6 +101,17 @@ pub fn Textarea(
     }
 }
 
+/// The look of a native radio button (`<input type="radio" class=RADIO>` plus a size such as
+/// `size-4`; keyboard and screen-reader behaviour stay the browser's). The page draws it, not
+/// the browser: left to itself a radio that is not chosen was a solid white disc on the dark
+/// theme. Not chosen it is an empty ring in the colour of field borders (3:1 against the
+/// page in both themes, WCAG 1.4.11); chosen, a thick ring in the primary colour around a
+/// dot of what is behind it, so the two differ by shape and not by colour alone.
+pub const RADIO: &str = "shrink-0 cursor-pointer appearance-none rounded-full border border-input \
+    bg-transparent checked:border-[5px] checked:border-primary focus-visible:outline-none \
+    focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 \
+    focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
+
 /// Native checkbox (keyboard and screen-reader behaviour for free).
 #[component]
 pub fn Checkbox(

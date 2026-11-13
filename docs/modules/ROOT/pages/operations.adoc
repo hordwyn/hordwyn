@@ -286,6 +286,9 @@ Every picture the application stores today comes from a data source and can be f
 again, which is why `img` and `orig` are not in the backup. No page uploads a picture yet;
 when one does, this table changes with it.
 
+The export a person can download on Settings > Imports and export is not a backup: it
+carries no plays, among other things (xref:v1-scope.adoc[What v1 covers]).
+
 The dump and the key file are one backup unit: a dump restored without its key has locked
 secrets (data-source keys, notification secrets, authenticators), and nothing can
 regenerate the key. The key file is outside the blob directory on purpose: copying or
@@ -521,6 +524,44 @@ cli storage evict              # evict now instead of waiting for the background
 The report also shows the Postgres database size and, with the Meilisearch backend, its
 document count and database size. Both are reported, not budgeted. See
 xref:storage-budget.adoc[storage budget].
+
+== Which hosts a browser contacts for pictures
+
+A page shows a cover from this instance when the instance has stored it, and otherwise
+from the address the data source gave. That address is loaded by the browser of the person
+who looks at the page, not by the server, and without a referrer: the host sees the
+browser's network address and which picture it asked for, not the page it is shown on.
+The hosts are those of the sources that are turned on:
+
+* `image.tmdb.org` (TMDB)
+* `artworks.thetvdb.com` (TheTVDB)
+* `images.igdb.com` (IGDB)
+* for podcasts, the host each podcast's feed names for its artwork
+
+This happens wherever a cover is shown that is not stored yet: on the rows of the search
+while someone types, on the cards of Home, the Library and the lists and on the item page
+of an item that was just added, and on the recent items of the empty search.
+
+`storage.fetch_policy` decides how much is stored ahead
+(xref:storage-budget.adoc[storage budget], "Fetch priority"). With `library`, the default,
+the covers of everything in a library, a list or a play are stored shortly after the item
+is added, so the hosts above are contacted for search results and for the first moments
+of a new item. `eager` also stores the covers of search results and reduces it further;
+it cannot remove it, because a row is shown before its cover has been fetched. `lazy`
+stores nothing ahead and leaves most covers at their source.
+
+Two things to know:
+
+* The recent items of the empty search are kept in the browser, each with the address its
+  cover had when the item page was last opened or a search last named the item. An item
+  opened once, right after it was added, keeps the source's address there until one of
+  the two happens again, also with `eager`.
+* A cover whose address starts with `http://` (some podcast feeds give one) is not loaded
+  on an instance served over https: browsers do not load such a picture into an https page
+  as it is, and the content security policy allows pictures over https only
+  (xref:reverse-proxy.adoc[Reverse proxy]). The box then shows the title, a row of the
+  search the icon of the kind, as for every cover that does not load, until the instance
+  has stored the cover.
 
 == S3 storage with compose
 

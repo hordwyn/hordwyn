@@ -1,4 +1,5 @@
 * xref:index.adoc[Overview]
+* xref:v1-scope.adoc[What v1 covers]
 * xref:architecture.adoc[Architecture]
 * xref:provider-pipeline.adoc[Provider pipeline]
 * xref:storage-budget.adoc[Storage budget]

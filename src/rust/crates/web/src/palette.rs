@@ -170,9 +170,17 @@ pub fn idle_items(
         leading: None,
     };
     let recent_group = i18n.t("search-recent");
+    // a recent item leads with the same box as a result row (v1-polish P7)
     let mut out: Vec<CommandItem> = recent
         .iter()
-        .map(|r| row(r.id.clone(), r.label.clone(), &recent_group))
+        .map(|r| CommandItem {
+            leading: Some(CommandLeading {
+                icon: crate::library::kind_icon(&r.kind),
+                image: r.cover.clone().filter(|url| !url.is_empty()),
+                square: crate::library_state::square_art(&r.kind),
+            }),
+            ..row(r.id.clone(), r.label.clone(), &recent_group)
+        })
         .collect();
     if commands {
         let g = i18n.t("search-suggested");
@@ -252,10 +260,11 @@ fn scope_group(scope: &str) -> Option<String> {
     (scope != SCOPES[0]).then(|| scope.to_string())
 }
 
-/// The small cover of a result row (OT-2): only a cover this instance has stored, in its
-/// smallest variant (WebP when there is one). A cover known only by its provider address is
-/// not loaded from the palette (DEC-608): the row shows the icon of its kind instead.
-fn thumb(i: &CatalogItemDto) -> Option<String> {
+/// The small cover of a row (OT-2), by the one rule of every page (DEC-640): the cover this
+/// instance has stored, in its smallest variant (WebP when there is one), else the provider's
+/// address, which the viewer's browser loads. Without either the row shows the icon of its
+/// kind, as it does while the picture loads and when it fails.
+pub(crate) fn thumb(i: &CatalogItemDto) -> Option<String> {
     let cover = i.cover.as_ref()?;
     cover
         .variants
@@ -264,6 +273,8 @@ fn thumb(i: &CatalogItemDto) -> Option<String> {
         .min_by_key(|v| v.width)
         .or_else(|| cover.variants.iter().min_by_key(|v| v.width))
         .map(|v| v.url.clone())
+        .or_else(|| Some(cover.url.clone()))
+        .filter(|url| !url.is_empty())
 }
 
 fn to_item(i: &CatalogItemDto, group: &str) -> CommandItem {
@@ -534,12 +545,25 @@ fn join(s: State, batch: Vec<CommandItem>) {
 /// One source's results join the list: its titles in the order it gave them, then the copies
 /// held for it that it does not name ([`Hold`]).
 fn add_results(r: &SearchResultsEventDto, s: State) {
+    refresh_recent(s, &r.items);
     s.waiting.update(|w| w.retain(|c| c != &r.connector));
     let batch: Vec<CommandItem> = r.items.iter().map(|i| to_item(i, &r.connector)).collect();
     let mut now = None;
     s.held.update_value(|hold| now = hold.arrived(batch));
     if let Some(rows) = now {
         join(s, rows);
+    }
+}
+
+/// The recent items a read names take the cover the read gives them (review POL-3): the
+/// list in the browser holds the address of the day the item page was opened, which is the
+/// provider's when the cover was not stored yet. No request is made for this.
+fn refresh_recent(s: State, items: &[CatalogItemDto]) {
+    let fresh: Vec<(String, Option<String>)> =
+        items.iter().map(|i| (i.id.clone(), thumb(i))).collect();
+    let list = s.username.with_value(|u| crate::recent::refresh(u, &fresh));
+    if let Some(list) = list {
+        s.recent.set(list);
     }
 }
 
@@ -615,6 +639,10 @@ struct State {
     held: StoredValue<Hold>,
     /// The active row, told by the list ([`pinned`]).
     active: RwSignal<Option<String>>,
+    /// The recent items of the idle list, read when the palette opens.
+    recent: RwSignal<Vec<RecentItem>>,
+    /// Whose recent items they are (the key of the list in this browser).
+    username: StoredValue<String>,
 }
 
 impl State {
@@ -628,6 +656,8 @@ impl State {
             asked: RwSignal::new(None::<Asked>),
             held: StoredValue::new(Hold::default()),
             active: RwSignal::new(None::<String>),
+            recent: RwSignal::new(Vec::new()),
+            username: StoredValue::new(expect_context::<crate::app::ClientConfig>().username),
         }
     }
 }
@@ -673,6 +703,7 @@ fn debounced_search(s: State) {
                         stream.update_value(Stream::failed);
                         return;
                     };
+                    refresh_recent(s, &r.items);
                     let (rows, wait) = local_rows(&r, &t("search-library"), &t("search-local"));
                     items.set(rows);
                     held.set_value(Hold::new(wait));
@@ -826,12 +857,13 @@ fn hints(i18n: &I18n, scope: RwSignal<Option<PaletteTarget>>) -> CommandHints {
 }
 
 /// The recent items are read when the palette opens (they change on every item page).
-fn recent_on_open(open: RwSignal<bool>) -> RwSignal<Vec<RecentItem>> {
-    let username = expect_context::<crate::app::ClientConfig>().username;
-    let recent = RwSignal::new(Vec::new());
+fn recent_on_open(open: RwSignal<bool>, s: State) -> RwSignal<Vec<RecentItem>> {
+    let State {
+        recent, username, ..
+    } = s;
     Effect::new(move |_| {
         if open.get() {
-            recent.set(crate::recent::load(&username));
+            recent.set(username.with_value(|u| crate::recent::load(u)));
         }
     });
     recent
@@ -885,7 +917,7 @@ pub fn SearchPalette() -> impl IntoView {
     open_on_ctrl_k(open);
     debounced_search(s);
     stream_results(use_events(), s);
-    let recent = recent_on_open(open);
+    let recent = recent_on_open(open, s);
     let (busy, quick_error) = (RwSignal::new(false), RwSignal::new(None::<String>));
     Effect::new(move |_| {
         if !open.get() {
@@ -1138,11 +1170,15 @@ mod tests {
                 id: "m".into(),
                 label: "Dune (2021)".into(),
                 plays: false,
+                kind: "movie".into(),
+                cover: Some("https://image.example/dune.jpg".into()),
             },
             RecentItem {
                 id: "g".into(),
                 label: "Azul (2017)".into(),
                 plays: true,
+                kind: "board_game".into(),
+                cover: None,
             },
         ];
         let rows = idle_items(&en, &recent, true, true);
@@ -1159,6 +1195,25 @@ mod tests {
             ]
         );
         assert_eq!(rows[0].group, "Recent");
+        // a recent item leads with the same box as a result row (v1-polish P7); a command
+        // is a row of text
+        assert_eq!(
+            rows[0].leading,
+            Some(CommandLeading {
+                icon: ui::IconName::KindMovie,
+                image: Some("https://image.example/dune.jpg".into()),
+                square: false,
+            })
+        );
+        assert_eq!(
+            rows[1].leading,
+            Some(CommandLeading {
+                icon: ui::IconName::KindBoardGame,
+                image: None,
+                square: true,
+            })
+        );
+        assert_eq!(rows[2].leading, None);
         assert_eq!(rows[2].group, "Suggestions");
         assert_eq!(rows[4].id, "cmd:play:g");
         // with a target only the recent items: a command would leave the target
@@ -1488,14 +1543,20 @@ mod tests {
         );
     }
 
-    /// OT-2: a row shows the cover this instance has stored, in its smallest variant; a cover
-    /// known only by its provider address is not loaded from the palette (DEC-608).
+    /// OT-2, DEC-640: a row shows the cover this instance has stored, in its smallest variant
+    /// (WebP first); a cover known only by its provider address is loaded from there, as on
+    /// every other page; without a cover the icon of the kind.
     #[test]
-    fn to_item_keeps_the_cover() {
-        with_en(covers_of_rows);
+    fn thumb_prefers_the_smallest_stored_variant() {
+        with_en(|| covers_of_rows(false));
     }
 
-    fn covers_of_rows() {
+    #[test]
+    fn thumb_falls_back_to_the_provider_address() {
+        with_en(|| covers_of_rows(true));
+    }
+
+    fn covers_of_rows(provider: bool) {
         let variant = |url: &str, width: u32, mime: &str| contracts::ImageVariantDto {
             url: url.into(),
             width,
@@ -1515,15 +1576,23 @@ mod tests {
             width: Some(600),
             height: Some(600),
         });
-        let row = to_item(&stored, "bgg");
-        assert_eq!(
-            row.leading,
-            Some(CommandLeading {
-                icon: ui::IconName::KindBoardGame,
-                image: Some("/assets/h/thumb.webp".into()),
-                square: true,
-            })
-        );
+        if !provider {
+            assert_eq!(thumb(&stored).as_deref(), Some("/assets/h/thumb.webp"));
+            assert_eq!(
+                to_item(&stored, "bgg").leading,
+                Some(CommandLeading {
+                    icon: ui::IconName::KindBoardGame,
+                    image: Some("/assets/h/thumb.webp".into()),
+                    square: true,
+                })
+            );
+            // no WebP: the smallest of what there is
+            if let Some(c) = stored.cover.as_mut() {
+                c.variants.retain(|v| v.mime != "image/webp");
+            }
+            assert_eq!(thumb(&stored).as_deref(), Some("/assets/h/thumb.avif"));
+            return;
+        }
         let mut remote = dto("m", "Heat", "tmdb");
         remote.cover = Some(contracts::ImageDto {
             url: "https://image.tmdb.org/t/p/w780/heat.jpg".into(),
@@ -1533,15 +1602,25 @@ mod tests {
             width: None,
             height: None,
         });
-        let icon_only = Some(CommandLeading {
-            icon: ui::IconName::KindMovie,
-            image: None,
-            square: false,
-        });
-        assert_eq!(to_item(&remote, "tmdb").leading, icon_only);
+        let leading = |image: Option<&str>| {
+            Some(CommandLeading {
+                icon: ui::IconName::KindMovie,
+                image: image.map(str::to_string),
+                square: false,
+            })
+        };
+        assert_eq!(
+            to_item(&remote, "tmdb").leading,
+            leading(Some("https://image.tmdb.org/t/p/w780/heat.jpg"))
+        );
+        // a cover without an address is no cover
+        if let Some(c) = remote.cover.as_mut() {
+            c.url = String::new();
+        }
+        assert_eq!(to_item(&remote, "tmdb").leading, leading(None));
         assert_eq!(
             to_item(&dto("n", "Heat", "tmdb"), "tmdb").leading,
-            icon_only
+            leading(None)
         );
     }
 }

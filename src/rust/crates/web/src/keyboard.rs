@@ -166,6 +166,48 @@ pub fn element(selector: &str) -> Option<web_sys::HtmlElement> {
         .ok()
 }
 
+/// Whether the keyboard focus is on no control: on the page itself, where it falls when the
+/// focused element is removed or disabled. Always `false` on the server.
+#[must_use]
+pub fn focus_is_nowhere() -> bool {
+    #[cfg(feature = "hydrate")]
+    {
+        focused().is_none_or(|el| el.tag_name().eq_ignore_ascii_case("body"))
+    }
+    #[cfg(not(feature = "hydrate"))]
+    false
+}
+
+/// Whether the keyboard focus is on an element matching `selector`. Always `false` on the
+/// server.
+#[must_use]
+pub fn focus_is_on(selector: &str) -> bool {
+    #[cfg(feature = "hydrate")]
+    {
+        focused().is_some_and(|el| el.matches(selector).unwrap_or(false))
+    }
+    #[cfg(not(feature = "hydrate"))]
+    {
+        let _ = selector;
+        false
+    }
+}
+
+/// Focus the first element matching `selector` without scrolling it into view (a focus that
+/// is handed back, not moved: the page stays where the person has it); `false` when there
+/// is none.
+#[must_use]
+pub fn focus_in_place(selector: &str) -> bool {
+    #[cfg(feature = "hydrate")]
+    if let Some(el) = element(selector) {
+        let options = web_sys::FocusOptions::new();
+        options.set_prevent_scroll(true);
+        return el.focus_with_options(&options).is_ok();
+    }
+    let _ = selector;
+    false
+}
+
 /// Click the first element matching `selector`; `false` when there is none.
 #[must_use]
 pub fn click(selector: &str) -> bool {

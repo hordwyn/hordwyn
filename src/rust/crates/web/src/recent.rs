@@ -16,6 +16,14 @@ pub struct RecentItem {
     /// The kind logs plays (the "Log a play of ..." suggestion).
     #[serde(default)]
     pub plays: bool,
+    /// The kind id (`movie`): the icon and the shape of the row's leading box.
+    #[serde(default)]
+    pub kind: String,
+    /// The address of a small cover (DEC-640: the stored variant, else the provider's
+    /// address) as the item page had it, or a later read that named the item
+    /// ([`refreshed`]); the row shows the icon when it no longer loads.
+    #[serde(default)]
+    pub cover: Option<String>,
 }
 
 /// `item` first, without an older copy of it, at most [`MAX_RECENT`].
@@ -25,6 +33,64 @@ pub fn pushed(mut list: Vec<RecentItem>, item: RecentItem) -> Vec<RecentItem> {
     list.insert(0, item);
     list.truncate(MAX_RECENT);
     list
+}
+
+/// The list with the covers a read just returned (`fresh`: item id and the address by the one
+/// rule, DEC-640) for the rows that are in it; `None` when no row changes. A row keeps the
+/// address of the day its item page was opened, often the provider's because the cover was
+/// not stored yet (review POL-3): every later answer that names the item corrects it. A
+/// stored cover is never given up for a provider's address or for none: an answer may know
+/// less than the item page did, and only the item page writes whatever it has.
+#[must_use]
+pub fn refreshed(
+    list: &[RecentItem],
+    fresh: &[(String, Option<String>)],
+) -> Option<Vec<RecentItem>> {
+    let mut changed = false;
+    let new = list
+        .iter()
+        .map(|row| {
+            let now = fresh.iter().find(|(id, _)| *id == row.id).map(|(_, c)| c);
+            match now {
+                Some(cover)
+                    if *cover != row.cover
+                        && (cover.as_deref().is_some_and(is_stored)
+                            || !row.cover.as_deref().is_some_and(is_stored)) =>
+                {
+                    changed = true;
+                    RecentItem {
+                        cover: cover.clone(),
+                        ..row.clone()
+                    }
+                }
+                _ => row.clone(),
+            }
+        })
+        .collect();
+    changed.then_some(new)
+}
+
+/// An address this instance serves (a stored variant, `/assets/...`), not a provider's.
+fn is_stored(url: &str) -> bool {
+    url.starts_with('/') && !url.starts_with("//")
+}
+
+/// Write the covers of a read into `username`'s list ([`refreshed`]); the new list when a
+/// row changed.
+#[must_use]
+pub fn refresh(username: &str, fresh: &[(String, Option<String>)]) -> Option<Vec<RecentItem>> {
+    #[cfg(feature = "hydrate")]
+    {
+        let storage = web_sys::window().and_then(|w| w.local_storage().ok().flatten())?;
+        let list = refreshed(&load(username), fresh)?;
+        let _ = storage.set_item(&storage_key(username), &serde_json::to_string(&list).ok()?);
+        Some(list)
+    }
+    #[cfg(not(feature = "hydrate"))]
+    {
+        let _ = (username, fresh);
+        None
+    }
 }
 
 /// The storage key of `username`'s list (one browser may serve several accounts).
@@ -82,6 +148,8 @@ mod tests {
             id: id.into(),
             label: id.to_uppercase(),
             plays: false,
+            kind: String::new(),
+            cover: None,
         }
     }
 
@@ -109,5 +177,72 @@ mod tests {
         // older stored rows without `plays` still read
         let old: RecentItem = serde_json::from_str(r#"{"id":"1","label":"One"}"#).unwrap();
         assert!(!old.plays);
+        assert_eq!((old.kind.as_str(), old.cover), ("", None));
+    }
+
+    /// Review POL-3: a row remembered with the provider's address takes the stored cover as
+    /// soon as a read names it.
+    #[test]
+    fn a_fresh_read_replaces_the_remembered_cover() {
+        let row = |id: &str, cover: Option<&str>| RecentItem {
+            cover: cover.map(Into::into),
+            ..r(id)
+        };
+        let fresh = |id: &str, cover: Option<&str>| (id.to_string(), cover.map(String::from));
+        let list = vec![
+            row("a", Some("https://img.example/a.jpg")),
+            row("b", Some("/assets/b/thumb.webp")),
+            row("c", None),
+        ];
+        // items that are not in the list, and a cover that is the same: nothing to write
+        assert_eq!(
+            refreshed(&list, &[fresh("x", Some("/assets/x.webp"))]),
+            None
+        );
+        assert_eq!(
+            refreshed(&list, &[fresh("b", Some("/assets/b/thumb.webp"))]),
+            None
+        );
+        assert_eq!(refreshed(&list, &[]), None);
+        let new = refreshed(
+            &list,
+            &[
+                fresh("c", Some("https://img.example/c.jpg")),
+                fresh("x", None),
+                fresh("a", Some("/assets/a/thumb.webp")),
+            ],
+        )
+        .expect("two rows change");
+        assert_eq!(
+            new.iter()
+                .map(|x| (x.id.as_str(), x.cover.as_deref()))
+                .collect::<Vec<_>>(),
+            [
+                ("a", Some("/assets/a/thumb.webp")),
+                ("b", Some("/assets/b/thumb.webp")),
+                ("c", Some("https://img.example/c.jpg")),
+            ]
+        );
+        // everything else of a row stays
+        assert_eq!(new[0].label, list[0].label);
+        // a stored cover is not given up for what an answer says: no cover, or the
+        // provider's address (the item page writes those)
+        assert_eq!(refreshed(&list, &[fresh("b", None)]), None);
+        assert_eq!(
+            refreshed(&list, &[fresh("b", Some("https://img.example/b.jpg"))]),
+            None
+        );
+        assert_eq!(
+            refreshed(&list, &[fresh("b", Some("//img.example/b.jpg"))]),
+            None
+        );
+        // a provider's address that changed, or went away, is taken
+        let moved = refreshed(&list, &[fresh("a", Some("https://img.example/a2.jpg"))]);
+        assert_eq!(
+            moved.expect("one row changes")[0].cover.as_deref(),
+            Some("https://img.example/a2.jpg")
+        );
+        let gone = refreshed(&list, &[fresh("a", None)]).expect("one row changes");
+        assert_eq!(gone[0].cover, None);
     }
 }

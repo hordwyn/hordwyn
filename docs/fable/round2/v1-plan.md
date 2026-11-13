@@ -179,7 +179,11 @@ and v1-wikidata each update their lines; the page is final with package 4b.
 **Acceptance (owner)**
 
 - Type a title that is not in your library into the palette: the rows show covers.
-- `/stats` highlights Stats in the top bar.
+- On `/stats` the top bar highlights nothing (it used to highlight Home; Stats is not one
+  of its five sections). The account menu, opened there, shows Stats as the current entry
+  (heavier, tinted); on the phone the tab bar marks You. (Rewritten after review POL-1; the
+  line read "`/stats` highlights Stats in the top bar". Deviation from the plan as first
+  written: LC-1, LC-10 in v1-polish-decisions.md.)
 - A podcast's episode list says "Listened"; logging a video game session shows a toast
   that does not say "Play".
 - History filtered to a year shows what you logged late on New Year's Eve in that year.

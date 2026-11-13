@@ -29,7 +29,7 @@ use crate::episode_plan::{
     release_dates, spread_over, standing_again, unwatched_in_season, unwatched_up_to,
 };
 use crate::i18n::{t, use_i18n};
-use crate::item_words::{Verb, again_ask_key, skipped_key, with_button_key};
+use crate::item_words::{EpisodeWords, Verb, again_ask_key, skipped_key, with_button_key};
 use crate::log_sheet::{ItemInfo, SheetTarget};
 use crate::next_step::{StepCtx, toast_logged};
 
@@ -371,6 +371,8 @@ fn BulkDates(
     offered: Memo<bool>,
     missing: Memo<usize>,
     has_dates: bool,
+    /// The hints name the bulk buttons, which a podcast calls differently.
+    words: EpisodeWords,
 ) -> impl IntoView {
     // a season without the dates takes "On release dates" away: fall back to now
     Effect::new(move |_| {
@@ -406,7 +408,7 @@ fn BulkDates(
                 </p>
             </Show>
             <Show when=release_hint>
-                <p class="text-xs text-muted-foreground">{t("episodes-release-hint")}</p>
+                <p class="text-xs text-muted-foreground">{t(words.release_hint)}</p>
             </Show>
             <Show when=move || ui.when.get() == "range">
                 <div class="flex flex-wrap gap-3">
@@ -421,7 +423,7 @@ fn BulkDates(
                             prop:value=move || ui.to.get() on:input=move |ev| ui.to.set(event_target_value(&ev))/>
                     </div>
                 </div>
-                <p id="ep-range-hint" class="text-xs text-muted-foreground">{t("episodes-range-hint")}</p>
+                <p id="ep-range-hint" class="text-xs text-muted-foreground">{t(words.range_hint)}</p>
             </Show>
         </div>
     }
@@ -470,7 +472,7 @@ pub fn EpisodeList(
         <section class="grid gap-3 py-2">
             <BulkBar bulk=b.clone() shown=shown/>
             <DateChoice bulk=b.clone() shown=shown has_dates=!dates.is_empty()/>
-            <AskPrevious ui=ui rows=rows answer=answer/>
+            <AskPrevious ui=ui rows=rows answer=answer verb=verb/>
             <AskAgain bulk=b/>
             {move || ui.error.get().map(|e| view! { <p role="alert" class="text-sm text-destructive-text">{e}</p> })}
             {move || rows.with_value(|r| r.iter().find(|s| s.number == shown.get()).cloned()).map(|season| view! {
@@ -534,15 +536,16 @@ fn BulkBar(bulk: BulkCtx, shown: Memo<u32>) -> impl IntoView {
     let (season, show) = (bulk.clone(), bulk.clone());
     let mark_season = move |_| self::bulk(Bulk::Season(shown.get_untracked()), &season);
     let mark_show = move |_| self::bulk(Bulk::Show, &show);
+    let words = EpisodeWords::of(bulk.info.with_value(|i| i.verb));
     view! {
         <div class="flex flex-wrap items-center justify-between gap-2">
             <SeasonChips rows=bulk.rows.get_value() shown=shown ui=ui/>
             <div class="flex flex-wrap gap-2">
                 <Button variant=ButtonVariant::Outline size=ButtonSize::Sm disabled=ui.busy attr:data-ep-bulk="season" on:click=mark_season>
-                    {t("episodes-mark-season")}
+                    {t(words.mark_season)}
                 </Button>
                 <Button variant=ButtonVariant::Outline size=ButtonSize::Sm disabled=ui.busy attr:data-ep-bulk="show" on:click=mark_show>
-                    {t("episodes-mark-show")}
+                    {t(words.mark_show)}
                 </Button>
             </div>
         </div>
@@ -560,8 +563,10 @@ fn DateChoice(bulk: BulkCtx, shown: Memo<u32>, has_dates: bool) -> impl IntoView
         ui,
         in_run,
         start_on_again,
+        info,
         ..
     } = bulk;
+    let words = EpisodeWords::of(info.with_value(|i| i.verb));
     let today = crate::history::today();
     let missing = Memo::new(move |_| {
         let open = rows.with_value(|r| unwatched_in_season(r, shown.get()));
@@ -571,7 +576,7 @@ fn DateChoice(bulk: BulkCtx, shown: Memo<u32>, has_dates: bool) -> impl IntoView
     let visible = move || date_choice_shown(in_run, start_on_again, ui.again.get().is_some());
     view! {
         <Show when=visible>
-            <BulkDates ui=ui offered=offered missing=missing has_dates=has_dates/>
+            <BulkDates ui=ui offered=offered missing=missing has_dates=has_dates words=words/>
         </Show>
     }
 }
@@ -630,7 +635,9 @@ fn AskPrevious(
     ui: EpisodeUi,
     rows: StoredValue<Vec<SeasonRow>>,
     answer: Callback<(bool, bool)>,
+    verb: Option<Verb>,
 ) -> impl IntoView {
+    let words = EpisodeWords::of(verb);
     let remember = RwSignal::new(false);
     let first = NodeRef::<html::Div>::new();
     Effect::new(move |_| {
@@ -649,7 +656,7 @@ fn AskPrevious(
         let i = use_i18n();
         let all = rows.with_value(|r| unwatched_up_to(r, (s, e)));
         let earlier = all.len().saturating_sub(1);
-        let question = i.t_args("episodes-ask", &[("count", earlier.into())]);
+        let question = i.t_args(words.ask, &[("count", earlier.into())]);
         view! {
             <div node_ref=first role="group" aria-label=question.clone() data-testid="episodes-ask"
                 class="grid gap-3 rounded-md border border-info/40 bg-info-soft p-3">
@@ -663,7 +670,7 @@ fn AskPrevious(
                     </Button>
                     <span class="flex items-center gap-2">
                         <Checkbox id="episodes-remember" checked=remember/>
-                        <Label r#for="episodes-remember">{t("episodes-remember")}</Label>
+                        <Label r#for="episodes-remember">{t(words.remember)}</Label>
                     </span>
                 </div>
             </div>
@@ -704,7 +711,10 @@ fn AskAgain(bulk: BulkCtx) -> impl IntoView {
         let eps = rows.with_value(|r| standing_again(r, Some(asked)))?;
         let i = use_i18n();
         let count = eps.len();
-        let question = i.t_args(again_ask_key(verb), &[("count", count.into())]);
+        let question = i.t_args(
+            again_ask_key(verb, bulk.start_on_again),
+            &[("count", count.into())],
+        );
         // the run this answer starts is dated now: say so, the date choice is hidden
         let dated_now = bulk
             .start_on_again
@@ -807,8 +817,9 @@ fn EpisodeRow(
             destructive: false,
         },
     ];
+    let words = EpisodeWords::of(verb);
     let state = if watched {
-        i18n.t("episodes-watched")
+        i18n.t(words.done)
     } else if next {
         i18n.t("episodes-next")
     } else {
@@ -828,9 +839,9 @@ fn EpisodeRow(
                 <span class="block text-xs text-muted-foreground">{state}</span>
             </span>
             <Button size=ButtonSize::Sm variant=if next { ButtonVariant::Default } else { ButtonVariant::Ghost }
-                disabled=busy attr:aria-label=use_i18n().t_args(if watched { "episodes-mark-again" } else { "episodes-mark" }, &n)
+                disabled=busy attr:aria-label=use_i18n().t_args(if watched { words.mark_again } else { words.mark }, &n)
                 on:click=move |_| mark.run(((season, episode), false))>
-                {if watched { t("episodes-again") } else { t("episodes-watched") }}
+                {if watched { t("episodes-again") } else { t(words.done) }}
             </Button>
             <DropdownMenu label=use_i18n().t_args("episodes-row-menu", &n) items=menu
                 id=crate::episode_plan::row_menu_id(here) open=open trigger_class="size-8 px-0"

@@ -724,3 +724,100 @@ async fn the_plays_of_an_item_are_read_in_one_batch_newest_first_and_capped() {
         expected
     );
 }
+
+#[tokio::test]
+async fn the_year_filter_follows_the_persons_time_zone() {
+    use chrono::TimeZone;
+    let at = |y, mo, d, h, mi| chrono::Utc.with_ymd_and_hms(y, mo, d, h, mi, 0).unwrap();
+    let env = TestEnv::new();
+    let (_, me) = common::user(&env, "alice").await;
+    let zone = app::time_zone::parse_zone("Europe/Berlin").unwrap();
+    env.app.set_time_zone(me, Some(zone)).await.unwrap();
+    env.clock.set(at(2026, 3, 1, 12, 0));
+    let cases = [
+        ("eve", at(2025, 12, 31, 22, 30)), // 2025-12-31 23:30 in Berlin
+        ("new year", at(2025, 12, 31, 23, 30)), // 2026-01-01 00:30 in Berlin
+        ("first", at(2024, 12, 31, 23, 0)), // 2025-01-01 00:00 in Berlin, the first instant
+        ("before", at(2024, 12, 31, 22, 59)), // 2024-12-31 23:59 in Berlin
+    ];
+    for (title, when) in cases {
+        let item = common::item(&env.app, "movie", title).await;
+        env.app
+            .log_progress(me, item.id, Progress::Finished, Some(when), None)
+            .await
+            .unwrap();
+    }
+    let titles = |year: i32| {
+        let env = &env;
+        async move {
+            let q = ActivityQuery {
+                year: Some(year),
+                limit: 50,
+                ..ActivityQuery::default()
+            };
+            let page = env.app.activity_feed(me, q).await.unwrap();
+            page.rows.into_iter().map(|r| r.title).collect::<Vec<_>>()
+        }
+    };
+    assert_eq!(titles(2024).await, ["before"]);
+    assert_eq!(titles(2025).await, ["eve", "first"]);
+    assert_eq!(titles(2026).await, ["new year"]);
+    // without a zone the year is the UTC year, as before
+    env.app.set_time_zone(me, None).await.unwrap();
+    assert_eq!(titles(2025).await, ["new year", "eve"]);
+    assert_eq!(titles(2024).await, ["first", "before"]);
+    // a year no calendar holds lists nothing; it does not drop the filter (review POL-9)
+    assert_eq!(titles(i32::MAX).await.len(), 0);
+    assert_eq!(titles(300_000).await.len(), 0);
+    assert_eq!(titles(i32::MIN).await.len(), 0);
+}
+
+/// Review POL-10: the boundary lies on the other side of the UTC midnight west of Greenwich,
+/// and the southern zones are on daylight time on 1 January.
+#[tokio::test]
+async fn the_year_filter_west_of_utc_and_in_southern_daylight_time() {
+    use chrono::TimeZone;
+    let at = |y, mo, d, h, mi| chrono::Utc.with_ymd_and_hms(y, mo, d, h, mi, 0).unwrap();
+    let env = TestEnv::new();
+    let (_, me) = common::user(&env, "alice").await;
+    env.clock.set(at(2026, 3, 1, 12, 0));
+    let cases = [
+        // America/Los_Angeles, UTC-8 in winter: the year starts at 08:00 UTC
+        ("la last", at(2026, 1, 1, 7, 59)), // 2025-12-31 23:59
+        ("la first", at(2026, 1, 1, 8, 0)), // 2026-01-01 00:00
+        // Australia/Sydney, UTC+11 in its summer: the year starts at 13:00 UTC the day before
+        ("sydney last", at(2025, 12, 31, 12, 59)), // 2025-12-31 23:59
+        ("sydney first", at(2025, 12, 31, 13, 0)), // 2026-01-01 00:00
+        // America/Santiago, UTC-3 in its summer: the year starts at 03:00 UTC
+        ("santiago last", at(2026, 1, 1, 2, 59)), // 2025-12-31 23:59
+        ("santiago first", at(2026, 1, 1, 3, 0)), // 2026-01-01 00:00
+    ];
+    for (title, when) in cases {
+        let item = common::item(&env.app, "movie", title).await;
+        env.app
+            .log_progress(me, item.id, Progress::Finished, Some(when), None)
+            .await
+            .unwrap();
+    }
+    for (zone, city) in [
+        ("America/Los_Angeles", "la"),
+        ("Australia/Sydney", "sydney"),
+        ("America/Santiago", "santiago"),
+    ] {
+        let tz = app::time_zone::parse_zone(zone).unwrap();
+        env.app.set_time_zone(me, Some(tz)).await.unwrap();
+        for (year, edge) in [(2025, "last"), (2026, "first")] {
+            let q = ActivityQuery {
+                year: Some(year),
+                limit: 50,
+                ..ActivityQuery::default()
+            };
+            let page = env.app.activity_feed(me, q).await.unwrap();
+            let titles: Vec<String> = page.rows.into_iter().map(|r| r.title).collect();
+            let own = format!("{city} {edge}");
+            assert!(titles.contains(&own), "{zone} {year}: {titles:?}");
+            let other = format!("{city} {}", if edge == "last" { "first" } else { "last" });
+            assert!(!titles.contains(&other), "{zone} {year}: {titles:?}");
+        }
+    }
+}

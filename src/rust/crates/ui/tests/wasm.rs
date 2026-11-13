@@ -1101,3 +1101,63 @@ async fn command_option_renders_its_leading_slot() {
         "no slot without a leading"
     );
 }
+
+/// v1-polish P5, P7: the picture of a row may come from another host and may fail. Then the
+/// row keeps the icon of its kind and shows nothing else: the picture is taken away (no broken
+/// picture mark) and has no alternative text.
+#[wasm_bindgen_test]
+async fn a_command_row_whose_picture_fails_keeps_the_icon_and_shows_no_text() {
+    let q = RwSignal::new(String::new());
+    let items = Signal::derive(|| {
+        vec![CommandItem {
+            id: "heat".into(),
+            label: "Heat".into(),
+            group: "g".into(),
+            keywords: String::new(),
+            leading: Some(CommandLeading {
+                icon: IconName::KindMovie,
+                // a data URL that is no picture: it fails without the network
+                image: Some("data:image/png;base64,AAAA".into()),
+                square: false,
+            }),
+        }]
+    });
+    leptos::mount::mount_to_body(move || {
+        view! {
+            <Command id="w-cmd-img" label="S" placeholder="p" empty_label="none" items=items query=q
+                on_select=Callback::new(|_: CommandItem| ())/>
+        }
+    });
+    settle().await;
+    let row = el("w-cmd-img-opt-heat");
+    let img: HtmlElement = row
+        .query_selector("img")
+        .unwrap()
+        .expect("the picture")
+        .dyn_into()
+        .unwrap();
+    assert_eq!(img.get_attribute("alt").as_deref(), Some(""));
+    // lazy pictures load once they are near the viewport; give the failure time to arrive
+    row.scroll_into_view();
+    for _ in 0..200 {
+        if img.class_list().contains("hidden") {
+            break;
+        }
+        next_frame().await;
+    }
+    assert!(
+        img.class_list().contains("hidden"),
+        "the failed picture is taken away"
+    );
+    assert!(row.query_selector("[data-leading] svg").unwrap().is_some());
+    assert_eq!(row.text_content().as_deref(), Some("Heat"));
+    // review POL-16: the row is kept while the list around it changes; a picture that loads
+    // after all (its address was replaced) is shown again
+    img.dispatch_event(&web_sys::Event::new("load").unwrap())
+        .unwrap();
+    next_frame().await;
+    assert!(
+        !img.class_list().contains("hidden"),
+        "a picture that loads is shown again"
+    );
+}

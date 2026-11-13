@@ -157,3 +157,67 @@ async fn a_keyed_row_keeps_its_shell_and_leaves_with_its_key() {
     assert_eq!(count("#k1 li"), 2);
     assert!(one("#k1 li[data-key='a']").is_none(), "the card is gone");
 }
+
+/// v1-polish P5: a cover that does not load (the provider's host is down or blocked) shows
+/// what an item without a cover shows, the box with the title, and keeps its name; neither a
+/// broken picture mark nor its alternative text is drawn.
+#[wasm_bindgen_test]
+async fn a_cover_that_fails_to_load_shows_the_title_in_its_box() {
+    // a data URL that is no picture: it fails without the network
+    let broken = picture("data:image/png;base64,AAAA", vec![]);
+    let of = RwSignal::new(Some(cover("Ronin", Some(broken))));
+    leptos::mount::mount_to_body(move || {
+        provide_context(Arc::new(I18n::new("en", BTreeMap::new())));
+        view! { <div id="c3" style="width:100px"><StableCover of=of sizes="10px"/></div> }
+    });
+    settle().await;
+    let img = one("#c3 img").expect("the cover");
+    img.scroll_into_view();
+    for _ in 0..200 {
+        if one("#c3 [role='img']").is_some() {
+            break;
+        }
+        next_frame().await;
+    }
+    let boxed = one("#c3 [role='img']").expect("the box takes the picture's place");
+    assert_eq!(
+        boxed.get_attribute("aria-label").as_deref(),
+        Some("Cover of Ronin")
+    );
+    assert_eq!(boxed.text_content().unwrap_or_default().trim(), "Ronin");
+    let picture = one("#c3 picture").expect("the picture element stays");
+    assert!(
+        picture.class_list().contains("hidden"),
+        "the failed picture is not drawn"
+    );
+}
+
+/// The next animation frame.
+async fn next_frame() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::task::{Poll, Waker};
+
+    let state = Rc::new(RefCell::new((false, None::<Waker>)));
+    let done = state.clone();
+    request_animation_frame(move || {
+        let waker = {
+            let mut s = done.borrow_mut();
+            s.0 = true;
+            s.1.take()
+        };
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    });
+    std::future::poll_fn(move |cx| {
+        let mut s = state.borrow_mut();
+        if s.0 {
+            Poll::Ready(())
+        } else {
+            s.1 = Some(cx.waker().clone());
+            Poll::Pending
+        }
+    })
+    .await;
+}
