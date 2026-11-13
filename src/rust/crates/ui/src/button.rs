@@ -107,7 +107,9 @@ pub fn CardActions(
 
 /// What a link shares with a button of the same variant and size: everything but the
 /// `disabled:` states, which a link does not have.
-fn link_classes(variant: ButtonVariant, size: ButtonSize) -> String {
+/// Also for links built outside the component tree (the hydration failure notice in `web`).
+#[must_use]
+pub fn link_classes(variant: ButtonVariant, size: ButtonSize) -> String {
     cva(BASE, &[variant.classes(), size.classes()])
         .split(' ')
         .filter(|c| !c.starts_with("disabled:"))

@@ -319,7 +319,7 @@ mod hydration {
         let _ = link.set_attribute("rel", "external");
         let _ = link.set_attribute(
             "class",
-            "inline-flex h-9 items-center rounded-md border border-border px-3 font-medium underline-offset-2 hover:underline",
+            &ui::link_classes(ui::ButtonVariant::Outline, ui::ButtonSize::Md),
         );
         link.set_text_content(Some(&label));
         let _ = note.append_child(&sentence);

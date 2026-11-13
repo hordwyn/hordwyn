@@ -45,7 +45,7 @@ mod tooltip;
 pub use alert::{Alert, AlertRole, AlertVariant, EmptyState, StatusDot, StatusState};
 pub use avatar::Avatar;
 pub use badge::{Badge, BadgeVariant};
-pub use button::{Button, ButtonLink, ButtonSize, ButtonVariant, CardActions};
+pub use button::{Button, ButtonLink, ButtonSize, ButtonVariant, CardActions, link_classes};
 pub use card::{Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle};
 pub use chip::{Chip, Segmented, SegmentedMode, SegmentedOption};
 pub use class::{cn, cva, slug};
