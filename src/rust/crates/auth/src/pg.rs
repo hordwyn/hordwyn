@@ -1,5 +1,5 @@
 //! Postgres adapter for [`AuthStore`] and [`InviteStore`] (store-pg migrations
-//! `0005_auth.sql`, `0016_admin.sql`). TOTP seeds are stored encrypted (purpose
+//! `0001_v1_baseline.sql`). TOTP seeds are stored encrypted (purpose
 //! `totp_secret`, addendum-1 2.2).
 
 use std::sync::Arc;

@@ -4,9 +4,6 @@
 # There are no default passwords: compose refuses to start until both are set (SEC-6).
 # The app is published on 127.0.0.1:3000 only; put a reverse proxy with TLS in front of it
 # ("Behind a reverse proxy" in the docs), or set APP_PUBLISH_ADDR to a LAN address.
-# An instance started with the compose file before these rules existed (default passwords,
-# port 3000 on every interface): see "Coming from a build before 0034" on the Operations page
-# BEFORE the first `up` with this file; an existing database keeps its password.
 #
 # Supported shape (OPS-12): ONE web process plus any number of workers. The default below is
 # one process doing both (`--role=all`). Never start a second `--role=all` or a second

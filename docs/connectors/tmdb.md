@@ -10,7 +10,7 @@ Date checked: 2026-11-05
 | Terms | https://www.themoviedb.org/api-terms-of-use ("last updated on: October 20, 2023") |
 | FAQ (pricing) | https://developer.themoviedb.org/docs/faq |
 | Licence | Proprietary API terms. Free for non-commercial use with attribution; commercial use needs a licence from TMDB (FAQ: "Our API is free to use for non-commercial purposes as long as you attribute TMDB as the source of the data and/or images"). |
-| Auth | Bearer token (API Read Access Token, a JWT) in the `Authorization: Bearer <token>` header (https://developer.themoviedb.org/docs/authentication-application). Env: `KK_TMDB_API_KEY`. |
+| Auth | Bearer token (API Read Access Token, a JWT) in the `Authorization: Bearer <token>` header (https://developer.themoviedb.org/docs/authentication-application). Env: `SOURCE_TMDB_API_KEY`. |
 | Rate limits | The old limit (40 requests per 10 s) was disabled on 2019-12-16; upper limits "sit somewhere in the 40 requests per second range" and a 429 must be respected (https://developer.themoviedb.org/docs/rate-limiting). We use 20 req/s, burst 10, 8 concurrent, and honour `Retry-After`. |
 | Hosts | `api.themoviedb.org` (API), `image.tmdb.org` (images) |
 | Status | enabled behind cargo feature `tmdb` |
@@ -82,7 +82,7 @@ example responses published in TMDB's API reference pages (search-movie, movie-d
 search-tv, tv-series-details), fetched 2026-11-05. No API key was available, so nothing was
 recorded live. They are small JSON documents of TMDB data, used for tests under the same
 non-commercial terms. No images are committed. `cargo xtask record tmdb` re-records them when
-`KK_TMDB_API_KEY` is set.
+`SOURCE_TMDB_API_KEY` is set.
 
 ## Season episodes (WP4-7, verified 2026-11-08)
 
@@ -123,5 +123,5 @@ reference page above (season 1 of series 1399, ten episodes with their `air_date
 `episode_number`, `episode_type`, `runtime` and `season_number`; names, overviews, stills, crew
 and guest stars left out to keep it small). No key was set on 2026-11-08, so nothing was
 recorded live; `cargo xtask record tmdb` re-records it from its `request.url` when
-`KK_TMDB_API_KEY` is set. The e2e mock (`src/web/tests/tmdb-mock.mjs`) also serves one
+`SOURCE_TMDB_API_KEY` is set. The e2e mock (`src/web/tests/tmdb-mock.mjs`) also serves one
 show of its own (id 990001), written for the tests, not TMDB data.

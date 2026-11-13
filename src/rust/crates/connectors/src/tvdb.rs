@@ -24,7 +24,7 @@ use crate::util::{date_of, get_json, non_empty, post_json, year_of};
 
 pub const ID: &str = "tvdb";
 /// `<apikey>` or `<apikey>:<pin>`.
-pub const API_KEY_ENV: &str = "KK_TVDB_API_KEY";
+pub const API_KEY_ENV: &str = "SOURCE_TVDB_API_KEY";
 /// Credential fields (stored as JSON, joined with `:` into the key string).
 pub const CREDENTIALS: CredentialSpec = CredentialSpec {
     instance_fields: &["api_key"],

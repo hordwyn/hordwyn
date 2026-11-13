@@ -8,6 +8,7 @@ pub mod locales;
 pub mod ops;
 pub mod record;
 pub mod services;
+pub mod upgrade;
 pub mod whitelabel;
 
 use std::path::{Path, PathBuf};

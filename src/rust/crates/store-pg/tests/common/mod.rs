@@ -15,7 +15,11 @@ pub struct PgEnv {
 }
 
 pub async fn env() -> Option<PgEnv> {
-    let pool = store_pg::testing::fresh_db().await?;
+    Some(env_on(store_pg::testing::fresh_db().await?))
+}
+
+/// The app on the (migrated) database `pool` points at.
+pub fn env_on(pool: sqlx::PgPool) -> PgEnv {
     let store = PgStore::new(pool);
     let s = Arc::new(store.clone());
     let app = App {
@@ -38,7 +42,7 @@ pub async fn env() -> Option<PgEnv> {
         jobs: Arc::new(MemJobs::default()),
         notifications: Arc::new(testkit::RecordingNotifications::default()),
     };
-    Some(PgEnv { app, store })
+    PgEnv { app, store }
 }
 
 pub async fn user(app: &App, name: &str) -> (User, Actor) {

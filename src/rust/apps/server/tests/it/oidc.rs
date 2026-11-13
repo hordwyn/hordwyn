@@ -1915,19 +1915,19 @@ async fn reauth_round_trip_with_max_age_zero() {
 }
 
 /// The owner's provider (authentik) and `max_age=0` (od-12 3.4, 4.4): run by hand with
-/// `KK_OIDC_LIVE_ISSUER`, `KK_OIDC_LIVE_CLIENT_ID`, `KK_OIDC_LIVE_CLIENT_SECRET` and
-/// `KK_OIDC_LIVE_PUBLIC_URL` (its `/api/v1/auth/oidc/callback` registered as redirect URI)
+/// `TEST_OIDC_LIVE_ISSUER`, `TEST_OIDC_LIVE_CLIENT_ID`, `TEST_OIDC_LIVE_CLIENT_SECRET` and
+/// `TEST_OIDC_LIVE_PUBLIC_URL` (its `/api/v1/auth/oidc/callback` registered as redirect URI)
 /// plus `TEST_DATABASE_URL`. The test prints an authorization URL; open it, sign in, and
-/// paste the address the browser ends up on into the file `KK_OIDC_LIVE_CALLBACK_FILE`
+/// paste the address the browser ends up on into the file `TEST_OIDC_LIVE_CALLBACK_FILE`
 /// (default `/tmp/oidc-live-callback`) within five minutes. It passes when the provider
 /// reported a fresh `auth_time` (the probe outcome `max_age_ok`).
 #[tokio::test]
 #[ignore = "needs a real provider and a person at the browser"]
 async fn live_provider_honours_max_age_zero() {
     let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("{k} is not set"));
-    let issuer = var("KK_OIDC_LIVE_ISSUER");
-    let public = var("KK_OIDC_LIVE_PUBLIC_URL");
-    let file = std::env::var("KK_OIDC_LIVE_CALLBACK_FILE")
+    let issuer = var("TEST_OIDC_LIVE_ISSUER");
+    let public = var("TEST_OIDC_LIVE_PUBLIC_URL");
+    let file = std::env::var("TEST_OIDC_LIVE_CALLBACK_FILE")
         .unwrap_or_else(|_| "/tmp/oidc-live-callback".into());
     let db = store_pg::testing::fresh_db_url().await.expect("database");
     let toml = format!(
@@ -1935,11 +1935,11 @@ async fn live_provider_honours_max_age_zero() {
          [server]\npublic_url = \"{public}\"\n[brand]\ndir = \"{}\"\n[auth]\nsecure_cookies = false\n\
          [auth.oidc]\nissuer = \"{issuer}\"\nclient_id = \"{}\"\n",
         repo("config/brand/default"),
-        var("KK_OIDC_LIVE_CLIENT_ID"),
+        var("TEST_OIDC_LIVE_CLIENT_ID"),
     );
     let env = vec![(
         "APP__AUTH__OIDC__CLIENT_SECRET".to_string(),
-        var("KK_OIDC_LIVE_CLIENT_SECRET"),
+        var("TEST_OIDC_LIVE_CLIENT_SECRET"),
     )];
     let cfg = config::AppConfig::from_sources(&toml, env).unwrap();
     let srv = Server::build(cfg, config::ServerRole::All, Overrides::default())

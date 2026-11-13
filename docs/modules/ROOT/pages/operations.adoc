@@ -41,14 +41,21 @@ server (used before an upgrade and during a restore).
 
 == Upgrade
 
-An instance that was installed before the release with migration `0034_secrets_key_backup`
-follows "Coming from a build before 0034" (the next section) once: its first four steps
-run before the steps here.
+The routine procedure for every release. Before it:
 
-. Take the backup of the Backup section first, at least the database dump. It is the only
-  way back: an older build refuses to start on a database a newer build has migrated.
-. Get the new version and build it: `git pull`, then `dc build` (without a service name:
-  there is one image, and every container of the project runs it).
+* Read the release notes of every version between the one you run and the new one, oldest
+  first (xref:releases/index.adoc[Releases]). Their "Upgrade steps, release-specific" say
+  what a release needs beyond these steps, and when.
+* Upgrade a copy first: xref:staging.adoc[Staging]. Its checklist is the check of step 6.
+
+Then, in the production checkout:
+
+. Take the backup of the Backup section first, at least the database dump and the secrets
+  key. It is the only way back: an older build refuses to start on a database a newer build
+  has migrated.
+. Get the new version and build it: `git fetch --tags`, `git checkout vX.Y.Z`, then
+  `dc build` (without a service name: there is one image, and every container of the
+  project runs it).
 . See what it will do to the database (nothing is changed):
 +
 [source,shell]
@@ -56,18 +63,16 @@ run before the steps here.
 dc run --rm --no-deps --entrypoint cli app migrate --dry-run
 ----
 +
-This is the only command to run from the new image while the old containers are still up.
-`cli storage report` and `cli storage evict` of a new image stop with a message until its
-server has started once on the volume (they would otherwise have to move the blob
-directory under the running old server).
+It lists the migrations the release notes name. This is the only command to run from the
+new image while the old containers are still up.
 . Start it: `dc up -d`. Every container is replaced, the web process and the workers
-  together: all of them must run the same image, because two builds can disagree about
-  where the blobs are (as this release and the one before it do). If you start worker
-  containers by another route than this compose file, stop them before this step and start
-  them from the new image. The migrations run before the port opens; `dc logs -f app` shows
-  each one and then `listening`.
-. Read the upgrade notes below for the migrations that ran; run `dc exec app cli reindex`
-  when a note asks for it.
+  together: all of them must run the same image, because two builds can disagree about the
+  database and the blob store. If you start worker containers by another route than this
+  compose file, stop them before this step and start them from the new image. The
+  migrations run before the port opens; `dc logs -f app` shows each one and then
+  `listening`.
+. Do the release-specific steps of the release notes that come after the start (for
+  example `dc exec app cli reindex` when a note asks for it).
 . Check: sign in, open a title, search for one. Nobody needs a hard reload after an
   upgrade: the files of the application bundle under `/pkg` carry a hash of their content
   in their names, a page is never stored by the browser and names the files of the build
@@ -75,99 +80,6 @@ directory under the running old server).
   reloaded.
 
 The way back is its own section, "Going back".
-
-== Coming from a build before 0034
-
-Once, for an instance that was installed before the release that brought migration
-`0034_secrets_key_backup` (your checkout is such a build while it has no file
-`src/docker/compose.s3.yml`). That release changed three things for a running instance, and
-each one stops the upgrade when it is skipped:
-
-* The compose file has no default passwords any more and reads them from `config/.env`,
-  which every command of this page needs. But an existing database keeps its password.
-* The application port is published on `127.0.0.1` only, no longer on every interface.
-* The blobs moved from `/data` to `/data/blobs`, so the upload backup of the Backup section
-  does not fit the old image.
-
-Steps 1 to 4 run on the checkout you have, BEFORE `git pull`, while the instance is up.
-
-. Create the environment file if you have none:
-+
-[source,shell]
-----
-test -f config/.env || cp config/.env.example config/.env
-chmod 600 config/.env
-----
-. Write the two passwords the instance runs with into it. Ask the running container (use
-  the compose command you started it with, without `--env-file`):
-+
-[source,shell]
-----
-docker compose -f src/docker/compose.yml exec app \
-  printenv APP__DATABASE__URL APP__SEARCH__MEILI_MASTER_KEY
-# postgres://app:<database password>@postgres:5432/app
-# <search master key>
-----
-+
-An instance that was started without setting anything prints the defaults of the old
-compose file, `app` and `change-me-please-32-bytes-minimum`. Then `config/.env` gets:
-+
-[source,shell]
-----
-POSTGRES_PASSWORD=app
-MEILI_MASTER_KEY=change-me-please-32-bytes-minimum
-----
-+
-(your own values if the container printed others). Do not generate a new database password
-at this point, whatever the comment in `config/.env.example` suggests for a new
-installation: an existing database keeps its password. The postgres image applies
-`POSTGRES_PASSWORD` only when it creates an empty data directory; a new value in the file
-changes what the application sends, not what the database expects, and the application then
-restarts in a loop with `password authentication failed for user "app"`. Changing the
-password is step 8.
-. If your reverse proxy runs on another machine, or people open `http://<host>:3000`
-  directly, set `APP_PUBLISH_ADDR` in `config/.env` to this host's LAN address (for example
-  `APP_PUBLISH_ADDR=192.168.1.20`); otherwise they get "connection refused" after the
-  upgrade. With the proxy on the same host there is nothing to set.
-. Take the backup with the paths of the old image (the uploads are in `/data/up` there):
-+
-[source,shell]
-----
-dc() { docker compose --env-file config/.env -f src/docker/compose.yml "$@"; }
-mkdir -p backup && chmod 700 backup
-dc exec -T postgres pg_dump -Fc -U app app > backup/app-$(date +%F).dump
-dc exec -T app cat /data/secrets.key > backup/secrets.key && chmod 600 backup/secrets.key
-# "No such file or directory": nobody has imported a file yet, there is nothing to save
-dc exec -T app tar -C /data -cf - up > backup/up-$(date +%F).tar
-# check as in the Backup section
-dc exec -T postgres pg_restore --list < backup/app-$(date +%F).dump | grep -c 'TABLE DATA'
-grep -c '^v[0-9]*:' backup/secrets.key
-----
-. Now `git pull`, and go on with Upgrade, step 2 (`dc build`, the dry run, `dc up -d`).
-  `config/.env.example` has new optional keys; none of them is needed for the upgrade.
-. The first start of the new image moves the blob directories (see "Blob directory of
-  earlier images"; one log line per directory) and applies the migrations. `dc ps` shows
-  the three services healthy. If the application restarts with `password authentication
-  failed`, `POSTGRES_PASSWORD` in `config/.env` is not the password of step 2: correct it
-  and run `dc up -d` again; nothing is lost.
-. Admin > Overview shows "Back up the secrets key": you copied the key in step 4, so confirm
-  it. From now on the Backup section applies as written (the uploads are in
-  `/data/blobs/up`). The image has a new name; `docker image rm tracker-app` removes the old
-  one.
-. Optional, afterwards: change the database password inside the initialized volume, then in
-  the file, in this order:
-+
-[source,shell]
-----
-dc stop app                       # and the workers, if you run any
-dc exec postgres psql -U app -d app -c "ALTER USER app PASSWORD 'NEWPASSWORD'"
-# set POSTGRES_PASSWORD=NEWPASSWORD in config/.env (letters and digits only), then
-dc up -d
-----
-+
-The search master key can be changed too: set a new `MEILI_MASTER_KEY` (16 bytes or more)
-and run `dc up -d`; the application looks its own search key up with the master key at
-every start.
 
 == Going back
 
@@ -185,69 +97,25 @@ dc exec -T postgres dropdb -U app --force --if-exists --maintenance-db=postgres 
 dc exec -T postgres createdb -U app --maintenance-db=postgres app
 dc exec -T postgres pg_restore --no-owner -U app -d app < backup/app-<date>.dump
 ----
-. Only when you go back to a build from before `0034_secrets_key_backup`: that image
-  expects the blobs directly in `/data`. Move the directories back (with the image you
-  still have, before you build the old one):
-+
-[source,shell]
-----
-dc run --rm --no-deps --entrypoint sh app -c \
-  'for d in up img http orig; do
-     if [ -d /data/blobs/$d ] && [ ! -e /data/$d ]; then mv /data/blobs/$d /data/$d; fi
-   done; ls /data /data/blobs'
-----
-+
-Without this the old build finds no stored import file, fetches every picture again, and
-the bytes under `/data/blobs` stay on the volume uncounted. The secrets key does not move.
 . Check out and build the version you came from, and start it: `git checkout <version>`,
   `dc build`, `dc up -d`. `config/.env` stays as it is.
-. The search index may still list titles added after the dump; with a build that has the
-  admin tool in the image, `dc exec app cli reindex --clear` rebuilds it.
+. The search index may still list titles added after the dump; `dc exec app cli reindex
+  --clear` rebuilds it.
 
-Without a dump, a single migration can be reversed by hand where its upgrade note says how;
+Without a dump, a single migration can be reversed by hand where its release notes say how;
 then start the older build on the same database.
 
 == Upgrade notes
 
+What a release changes in the database, and any step beyond the routine ones above (for
+example a `cli reindex`), is in the release notes of that version, section "Upgrade steps,
+release-specific" (xref:releases/index.adoc[Releases]); `CHANGELOG.md` at the root of the
+repository lists the changes of every version. v1 is the first release: its database starts
+from one baseline migration, and there is nothing to upgrade from.
+
 Going back to an older build is done by restoring the database dump taken before the
 upgrade (see "Going back"), not by starting the older binary on the migrated database. Where
-a row names a manual reverse, that is the way for someone who has no dump.
-
-[cols="1,4"]
-|===
-|Migration |What to know
-
-|`0032_coop_no_result`
-|One-way for the data written after it. The migration only widens a check: a co-op play can
-be stored without a result (`sessions.coop_outcome = 'none'`); no existing row is changed.
-Once such a play has been logged, a build from before this migration cannot read that
-account's plays any more (History, People and the game's page fail with a corrupt-row
-error). To go back without a restore, first set those rows to no outcome and put the old
-check back: `UPDATE sessions SET coop_outcome = NULL WHERE coop_outcome = 'none';`, then
-`ALTER TABLE sessions DROP CONSTRAINT sessions_coop_outcome_check, ADD CONSTRAINT
-sessions_coop_outcome_check CHECK (coop_outcome IN ('won', 'lost'));`. Those plays then read
-as competitive plays without a winner.
-
-|`0033_catalog_popularity`
-|Additive (one nullable column). The search order uses the new value as a tie-break, and
-every catalog search document now carries a `popularity` number (0 when the source gives
-none). Run `cli reindex` once after the upgrade so the documents written before it carry
-the field too: on Meilisearch the order among documents without the field is not defined
-by its ranking rules. Titles kept from earlier searches get their value the next time
-their source names or refreshes them; until then they rank as before.
-
-|`0034_secrets_key_backup`
-|Additive (one nullable column). After the upgrade Admin > Overview shows "Back up the
-secrets key" once, until an administrator confirms the backup. The same release moves the
-blob directory of the container image (see "Blob directory of earlier images"), so going
-back to the build before it also needs the directories moved back ("Going back", step 3).
-An instance installed before this release upgrades by "Coming from a build before 0034".
-To go back without a restore, stop the application and remove the column and the
-migration's record: `ALTER TABLE secrets_keys DROP COLUMN backup_confirmed_at;`, then
-`DELETE FROM _sqlx_migrations WHERE version = 34;` (both with `dc exec postgres psql -U app
--d app -c "..."`). The confirmations are lost, nothing else. Audit rows of the kind
-"Secrets key backup confirmed" stay in the table.
-|===
+a release note names a manual reverse, that is the way for someone who has no dump.
 
 == Backup
 
@@ -357,8 +225,7 @@ dc exec -T postgres dropdb -U app --force --if-exists --maintenance-db=postgres 
 dc exec -T postgres createdb -U app --maintenance-db=postgres app
 dc exec -T postgres pg_restore --no-owner -U app -d app < backup/app-<date>.dump
 ----
-. Restore the import files (skip it without an archive; an archive taken from an image
-  before `0034_secrets_key_backup` unpacks the same way):
+. Restore the import files (skip it without an archive):
 +
 [source,shell]
 ----
@@ -433,29 +300,6 @@ docker image rm localhost/tracker-restore-app:local
 
 `dcr down -v` removes only what belongs to the project `tracker-restore`. The live instance
 is not stopped or changed at any point.
-
-== Blob directory of earlier images
-
-Images built before the secrets key was separated from the blobs kept the blob store
-directly in `/data`, next to (and around) `/data/secrets.key`. The image now uses
-`/data/blobs` and sets `storage.fs_legacy_root` (`APP__STORAGE__FS_LEGACY_ROOT=/data`): at
-start the server moves the directories `up`, `img`, `http` and `orig` from `/data` into
-`/data/blobs` (a rename inside the volume, logged once per directory) when `/data/blobs`
-does not have them yet. Nothing has to be done by hand, the key file stays where it is, and
-the volume layout of an existing instance keeps working with the new image.
-
-Only the server moves them. The storage commands of the admin tool (`cli storage report`,
-`cli storage evict`) stop with the directories in the message while the move is still to
-come: a container of the earlier image may still be writing there. For the same reason all
-containers on the volume must run the same image during and after the move; a worker left
-on the earlier image would keep writing to `/data` while the web process reads
-`/data/blobs`.
-
-If the move fails (for example `/data/blobs` is a different mount), the server stops with
-the two paths in the message; move the four directories yourself, or keep the old layout
-by setting `APP__STORAGE__FS_ROOT=/data` (then the key stays inside the blob directory,
-which is what this change removes). Outside the image the setting is empty and nothing is
-moved. To go back to an earlier image, see "Going back".
 
 == Secrets at rest
 
@@ -559,6 +403,7 @@ queue; they are then simply slower.
 ----
 cli reindex           # queue every catalog item, library entry and companion
 cli reindex --clear   # empty the indexes first (removes documents of deleted rows)
+cli reindex --now     # index in the command itself and wait (an instance without a worker)
 ----
 
 The worker's indexer processes queued rows in batches of 200. If Meilisearch is unreachable

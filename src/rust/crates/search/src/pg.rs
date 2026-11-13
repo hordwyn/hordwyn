@@ -1,5 +1,6 @@
 //! Postgres fallback adapter: full-text search (`simple` configuration, weighted by field
-//! importance) plus `pg_trgm` similarity, in table `search_docs` (store-pg migration 0007).
+//! importance) plus `pg_trgm` similarity, in table `search_docs` (store-pg migration
+//! `0001_v1_baseline.sql`).
 
 use app::ports::{PortError, SearchDoc, SearchHit, SearchIndex, SearchQuery};
 use async_trait::async_trait;

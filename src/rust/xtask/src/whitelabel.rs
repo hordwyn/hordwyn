@@ -101,9 +101,175 @@ fn walk(root: &Path, dir: &Path, needles: &[String], out: &mut Vec<PathBuf>) {
     }
 }
 
+/// The prefix of the short environment variables of the data sources before v1: the initials
+/// of the former codename (v1-release, plan addendum 3). Assembled at runtime so this file
+/// does not match itself.
+#[must_use]
+pub fn former_env_prefix() -> String {
+    ["K", "K_"].concat()
+}
+
+/// Records that keep the former prefix on purpose: decisions, reviews, briefs and research
+/// notes written before the rename quote the variables as they were then.
+pub const ENV_PREFIX_RECORDS: &[&str] = &[
+    "docs/DECISIONS.md",
+    "docs/HANDOFF.md",
+    "docs/fable/",
+    "docs/reviews/",
+    "docs/handoff/",
+    "docs/research/",
+    "docs/design/",
+    ".git/",
+];
+
+/// `path:line` of every variable with the [`former_env_prefix`] (the prefix at a word start,
+/// followed by an upper-case letter or `<`) in a text file outside the
+/// [`ENV_PREFIX_RECORDS`]: code, configuration, CI, the pages and the connector notes use the
+/// neutral prefix only, and there is no alias for the old names (greenfield until v1).
+#[must_use]
+pub fn former_env_prefix_offenders(root: &Path) -> Vec<String> {
+    let prefix = former_env_prefix();
+    let ignored = git_ignored(root);
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if ENV_PREFIX_RECORDS
+                .iter()
+                .any(|p| rel == p.trim_end_matches('/') || rel.starts_with(p))
+                || ignored.iter().any(|p| {
+                    rel == p.trim_end_matches('/')
+                        || (p.ends_with('/') && rel.starts_with(p.as_str()))
+                })
+            {
+                continue;
+            }
+            if path.is_dir() {
+                if !SKIPPED_DIRS.iter().any(|d| entry.file_name() == *d) {
+                    stack.push(path);
+                }
+                continue;
+            }
+            // binary files (screenshots, fonts) are not text and are skipped
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
+            for (n, line) in text.lines().enumerate() {
+                if names_env_prefix(line, &prefix) {
+                    out.push(format!("{rel}:{}", n + 1));
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The files and directories (with a trailing `/`) git ignores under `root` (REL-15): local
+/// state such as `config/.env` or `owner-inbox/` is not part of the repository. Empty when
+/// `root` is not a git checkout or git is missing.
+fn git_ignored(root: &Path) -> Vec<String> {
+    std::process::Command::new("git")
+        .args([
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+        ])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `prefix` at the start of a word and followed by an upper-case ASCII letter or `<` (a
+/// placeholder such as `<ID>`).
+fn names_env_prefix(line: &str, prefix: &str) -> bool {
+    line.match_indices(prefix).any(|(at, _)| {
+        let start = before(line, at).is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_'));
+        let next = line[at + prefix.len()..].chars().next();
+        start && next.is_some_and(|c| c.is_ascii_uppercase() || c == '<')
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// v1-release item 2: the short variables lost the former prefix; a word that merely
+    /// contains the letters is not a hit.
+    #[test]
+    fn the_former_env_prefix_is_found_at_a_word_start_only() {
+        let p = former_env_prefix();
+        assert!(names_env_prefix(&format!("export {p}TMDB_API_KEY=x"), &p));
+        assert!(names_env_prefix(&format!("`{p}<ID>_API_KEY`"), &p));
+        assert!(names_env_prefix(&format!("(\"{p}OPERATOR_CONTACT\")"), &p));
+        assert!(!names_env_prefix(&format!("BOOK{p}TITLE"), &p));
+        assert!(!names_env_prefix(&format!("{p}lower"), &p));
+        assert!(!names_env_prefix("SOURCE_TMDB_API_KEY", &p));
+        let dir = std::env::temp_dir().join(format!("wl-env-{}", std::process::id()));
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::create_dir_all(dir.join("docs/reviews")).unwrap();
+        fs::write(
+            dir.join("src/a.rs"),
+            format!("ok\nlet k = \"{p}TMDB_API_KEY\";\n"),
+        )
+        .unwrap();
+        fs::write(dir.join("docs/reviews/r.md"), format!("{p}TMDB_API_KEY")).unwrap();
+        fs::write(
+            dir.join("src/b.png"),
+            [0xff_u8, 0xfe, b'K', b'K', b'_', b'X'],
+        )
+        .unwrap();
+        let found = former_env_prefix_offenders(&dir);
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(found, vec!["src/a.rs:2".to_string()]);
+    }
+
+    /// REL-15: a git-ignored file (the local `config/.env`, `owner-inbox/`) is not part of the
+    /// repository, so the guard does not read it.
+    #[test]
+    fn the_former_env_prefix_guard_skips_ignored_files() {
+        let p = former_env_prefix();
+        let dir = std::env::temp_dir().join(format!("wl-ignored-{}", std::process::id()));
+        fs::create_dir_all(dir.join("config")).unwrap();
+        fs::create_dir_all(dir.join("owner-inbox")).unwrap();
+        let ok = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&dir)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git init");
+        fs::write(dir.join(".gitignore"), "config/.env\nowner-inbox/\n").unwrap();
+        fs::write(dir.join("config/.env"), format!("{p}TMDB_API_KEY=x\n")).unwrap();
+        fs::write(dir.join("owner-inbox/n.md"), format!("{p}TMDB_API_KEY\n")).unwrap();
+        fs::write(
+            dir.join("config/.env.example"),
+            format!("{p}TMDB_API_KEY=\n"),
+        )
+        .unwrap();
+        let found = former_env_prefix_offenders(&dir);
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(found, vec!["config/.env.example:1".to_string()]);
+    }
 
     #[test]
     fn detects_codename_outside_allowed_paths() {

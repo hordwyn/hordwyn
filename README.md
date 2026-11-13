@@ -19,9 +19,8 @@ reverse proxy, backup and restore: `docs/modules/ROOT/pages/install.adoc`,
 `reverse-proxy.adoc` and `operations.adoc`. Back up the secrets key (`/data/secrets.key`)
 together with the database.
 
-Upgrading an instance that is already running: `operations.adoc`, "Upgrade". An instance
-installed before the compose file required its passwords follows "Coming from a build before
-0034" there first (an existing database keeps its password; do not generate a new one).
+Upgrading an instance that is already running: `operations.adoc`, "Upgrade", and the release
+notes of the version (`CHANGELOG.md`, `docs/modules/ROOT/pages/releases/`).
 
 ## Development
 

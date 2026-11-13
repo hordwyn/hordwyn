@@ -20,8 +20,10 @@ const USAGE: &str = "usage: cli [--config <file>] <command>
                                    storage usage, limits, S3 counters and what eviction
                                    would remove now (--dry-run: nothing is changed)
   storage evict                    run eviction now (normally a background job)
-  reindex [--clear]                queue every catalog item, library entry and companion for
-                                   the search indexer (--clear: empty the indexes first)
+  reindex [--clear] [--now]        queue every catalog item, library entry and companion for
+                                   the search indexer (--clear: empty the indexes first;
+                                   --now: index them in this process and wait, for an
+                                   instance without a worker, such as a staging copy)
   refresh-failed [--kind <kind>] [--apply]
                                    ask the sources again for every item that never got its
                                    data (a failed refresh, or an imported title that was
@@ -47,7 +49,7 @@ enum Cmd {
     Migrate { dry_run: bool },
     StorageReport { json: bool },
     StorageEvict,
-    Reindex { clear: bool },
+    Reindex { clear: bool, now: bool },
     RefreshFailed { kind: Option<String>, apply: bool },
     MatchBooks { apply: bool },
     MatchesApplied,
@@ -117,9 +119,10 @@ fn command(words: &[&str], flags: &[&str], kind: &mut Option<String>) -> Result<
             Cmd::StorageEvict
         }
         ["reindex"] => {
-            known(&["--clear"])?;
+            known(&["--clear", "--now"])?;
             Cmd::Reindex {
                 clear: flags.contains(&"--clear"),
+                now: flags.contains(&"--now"),
             }
         }
         ["refresh-failed"] => {
@@ -282,6 +285,17 @@ async fn run(args: Args) -> Result<()> {
         .context("connect to the database")?;
     match args.cmd {
         Cmd::Migrate { dry_run: true } => {
+            let differ = store_pg::mismatched_migrations(&pool).await?;
+            if !differ.is_empty() {
+                let lines: Vec<String> = differ.iter().map(|m| format!("  {m}")).collect();
+                bail!(
+                    "the database's migrations differ from this build's, so the start would \
+                     refuse it; nothing was changed:\n{}\nA database made by a build from \
+                     before 1.0.0 cannot be upgraded; a changed released migration is a bug of \
+                     the release (see the release notes).",
+                    lines.join("\n")
+                );
+            }
             let pending = store_pg::pending_migrations(&pool).await?;
             if pending.is_empty() {
                 println!("no pending migrations");
@@ -333,12 +347,15 @@ async fn run(args: Args) -> Result<()> {
                 human(r.after)
             );
         }
-        Cmd::Reindex { clear } => {
-            if clear {
-                clear_indexes(&cfg, &pool).await?;
-            }
+        Cmd::Reindex { clear, now } => {
+            let index = open_index(&cfg, &pool, clear).await?;
             let n = search::indexer::Indexer::enqueue_all(&pool).await?;
-            println!("queued {n} documents; the worker's indexer picks them up");
+            if now {
+                let done = server::escape::index_now(&pool, index).await?;
+                println!("queued {n} documents and indexed them ({done} outbox rows)");
+            } else {
+                println!("queued {n} documents; the worker's indexer picks them up");
+            }
         }
         _ => unreachable!("handled above"),
     }
@@ -465,13 +482,21 @@ async fn meili_stats(cfg: &config::AppConfig) -> Option<(u64, u64)> {
     m.stats().await.ok()
 }
 
-async fn clear_indexes(cfg: &config::AppConfig, pool: &sqlx::PgPool) -> Result<()> {
-    match cfg.search.backend {
+/// The configured search index; `clear` empties its indexes first.
+async fn open_index(
+    cfg: &config::AppConfig,
+    pool: &sqlx::PgPool,
+    clear: bool,
+) -> Result<Arc<dyn app::ports::SearchIndex>> {
+    let index: Arc<dyn app::ports::SearchIndex> = match cfg.search.backend {
         config::SearchBackend::Postgres => {
             let pg = search::pg::PgSearch::new(pool.clone());
-            for ix in search::INDEXES {
-                pg.clear(ix).await?;
+            if clear {
+                for ix in search::INDEXES {
+                    pg.clear(ix).await?;
+                }
             }
+            Arc::new(pg)
         }
         config::SearchBackend::Meilisearch => {
             let key = cfg
@@ -485,36 +510,21 @@ async fn clear_indexes(cfg: &config::AppConfig, pool: &sqlx::PgPool) -> Result<(
                 &cfg.search.index_prefix,
             )
             .await?;
-            for ix in search::INDEXES {
-                m.clear(ix).await?;
+            if clear {
+                for ix in search::INDEXES {
+                    m.clear(ix).await?;
+                }
             }
+            Arc::new(m)
         }
+    };
+    if clear {
+        println!("search indexes cleared");
     }
-    println!("search indexes cleared");
-    Ok(())
-}
-
-/// The storage commands never move the blob directories of an earlier layout (review
-/// V1OPS-5, DEC-643): only a start of the server does. While such directories are still to
-/// be moved a server of the earlier image may be running on the volume, and moving them away
-/// under it would split the store between two roots. So the command stops and says so.
-fn refuse_pending_move(storage: &assets::StorageConfig) -> Result<()> {
-    let pending = assets::legacy_dirs_pending(storage);
-    if pending.is_empty() {
-        return Ok(());
-    }
-    let dirs: Vec<String> = pending.iter().map(|p| p.display().to_string()).collect();
-    bail!(
-        "the blob directories {} are still in the earlier layout (storage.fs_legacy_root) and \
-         only the server moves them into {}: start the server of this build first, with every \
-         container of an earlier build stopped. Nothing was changed.",
-        dirs.join(", "),
-        storage.fs_root
-    )
+    Ok(index)
 }
 
 fn budget(cfg: &config::AppConfig, pool: &sqlx::PgPool) -> Result<assets::StorageBudget> {
-    refuse_pending_move(&cfg.storage)?;
     Ok(assets::StorageBudget::open(
         cfg.storage.clone(),
         Arc::new(assets::pg::PgObjectIndex::new(pool.clone())),
@@ -558,7 +568,18 @@ mod tests {
         assert!(p("migrate --clear").is_err());
         assert_eq!(
             p("reindex --clear").unwrap().cmd,
-            Cmd::Reindex { clear: true }
+            Cmd::Reindex {
+                clear: true,
+                now: false
+            }
+        );
+        assert_eq!(
+            p("reindex --clear --now").unwrap().cmd,
+            Cmd::Reindex {
+                clear: true,
+                now: true
+            },
+            "--now: index in this process, for an instance without a worker (staging)"
         );
         assert_eq!(p("").unwrap().cmd, Cmd::Help);
         assert!(p("storage report --force").is_err());
@@ -623,33 +644,5 @@ mod tests {
         assert_eq!(human(0), "0.0 B");
         assert_eq!(human(1536), "1.5 KiB");
         assert_eq!(human(20 << 30), "20.0 GiB");
-    }
-
-    /// Review V1OPS-5: `storage report` and `storage evict` of a new image, run while the
-    /// blob directories still lie in the earlier root (an older server may be writing
-    /// there), stop with the directories in the message and move nothing.
-    #[test]
-    fn storage_commands_refuse_to_move_the_earlier_blob_directories() {
-        let data = std::env::temp_dir().join(format!("cli-layout-{}", std::process::id()));
-        std::fs::create_dir_all(data.join("img")).unwrap();
-        let storage = assets::StorageConfig {
-            backend: assets::Backend::Fs,
-            fs_root: data.join("blobs").display().to_string(),
-            fs_legacy_root: Some(data.display().to_string()),
-            ..assets::StorageConfig::default()
-        };
-        let refused = refuse_pending_move(&storage).unwrap_err().to_string();
-        assert!(
-            refused.contains(&data.join("img").display().to_string()),
-            "{refused}"
-        );
-        assert!(refused.contains("start the server"), "{refused}");
-        assert!(data.join("img").is_dir(), "nothing moved");
-        assert!(!data.join("blobs").exists(), "nothing created");
-        // once the server has moved them (or on a fresh volume) the commands run
-        std::fs::create_dir_all(data.join("blobs")).unwrap();
-        std::fs::rename(data.join("img"), data.join("blobs/img")).unwrap();
-        refuse_pending_move(&storage).unwrap();
-        std::fs::remove_dir_all(&data).unwrap();
     }
 }

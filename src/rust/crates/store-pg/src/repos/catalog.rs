@@ -446,7 +446,7 @@ impl CatalogRepo for PgStore {
     }
 
     async fn titled(&self, kind: &KindId, title: &str, limit: u32) -> Res<Vec<CatalogItem>> {
-        // the comparison the index `catalog_items_kind_title` holds (migration 0037)
+        // the comparison the index `catalog_items_kind_title` holds (v1 baseline migration)
         let ids = sqlx::query_scalar!(
             "SELECT id FROM catalog_items
              WHERE kind = $1 AND lower(btrim(title)) = lower(btrim($2))
@@ -565,7 +565,7 @@ impl CatalogRepo for PgStore {
     }
 }
 
-/// Per-episode release dates (WP4-7, migration 0027).
+/// Per-episode release dates (WP4-7, the v1 baseline migration).
 mod episodes {
     use domain::catalog::{CatalogEpisode, EpisodeSeason};
     use domain::ids::ItemId;

@@ -1,4 +1,4 @@
-//! WP4-7 on Postgres (migration 0027): a season's episodes are stored with what they were
+//! WP4-7 on Postgres (v1 baseline migration): a season's episodes are stored with what they were
 //! fetched for, replaced as a whole, kept idempotent, and go with their item.
 
 mod common;

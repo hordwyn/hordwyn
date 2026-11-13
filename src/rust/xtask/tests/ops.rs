@@ -48,16 +48,49 @@ fn the_image_contains_the_cli_and_keeps_the_key_out_of_the_blob_directory() {
     assert_eq!(found.len(), 0, "{}", found.join("\n"));
 }
 
-/// The image moves the blobs of an existing volume instead of starting on an empty store.
+/// v1-release item 1 (greenfield until v1, HANDOFF 4.8): nothing of v1 carries a path from a
+/// pre-v1 build. No blob move from the earlier image layout, no upgrade section or migration
+/// note for builds before the v1 baseline, in the deployment files, the pages and the code
+/// that read them.
 #[test]
-fn the_image_names_the_earlier_blob_root() {
-    let text = read("src/docker/Dockerfile");
-    let ins = dockerfile_instructions(&text);
-    assert!(
-        ins.iter()
-            .any(|i| i.word == "ENV" && i.args.contains("APP__STORAGE__FS_LEGACY_ROOT=/data")),
-        "APP__STORAGE__FS_LEGACY_ROOT=/data is not set in the image"
-    );
+fn no_pre_v1_upgrade_shims_are_left() {
+    let files = [
+        "src/docker/Dockerfile",
+        "src/docker/compose.yml",
+        "src/docker/compose.s3.yml",
+        "src/docker/compose.podman.yml",
+        "src/docker/compose.podman.s3.yml",
+        "config/.env.example",
+        "README.md",
+        "docs/modules/ROOT/pages/install.adoc",
+        "docs/modules/ROOT/pages/operations.adoc",
+        "docs/modules/ROOT/pages/configuration.adoc",
+        "src/rust/crates/assets/src/backend.rs",
+        "src/rust/crates/assets/src/config.rs",
+        "src/rust/crates/assets/src/lib.rs",
+        "src/rust/apps/cli/src/main.rs",
+    ];
+    let shims = [
+        "fs_legacy_root",
+        "FS_LEGACY_ROOT",
+        "legacy_dirs_pending",
+        "before 0034",
+        "Blob directory of earlier images",
+        "earlier layout",
+        "0032_coop_no_result",
+        "0033_catalog_popularity",
+        "0034_secrets_key_backup",
+    ];
+    let mut found = Vec::new();
+    for file in files {
+        let text = read(file);
+        for shim in shims {
+            if text.contains(shim) {
+                found.push(format!("{file}: `{shim}`"));
+            }
+        }
+    }
+    assert_eq!(found.len(), 0, "pre-v1 shims left:\n{}", found.join("\n"));
 }
 
 const COMPOSE_FILES: [&str; 4] = [
@@ -246,53 +279,11 @@ fn a_section_ends_at_the_next_heading_of_its_level() {
     assert_eq!(commented_service(compose, "db").len(), 0);
 }
 
-/// V1OPS-1: an instance started with the compose file before this package (default
-/// passwords, port 3000 on every interface, blobs in `/data`, no `config/.env` needed) gets
-/// its own steps, in an order that works on the old checkout.
+/// V1OPS-1, kept after v1-release: the database applies `POSTGRES_PASSWORD` only when it
+/// creates its data directory, so the first-run pages say that an existing database keeps its
+/// password (a restore or a re-created `config/.env` must not get a new one).
 #[test]
-fn the_upgrade_of_an_instance_from_before_0034_is_spelled_out() {
-    let s = ops_section("Coming from a build before 0034");
-    let what = "the section `Coming from a build before 0034`";
-    expect_all(
-        &s,
-        what,
-        &[
-            // the environment file exists before any command reads it
-            "cp config/.env.example config/.env",
-            // the database keeps the password it was initialized with
-            "POSTGRES_PASSWORD=app",
-            "an existing database keeps its password",
-            // ... or it is changed inside the initialized volume, then in the file
-            "ALTER USER app PASSWORD",
-            "MEILI_MASTER_KEY",
-            // the port is on loopback now
-            "APP_PUBLISH_ADDR",
-            // the old image keeps the uploads in /data/up
-            "tar -C /data -cf - up",
-            "pg_dump -Fc",
-            "git pull",
-        ],
-    );
-    expect_order(
-        &s,
-        what,
-        "cp config/.env.example config/.env",
-        "pg_dump -Fc",
-    );
-    // the step that pulls comes after everything that needs the old checkout
-    let pull = "Now `git pull`";
-    expect_order(&s, what, "POSTGRES_PASSWORD=app", pull);
-    expect_order(&s, what, "tar -C /data -cf - up", pull);
-    expect_order(&s, what, "APP_PUBLISH_ADDR=", pull);
-    expect_order(&s, what, pull, "ALTER USER app PASSWORD");
-    // the general steps point at it before their first command
-    let upgrade = ops_section("Upgrade");
-    expect_order(
-        &upgrade,
-        "the section `Upgrade`",
-        "Coming from a build before 0034",
-        "git pull",
-    );
+fn an_existing_database_keeps_its_password() {
     for file in [
         "config/.env.example",
         "docs/modules/ROOT/pages/install.adoc",
@@ -356,12 +347,7 @@ fn a_restore_can_be_rehearsed_beside_the_live_instance() {
 /// V1OPS-3: the store has four top-level directories; each place that lists them lists four.
 #[test]
 fn the_docs_name_all_four_blob_directories() {
-    let moved = ops_section("Blob directory of earlier images");
-    let reference = read("docs/modules/ROOT/pages/configuration.adoc");
-    let setting = reference
-        .lines()
-        .find(|l| l.contains("APP__STORAGE__FS_LEGACY_ROOT"))
-        .expect("fs_legacy_root in the configuration reference");
+    let backup = ops_section("Backup");
     let image = read("src/docker/Dockerfile");
     let comment = image
         .lines()
@@ -369,20 +355,25 @@ fn the_docs_name_all_four_blob_directories() {
         .take_while(|l| l.starts_with('#'))
         .collect::<Vec<_>>()
         .join("\n");
-    for (what, text) in [
-        (
-            "operations.adoc, Blob directory of earlier images",
-            moved.as_str(),
-        ),
-        ("configuration.adoc, storage.fs_legacy_root", setting),
-        ("the Dockerfile comment on the volume", comment.as_str()),
-    ] {
-        expect_all(text, what, &["`up`", "`img`", "`http`", "`orig`"]);
-    }
+    expect_all(
+        &backup,
+        "operations.adoc, Backup",
+        &[
+            "/data/blobs/up",
+            "/data/blobs/img",
+            "/data/blobs/http",
+            "/data/blobs/orig",
+        ],
+    );
+    expect_all(
+        &comment,
+        "the Dockerfile comment on the volume",
+        &["`up`", "`img`", "`http`", "`orig`"],
+    );
 }
 
 /// V1OPS-4: the way back is complete: an empty database instead of `--clean` on a migrated
-/// one, the blob directories back where the older image looks, and a manual reverse of 0034.
+/// one, then the older build.
 #[test]
 fn the_way_back_is_complete() {
     let s = ops_section("Going back");
@@ -395,9 +386,6 @@ fn the_way_back_is_complete() {
             "dropdb -U app --force",
             "createdb -U app",
             "pg_restore --no-owner -U app -d app",
-            "/data/blobs/$d",
-            "mv ",
-            "for d in up img http orig",
             "git checkout",
             "dc build",
         ],
@@ -405,7 +393,7 @@ fn the_way_back_is_complete() {
     assert!(!s.contains("--clean"), "{what} uses pg_restore --clean");
     expect_order(&s, what, "dc stop app", "dropdb -U app --force");
     expect_order(&s, what, "createdb -U app", "pg_restore --no-owner");
-    expect_order(&s, what, "mv ", "git checkout");
+    expect_order(&s, what, "pg_restore --no-owner", "git checkout");
     // the restore itself does not rely on --clean either (a started, migrated instance)
     let restore = ops_section("Restore");
     assert!(
@@ -416,15 +404,6 @@ fn the_way_back_is_complete() {
         &restore,
         "the section `Restore`",
         &["dropdb -U app --force", "createdb -U app"],
-    );
-    let notes = ops_section("Upgrade notes");
-    expect_all(
-        &notes,
-        "the 0034 upgrade note",
-        &[
-            "ALTER TABLE secrets_keys DROP COLUMN backup_confirmed_at;",
-            "DELETE FROM _sqlx_migrations WHERE version = 34;",
-        ],
     );
 }
 
@@ -463,7 +442,7 @@ fn every_container_runs_the_image_the_app_service_builds() {
         !s.contains("dc build app"),
         "{what} builds the app service only"
     );
-    expect_all(&s, what, &["`dc build`", "the same image", "cli storage"]);
+    expect_all(&s, what, &["`dc build`", "the same image"]);
 }
 
 /// V1OPS-6: what is under `up/` are import files; nothing promises more.
@@ -505,4 +484,196 @@ fn the_restore_waits_for_the_services() {
     let s = ops_section("Restore");
     assert!(s.contains("dc up -d --wait postgres meilisearch"));
     assert!(!s.contains("dc up -d postgres meilisearch"));
+}
+
+/// v1-release item 5: from v1 on every release has a changelog entry, release notes with the
+/// four sections, a routine upgrade that starts from them, and a staging copy that never
+/// touches production.
+#[test]
+fn the_release_process_is_written_down() {
+    let changelog = read("CHANGELOG.md");
+    expect_all(
+        &changelog,
+        "CHANGELOG.md",
+        &[
+            "https://keepachangelog.com/en/1.1.0/",
+            "## [Unreleased]",
+            "## [1.0.0]",
+            "### Added",
+        ],
+    );
+    expect_order(&changelog, "CHANGELOG.md", "## [Unreleased]", "## [1.0.0]");
+    let sections = [
+        "== Highlights",
+        "== Upgrade steps, routine",
+        "== Upgrade steps, release-specific",
+        "== Known issues",
+        "== Rollback",
+    ];
+    for page in ["template.adoc", "v1.0.0.adoc"] {
+        let text = read(&format!("docs/modules/ROOT/pages/releases/{page}"));
+        expect_all(&text, page, &sections);
+        for pair in sections.windows(2) {
+            expect_order(&text, page, pair[0], pair[1]);
+        }
+    }
+    let upgrade = ops_section("Upgrade");
+    expect_all(
+        &upgrade,
+        "the section `Upgrade`",
+        &[
+            "xref:releases/index.adoc",
+            "xref:staging.adoc",
+            "migrate --dry-run",
+        ],
+    );
+    expect_order(
+        &upgrade,
+        "the section `Upgrade`",
+        "xref:staging.adoc",
+        "dc up -d",
+    );
+    let staging = read("docs/modules/ROOT/pages/staging.adoc");
+    expect_all(
+        &staging,
+        "staging.adoc",
+        &[
+            "-p tracker-staging",
+            "APP_PUBLISH_PORT=3002",
+            "APP_ROLE=web",
+            "APP_IMAGE=",
+            "git worktree add",
+            "migrate --dry-run",
+            "dcs down -v",
+            "== Checklist",
+        ],
+    );
+    assert!(
+        !staging.contains("dc down"),
+        "staging.adoc stops production"
+    );
+    expect_order(
+        &staging,
+        "staging.adoc",
+        "== Checklist",
+        "== Then production",
+    );
+    let nav = read("docs/modules/ROOT/nav.adoc");
+    for page in [
+        "staging.adoc",
+        "releases/index.adoc",
+        "releases/v1.0.0.adoc",
+    ] {
+        assert!(nav.contains(page), "nav.adoc lacks {page}");
+    }
+}
+
+/// REL-1: the staging copy runs without a worker (`APP_ROLE=web`: it must send no
+/// notification), so whatever its checklist asks of background work has to run in the
+/// command itself. `cli reindex` only queues for the worker's indexer; on the copy it needs
+/// `--now`, and the CLI has that option.
+#[test]
+fn the_staging_page_and_the_role_it_uses_fit_together() {
+    let staging = read("docs/modules/ROOT/pages/staging.adoc");
+    let mut roles: Vec<&str> = staging
+        .split("APP_ROLE=")
+        .skip(1)
+        .map(|rest| {
+            rest.split_whitespace()
+                .next()
+                .unwrap_or_default()
+                .trim_end_matches('`')
+        })
+        .collect();
+    roles.dedup();
+    assert_eq!(
+        roles,
+        ["web"],
+        "the copy runs the web role only (a worker would send notifications)"
+    );
+    let reindex: Vec<&str> = staging
+        .lines()
+        .filter(|l| l.contains("cli reindex"))
+        .collect();
+    assert!(
+        !reindex.is_empty(),
+        "the checklist checks the search on the copy"
+    );
+    for line in reindex {
+        assert!(
+            line.contains("--now"),
+            "without a worker `cli reindex` only queues: `{line}`"
+        );
+    }
+    let cli = read("src/rust/apps/cli/src/main.rs");
+    assert!(
+        cli.contains("reindex [--clear] [--now]"),
+        "the CLI has no `reindex --now`"
+    );
+}
+
+/// REL-2, REL-7, REL-8, REL-10, REL-11: the release checklist and the staging page agree:
+/// staging checks a candidate tag before the release tag exists, the release tag goes on
+/// the commit that passed; the copy never uses the production bucket and finds the backup.
+#[test]
+fn the_release_checklist_and_the_staging_page_agree() {
+    let handoff = read("docs/HANDOFF.md");
+    let checklist = section_of(&handoff, "### Release checklist");
+    for (a, b) in [
+        ("**Version.**", "**Website.**"),
+        ("**Website.**", "**Release candidate.**"),
+        ("**Upgrade test.**", "**Release candidate.**"),
+        ("**Release candidate.**", "**Staging (owner).**"),
+        ("**Staging (owner).**", "**Tag and push.**"),
+    ] {
+        expect_order(&checklist, "the release checklist", a, b);
+    }
+    expect_all(
+        &checklist,
+        "the release checklist",
+        &[
+            "vX.Y.Z-rc.N",
+            "vX.Y.Z-rc.N^{commit}",
+            "Cargo.lock",
+            "features.toml",
+            "released-migrations.txt",
+        ],
+    );
+    let staging = read("docs/modules/ROOT/pages/staging.adoc");
+    expect_all(
+        &staging,
+        "staging.adoc",
+        &[
+            "vX.Y.Z-rc.N",
+            "APP__STORAGE__BACKEND=fs",
+            "ln -s \"$PWD/backup\" ../tracker-staging/backup",
+        ],
+    );
+    expect_order(
+        &staging,
+        "staging.adoc",
+        "APP__STORAGE__BACKEND=fs",
+        "dcs build",
+    );
+    let template = read("docs/modules/ROOT/pages/releases/template.adoc");
+    assert!(
+        !template.contains("git pull"),
+        "template.adoc: `git pull` fails on the detached checkout of the last upgrade"
+    );
+    assert!(
+        template.contains("git checkout vX.Y.Z"),
+        "template.adoc names the checkout of operations.adoc"
+    );
+}
+
+/// The text from the Markdown heading `start` to the next heading of its level or above.
+fn section_of(text: &str, start: &str) -> String {
+    let at = text.find(start).unwrap_or_else(|| panic!("no `{start}`"));
+    let level = start.split(' ').next().unwrap_or_default().len();
+    let rest = &text[at + start.len()..];
+    let end = (1..=level)
+        .filter_map(|n| rest.find(&format!("\n{} ", "#".repeat(n))))
+        .min()
+        .unwrap_or(rest.len());
+    format!("{start}{}", &rest[..end])
 }

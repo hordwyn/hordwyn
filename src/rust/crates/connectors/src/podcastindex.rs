@@ -18,7 +18,7 @@ use crate::util::{get_json, non_empty};
 
 pub const ID: &str = "podcastindex";
 /// `<api_key>:<api_secret>`.
-pub const API_KEY_ENV: &str = "KK_PODCASTINDEX_API_KEY";
+pub const API_KEY_ENV: &str = "SOURCE_PODCASTINDEX_API_KEY";
 /// Credential fields (stored as JSON, joined with `:` into the key string).
 pub const CREDENTIALS: CredentialSpec = CredentialSpec {
     instance_fields: &["api_key", "api_secret"],

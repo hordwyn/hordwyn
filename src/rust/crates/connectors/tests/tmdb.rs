@@ -234,7 +234,7 @@ async fn refresh_turns_a_stub_into_a_full_item() {
     assert_eq!(env.events.topics(), vec!["entity.updated".to_string()]);
 }
 
-/// Live smoke test; needs `KK_TMDB_API_KEY`.
+/// Live smoke test; needs `SOURCE_TMDB_API_KEY`.
 #[tokio::test]
 #[ignore = "talks to the real TMDB API"]
 async fn live_search() {

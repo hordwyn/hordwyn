@@ -247,6 +247,58 @@ async fn the_cli_escape_hatches_work_and_are_audited_as_cli() {
     std::fs::remove_dir_all(&h.dir).unwrap();
 }
 
+/// REL-1: `cli reindex --clear --now` fills the search index without a worker (a staging
+/// copy runs `--role=web`, so nothing else would index what `reindex` queued).
+#[tokio::test]
+async fn reindex_now_fills_the_index_without_a_worker() {
+    let Some(db) = store_pg::testing::fresh_db_url().await else {
+        return;
+    };
+    let h = Box::pin(hatches(&db)).await;
+    h.srv
+        .app
+        .upsert_catalog_item(app::NewCatalogItem {
+            kind: domain::kind::KindId::new("movie").unwrap(),
+            title: "Heat".into(),
+            original_title: None,
+            year: Some(1995),
+            description: Some("bank robbery in Los Angeles".into()),
+            external_ids: vec![domain::catalog::ExternalId::new("tmdb", "949")],
+            attributes: json!({}),
+            cover_url: None,
+            popularity: None,
+        })
+        .await
+        .unwrap();
+    let viewer: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+        .fetch_one(&h.pool)
+        .await
+        .unwrap();
+    let find = || app::ports::SearchQuery {
+        index: "catalog".into(),
+        text: "robbery".into(),
+        viewer: domain::ids::UserId(viewer),
+        filters: vec![],
+        limit: 10,
+    };
+    // `reindex --clear` queues; without a worker nothing reaches the index
+    search::pg::PgSearch::new(h.pool.clone())
+        .clear("catalog")
+        .await
+        .unwrap();
+    search::indexer::Indexer::enqueue_all(&h.pool)
+        .await
+        .unwrap();
+    assert_eq!(h.srv.search.search(find()).await.unwrap().len(), 0);
+    // `--now` indexes in the calling process
+    let done = server::escape::index_now(&h.pool, h.srv.search.clone())
+        .await
+        .unwrap();
+    assert!(done > 0);
+    assert_eq!(h.srv.search.search(find()).await.unwrap().len(), 1);
+    std::fs::remove_dir_all(&h.dir).unwrap();
+}
+
 /// DEC-283: SIGHUP re-reads the key file; a set without a version still in use is refused
 /// (the loaded ring stays), a set that keeps it is taken, and the reload is audited.
 #[tokio::test]

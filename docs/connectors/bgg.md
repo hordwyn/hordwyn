@@ -14,7 +14,7 @@ token, R-P2). Off by default when built (rule Q11 style: terms are restrictive a
 | Terms | wiki page "XML API Terms of Use" (linked from the usage guide; exact URL to confirm) and the site Terms of Service, https://boardgamegeek.com/terms |
 | Licence of data | worldwide, non-exclusive, royalty-free licence to reproduce and display, **strictly non-commercial**, revocable by BGG at any time for any reason; Wikipedia-sourced text is CC BY-NC-SA 3.0 |
 | Images | not addressed by the terms; default: never stored in our storage (see below) |
-| Auth | registered application per instance, `Authorization: Bearer <token>` (no colon), host `boardgamegeek.com` without `www`; env `KK_BGG_TOKEN` |
+| Auth | registered application per instance, `Authorization: Bearer <token>` (no colon), host `boardgamegeek.com` without `www`; env `SOURCE_BGG_TOKEN` |
 | Rate limits | 500/503 when too fast; "a 5-second wait between requests seems to suffice"; `thing` takes at most 20 ids; requests server-side only, cached, kept to a minimum; usage visible per application on https://boardgamegeek.com/applications |
 | Collections | `collection` may answer 202 (queued): retry with delay; expansions need a second call (`subtype=boardgameexpansion`) |
 | Attribution | "Data from BoardGameGeek" by name on every use; "Powered by BGG" logo linked to BoardGameGeek in public-facing uses, text legible (logo files not received yet) |

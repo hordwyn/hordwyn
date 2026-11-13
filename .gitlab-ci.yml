@@ -114,6 +114,25 @@ test:
       case "$code" in 200|409) ;; *) exit 1 ;; esac
     - cargo test --workspace --features "$NATIVE_FEATURES"
 
+# Every pipeline (v1-release item 6, REL-5): the database of the newest release tag below
+# this commit, with its seed, migrated by this build and read back, so a changed released
+# migration fails on main and in a merge request, not first on the tag. Needs the whole
+# history for the tags (GIT_DEPTH 0). Before v1 (and on the v1 tag) there is no earlier
+# release and the command skips with a message.
+upgrade-test:
+  extends: .rust
+  stage: test
+  services:
+    - name: postgres:18.6-alpine
+      alias: postgres
+  variables:
+    GIT_DEPTH: "0"
+    TEST_DATABASE_URL: "postgres://app:app@postgres:5432/app_test"
+    REQUIRE_SERVICES: "1"
+  script:
+    - git fetch --tags --force --quiet
+    - cargo xtask upgrade-test
+
 wasm-test:
   extends: .rust
   stage: test

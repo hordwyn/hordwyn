@@ -6,6 +6,7 @@
 
 mod conv;
 mod repos;
+pub mod schema;
 pub mod testing;
 mod tx;
 
@@ -116,6 +117,77 @@ pub async fn pending_migrations(pool: &PgPool) -> Result<Vec<PendingMigration>, 
         .map(|m| PendingMigration {
             version: m.version,
             description: m.description.to_string(),
+        })
+        .collect())
+}
+
+/// An applied migration of the database that this build's set does not match: `migrate`
+/// (sqlx's `Migrator::run`) refuses to start on such a database.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MigrationMismatch {
+    /// This build has the version, with another checksum: the file changed after it was
+    /// applied (a released migration must never change).
+    Changed { version: i64, description: String },
+    /// This build does not have the version: the database was made by another build (one
+    /// from before the v1 baseline, or a newer one).
+    Unknown { version: i64, description: String },
+}
+
+impl std::fmt::Display for MigrationMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Changed {
+                version,
+                description,
+            } => write!(
+                f,
+                "{version:04} {description}: applied, but this build's file has changed"
+            ),
+            Self::Unknown {
+                version,
+                description,
+            } => write!(
+                f,
+                "{version:04} {description}: applied, but this build does not have it"
+            ),
+        }
+    }
+}
+
+/// The applied migrations of the database that differ from this build's (REL-13), read-only
+/// like [`pending_migrations`]: the dry run reports them, because the start would fail on
+/// them. Empty for a database of this build or one that was never migrated.
+///
+/// # Errors
+/// Database errors.
+pub async fn mismatched_migrations(pool: &PgPool) -> Result<Vec<MigrationMismatch>, sqlx::Error> {
+    let applied: Vec<(i64, String, Vec<u8>)> = match sqlx::query_as(
+        "SELECT version, description, checksum FROM _sqlx_migrations WHERE success ORDER BY version",
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(v) => v,
+        Err(sqlx::Error::Database(e)) if e.code().as_deref() == Some("42P01") => Vec::new(),
+        Err(e) => return Err(e),
+    };
+    Ok(applied
+        .into_iter()
+        .filter_map(|(version, description, checksum)| {
+            match MIGRATOR
+                .iter()
+                .find(|m| !m.migration_type.is_down_migration() && m.version == version)
+            {
+                None => Some(MigrationMismatch::Unknown {
+                    version,
+                    description,
+                }),
+                Some(m) if *m.checksum != *checksum => Some(MigrationMismatch::Changed {
+                    version,
+                    description: m.description.to_string(),
+                }),
+                Some(_) => None,
+            }
         })
         .collect())
 }

@@ -1,5 +1,5 @@
 //! Postgres adapters for [`ObjectIndex`] and [`AssetRepo`] (tables from store-pg migration
-//! `0004_storage.sql`).
+//! `0001_v1_baseline.sql`).
 
 use app::ports::PortError;
 use async_trait::async_trait;

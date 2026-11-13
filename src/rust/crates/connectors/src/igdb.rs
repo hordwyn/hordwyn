@@ -20,7 +20,7 @@ use crate::util::{non_empty, post_json};
 
 pub const ID: &str = "igdb";
 /// `<client_id>:<client_secret>` from the Twitch developer console.
-pub const API_KEY_ENV: &str = "KK_IGDB_API_KEY";
+pub const API_KEY_ENV: &str = "SOURCE_IGDB_API_KEY";
 /// Credential fields (stored as JSON, joined with `:` into the key string).
 pub const CREDENTIALS: CredentialSpec = CredentialSpec {
     instance_fields: &["client_id", "client_secret"],

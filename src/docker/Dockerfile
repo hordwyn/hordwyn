@@ -57,12 +57,9 @@ ENV LEPTOS_SITE_ROOT=/srv/site \
     LEPTOS_ENV=PROD \
     APP__BRAND__DIR=/etc/app/brand/default \
     APP__STORAGE__FS_ROOT=/data/blobs \
-    APP__STORAGE__FS_LEGACY_ROOT=/data \
     APP__SECRETS__KEY_FILE=/data/secrets.key
-# One volume, two things in it: the blob store under /data/blobs and the secrets key next to
-# it, never inside it (OPS-3). Images before this layout kept the blobs in /data itself;
-# FS_LEGACY_ROOT lets the server move `up`, `img`, `http` and `orig` into /data/blobs at
-# start (the server only: the storage commands of `cli` refuse to run until it has).
+# One volume, two things in it: the blob store under /data/blobs (its directories `up`,
+# `img`, `http` and `orig`) and the secrets key next to it, never inside it (OPS-3).
 # Relative default paths (an empty APP__SECRETS__KEY_FILE in an env file) resolve to /data too.
 WORKDIR /
 USER app

@@ -14,3 +14,15 @@ version = ""
 
 # ids confirmed to be in that release
 confirmed = []
+
+# Prepared for v1 (v1-release item 9; set by the owner or the orchestrator when v1 is tagged,
+# with version = "v1.0.0", the tag, after reading the features page against it). Every id a page
+# names today; all of them are in v1 (docs: What v1 covers). book, board_game and
+# manual_entry are still marked "coming" in features.toml and home.toml: switch them to
+# "shipped" in the same change, or the pages keep calling them "Coming".
+# confirmed = [
+#   "movie", "show", "book", "podcast", "video_game", "board_game",
+#   "people", "lists", "history", "import_export", "notifications", "integrations",
+#   "accounts", "themes_languages", "white_label", "manual_entry",
+#   "security_headers",
+# ]

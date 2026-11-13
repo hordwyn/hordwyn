@@ -1,0 +1,32 @@
+= Releases
+
+Each release has a page of release notes here; `CHANGELOG.md` at the root of the repository
+lists the changes of every version in one file
+(https://keepachangelog.com/en/1.1.0/[Keep a Changelog 1.1.0]). Release tags are named
+`v<major>.<minor>.<patch>` (https://semver.org/spec/v2.0.0.html[Semantic Versioning 2.0.0]).
+
+[cols="1,1,3"]
+|===
+|Version |Date |Notes
+
+|1.0.0
+|not released yet
+|xref:releases/v1.0.0.adoc[Release notes 1.0.0]: the first release. There is nothing to
+upgrade from.
+|===
+
+== How to upgrade
+
+. Read the release notes of every version between the one you run and the one you install,
+  oldest first: their "Upgrade steps, release-specific" add to the routine steps.
+. Try the upgrade on a copy first: xref:staging.adoc[Staging].
+. Upgrade the instance: xref:operations.adoc#_upgrade[Operations, Upgrade] (the routine
+  steps: backup, dry run, start, check). The way back is
+  xref:operations.adoc#_going_back[Going back].
+
+== Writing the notes of a release
+
+Copy xref:releases/template.adoc[the template] to `releases/v<version>.adoc`, fill in every
+section (write "None." rather than leaving one out), add the row above and the page to the
+navigation, and move the lines of "Unreleased" in `CHANGELOG.md` under the new version. The
+release checklist is in `docs/HANDOFF.md`, section 1.

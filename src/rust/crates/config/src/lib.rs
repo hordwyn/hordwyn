@@ -373,8 +373,8 @@ impl Default for BrandConfig {
 pub struct ConnectorConfig {
     /// Compiled-in connectors are on unless switched off here.
     pub enabled: bool,
-    /// API key or token. Prefer `APP__CONNECTORS__<ID>__API_KEY`; `KK_<ID>_API_KEY` is read
-    /// as a fallback.
+    /// API key or token. Prefer `APP__CONNECTORS__<ID>__API_KEY`; `SOURCE_<ID>_API_KEY` is
+    /// read as a fallback.
     #[serde(skip_serializing)]
     pub api_key: Option<Secret>,
     /// Override of the API base URL (tests, mirrors). Its host is added to the allowlist.
@@ -529,7 +529,7 @@ pub struct InstanceConfig {
     /// https URL, at most 200 characters. Sent in the `User-Agent` of requests to the data
     /// sources that ask clients to identify themselves (Open Library, Wikidata), to no other
     /// source; Wikidata is not asked without one.
-    /// Short form: `KK_OPERATOR_CONTACT`. When set here or in the environment the admin area
+    /// Short form: `SOURCE_OPERATOR_CONTACT`. When set here or in the environment the admin area
     /// shows it read-only; otherwise Admin > Data sources stores it in the database.
     pub operator_contact: Option<String>,
 }
@@ -668,7 +668,12 @@ fn leaf_paths(table: &toml::Table, prefix: &str, out: &mut BTreeMap<String, Orig
 }
 
 /// Short form of `APP__INSTANCE__OPERATOR_CONTACT`.
-pub const OPERATOR_CONTACT_ENV: &str = "KK_OPERATOR_CONTACT";
+pub const OPERATOR_CONTACT_ENV: &str = "SOURCE_OPERATOR_CONTACT";
+
+/// Prefix of the short variables of the data sources: `SOURCE_<ID>_API_KEY` and
+/// [`OPERATOR_CONTACT_ENV`] (v1-release item 2: no brand in it, and no alias for the names
+/// before v1).
+pub const SOURCE_ENV_PREFIX: &str = "SOURCE_";
 
 /// Apply `APP__A__B=value` overrides onto a TOML table, recording each key's variable.
 fn apply_env(
@@ -734,10 +739,10 @@ impl AppConfig {
         let mut cfg: Self = toml::Value::Table(table)
             .try_into()
             .map_err(|e: toml::de::Error| ConfigError::Parse(e.to_string()))?;
-        // Legacy-style key variables (`KK_TMDB_API_KEY`, KICKOFF section 5) as fallback.
+        // Short key variables (`SOURCE_TMDB_API_KEY`, KICKOFF section 5) as fallback.
         for (k, v) in &env {
             if let Some(id) = k
-                .strip_prefix("KK_")
+                .strip_prefix(SOURCE_ENV_PREFIX)
                 .and_then(|r| r.strip_suffix("_API_KEY"))
             {
                 let c = cfg
@@ -1103,9 +1108,14 @@ mod tests {
         assert!(!off.connectors["tmdb"].enabled);
     }
 
+    /// v1-release item 2: the short key variables carry the neutral prefix `SOURCE_`; the
+    /// prefix of the former codename is not read (no alias, greenfield until v1).
     #[test]
-    fn kk_key_variables_are_a_fallback() {
-        let c = AppConfig::from_sources("", env(&[("KK_TMDB_API_KEY", "k")])).unwrap();
+    fn source_key_variables_are_a_fallback() {
+        let old = ["K", "K_TMDB_API_KEY"].concat();
+        let c = AppConfig::from_sources("", env(&[(old.as_str(), "k")])).unwrap();
+        assert!(!c.connectors.contains_key("tmdb"));
+        let c = AppConfig::from_sources("", env(&[("SOURCE_TMDB_API_KEY", "k")])).unwrap();
         assert!(c.connectors["tmdb"].enabled);
         assert_eq!(
             c.connectors["tmdb"].api_key.as_ref().map(Secret::expose),
@@ -1150,7 +1160,7 @@ mod tests {
             env(&[
                 ("APP__AUTH__SECURE_COOKIES", "false"),
                 ("APP__STORAGE__HIGH_WATERMARK", "0.85"),
-                ("KK_TMDB_API_KEY", "k"),
+                ("SOURCE_TMDB_API_KEY", "k"),
             ]),
         )
         .unwrap();
@@ -1166,7 +1176,7 @@ mod tests {
         );
         assert_eq!(
             c.origin("connectors.tmdb.api_key"),
-            Some(&Origin::Env("KK_TMDB_API_KEY".into()))
+            Some(&Origin::Env("SOURCE_TMDB_API_KEY".into()))
         );
         assert_eq!(c.origin("storage.max_total_bytes"), None);
         assert_eq!(c.origin("instance.hosting"), None);
@@ -1242,9 +1252,9 @@ mod tests {
         let c = AppConfig::from_sources("", env(&[])).unwrap();
         assert_eq!(c.instance.operator_contact, None);
         assert_eq!(c.origin("instance.operator_contact"), None);
-        let c = AppConfig::from_sources("", env(&[("KK_OPERATOR_CONTACT", "")])).unwrap();
+        let c = AppConfig::from_sources("", env(&[("SOURCE_OPERATOR_CONTACT", "")])).unwrap();
         assert_eq!(c.instance.operator_contact, None);
-        let c = AppConfig::from_sources("", env(&[("KK_OPERATOR_CONTACT", "ops@example.org")]))
+        let c = AppConfig::from_sources("", env(&[("SOURCE_OPERATOR_CONTACT", "ops@example.org")]))
             .unwrap();
         assert_eq!(
             c.instance.operator_contact.as_deref(),
@@ -1252,12 +1262,12 @@ mod tests {
         );
         assert_eq!(
             c.origin("instance.operator_contact"),
-            Some(&Origin::Env("KK_OPERATOR_CONTACT".into()))
+            Some(&Origin::Env("SOURCE_OPERATOR_CONTACT".into()))
         );
         let c = AppConfig::from_sources(
             "",
             env(&[
-                ("KK_OPERATOR_CONTACT", "ops@example.org"),
+                ("SOURCE_OPERATOR_CONTACT", "ops@example.org"),
                 ("APP__INSTANCE__OPERATOR_CONTACT", "https://example.org/me"),
             ]),
         )

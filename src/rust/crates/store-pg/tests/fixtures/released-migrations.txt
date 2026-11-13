@@ -1,0 +1,9 @@
+# The migrations that are in a release tag (REL-5), one line each:
+#   <version> <SHA-384 of the file, the checksum sqlx records> <file>
+# Checked by the store-pg test `released_migrations_have_not_changed` in every run: a
+# released file must never change, not even a comment (an upgraded instance would refuse to
+# start). At each release, append the lines of the release's new migrations (that test
+# prints them as "not released yet"); never edit a line. The v1 baseline is listed before
+# the v1.0.0 tag so that a change to it is a deliberate edit of this file; from the tag on
+# its line is fixed.
+0001 7b5fc783557aa1a1a05afa83cb8b3a56805a34398c0e366f2d2ea78399e8bf336bfbc17f5ed45a7f033476fffb04867f 0001_v1_baseline.sql

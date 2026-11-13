@@ -1126,7 +1126,7 @@ fn tally_plays(
 /// ot2f: the grouped read behind the "Plays" tab and the Stats Play tab answers what the
 /// rule in Rust answers ([`app::ports::fold_play_totals`]) for every kind of play: wins,
 /// ties, plays without a winner, a play the person did not take part in, the three co-op
-/// outcomes (OT-18: `none` is stored, migration 0032), and a second item.
+/// outcomes (OT-18: `none` is stored, the v1 baseline migration), and a second item.
 #[tokio::test]
 async fn play_totals_on_postgres_match_the_rule_in_rust() {
     use app::ports::{ItemPlayTotals, SessionRepo, fold_play_totals};
@@ -1419,91 +1419,4 @@ async fn a_completion_by_hand_keeps_its_day_on_postgres() {
         .unwrap();
     same_stats(&env, uid, "dropped").await;
     assert_eq!(completion_months(&env, me).await, [month("2025-03", 1)]);
-}
-
-/// Review BOOK-4: a database that held Completed entries before the completion columns
-/// existed. The migration dates them by the rule (the newest effective event, else undated;
-/// none for an entry an event completed) and makes every user's cache rebuild, so the
-/// statistics show them at the next read and not entry by entry as each is touched.
-#[tokio::test]
-async fn the_completion_migration_dates_existing_entries_and_rebuilds_the_cache() {
-    use chrono::TimeZone;
-    use domain::library::HandCompletion;
-    let Some(env) = common::env().await else {
-        return;
-    };
-    let app = &env.app;
-    let (_, me) = common::user(app, "alice").await;
-    let none = || serde_json::json!({});
-    let read = chrono::Utc.with_ymd_and_hms(2025, 3, 31, 20, 0, 0).unwrap();
-    let dune = item(app, "book", "Dune", None, none()).await;
-    let emma = item(app, "book", "Emma", None, none()).await;
-    let heat = item(app, "movie", "Heat", None, none()).await;
-    let page = Progress::Paged {
-        page: Some(100),
-        chapter: None,
-        volume: None,
-    };
-    app.log_progress(me, dune.id, page, Some(read), None)
-        .await
-        .unwrap();
-    for book in [&dune, &emma] {
-        app.set_status(me, book.id, Status::completed(), None)
-            .await
-            .unwrap();
-    }
-    app.log_progress(me, heat.id, Progress::Finished, None, None)
-        .await
-        .unwrap();
-    same_stats(&env, me.user_id, "before").await;
-
-    // back to the state before the migration: no columns, and a cache that was built
-    // without the completions of the two books
-    let migration = store_pg::MIGRATOR
-        .iter()
-        .find(|m| m.description == "hand completions")
-        .expect("the migration of this package");
-    sqlx::raw_sql(
-        "DROP TRIGGER stats_entry_changed ON library_entries;
-         DROP TRIGGER library_entry_completion ON library_entries;
-         DROP FUNCTION stats_entry_changed();
-         DROP FUNCTION library_entry_completion();
-         ALTER TABLE library_entries DROP COLUMN completed_at, DROP COLUMN completed_undated;
-         UPDATE stats_item_months SET completions = 0 WHERE kind = 'book';
-         UPDATE stats_months SET completions = 0 WHERE kind = 'book';
-         DELETE FROM stats_item_months WHERE month = '';
-         DELETE FROM stats_months WHERE month = '';
-         DELETE FROM stats_dirty;",
-    )
-    .execute(env.store.pool())
-    .await
-    .unwrap();
-    sqlx::raw_sql(migration.sql.clone())
-        .execute(env.store.pool())
-        .await
-        .unwrap();
-
-    let completed = |id: domain::ids::ItemId| async move {
-        let e = app.entry(me, id).await.unwrap().unwrap();
-        e.completed
-    };
-    assert_eq!(completed(dune.id).await, Some(HandCompletion::At(read)));
-    assert_eq!(completed(emma.id).await, Some(HandCompletion::Undated));
-    assert_eq!(
-        completed(heat.id).await,
-        None,
-        "the event is its completion"
-    );
-    same_stats(&env, me.user_id, "after the migration").await;
-    assert_eq!(
-        app.stats_totals(me)
-            .await
-            .unwrap()
-            .overall
-            .amounts
-            .completions,
-        3
-    );
-    let books = completion_months(&env, me).await;
-    assert!(books.contains(&("2025-03".to_string(), 1)), "{books:?}");
 }
