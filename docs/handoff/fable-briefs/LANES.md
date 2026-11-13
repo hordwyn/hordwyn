@@ -37,3 +37,7 @@ Process rules (added 2026-11-13, from lane C):
 - Under parallel load the browser suite runs about twice as slow; a test that hits its timeout
   only under load is reported, not given a longer timeout as a workaround - the orchestrator
   judges it in the main-checkout gate.
+- Gate flag: while the orchestrator's gate runs in the main checkout, the file
+  `<projects dir>/.gate-running` exists. Before starting Playwright, the server `it`
+  binary or any cargo command with more than CARGO_BUILD_JOBS=1, check it; if it exists, do
+  code work or single-crate unit tests only, and poll every 2 minutes until it is gone.
