@@ -1,5 +1,5 @@
 site:
-  title: Tracker documentation
+  title: Hordwyn documentation
   start_page: tracker::index.adoc
 content:
   sources:

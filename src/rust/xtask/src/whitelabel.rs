@@ -1,16 +1,29 @@
-//! White-label guards (KICKOFF rule 9): the codename must not appear in code, and no colour is
-//! written down outside the brand folder.
+//! White-label guards (KICKOFF rule 9): the product name (and the codename it replaced) must
+//! not appear in code, and no colour is written down outside the brand folder.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The codename, assembled at runtime so this file does not match itself.
+/// The name of the default brand, assembled at runtime so this file does not match itself.
 #[must_use]
 pub fn codename() -> String {
+    ["hord", "wyn"].concat()
+}
+
+/// The codename the product had before it was renamed. It stays forbidden in code so that
+/// the old name does not linger.
+#[must_use]
+pub fn former_codename() -> String {
     ["kith", "keep"].concat()
 }
 
-/// Paths (relative to the repo root, `/`-separated) that may contain the codename.
+/// Every name the guard looks for (lowercase): the current one and the former one.
+#[must_use]
+pub fn codenames() -> Vec<String> {
+    vec![codename(), former_codename()]
+}
+
+/// Paths (relative to the repo root, `/`-separated) that may contain a codename.
 pub const ALLOWED_PREFIXES: &[&str] = &[
     "config/brand/",
     "docs/",
@@ -33,18 +46,18 @@ pub const SKIPPED_DIRS: &[&str] = &[
     ".dev",
 ];
 
-/// Return every file under `root` that contains the codename (case-insensitive) outside the
-/// allowed locations.
+/// Return every file under `root` that contains one of the [`codenames`] (case-insensitive,
+/// in its text or in its path) outside the allowed locations.
 #[must_use]
 pub fn offenders(root: &Path) -> Vec<PathBuf> {
-    let needle = codename();
+    let needles = codenames();
     let mut out = Vec::new();
-    walk(root, root, &needle, &mut out);
+    walk(root, root, &needles, &mut out);
     out.sort();
     out
 }
 
-fn walk(root: &Path, dir: &Path, needle: &str, out: &mut Vec<PathBuf>) {
+fn walk(root: &Path, dir: &Path, needles: &[String], out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -66,14 +79,21 @@ fn walk(root: &Path, dir: &Path, needle: &str, out: &mut Vec<PathBuf>) {
             if SKIPPED_DIRS.iter().any(|d| name == *d) {
                 continue;
             }
-            walk(root, &path, needle, out);
-        } else if let Ok(bytes) = fs::read(&path)
-            && (String::from_utf8_lossy(&bytes)
-                .to_lowercase()
-                .contains(needle)
-                || rel.to_lowercase().contains(needle))
-        {
-            out.push(PathBuf::from(rel));
+            walk(root, &path, needles, out);
+        } else if let Ok(bytes) = fs::read(&path) {
+            let text = String::from_utf8_lossy(&bytes).to_lowercase();
+            let rel = rel.to_lowercase();
+            if needles
+                .iter()
+                .any(|n| text.contains(n.as_str()) || rel.contains(n.as_str()))
+            {
+                out.push(PathBuf::from(
+                    path.strip_prefix(root)
+                        .unwrap_or(&path)
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                ));
+            }
         }
     }
 }
@@ -97,6 +117,33 @@ mod tests {
         let found = offenders(&dir);
         fs::remove_dir_all(&dir).unwrap();
         assert_eq!(found, vec![PathBuf::from("src/a.rs")]);
+    }
+
+    /// The rename (2026-11-12): the new name is guarded, and the old one stays forbidden.
+    #[test]
+    fn detects_the_current_and_the_former_name() {
+        let current = ["hord", "wyn"].concat();
+        let former = ["kith", "keep"].concat();
+        let dir = std::env::temp_dir().join(format!("wl-names-{}", std::process::id()));
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::create_dir_all(dir.join("docs")).unwrap();
+        let mut title = current.clone();
+        title[..1].make_ascii_uppercase();
+        fs::write(dir.join("src/new.rs"), format!("// {title}")).unwrap();
+        fs::write(dir.join("src/old.rs"), format!("// {former}")).unwrap();
+        fs::write(dir.join(format!("src/{current}.txt")), "x").unwrap();
+        fs::write(dir.join("src/ok.rs"), "fn hoard() {}").unwrap();
+        fs::write(dir.join("docs/a.md"), format!("{current} {former}")).unwrap();
+        let found = offenders(&dir);
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(
+            found,
+            vec![
+                PathBuf::from(format!("src/{current}.txt")),
+                PathBuf::from("src/new.rs"),
+                PathBuf::from("src/old.rs"),
+            ]
+        );
     }
 }
 

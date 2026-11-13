@@ -1,5 +1,9 @@
 # Design: self-hosted life tracker (codename: `kithkeep`)
 
+> Note (2026-11-12): the product is now named hordwyn (display name "Hordwyn"); this input
+> document is kept as written. Where it says `kithkeep`, read `hordwyn`. See
+> `docs/research/names.md` sections 10-11 and `docs/HANDOFF.md` section 4.8.
+
 Status: draft v0.3 - input for the kickoff prompt.
 License: MIT.
 Clean-room note: this document is the **only** reference for implementation. No GPL-family

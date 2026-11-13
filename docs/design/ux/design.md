@@ -5,7 +5,7 @@ Status: proposal v1, 2026-11-06; owner rulings applied (owner review 2026-11-06,
 implements it in the Leptos/Tailwind codebase (`src/rust/crates/ui`, `src/rust/crates/web`).
 
 Conventions: the product is white-label, so this document calls it "the product" or
-"[Brand]". The codename stays in `config/brand/default/brand.toml` only. Every claim that
+"[Brand]". The default name (Hordwyn) stays in `config/brand/default/brand.toml` only. Every claim that
 rests on outside evidence points to a numbered finding in `research.md` as `[R-nn]`; everything
 else is design judgement and is marked as such where it matters. ASCII throughout, except the
 German microcopy examples.
@@ -196,8 +196,9 @@ sharp s to stay safe in any file.
 
 ### 2.5 Naming guidance for the white-label default
 
-- The codename stays the default `name` in `config/brand/default/brand.toml`; it is a
-  placeholder and nothing in the UI depends on its meaning. The docs and the mockups use
+- The default `name` in `config/brand/default/brand.toml` is "Hordwyn" (since 2026-11-12;
+  before that a codename); nothing in the UI depends on its meaning. The docs and the
+  mockups use
   "[Brand]".
 - Rules for an operator's name (brand guide): one or two words, readable at 14 px in the
   wordmark slot, works as a cookie prefix (`short_name` reduced to `[a-z0-9]`), does not

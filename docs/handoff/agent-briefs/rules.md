@@ -1,11 +1,12 @@
-COMMON RULES FOR THIS WORK PACKAGE (repo <repo>, project "kithkeep"):
+COMMON RULES FOR THIS WORK PACKAGE (repo <repo>, project "hordwyn"):
 - Read docs/HANDOFF.md sections 2 (KICKOFF rules, verbatim, binding) and 4 (owner rulings, they win) first.
 - Key rules: no hallucination (cite sources, docs.rs etc.); never block, pick a default and record it in
   docs/DECISIONS.md (next free number, format `DEC-NNN | question | choice | alternatives | how to reverse | source`;
   check the last number right before writing, other agents append too); ASCII only in code/docs/commits/file names
   (except non-English .ftl files); TEST-DRIVEN: write the failing test, run it, see it fail, then implement;
   no GPL/AGPL/LGPL code ever; icons only from the vendored free libraries, never hand-drawn SVG paths;
-  white-label: the string "kithkeep" must not appear in code outside config/brand/ and docs/;
+  white-label: the product name "hordwyn" (and the former codename "kithkeep") must not appear in code outside
+  config/brand/ and docs/;
   no AI attribution anywhere; clippy pedantic as errors; #![deny(unsafe_code)]; thiserror in libs.
 - Pedantic gotchas: no assert!(x.is_empty()) (use assert_eq!(x.len(), 0)), functions <= 100 lines.
 - Build host: 2 vCPU, 4 GB RAM, little disk. Other agents work in the SAME checkout at the same time on other

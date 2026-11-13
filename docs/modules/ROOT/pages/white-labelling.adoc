@@ -1,7 +1,8 @@
 = White-labelling
 
 No product name, logo, colour, domain or support URL is hard-coded. Everything brand
-specific comes from a brand directory; a test fails if the codename appears in code outside
+specific comes from a brand directory; a test fails if the default name (or the former
+codename) appears in code outside
 `config/brand/` and `docs/`, and a second one if component code writes down a colour (see
 "Colours").
 
