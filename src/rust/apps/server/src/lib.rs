@@ -200,6 +200,12 @@ fn default_registry(cfg: &AppConfig) -> (Registry, Vec<(String, String, Vec<Stri
         Some(b) => connectors::openlibrary::OpenLibrary::with_base_urls(&b, &b),
         None => connectors::openlibrary::OpenLibrary::new(),
     }));
+    // no key; board games (DEC-641); asked only with the operator contact (`Required`)
+    #[cfg(feature = "wikidata")]
+    all.push(Arc::new(match base("wikidata") {
+        Some(b) => connectors::wikidata::Wikidata::with_base_url(&b),
+        None => connectors::wikidata::Wikidata::new(),
+    }));
     #[cfg(feature = "podcastindex")]
     all.push(Arc::new(match base("podcastindex") {
         Some(b) => connectors::podcastindex::PodcastIndex::with_base_url(key("podcastindex"), &b),
@@ -308,7 +314,10 @@ impl Server {
             .map_err(|e| anyhow::anyhow!("instance.operator_contact: {e}"))?;
         let registry = registry
             .with_stats(stats.clone())
-            .with_contact(contact.clone());
+            .with_contact(contact.clone())
+            // the instance language: what a refresh asks the sources in, and a search of a
+            // member who left their language automatic (WD-2, LB-35)
+            .with_language(&brand.default_locale);
         // `instance.hosting`, shared by the admin API (which changes it) and the governed
         // client (fair share of the interactive lane in hosted mode, design.md 4.1)
         let hosting = Arc::new(std::sync::RwLock::new(

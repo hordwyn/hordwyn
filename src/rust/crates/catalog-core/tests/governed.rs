@@ -488,3 +488,45 @@ async fn a_source_without_a_key_takes_its_turn_from_the_shared_pace() {
         [("fake".to_string(), half), ("fake".to_string(), half)]
     );
 }
+
+/// WD-4: a pause a connector asks for (an error object in an HTTP 200 answer) holds the next
+/// request to that source: a short one is waited for, a long one fails fast and sends nothing.
+#[tokio::test]
+async fn a_pause_asked_by_a_connector_holds_the_next_request() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+        .mount(&server)
+        .await;
+    let http = client(&server, policy(&server));
+    http.pause("fake", Duration::from_millis(400));
+    let t = Instant::now();
+    http.fetch(get(&server, "/short")).await.unwrap();
+    assert!(
+        t.elapsed() >= Duration::from_millis(350),
+        "{:?}",
+        t.elapsed()
+    );
+    http.pause("fake", Duration::from_secs(60));
+    let r = http.fetch(get(&server, "/long")).await;
+    assert!(
+        matches!(r, Err(HttpError::RateLimited { retry_after_ms }) if retry_after_ms > 50_000),
+        "{r:?}"
+    );
+    assert_eq!(http.upstream_calls(), 1);
+}
+
+/// WD-6 (API:Etiquette): the client asks for a compressed answer.
+#[tokio::test]
+async fn requests_ask_for_a_compressed_answer() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/gz"))
+        .and(wiremock::matchers::header_regex("accept-encoding", "gzip"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+        .mount(&server)
+        .await;
+    let http = client(&server, policy(&server));
+    let r = http.fetch(get(&server, "/gz")).await.unwrap();
+    assert_eq!(r.status, 200, "no Accept-Encoding: gzip");
+}

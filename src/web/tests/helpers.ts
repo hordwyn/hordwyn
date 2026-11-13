@@ -41,6 +41,9 @@ export async function signUp(page: Page, user: string, display = "") {
 // whose sessions the re-authentication spec may age.
 export const ADMIN = "e2eadmin";
 export const REAUTH_ADMIN = "e2ereauth";
+// The operator contact the setup gives the instance (v1-wikidata): Wikidata, the source of board
+// games, is asked only with one. Only contact.spec.ts takes it away, after every other spec.
+export const E2E_CONTACT = "e2e@example.org";
 
 /** Sign in through the API; the browser context keeps the session cookie. */
 export async function signIn(page: Page, user: string) {

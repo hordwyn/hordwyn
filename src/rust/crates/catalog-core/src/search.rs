@@ -20,11 +20,13 @@ use crate::registry::Registry;
 
 /// The requesting member's own credential per connector id (`CredentialSpec::user_fields`
 /// joined with `:`), handed to that connector only ([`Ctx::user_key`]). `Debug` prints the
-/// connector ids only (UX2-S9).
+/// connector ids only (UX2-S9). It also carries who searches: the member (fair share) and
+/// the language they chose (WD-2).
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct UserKeys(
     BTreeMap<String, Zeroizing<String>>,
     Option<domain::ids::UserId>,
+    Option<String>,
 );
 
 impl UserKeys {
@@ -37,7 +39,20 @@ impl UserKeys {
     /// hosted mode, design.md 4.1).
     #[must_use]
     pub fn for_user(user: domain::ids::UserId) -> Self {
-        Self(BTreeMap::new(), Some(user))
+        Self(BTreeMap::new(), Some(user), None)
+    }
+
+    /// The language the member chose (`None`: automatic, the instance language applies).
+    #[must_use]
+    pub fn with_language(mut self, language: Option<String>) -> Self {
+        self.2 = language;
+        self
+    }
+
+    /// The member's chosen language, if any.
+    #[must_use]
+    pub fn language(&self) -> Option<&str> {
+        self.2.as_deref()
     }
 
     /// The member these searches are made for.
@@ -164,7 +179,11 @@ impl SearchFanout {
             let req = SearchRequest {
                 kind,
                 query: query.to_string(),
-                language: None,
+                // the member's chosen language, else the instance language (WD-2, LB-35)
+                language: user_keys
+                    .language()
+                    .or(self.registry.language())
+                    .map(String::from),
                 limit,
             };
             pending.push(async move {

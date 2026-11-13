@@ -4,6 +4,7 @@
   "description": "Attributes of a board game (D-9a). People (designers, artists, publishers) are\ncatalog relations, not attributes.",
   "properties": {
     "bgg_id": {
+      "description": "BoardGameGeek id: a reference for the outbound link, not a matching key (LB-36).",
       "format": "uint64",
       "minimum": 0,
       "type": [
@@ -12,6 +13,13 @@
       ]
     },
     "categories": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "gtins": {
+      "description": "GTINs (EAN/UPC) of editions: references, not matching keys (LB-36).",
       "items": {
         "type": "string"
       },

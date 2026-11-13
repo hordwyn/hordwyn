@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./fixtures";
-import { ADMIN, expectNoA11yViolations, hydrated, signIn, signUp } from "./helpers";
+import { ADMIN, E2E_CONTACT, expectNoA11yViolations, hydrated, signIn, signUp } from "./helpers";
 
 // v1-books (docs/fable/round2/v1-plan.md 3): books come from Open Library (the mock in
 // tests/openlibrary-mock.mjs serves the recorded answers). A title search in the Read scope
@@ -143,8 +143,9 @@ test("the operator contact is saved on Admin > Data sources and Open Library wor
   await expect(card).toContainText("Book data and covers from Open Library.");
   await expectNoA11yViolations(page, "sources with the contact field");
 
-  // the contact can be removed again
-  await page.getByTestId("operator-contact").getByLabel("Operator contact").fill("");
+  // the contact of the other specs is put back (Wikidata needs one; removing it is
+  // contact.spec.ts, which runs after every other spec)
+  await page.getByTestId("operator-contact").getByLabel("Operator contact").fill(E2E_CONTACT);
   await page.getByTestId("operator-contact").getByRole("button", { name: "Save" }).click();
-  await expect(page.getByTestId("operator-contact").getByRole("status")).toContainText("Removed. Requests carry no contact now.");
+  await expect(page.getByTestId("operator-contact").getByRole("status")).toContainText("Saved.");
 });

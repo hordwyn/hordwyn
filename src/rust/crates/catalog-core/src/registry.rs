@@ -21,9 +21,25 @@ pub struct Registry {
     /// The operator contact (shared by clones): a connector that requires it is not usable
     /// without one.
     contact: Option<OperatorContact>,
+    /// The instance language (the brand's `default_locale`): what a refresh asks the sources
+    /// in, and a search of a member who left their language automatic (WD-2).
+    language: Option<String>,
 }
 
 impl Registry {
+    /// The instance language the sources are asked in when no member's language applies.
+    #[must_use]
+    pub fn with_language(mut self, language: &str) -> Self {
+        self.language = Some(language.to_string());
+        self
+    }
+
+    /// The instance language, if set.
+    #[must_use]
+    pub fn language(&self) -> Option<&str> {
+        self.language.as_deref()
+    }
+
     /// Read rejections (401/403) from the governed client's counters.
     #[must_use]
     pub fn with_stats(mut self, stats: Arc<SourceStats>) -> Self {

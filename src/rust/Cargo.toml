@@ -57,7 +57,8 @@ sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio
 tokio-util = "0.7.20"
 fastrand = "2.5.0"
 croner = "4.0.3"
-reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2"] }
+# gzip: API:Etiquette (Wikidata) asks for compressed transfer; decoded before parse and cache (LB-38)
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2", "gzip"] }
 governor = "0.10.4"
 blake3 = "1.8.7"
 httpdate = "1.0.3"

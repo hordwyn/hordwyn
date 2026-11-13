@@ -20,7 +20,7 @@ use crate::admin_api;
 use crate::admin_state::source_state;
 use crate::api;
 use crate::events::use_events;
-use crate::i18n::{I18n, t, use_i18n};
+use crate::i18n::{I18n, kind_label, t, use_i18n};
 use crate::next_step::{
     LoggedStep, StepCtx, logged_step_label, run_step, step_progress, toast_added,
 };
@@ -1103,10 +1103,16 @@ fn SourceFooter(status: SourceStatusPageDto, actions: bool) -> impl IntoView {
     let rows = footer_items(&status);
     (!rows.is_empty()).then(|| {
         let rows = rows.into_iter().map(|row| match row {
-            FooterItem::Source { name, state, action, .. } => {
+            FooterItem::Source { name, state, action, kinds, .. } => {
                 // a word for every state, working too (colour is never the only cue, UX2-W4)
                 let word = t(&format!("source-state-{state}"));
-                let label = i18n.t_args("search-footer-source", &[("source", name.clone().into()), ("state", word.into())]);
+                let label = if state == "needs_contact" && !kinds.is_empty() {
+                    // what waits for the contact: "Wikidata (Board game): Operator contact missing"
+                    let kinds = kinds.iter().map(|k| kind_label(k)).collect::<Vec<_>>().join(", ");
+                    i18n.t_args("search-footer-source-kinds", &[("source", name.clone().into()), ("kinds", kinds.into()), ("state", word.into())])
+                } else {
+                    i18n.t_args("search-footer-source", &[("source", name.clone().into()), ("state", word.into())])
+                };
                 let dot = source_state(&state);
                 view! {
                     <li class="flex flex-wrap items-center gap-x-2">
@@ -1562,7 +1568,7 @@ mod tests {
             width,
             mime: mime.into(),
         };
-        let mut stored = dto("a", "Azul", "bgg");
+        let mut stored = dto("a", "Azul", "example");
         stored.kind = "board_game".into();
         stored.cover = Some(contracts::ImageDto {
             url: "/assets/h/card.webp".into(),
@@ -1579,7 +1585,7 @@ mod tests {
         if !provider {
             assert_eq!(thumb(&stored).as_deref(), Some("/assets/h/thumb.webp"));
             assert_eq!(
-                to_item(&stored, "bgg").leading,
+                to_item(&stored, "example").leading,
                 Some(CommandLeading {
                     icon: ui::IconName::KindBoardGame,
                     image: Some("/assets/h/thumb.webp".into()),

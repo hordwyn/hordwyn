@@ -19,5 +19,7 @@ pub mod podcastindex;
 pub mod tmdb;
 #[cfg(feature = "tvdb")]
 pub mod tvdb;
+#[cfg(feature = "wikidata")]
+pub mod wikidata;
 
 pub use util::{get_json, post_json};

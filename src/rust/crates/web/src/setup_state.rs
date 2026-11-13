@@ -154,7 +154,7 @@ mod tests {
             source("igdb", "missing", &["client_id", "client_secret"]),
             source("tvdb", "db", &["api_key"]),
             source("podcastindex", "missing", &["api_key", "api_secret"]),
-            source("bgg", "missing", &["api_key"]),
+            source("example", "missing", &["api_key"]),
         ];
         assert_eq!(open_sources(&list), vec!["igdb", "podcastindex"]);
         assert!(!needs_key(&list[0]), "set by the environment");

@@ -298,12 +298,8 @@ impl GovernedHttp {
         self
     }
 
-    /// The operator contact, if one is set.
-    fn contact_value(&self) -> Option<String> {
-        self.contact.as_ref().and_then(|(_, c)| c.get())
-    }
-
-    /// The `User-Agent` of a connector that gets the contact: `<product> (<contact>)`.
+    /// The `User-Agent` of a connector that gets the contact: `<product> (<contact>)`. Read
+    /// once per request (WD-7): the request is refused or sent with what this one read.
     fn contact_agent(&self, g: &Governed) -> Option<String> {
         if g.policy.contact == ContactUse::None {
             return None;
@@ -354,11 +350,15 @@ impl GovernedHttp {
         req: &HttpRequest,
         key: &str,
         cached: Option<(CacheEntry, Vec<u8>)>,
+        agent: Option<&str>,
     ) -> Result<HttpResponse, HttpError> {
         let span = tracing::Span::current();
         let mut attempt = 0u32;
         loop {
-            match self.attempt(g, req, key, cached.as_ref(), attempt).await {
+            match self
+                .attempt(g, req, key, cached.as_ref(), attempt, agent)
+                .await
+            {
                 Step::Done(r) => {
                     if let Ok(resp) = &r {
                         span.record("status", resp.status);
@@ -380,6 +380,7 @@ impl GovernedHttp {
         key: &str,
         cached: Option<&(CacheEntry, Vec<u8>)>,
         attempt: u32,
+        agent: Option<&str>,
     ) -> Step {
         let retries_left = attempt < g.policy.max_retries;
         if !g.breaker.allow() {
@@ -406,7 +407,7 @@ impl GovernedHttp {
         for (k, v) in &req.headers {
             rb = rb.header(k, v);
         }
-        if let Some(agent) = self.contact_agent(g) {
+        if let Some(agent) = agent {
             rb = rb.header(reqwest::header::USER_AGENT, agent);
         }
         if let Some((entry, _)) = cached {
@@ -568,8 +569,10 @@ impl HttpFetch for GovernedHttp {
             let g = self.connectors.get(&req.connector).ok_or_else(|| {
                 HttpError::Blocked(format!("unknown connector `{}`", req.connector))
             })?;
-            // a source that requires the operator contact is not asked without one
-            if g.policy.contact == ContactUse::Required && self.contact_value().is_none() {
+            // the contact is read once for this request (WD-7); a source that requires it is
+            // not asked without one
+            let agent = self.contact_agent(g);
+            if g.policy.contact == ContactUse::Required && agent.is_none() {
                 return Err(HttpError::Blocked(format!(
                     "connector `{}` needs the operator contact and none is set",
                     req.connector
@@ -613,15 +616,23 @@ impl HttpFetch for GovernedHttp {
             }
             span.record("cache", if cached.is_some() { "stale" } else { "miss" });
             if !cacheable {
-                return self.upstream(g, &req, &key, None).await;
+                return self.upstream(g, &req, &key, None, agent.as_deref()).await;
             }
             let flight = format!("{}|{key}", req.connector);
             self.flights
-                .run(&flight, || self.upstream(g, &req, &key, cached))
+                .run(&flight, || {
+                    self.upstream(g, &req, &key, cached, agent.as_deref())
+                })
                 .await
         }
         .instrument(span)
         .await
+    }
+
+    fn pause(&self, connector: &str, wait: Duration) {
+        if let Some(g) = self.connectors.get(connector) {
+            g.pause_for(wait);
+        }
     }
 }
 

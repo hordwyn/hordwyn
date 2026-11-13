@@ -461,7 +461,8 @@ pub struct InstanceConfig {
     pub hosting: Hosting,
     /// Contact of the person who runs the instance: an e-mail address (preferred) or an
     /// https URL, at most 200 characters. Sent in the `User-Agent` of requests to the data
-    /// sources that ask clients to identify themselves (Open Library), to no other source.
+    /// sources that ask clients to identify themselves (Open Library, Wikidata), to no other
+    /// source; Wikidata is not asked without one.
     /// Short form: `KK_OPERATOR_CONTACT`. When set here or in the environment the admin area
     /// shows it read-only; otherwise Admin > Data sources stores it in the database.
     pub operator_contact: Option<String>,

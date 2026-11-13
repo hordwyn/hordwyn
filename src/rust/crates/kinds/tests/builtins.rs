@@ -68,7 +68,11 @@ fn descriptor_schema_and_facets() {
     assert_eq!(d.attributes_schema["type"], "object");
     assert!(d.attributes_schema["properties"]["players_best"].is_object());
     assert!(d.facets.contains(&"mechanics".to_string()));
-    assert_eq!(d.default_connectors, vec!["bgg".to_string()]);
+    assert_eq!(
+        d.default_connectors,
+        vec!["wikidata".to_string()],
+        "no BGG (DEC-530)"
+    );
     assert!(
         r.get(&id("video_game"))
             .unwrap()

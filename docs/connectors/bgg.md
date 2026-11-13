@@ -1,5 +1,7 @@
 # Connector: BoardGameGeek (`bgg`)
 
+Since v1-wikidata (2026-11-13) the BoardGameGeek id of a board game arrives from Wikidata (P2339) as a reference identifier only (`attributes.bgg_id` and an outbound link; not an external id, so it never merges two catalogue items, LB-36); nothing is fetched from BoardGameGeek.
+
 Date checked: 2026-11-06 (texts supplied by the owner; this build host cannot reach the site,
 DEC-107). Status: **terms recorded, not implemented yet** (waits for the owner's application
 token, R-P2). Off by default when built (rule Q11 style: terms are restrictive and revocable).

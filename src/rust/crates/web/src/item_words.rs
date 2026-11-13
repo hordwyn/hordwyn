@@ -426,6 +426,96 @@ pub fn again_line(i: &I18n, verb: Option<Verb>, finished: u32) -> Option<String>
     })
 }
 
+/// The facts of a board game in words, each with its label: "Players" "2-4 players",
+/// "Playing time" "60-90 min", "Age" "from 10 years" (v1-plan 4b point 7), instead of the
+/// raw numbers of the attributes. Facts the source does not have are left out.
+#[must_use]
+pub fn game_facts(i: &I18n, attributes: &serde_json::Value) -> Vec<(String, String)> {
+    let number = |key: &str| attributes.get(key).and_then(serde_json::Value::as_u64);
+    let mut out = Vec::new();
+    let players = range_text(
+        i,
+        number("players_min"),
+        number("players_max"),
+        [
+            "game-players",
+            "game-players-range",
+            "game-players-from",
+            "game-players-up-to",
+        ],
+    );
+    if let Some(p) = players {
+        out.push((i.t("game-fact-players"), p));
+    }
+    let time = range_text(
+        i,
+        number("playtime_min_minutes"),
+        number("playtime_max_minutes"),
+        [
+            "game-minutes",
+            "game-minutes-range",
+            "game-minutes-from",
+            "game-minutes-up-to",
+        ],
+    );
+    if let Some(t) = time {
+        out.push((i.t("game-fact-time"), t));
+    }
+    if let Some(age) = number("min_age") {
+        out.push((
+            i.t("game-fact-age"),
+            i.t_args("game-age", &[("age", age.into())]),
+        ));
+    }
+    out
+}
+
+/// A count or a range in words with the keys `[one value, range, from, up to]`.
+fn range_text(i: &I18n, min: Option<u64>, max: Option<u64>, keys: [&str; 4]) -> Option<String> {
+    let [one, range, from, up_to] = keys;
+    Some(match (min, max) {
+        (Some(a), Some(b)) if a == b => i.t_args(one, &[("count", a.into())]),
+        (Some(a), Some(b)) => {
+            i.t_args(range, &[("min", a.min(b).into()), ("max", a.max(b).into())])
+        }
+        (Some(a), None) => i.t_args(from, &[("min", a.into())]),
+        (None, Some(b)) => i.t_args(up_to, &[("max", b.into())]),
+        (None, None) => return None,
+    })
+}
+
+/// Links to the pages of the item elsewhere: "Wikidata" (where its data can be corrected),
+/// by its external id, and "BoardGameGeek" (a plain link; nothing is fetched from there), by
+/// the `bgg_id` attribute (a reference, not a matching key, LB-36). An identifier that is
+/// not one of the source's is never made into a link.
+#[must_use]
+pub fn outbound_links(
+    ids: &[contracts::ExternalIdDto],
+    attributes: &serde_json::Value,
+) -> Vec<(&'static str, String)> {
+    let digits = |s: &str| !s.is_empty() && s.len() <= 12 && s.chars().all(|c| c.is_ascii_digit());
+    let mut out = Vec::new();
+    for e in ids {
+        if e.namespace == "wikidata" && e.value.strip_prefix('Q').is_some_and(digits) {
+            out.push((
+                "Wikidata",
+                format!("https://www.wikidata.org/wiki/{}", e.value),
+            ));
+        }
+    }
+    if let Some(bgg) = attributes
+        .get("bgg_id")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|b| (1..=999_999_999_999).contains(b))
+    {
+        out.push((
+            "BoardGameGeek",
+            format!("https://boardgamegeek.com/boardgame/{bgg}"),
+        ));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -1262,5 +1352,106 @@ mod tests {
             ask(&en, l, false, 2),
             "These 2 episodes are already listened to. Log them again?"
         );
+    }
+
+    fn facts_of(i: &I18n, attributes: &serde_json::Value) -> Vec<String> {
+        game_facts(i, attributes)
+            .into_iter()
+            .map(|(label, text)| format!("{label}: {text}"))
+            .collect()
+    }
+
+    /// v1-plan 4b point 7: players, time and age of a board game in words, en and de.
+    #[test]
+    fn a_board_game_reads_players_time_and_age_in_words() {
+        let (en, de) = both();
+        let catan = serde_json::json!({"players_min": 3, "players_max": 4,
+            "playtime_min_minutes": 60, "playtime_max_minutes": 90, "min_age": 10,
+            "bgg_id": 13});
+        assert_eq!(
+            facts_of(&en, &catan),
+            [
+                "Players: 3-4 players",
+                "Playing time: 60-90 min",
+                "Age: from 10 years"
+            ]
+        );
+        assert_eq!(
+            facts_of(&de, &catan),
+            [
+                "Mitspielende: 3-4 Personen",
+                "Spieldauer: 60-90 Min.",
+                "Alter: ab 10 Jahren"
+            ]
+        );
+        let duel = serde_json::json!({"players_min": 2, "players_max": 2,
+            "playtime_min_minutes": 60, "playtime_max_minutes": 60});
+        assert_eq!(
+            facts_of(&en, &duel),
+            ["Players: 2 players", "Playing time: 60 min"]
+        );
+        assert_eq!(
+            facts_of(&de, &duel),
+            ["Mitspielende: 2 Personen", "Spieldauer: 60 Min."]
+        );
+        let solo = serde_json::json!({"players_min": 1, "players_max": 1});
+        assert_eq!(facts_of(&en, &solo), ["Players: 1 player"]);
+        assert_eq!(facts_of(&de, &solo), ["Mitspielende: 1 Person"]);
+    }
+
+    #[test]
+    fn half_a_range_says_which_half_and_nothing_says_nothing() {
+        let (en, de) = both();
+        let from = serde_json::json!({"players_min": 2});
+        assert_eq!(facts_of(&en, &from), ["Players: from 2 players"]);
+        assert_eq!(facts_of(&de, &from), ["Mitspielende: ab 2 Personen"]);
+        let up_to = serde_json::json!({"players_max": 6});
+        assert_eq!(facts_of(&en, &up_to), ["Players: up to 6 players"]);
+        assert_eq!(facts_of(&de, &up_to), ["Mitspielende: bis 6 Personen"]);
+        // a range written the wrong way round reads the right way round
+        let swapped = serde_json::json!({"playtime_min_minutes": 90, "playtime_max_minutes": 30});
+        assert_eq!(facts_of(&en, &swapped), ["Playing time: 30-90 min"]);
+        assert_eq!(game_facts(&en, &serde_json::json!({})).len(), 0);
+        assert_eq!(
+            game_facts(&en, &serde_json::json!({"players_min": "two"})).len(),
+            0
+        );
+    }
+
+    #[test]
+    fn a_game_links_to_wikidata_and_boardgamegeek() {
+        let id = |namespace: &str, value: &str| contracts::ExternalIdDto {
+            namespace: namespace.into(),
+            value: value.into(),
+        };
+        // the BGG id is a reference in the attributes, not a matching key (WD-3)
+        let links = outbound_links(
+            &[id("wikidata", "Q17271")],
+            &serde_json::json!({"bgg_id": 13, "gtins": ["0688623905027"]}),
+        );
+        assert_eq!(
+            links,
+            [
+                (
+                    "Wikidata",
+                    "https://www.wikidata.org/wiki/Q17271".to_string()
+                ),
+                (
+                    "BoardGameGeek",
+                    "https://boardgamegeek.com/boardgame/13".to_string()
+                ),
+            ]
+        );
+        // what is no id of the source is never made into a link
+        let odd = outbound_links(&[id("wikidata", "Q1/../x")], &serde_json::json!({}));
+        assert_eq!(odd.len(), 0);
+        for bgg in [
+            serde_json::json!({"bgg_id": "13?x=1"}),
+            serde_json::json!({"bgg_id": 0}),
+            serde_json::json!({"bgg_id": -13}),
+            serde_json::json!({"bgg_id": 1_000_000_000_000_u64}),
+        ] {
+            assert_eq!(outbound_links(&[], &bgg).len(), 0, "{bgg}");
+        }
     }
 }

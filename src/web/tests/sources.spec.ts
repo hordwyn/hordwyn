@@ -4,7 +4,8 @@ import { ADMIN, expectNoA11yViolations, expectReflow, hydrated, signIn, signUp, 
 // UX phase 2, "why is nothing happening" (design.md 4.4, 6.1, 6.4): the palette's no-results
 // card for a kind group without a source with Ask admin (member) or Set up (admin), the
 // footer with source status, axe on the open palette in both themes at 1280 and 360 px, and
-// the Home nudge for admins only. In the e2e build only TMDB has a key, so Play has no source.
+// the Home nudge for admins only. In the e2e build only TMDB has a key and Open Library and
+// Wikidata need none (the operator contact is set in global.setup.ts), so Listen has no source.
 
 async function openPalette(page: Page) {
   await page.getByRole("button", { name: /^Search or add/ }).first().click();
@@ -13,32 +14,32 @@ async function openPalette(page: Page) {
   return dialog;
 }
 
-async function searchPlay(page: Page) {
+async function searchListen(page: Page) {
   const dialog = await openPalette(page);
-  await dialog.getByRole("radio", { name: "Play" }).click();
+  await dialog.getByRole("radio", { name: "Listen" }).click();
   await dialog.getByRole("combobox").fill("catan");
   const card = dialog.getByTestId("no-results");
   await expect(card).toBeVisible();
   return { dialog, card };
 }
 
-test("a member searching Play learns there is no source and asks the admin", async ({ page }) => {
+test("a member searching Listen learns there is no source and asks the admin", async ({ page }) => {
   await signUp(page, `pal${Date.now()}`);
-  const { dialog, card } = await searchPlay(page);
+  const { dialog, card } = await searchListen(page);
   await expect(card.getByRole("heading", { name: "Search is not set up yet" })).toBeVisible();
   await expect(card).toContainText("Ask your admin");
   await expect(card.getByRole("link", { name: "Set up" })).toHaveCount(0);
   // the footer names the group too, without a second Ask button
-  await expect(dialog.getByRole("list", { name: "Data sources" })).toContainText("Play: no source set up");
-  await card.getByRole("button", { name: "Ask admin about Play" }).click();
+  await expect(dialog.getByRole("list", { name: "Data sources" })).toContainText("Listen: no source set up");
+  await card.getByRole("button", { name: "Ask admin about Listen" }).click();
   await expect(card.getByText("Your admin has been asked.")).toBeVisible();
 });
 
-test("an admin searching Play gets the Set up link", async ({ page }) => {
+test("an admin searching Listen gets the Set up link", async ({ page }) => {
   await signIn(page, ADMIN);
   await page.goto("/");
   await hydrated(page);
-  const { card } = await searchPlay(page);
+  const { card } = await searchListen(page);
   await expect(card.getByRole("link", { name: "Set up" })).toHaveAttribute("href", "/admin/sources");
   await expect(card.getByRole("button", { name: /^Ask admin/ })).toHaveCount(0);
 });
@@ -55,7 +56,7 @@ test("the open palette with its no-results card has no axe violations in both th
       if (theme === "dark") {
         await expect(page.locator("html")).toHaveClass(/dark/);
       }
-      await searchPlay(page);
+      await searchListen(page);
       await expectNoA11yViolations(page, `palette ${theme} ${width}`);
       await expectReflow(page, `palette ${width}`);
       await page.keyboard.press("Escape");
@@ -69,7 +70,7 @@ test("the Home nudge shows for the admin with one action, never for a member", a
   await hydrated(page);
   const nudge = page.getByTestId("nudge");
   await expect(nudge).toBeVisible();
-  await expect(nudge).toContainText("Play");
+  await expect(nudge).toContainText("Listen");
   await expect(nudge.getByRole("link")).toHaveCount(1);
   const setUp = nudge.getByRole("link", { name: "Set up data sources" });
   await expect(setUp).toHaveAttribute("href", "/admin/sources");

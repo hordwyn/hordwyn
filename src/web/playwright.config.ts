@@ -10,6 +10,8 @@ const mailSmtpPort = Number(process.env.MAIL_SINK_SMTP_PORT ?? 3013);
 const mailHttpPort = Number(process.env.MAIL_SINK_HTTP_PORT ?? 3014);
 // the Open Library mock (tests/openlibrary-mock.mjs): the API and the covers on one host
 const openLibraryPort = Number(process.env.OPENLIBRARY_MOCK_PORT ?? 3015);
+// the Wikidata mock (tests/wikidata-mock.mjs): the Action API of board games
+const wikidataPort = Number(process.env.WIKIDATA_MOCK_PORT ?? 3016);
 const repo = `${require("node:path").resolve(__dirname, "../..")}/`;
 const serverCmd = process.env.E2E_SERVER_CMD ?? "../rust/target/debug/server";
 // UX3-25 panic guard (DEC-384): with E2E_SERVER_LOG set (`cargo xtask e2e` sets it to a file
@@ -33,14 +35,23 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
       dependencies: ["setup"],
-      testIgnore: /signin\.spec\.ts/,
+      testIgnore: /(signin|contact)\.spec\.ts/,
+    },
+    // the operator contact is an instance setting the other specs need (Wikidata, board games):
+    // the spec that takes it away runs alone, after them, and puts it back
+    {
+      name: "contact",
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["chromium"],
+      testMatch: /contact\.spec\.ts/,
+      fullyParallel: false,
     },
     // the sign-in specs add an identity provider and switch the instance to `auto` mode for a
     // while, which changes every signed-out page: they run alone, after the other specs
     {
       name: "sso",
       use: { ...devices["Desktop Chrome"] },
-      dependencies: ["chromium"],
+      dependencies: ["contact"],
       testMatch: /signin\.spec\.ts/,
       fullyParallel: false,
     },
@@ -57,6 +68,12 @@ export default defineConfig({
       url: `http://127.0.0.1:${openLibraryPort}/health`,
       reuseExistingServer: !process.env.CI,
       env: { OPENLIBRARY_MOCK_PORT: String(openLibraryPort) },
+    },
+    {
+      command: "node tests/wikidata-mock.mjs",
+      url: `http://127.0.0.1:${wikidataPort}/health`,
+      reuseExistingServer: !process.env.CI,
+      env: { WIKIDATA_MOCK_PORT: String(wikidataPort) },
     },
     {
       command: "node tests/oidc-mock.mjs",
@@ -97,6 +114,8 @@ export default defineConfig({
         APP__CONNECTORS__TMDB__API_KEY: "e2e-not-a-real-key",
         // no key; without this the server would ask openlibrary.org itself
         APP__CONNECTORS__OPENLIBRARY__BASE_URL: `http://127.0.0.1:${openLibraryPort}`,
+        // no key; asked only once the operator contact is set (tests/global.setup.ts sets it)
+        APP__CONNECTORS__WIKIDATA__BASE_URL: `http://127.0.0.1:${wikidataPort}`,
         // an operator contact of the developer's shell never reaches the e2e server (an
         // empty value is "not set"; review BOOK-16)
         KK_OPERATOR_CONTACT: "",

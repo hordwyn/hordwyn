@@ -28,6 +28,8 @@ pub enum FooterItem {
     Source {
         id: String,
         name: String,
+        /// The kinds the source serves (named on a row that waits for the operator contact).
+        kinds: Vec<String>,
         state: String,
         action: Option<HintAction>,
     },
@@ -81,6 +83,7 @@ pub fn footer_items(status: &SourceStatusPageDto) -> Vec<FooterItem> {
         .map(|s| FooterItem::Source {
             id: s.id.clone(),
             name: s.name.clone(),
+            kinds: s.kinds.clone(),
             state: s.state.clone(),
             action: (admin && failing(&s.state)).then_some(HintAction::SetUp),
         })
@@ -160,6 +163,8 @@ pub enum Nudge {
     NoSource(Vec<String>),
     /// Sources that are set up but do not answer (names).
     Failing(Vec<String>),
+    /// Sources that are not asked until the operator contact is set (names).
+    NeedsContact(Vec<String>),
 }
 
 impl Nudge {
@@ -168,8 +173,16 @@ impl Nudge {
     pub fn href(&self) -> &'static str {
         match self {
             Self::Setup => "/setup",
-            Self::NoSource(_) | Self::Failing(_) => SET_UP_HREF,
+            Self::NoSource(_) | Self::Failing(_) | Self::NeedsContact(_) => SET_UP_HREF,
         }
+    }
+
+    /// Can the admin answer "Don't remind me"? Only for the operator contact: not giving it
+    /// is a choice (the consent `Required` asks for), the other nudges are things to fix
+    /// (WD-10, LB-40).
+    #[must_use]
+    pub fn can_decline(&self) -> bool {
+        matches!(self, Self::NeedsContact(_))
     }
 
     /// Identity for the snooze: a new problem shows again at once.
@@ -179,12 +192,13 @@ impl Nudge {
             Self::Setup => "setup".into(),
             Self::NoSource(g) => format!("groups:{}", g.join(",")),
             Self::Failing(s) => format!("failing:{}", s.join(",")),
+            Self::NeedsContact(s) => format!("contact:{}", s.join(",")),
         }
     }
 }
 
-/// The nudge to show, if any: never for members; an open setup first, then groups without a
-/// source, then failing sources.
+/// The nudge to show, if any: never for members; an open setup first, then sources waiting for
+/// the operator contact, then groups without a source, then failing sources.
 #[must_use]
 pub fn nudge(status: &SourceStatusPageDto) -> Option<Nudge> {
     if !status.is_admin {
@@ -193,16 +207,25 @@ pub fn nudge(status: &SourceStatusPageDto) -> Option<Nudge> {
     if status.setup_open {
         return Some(Nudge::Setup);
     }
+    let names = |contact: bool| -> Vec<String> {
+        status
+            .sources
+            .iter()
+            .filter(|s| failing(&s.state) && (s.state == "needs_contact") == contact)
+            .map(|s| s.name.clone())
+            .collect()
+    };
+    // a source that waits for the contact is not broken: it is named on its own, before a
+    // group without a source (the contact is one field, and it may be why the group has none)
+    let waiting = names(true);
+    if !waiting.is_empty() {
+        return Some(Nudge::NeedsContact(waiting));
+    }
     if !status.groups_without_source.is_empty() {
         return Some(Nudge::NoSource(status.groups_without_source.clone()));
     }
-    let names: Vec<String> = status
-        .sources
-        .iter()
-        .filter(|s| failing(&s.state))
-        .map(|s| s.name.clone())
-        .collect();
-    (!names.is_empty()).then_some(Nudge::Failing(names))
+    let failing = names(false);
+    (!failing.is_empty()).then_some(Nudge::Failing(failing))
 }
 
 /// The stored snooze (`<key>|<until ms>`) covers `key` at `now_ms`.
@@ -212,6 +235,13 @@ pub fn snoozed(stored: Option<&str>, key: &str, now_ms: f64) -> bool {
         .and_then(|s| s.rsplit_once('|'))
         .and_then(|(k, until)| Some((k, until.parse::<f64>().ok()?)))
         .is_some_and(|(k, until)| k == key && now_ms < until)
+}
+
+/// Did the admin answer "Don't remind me" to the nudge `key` in this browser (`stored` is the
+/// key they declined)? A new problem has another key and shows.
+#[must_use]
+pub fn declined(stored: Option<&str>, key: &str) -> bool {
+    stored == Some(key)
 }
 
 /// The value to store when the admin snoozes `key` at `now_ms`.
@@ -267,13 +297,17 @@ mod tests {
     /// v1-books 3.1.1: a source that waits for the operator contact is named, with Set up.
     #[test]
     fn a_source_without_the_operator_contact_is_shown_with_set_up() {
-        let sources = vec![src("tmdb", "working"), src("wikidata", "needs_contact")];
+        let mut wikidata = src("wikidata", "needs_contact");
+        wikidata.kinds = vec!["board_game".into()];
+        let sources = vec![src("tmdb", "working"), wikidata];
         let admin = footer_items(&page(true, sources, &[]));
         assert_eq!(admin.len(), 2);
         assert!(matches!(
             &admin[1],
             FooterItem::Source { state, action: Some(HintAction::SetUp), .. } if state == "needs_contact"
         ));
+        // v1-wikidata: the row says what waits for it ("Board game (WIKIDATA)")
+        assert!(matches!(&admin[1], FooterItem::Source { kinds, .. } if kinds == &["board_game"]));
         assert_eq!(
             crate::admin_state::source_state("needs_contact"),
             ui::StatusState::Bad
@@ -287,7 +321,7 @@ mod tests {
             src("tvdb", "not_set_up"),
             src("igdb", "key_rejected"),
             src("podcastindex", "rate_limited"),
-            src("bgg", "disabled"),
+            src("wikidata", "disabled"),
         ];
         let admin = footer_items(&page(true, sources.clone(), &["play"]));
         let ids: Vec<String> = admin
@@ -417,6 +451,36 @@ mod tests {
         assert_eq!(nudge(&p), None, "nothing to do: no nudge");
     }
 
+    /// v1-wikidata: a source that waits for the operator contact is named on its own, before
+    /// sources that do not answer (it is not broken, it is not asked).
+    #[test]
+    fn the_nudge_names_a_source_that_waits_for_the_operator_contact() {
+        let mut p = page(
+            true,
+            vec![
+                src("tmdb", "key_rejected"),
+                src("wikidata", "needs_contact"),
+            ],
+            &[],
+        );
+        let n = nudge(&p).unwrap();
+        assert_eq!(n, Nudge::NeedsContact(vec!["WIKIDATA".into()]));
+        assert_eq!(n.href(), "/admin/sources");
+        assert_eq!(n.key(), "contact:WIKIDATA");
+        p.sources.remove(1);
+        assert_eq!(nudge(&p), Some(Nudge::Failing(vec!["TMDB".into()])));
+        // before a group without a source: the contact is one field, and it may be the reason
+        p.groups_without_source = vec!["play".into()];
+        assert_eq!(nudge(&p), Some(Nudge::NoSource(vec!["play".into()])));
+        p.sources = vec![src("wikidata", "needs_contact")];
+        assert_eq!(
+            nudge(&p),
+            Some(Nudge::NeedsContact(vec!["WIKIDATA".into()]))
+        );
+        p.is_admin = false;
+        assert_eq!(nudge(&p), None, "never for members");
+    }
+
     #[test]
     fn a_snooze_lasts_seven_days_and_only_for_the_same_problem() {
         let n = Nudge::NoSource(vec!["play".into()]);
@@ -430,5 +494,26 @@ mod tests {
         );
         assert!(!snoozed(None, &n.key(), 0.0));
         assert!(!snoozed(Some("garbage"), &n.key(), 0.0));
+    }
+
+    /// WD-10: an admin who decides not to give the operator contact can answer the nudge
+    /// "Don't remind me"; it stays hidden for that source in this browser (not for a new
+    /// problem). The other nudges are things to fix and can only be snoozed.
+    #[test]
+    fn only_the_contact_nudge_can_be_declined_and_a_declined_one_stays_hidden() {
+        let contact = Nudge::NeedsContact(vec!["Wikidata".into()]);
+        assert!(contact.can_decline());
+        for n in [
+            Nudge::Setup,
+            Nudge::NoSource(vec!["play".into()]),
+            Nudge::Failing(vec!["TMDB".into()]),
+        ] {
+            assert!(!n.can_decline(), "{n:?}");
+        }
+        let stored = contact.key();
+        assert!(declined(Some(&stored), &contact.key()));
+        let two = Nudge::NeedsContact(vec!["Wikidata".into(), "Other".into()]);
+        assert!(!declined(Some(&stored), &two.key()), "a new problem shows");
+        assert!(!declined(None, &contact.key()));
     }
 }

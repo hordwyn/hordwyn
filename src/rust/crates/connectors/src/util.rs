@@ -13,6 +13,23 @@ pub async fn get_json<T: DeserializeOwned>(
     url: &str,
     headers: Vec<(String, String)>,
 ) -> Result<T, ConnectorError> {
+    Ok(get_json_with_headers(ctx, connector, op, url, headers)
+        .await?
+        .0)
+}
+
+/// [`get_json`] that also returns the answer's headers (`Retry-After` of an error object
+/// in an HTTP 200 answer, WD-4).
+///
+/// # Errors
+/// As [`get_json`].
+pub async fn get_json_with_headers<T: DeserializeOwned>(
+    ctx: &Ctx,
+    connector: &str,
+    op: &str,
+    url: &str,
+    headers: Vec<(String, String)>,
+) -> Result<(T, Vec<(String, String)>), ConnectorError> {
     let resp = ctx
         .http
         .fetch(HttpRequest {
@@ -28,9 +45,9 @@ pub async fn get_json<T: DeserializeOwned>(
         })
         .await?;
     match resp.status {
-        200..=299 => {
-            serde_json::from_slice(&resp.body).map_err(|e| ConnectorError::Parse(e.to_string()))
-        }
+        200..=299 => serde_json::from_slice(&resp.body)
+            .map(|v| (v, resp.headers))
+            .map_err(|e| ConnectorError::Parse(e.to_string())),
         404 => Err(ConnectorError::NotFound),
         status => Err(status_error(ctx, status)),
     }

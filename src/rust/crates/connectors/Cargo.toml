@@ -28,10 +28,11 @@ default = []
 tmdb = []
 igdb = []
 openlibrary = []
+wikidata = []
 podcastindex = ["dep:sha1"]
 tvdb = ["dep:blake3"]
 # every connector (CI, server builds)
-all = ["tmdb", "igdb", "podcastindex", "tvdb", "openlibrary"]
+all = ["tmdb", "igdb", "podcastindex", "tvdb", "openlibrary", "wikidata"]
 
 [dev-dependencies]
 testkit.workspace = true

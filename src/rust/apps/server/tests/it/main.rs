@@ -30,6 +30,7 @@ mod oidc;
 mod ops;
 mod phase1_fns;
 mod retention;
+mod search_language;
 mod security_headers;
 mod setup_page;
 mod sharing;
