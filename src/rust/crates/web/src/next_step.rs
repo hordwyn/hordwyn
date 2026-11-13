@@ -218,7 +218,31 @@ pub fn run_step(
     error: RwSignal<Option<String>>,
     on_done: Option<Callback<()>>,
 ) {
-    log_step(ctx, step, None, busy, error, on_done);
+    log_step(ctx, step, None, busy, error, on_done, None);
+}
+
+/// What follows a logged step: "Finished" on a book completes the entry after its last page
+/// is logged (v1-books).
+#[derive(Clone, Copy)]
+pub struct Then {
+    /// Runs once when the log went through (not after an undo of it).
+    pub online: Callback<()>,
+    /// Offline nothing can run after the log: this status is queued behind it instead, so
+    /// the sync logs the page and then sets the status, in that order (review BOOK-6).
+    pub status: &'static str,
+}
+
+/// [`run_step`] with what follows it ([`Then`]): run when the log went through, or queued
+/// behind the log when it could only be saved offline.
+pub fn run_step_then(
+    ctx: StepCtx,
+    step: LoggedStep,
+    busy: RwSignal<bool>,
+    error: RwSignal<Option<String>>,
+    on_done: Option<Callback<()>>,
+    then: Then,
+) {
+    log_step(ctx, step, None, busy, error, on_done, Some(then));
 }
 
 /// [`run_step`] for an item that is not in the library (OT-4): the first log adds it. The
@@ -233,7 +257,7 @@ pub fn run_first_step(
     done: RwSignal<bool>,
     on_done: Option<Callback<()>>,
 ) {
-    log_step(ctx, step, Some(done), busy, error, on_done);
+    log_step(ctx, step, Some(done), busy, error, on_done, None);
 }
 
 /// `added`: the log is the first of an item outside the library; see [`run_first_step`].
@@ -244,6 +268,7 @@ fn log_step(
     busy: RwSignal<bool>,
     error: RwSignal<Option<String>>,
     on_done: Option<Callback<()>>,
+    then: Option<Then>,
 ) {
     let LoggedStep {
         item_id,
@@ -275,6 +300,9 @@ fn log_step(
                     toast_logged(&ctx, &label, said, vec![event.id], on_done);
                 }
                 ctx.done(on_done);
+                if let Some(then) = then {
+                    then.online.run(());
+                }
             }
             Err(e) if crate::offline::network_error(&e) && ctx.offline.is_some() => {
                 let hlc = ctx.offline.map(crate::offline::Offline::stamp);
@@ -286,7 +314,12 @@ fn log_step(
                 );
                 let q =
                     crate::offline::Queued::with_op_id(op, cmd, &title, crate::offline::now_ms());
-                ctx.save_offline(title, vec![q], None);
+                // what follows the log is stamped after it and waits behind it in the queue
+                let status = then.zip(ctx.offline).map(|(then, offline)| {
+                    crate::offline::status_command(&item_id, then.status, &offline.stamp())
+                });
+                let queued = crate::offline::log_then_status(q, status, crate::offline::now_ms());
+                ctx.save_offline(title, queued, None);
                 ctx.funnel.logged();
             }
             Err(e) => {

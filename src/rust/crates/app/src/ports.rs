@@ -152,6 +152,16 @@ pub trait CatalogRepo: Send + Sync {
     ) -> RepoResult<Option<CatalogItem>>;
     /// The items with these ids that exist, in any order.
     async fn get_many(&self, ids: &[ItemId]) -> RepoResult<Vec<CatalogItem>>;
+    /// The ids of the items that never got their data (of `kind`, when given), by id: in
+    /// state `failed`, or never fetched (`fetched_at` empty) and in somebody's library (an
+    /// import stub; search results nobody added are left out).
+    async fn unfetched_items(&self, kind: Option<&KindId>) -> RepoResult<Vec<ItemId>>;
+    /// The ids of the items of `kind` that hold no external id in `namespace`, by title.
+    async fn items_without_namespace(
+        &self,
+        kind: &KindId,
+        namespace: &str,
+    ) -> RepoResult<Vec<ItemId>>;
     /// The seasons fetched for an item with their episodes, by season number (WP4-7).
     async fn episode_seasons(
         &self,

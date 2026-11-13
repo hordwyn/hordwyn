@@ -371,6 +371,38 @@ impl CatalogRepo for PgStore {
         }
     }
 
+    async fn unfetched_items(&self, kind: Option<&KindId>) -> Res<Vec<ItemId>> {
+        let rows = sqlx::query_scalar!(
+            "SELECT c.id FROM catalog_items c
+             WHERE ($1::text IS NULL OR c.kind = $1)
+               AND (c.state = 'failed'
+                    OR (c.fetched_at IS NULL
+                        AND EXISTS (SELECT 1 FROM library_entries l WHERE l.item_id = c.id)))
+             ORDER BY c.id",
+            kind.map(KindId::as_str)
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?;
+        Ok(rows.into_iter().map(ItemId).collect())
+    }
+
+    async fn items_without_namespace(&self, kind: &KindId, namespace: &str) -> Res<Vec<ItemId>> {
+        let rows = sqlx::query_scalar!(
+            "SELECT c.id FROM catalog_items c
+             WHERE c.kind = $1
+               AND NOT EXISTS (SELECT 1 FROM external_ids e
+                               WHERE e.item_id = c.id AND e.namespace = $2)
+             ORDER BY c.title, c.id",
+            kind.as_str(),
+            namespace
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?;
+        Ok(rows.into_iter().map(ItemId).collect())
+    }
+
     async fn get_many(&self, ids: &[ItemId]) -> Res<Vec<CatalogItem>> {
         let ids: Vec<uuid::Uuid> = ids.iter().map(|i| i.0).collect();
         let rows = sqlx::query_as!(

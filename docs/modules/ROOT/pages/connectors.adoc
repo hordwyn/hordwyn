@@ -31,6 +31,16 @@ Developer Services Agreement; commercial partnership available. Caching allowed.
 |`<key>:<secret>`, signed requests (`APP__CONNECTORS__PODCASTINDEX__API_KEY`)
 |"Podcast data from the Podcast Index." The core index is free for any use.
 
+|`openlibrary` (Open Library)
+|book
+|none. The operator contact (`instance.operator_contact`, Admin > Data sources or
+`KK_OPERATOR_CONTACT`) is sent in the `User-Agent` when it is set
+|"Book data and covers from Open Library." with a link (a courtesy the source asks for).
+No licence stated; the Internet Archive asserts no new rights over the database. At most one
+request per second; not a backend for high-traffic commercial services. One item is one
+work: an ISBN finds its work, the page total is the median over the editions (an estimate a
+person can correct). Details: `docs/connectors/openlibrary.md`.
+
 |`tvdb` (TheTVDB)
 |show
 |API key, optional PIN, `<apikey>[:<pin>]` (`APP__CONNECTORS__TVDB__API_KEY`)
@@ -45,11 +55,36 @@ registered only with a key).
 |===
 |`anilist` |Terms forbid use in anime/manga tracker services (DEC-108).
 |`bgg` |Docs and terms not reachable from the build host; token needed (DEC-107).
-|`openlibrary`, `musicbrainz`, `vndb`, `metron` |Service software is GPL-family; their docs
-were not read under KICKOFF rule 6 (owner decision, DEC-106).
+|`musicbrainz`, `vndb`, `metron` |Not built yet. Their service software is GPL-family: the
+public API documentation may be read to write a client, the code may not (DEC-169, which
+superseded DEC-106).
 |`hardcover` |Docs pages are JavaScript-only from the build host; not researched in this
 session.
 |===
+
+== The operator contact
+
+Some sources ask every client to say who runs it. The instance setting
+`instance.operator_contact` holds that: an e-mail address (preferred: the sources name an
+e-mail address, and Open Library gives its higher rate for one) or an https URL, at most
+200 characters. An admin sets it on Admin > Data sources; `KK_OPERATOR_CONTACT` (or
+`APP__INSTANCE__OPERATOR_CONTACT`) in the environment sets it for good and the page then
+shows it read-only. It is the operator's contact, never a member's.
+
+A connector declares whether it gets the contact: `none` (TMDB, TheTVDB, IGDB, Podcast
+Index: their requests carry the plain application `User-Agent` and never the contact),
+`preferred` (Open Library: asked with and without it) or `required` (a source that is not
+asked at all without one; its state on the sources page and in the search footer is
+"Operator contact missing"). The header of a source that gets it is
+`<brand ident>/<version> (<contact>)`. It goes with a request also where the source
+redirects it (a cover of Open Library is served by `archive.org` hosts). A worker that runs
+as its own process reads the contact when it starts: restart it after the contact was
+changed or removed.
+
+A source without a key counts the requests of an address, whichever process sent them. The
+web role, a separate worker and the commands of the admin tool therefore take turns at such
+a source from one pace in the database (table `source_pace`), so the instance as a whole
+stays inside the rate the connector declares.
 
 == Data licences
 

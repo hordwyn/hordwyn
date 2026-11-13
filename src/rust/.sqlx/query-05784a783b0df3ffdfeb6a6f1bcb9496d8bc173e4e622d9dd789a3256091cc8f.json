@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO library_entries (id, user_id, item_id, kind, status, status_hlc, rating,\n                                      rating_hlc, notes, notes_hlc, added_at, completed_at,\n                                      completed_undated)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)\n         ON CONFLICT (user_id, item_id) DO UPDATE SET status = EXCLUDED.status,\n             status_hlc = EXCLUDED.status_hlc, rating = EXCLUDED.rating,\n             rating_hlc = EXCLUDED.rating_hlc, notes = EXCLUDED.notes,\n             notes_hlc = EXCLUDED.notes_hlc, completed_at = EXCLUDED.completed_at,\n             completed_undated = EXCLUDED.completed_undated\n         RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "library_entries",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Int2",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "05784a783b0df3ffdfeb6a6f1bcb9496d8bc173e4e622d9dd789a3256091cc8f"
+}

@@ -25,7 +25,10 @@ file (or another file with the same ids) updates instead of duplicating.
 |`external_ids` |object |Provider ids (`tmdb`, `imdb`, `igdb`, ...). Matching uses these
 first; unmatched entries become catalog stubs that are refreshed in the background.
 |`status` |string |A status of the kind (`planned`, `in_progress`, `completed`, `paused`,
-`dropped`, plus kind-specific ones).
+`dropped`, plus kind-specific ones). In the statistics a `completed` entry is finished on
+the day of its newest `history` entry, however often and whenever the file is imported;
+without any history it has no date and counts in the all-time totals only, not in a month,
+a year or a goal.
 |`rating` |integer 0..100 |Rating (stars x 20 in the UI).
 |`notes` |string |Private notes.
 |`history` |list |Progress events: `date` (RFC 3339 or `YYYY-MM-DD`) and optional

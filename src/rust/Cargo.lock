@@ -151,6 +151,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "domain",
+ "kinds",
  "serde",
  "serde_json",
  "testkit",

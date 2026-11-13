@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, user_id, item_id, kind, status, status_hlc, rating, rating_hlc, notes,\n                    notes_hlc, added_at FROM library_entries\n             WHERE user_id = $1 AND item_id = ANY($2)",
+  "query": "SELECT id, user_id, item_id, kind, status, status_hlc, completed_at,\n                    completed_undated, rating, rating_hlc, notes,\n                    notes_hlc, added_at FROM library_entries\n             WHERE user_id = $1\n               AND ($2::timestamptz IS NULL\n                    OR (added_at <= $2 AND (added_at < $2 OR id < $3::uuid)))\n             ORDER BY added_at DESC, id DESC LIMIT $4",
   "describe": {
     "columns": [
       {
@@ -71,6 +71,28 @@
       },
       {
         "ordinal": 6,
+        "name": "completed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "library_entries",
+            "name": "completed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "completed_undated",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "library_entries",
+            "name": "completed_undated"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
         "name": "rating",
         "type_info": "Int2",
         "origin": {
@@ -81,7 +103,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "rating_hlc",
         "type_info": "Text",
         "origin": {
@@ -92,7 +114,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "notes",
         "type_info": "Text",
         "origin": {
@@ -103,7 +125,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "notes_hlc",
         "type_info": "Text",
         "origin": {
@@ -114,7 +136,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "added_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -128,7 +150,9 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "UuidArray"
+        "Timestamptz",
+        "Uuid",
+        "Int8"
       ]
     },
     "nullable": [
@@ -142,8 +166,10 @@
       false,
       true,
       false,
+      true,
+      false,
       false
     ]
   },
-  "hash": "27b857cf5b5063ac799f53173c2de45af50c43582477c461b5edaa9694e298aa"
+  "hash": "8499300acc5b3dbc76edd5220cc37fbc52c70853056bbd6c591b4b5d43aaaf54"
 }

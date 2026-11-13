@@ -13,6 +13,7 @@ use app::ports::{RepoError, RepoResult};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
+pub use repos::match_log::CatalogMatch;
 pub use tx::Change;
 
 /// Embedded migrations (`crates/store-pg/migrations`), shared by every crate that uses the

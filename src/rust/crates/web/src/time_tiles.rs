@@ -235,7 +235,15 @@ pub fn banked(i: &I18n, stats: &StatsTotalsDto) -> Banked {
     if stats.overall.amounts.pages > 0 {
         notes.push(i.t("stats-reading-note"));
     }
+    // a book set to Completed without a known total has no pages to count (v1-books)
+    if books.completions > 0 {
+        notes.push(i.t("stats-finished-note"));
+    }
     notes.push(i.t("stats-untimed-note"));
+    // Completed without a logged step: in these totals, in no month, year or goal (LB-15)
+    if stats.undated_completions > 0 {
+        notes.push(i.t("stats-undated-note"));
+    }
     Banked {
         total: Measure::Hours.counted(i, total),
         sentence: hero_sentence(i, total),
@@ -333,6 +341,7 @@ mod tests {
             },
             groups: Vec::new(),
             kinds,
+            undated_completions: 0,
         }
     }
 
@@ -441,6 +450,7 @@ mod tests {
             b.notes,
             [
                 "Reading is counted in pages.",
+                "Books finished without a page count add no pages.",
                 "Titles without a known length count as 0."
             ]
         );
@@ -567,6 +577,15 @@ mod tests {
         );
         assert_eq!(none.also, None);
         assert_eq!(none.notes, ["Titles without a known length count as 0."]);
+        // LB-15: completions without a day are in the totals; the footnote says where not
+        let mut undated = stats(Vec::new());
+        undated.undated_completions = 2;
+        let notes = banked(&en, &undated).notes;
+        assert_eq!(notes.len(), 2);
+        assert!(notes[1].contains("have no date"), "{notes:?}");
+        let de = I18n::new("de", BTreeMap::new());
+        let notes = banked(&de, &undated).notes;
+        assert!(notes[1].contains("kein Datum"), "{notes:?}");
 
         let movie = |minutes| {
             stats(vec![kind(

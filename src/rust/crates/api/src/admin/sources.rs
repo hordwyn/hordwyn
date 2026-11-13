@@ -63,6 +63,7 @@ fn admin_state(state: CredentialState, c: &SourceCounters) -> &'static str {
         CredentialState::Missing => "not_set_up",
         CredentialState::Locked => "key_unavailable",
         CredentialState::Invalid => "key_rejected",
+        CredentialState::NeedsContact => "needs_contact",
         CredentialState::NotNeeded | CredentialState::Env | CredentialState::Db => {
             if c.circuit_open_until.is_some() {
                 "circuit_open"
@@ -81,7 +82,8 @@ fn admin_state(state: CredentialState, c: &SourceCounters) -> &'static str {
 /// What a member sees for the same state (no details, design.md 4.4).
 fn member_state(admin: &str, needs_account: bool) -> &'static str {
     match admin {
-        "not_set_up" => "not_set_up",
+        // a missing operator contact is a thing to ask the admin for, like a missing key
+        "not_set_up" | "needs_contact" => "not_set_up",
         "key_unavailable" | "key_rejected" => "unavailable",
         "rate_limited" => "slow",
         "circuit_open" => "retrying",

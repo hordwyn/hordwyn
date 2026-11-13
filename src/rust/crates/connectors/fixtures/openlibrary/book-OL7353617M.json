@@ -1,0 +1,57 @@
+{
+  "fixture": {
+    "synthetic": false,
+    "source": "recorded from https://openlibrary.org/books/OL7353617M.json",
+    "checked": "2026-11-12",
+    "note": "recorded 2026-11-12 with one request; the same edition, recorded through https://openlibrary.org/isbn/9780140328721.json which redirects to this address"
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://openlibrary.org/books/OL7353617M.json"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "content-type",
+      "application/json"
+    ]
+  ],
+  "body": {
+    "key": "/books/OL7353617M",
+    "title": "Fantastic Mr. Fox",
+    "publishers": [
+      "Puffin"
+    ],
+    "publish_date": "October 1, 1988",
+    "languages": [
+      {
+        "key": "/languages/eng"
+      }
+    ],
+    "number_of_pages": 96,
+    "isbn_10": [
+      "0140328726"
+    ],
+    "isbn_13": [
+      "9780140328721"
+    ],
+    "covers": [
+      15152634,
+      8739161,
+      -1
+    ],
+    "works": [
+      {
+        "key": "/works/OL45804W"
+      }
+    ],
+    "authors": [
+      {
+        "key": "/authors/OL34184A"
+      }
+    ],
+    "type": {
+      "key": "/type/edition"
+    }
+  }
+}

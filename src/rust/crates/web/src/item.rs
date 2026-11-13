@@ -736,7 +736,9 @@ fn ActionBar(
     );
     let controls = match step.action.as_str() {
         "page" => {
-            view! { <PagesInline info=info.clone() step=step.clone() draft=ui.inline/> }.into_any()
+            let total = crate::log_form::page_total(&page.item, page.page_total_editable);
+            view! { <PagesInline info=info.clone() step=step.clone() draft=ui.inline total=total/> }
+                .into_any()
         }
         "position" => {
             view! { <PositionInline info=info.clone() step=step.clone() draft=ui.inline/> }

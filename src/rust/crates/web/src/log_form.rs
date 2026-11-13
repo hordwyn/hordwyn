@@ -399,6 +399,52 @@ pub fn page_progress(input: &str, pages: Option<u32>) -> Result<serde_json::Valu
     Ok(serde_json::json!({"type": "paged", "page": page}))
 }
 
+/// What the pages control knows about the page total of its item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PageTotal {
+    /// The total is a source's estimate (the median over the editions of a work), not a
+    /// number somebody counted or set.
+    pub estimated: bool,
+    /// The viewer may change it (`ItemPageDto::page_total_editable`).
+    pub can_edit: bool,
+}
+
+/// The sources whose page total is an estimate: Open Library gives the median number of
+/// pages over the editions of a work (docs/connectors/openlibrary.md).
+const ESTIMATING_SOURCES: [&str; 1] = ["openlibrary"];
+
+/// [`PageTotal`] of an item: an estimate when the field came from a source that estimates,
+/// never when a person set it.
+#[must_use]
+pub fn page_total(item: &contracts::CatalogItemDto, can_edit: bool) -> PageTotal {
+    let estimated = item
+        .provenance
+        .get("attributes.page_count")
+        .is_some_and(|source| ESTIMATING_SOURCES.contains(&source.as_str()));
+    PageTotal {
+        estimated,
+        can_edit,
+    }
+}
+
+/// A typed page total: a whole number from 1 to 100000.
+#[must_use]
+pub fn parse_page_total(input: &str) -> Option<u32> {
+    input
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|p| (1..=100_000).contains(p))
+}
+
+/// The page "Finished" logs before it completes the entry: the last one, when the total is
+/// known and the reader is not there yet, so that finishing counts the pages that were left.
+/// `None`: nothing to log (no total, or already on the last page).
+#[must_use]
+pub fn finish_page(at: Option<u32>, pages: Option<u32>) -> Option<u32> {
+    pages.filter(|total| *total > 0 && at != Some(*total))
+}
+
 /// `h:mm:ss`, `mm:ss` or plain minutes, in seconds.
 #[must_use]
 pub fn parse_position(s: &str) -> Option<u64> {
@@ -780,6 +826,61 @@ mod tests {
             page_progress("411", Some(410)),
             Err(FormError::PageBeyond(410))
         );
+    }
+
+    /// v1-books 3.1.3 (G16): Finished with a total logs the last page; without one it does not.
+    #[test]
+    fn finished_logs_the_last_page_when_the_total_is_known() {
+        assert_eq!(finish_page(Some(212), Some(410)), Some(410));
+        assert_eq!(finish_page(None, Some(410)), Some(410), "never opened");
+        assert_eq!(finish_page(Some(410), Some(410)), None, "already there");
+        assert_eq!(
+            finish_page(Some(212), None),
+            None,
+            "no total: only the status"
+        );
+        assert_eq!(finish_page(None, None), None);
+        assert_eq!(
+            finish_page(Some(3), Some(0)),
+            None,
+            "a total of 0 is no total"
+        );
+    }
+
+    #[test]
+    fn a_page_total_is_a_number_from_1_to_100000() {
+        assert_eq!(parse_page_total(" 577 "), Some(577));
+        assert_eq!(parse_page_total("100000"), Some(100_000));
+        for bad in ["0", "100001", "", "12.5", "-3", "many"] {
+            assert_eq!(parse_page_total(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn only_a_total_from_an_estimating_source_is_an_estimate() {
+        let item = |source: Option<&str>| -> contracts::CatalogItemDto {
+            let mut provenance = serde_json::Map::new();
+            if let Some(s) = source {
+                provenance.insert("attributes.page_count".into(), s.into());
+            }
+            serde_json::from_value(serde_json::json!({
+                "id": "i", "kind": "book", "title": "Dune", "original_title": null,
+                "year": 1965, "description": null, "cover": null, "external_ids": [],
+                "attributes": {"page_count": 608}, "state": "full", "provenance": provenance
+            }))
+            .unwrap()
+        };
+        assert!(page_total(&item(Some("openlibrary")), true).estimated);
+        assert!(
+            !page_total(&item(Some("user")), true).estimated,
+            "a person set it"
+        );
+        assert!(
+            !page_total(&item(None), true).estimated,
+            "an import brought it"
+        );
+        assert!(page_total(&item(None), true).can_edit);
+        assert!(!page_total(&item(Some("openlibrary")), false).can_edit);
     }
 
     #[test]

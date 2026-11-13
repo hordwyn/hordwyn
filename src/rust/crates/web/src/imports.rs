@@ -524,6 +524,10 @@ fn ResultPanel(r: ImportDto, page: Page) -> impl IntoView {
     view! {
         <h3 class="font-semibold">{heading}</h3>
         <p class="text-sm" data-testid="imp-result">{counts}</p>
+        // where the statistics put what the file calls Completed (LB-15)
+        {(r.imported > 0).then(|| view! {
+            <p class="text-sm text-muted-foreground" data-testid="imp-completed-note">{t("imports-completed-note")}</p>
+        })}
         {(r.state == "cancelled").then(|| view! {
             <p class="text-sm">{use_i18n().t_args("imports-stopped-at", &[("done", r.cursor.into()), ("total", r.total.into())])}</p>
         })}

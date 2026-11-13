@@ -206,6 +206,14 @@ pub fn config_values(
             smtp.map_or(Value::Null, |s| Value::from(s.from.as_str())),
         ),
         ("usage.funnel", Value::from(config.usage.funnel)),
+        (
+            api::admin::OPERATOR_CONTACT,
+            config
+                .instance
+                .operator_contact
+                .as_deref()
+                .map_or(Value::Null, Value::from),
+        ),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -253,6 +261,8 @@ pub struct AdminParts<'a> {
     pub mailer: Arc<notify::channels::email::Mailer>,
     /// `instance.hosting`, shared with the governed client.
     pub hosting: Arc<std::sync::RwLock<String>>,
+    /// `instance.operator_contact`, shared with the governed client and the registry.
+    pub contact: catalog_core::OperatorContact,
 }
 
 /// Add the admin API to the state, then apply the stored settings and credentials.
@@ -311,6 +321,7 @@ pub async fn with_admin(
         },
         secure_cookies: Arc::new(std::sync::atomic::AtomicBool::new(cfg.auth.secure_cookies)),
         hosting: p.hosting,
+        contact: p.contact,
         mail: Some(Arc::new(EmailTransport(p.mailer))),
     });
     api::admin::load_settings(&api)

@@ -27,10 +27,11 @@ blake3 = { workspace = true, optional = true }
 default = []
 tmdb = []
 igdb = []
+openlibrary = []
 podcastindex = ["dep:sha1"]
 tvdb = ["dep:blake3"]
 # every connector (CI, server builds)
-all = ["tmdb", "igdb", "podcastindex", "tvdb"]
+all = ["tmdb", "igdb", "podcastindex", "tvdb", "openlibrary"]
 
 [dev-dependencies]
 testkit.workspace = true

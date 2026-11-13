@@ -324,6 +324,15 @@ pub struct ItemPageDto {
     /// win rate); absent for a kind that is not played.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub play_totals: Option<browse::PlayTotalsDto>,
+    /// The viewer may correct data of the shared item (the page total of a book): everybody
+    /// on a home instance, admins only on a hosted one.
+    #[serde(default)]
+    pub can_edit: bool,
+    /// The viewer may set or change the page total of this item: `can_edit`, and the kind
+    /// holds one (a book, a comic; a manga counts chapters). The page shows "Set page total"
+    /// and "Change" only then (review BOOK-5).
+    #[serde(default)]
+    pub page_total_editable: bool,
 }
 
 /// When one episode was released (`YYYY-MM-DD`, `None` when the source has no date yet).
@@ -422,6 +431,14 @@ pub struct LoggedSessionDto {
 pub struct PrivacyDto {
     /// Linked participants see the sessions you log.
     pub share_sessions: bool,
+}
+
+/// A page total a person sets on an item (`PUT /items/{id}/page-count`): 1 to 100000. It
+/// replaces the estimate of the source and survives its refreshes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+pub struct PageCountDto {
+    pub pages: u32,
 }
 
 /// The caller's time zone (`PUT /auth/me/time-zone`, DEC-239): an IANA name such as
@@ -619,7 +636,11 @@ mod tests {
             (dto.kinds[0].kind.as_str(), dto.kinds[0].amounts.minutes),
             ("movie", 170)
         );
-        assert_eq!(serde_json::to_value(&dto).unwrap(), json);
+        // the answer of a server before LB-15 names no undated completions: none
+        assert_eq!(dto.undated_completions, 0);
+        let mut now = json.clone();
+        now["undated_completions"] = 0.into();
+        assert_eq!(serde_json::to_value(&dto).unwrap(), now);
         let mut old = json;
         old.as_object_mut().unwrap().remove("kinds");
         let old: StatsTotalsDto = serde_json::from_value(old).unwrap();

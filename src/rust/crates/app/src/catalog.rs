@@ -125,35 +125,70 @@ impl App {
         id: ItemId,
         refresh: CatalogRefresh,
     ) -> AppResult<CatalogItem> {
+        self.store_refresh(id, refresh, true).await
+    }
+
+    /// The rules shared by a full refresh and a partial fill. A field whose provenance is
+    /// [`USER_PROVENANCE`] keeps its value and its provenance (v1-plan.md 7, B3).
+    async fn store_refresh(
+        &self,
+        id: ItemId,
+        refresh: CatalogRefresh,
+        complete: bool,
+    ) -> AppResult<CatalogItem> {
         let mut item = self.catalog_item(id).await?;
         let now = self.now();
-        match self
-            .kinds
-            .validate_attributes(&item.kind, &refresh.attributes)
-        {
+        let by_user: std::collections::BTreeSet<String> = item
+            .provenance
+            .iter()
+            .filter(|(_, source)| source.as_str() == USER_PROVENANCE)
+            .map(|(field, _)| field.clone())
+            .collect();
+        let kept = |field: &str| by_user.contains(field);
+        let attributes = keep_user_attributes(refresh.attributes, &item.attributes, &by_user);
+        match self.kinds.validate_attributes(&item.kind, &attributes) {
             Ok(attrs) => item.attributes = attrs,
             Err(reason) => {
                 // Provider data that does not fit the schema must not break the page.
                 item.provenance.insert("attributes.invalid".into(), reason);
             }
         }
-        if !refresh.title.trim().is_empty() {
+        if !refresh.title.trim().is_empty() && !kept("title") {
             item.title = refresh.title;
         }
-        item.original_title = refresh.original_title.or(item.original_title);
-        item.year = refresh.year.or(item.year);
-        item.description = refresh.description.or(item.description);
-        item.cover_url = refresh.cover_url.or(item.cover_url);
+        if !kept("original_title") {
+            item.original_title = refresh.original_title.or(item.original_title);
+        }
+        if !kept("year") {
+            item.year = refresh.year.or(item.year);
+        }
+        if !kept("description") {
+            item.description = refresh.description.or(item.description);
+        }
+        if !kept("cover_url") {
+            item.cover_url = refresh.cover_url.or(item.cover_url);
+        }
         item.popularity = refresh.popularity.or(item.popularity);
         for ext in refresh.external_ids {
             if !item.external_ids.contains(&ext) {
                 item.external_ids.push(ext);
             }
         }
-        item.provenance.extend(refresh.provenance);
-        item.state = EntityState::Full;
+        item.provenance.extend(
+            refresh
+                .provenance
+                .into_iter()
+                .filter(|(field, _)| !by_user.contains(field)),
+        );
         item.fetched_at = Some(now);
-        item.fresh_until = Some(now + chrono::Duration::seconds(refresh.fresh_for_secs));
+        if complete {
+            item.state = EntityState::Full;
+            item.fresh_until = Some(now + chrono::Duration::seconds(refresh.fresh_for_secs));
+        } else {
+            // the rest (description, subjects) comes with the refresh a page view queues
+            item.state = EntityState::Partial;
+            item.fresh_until = None;
+        }
         self.repos.catalog.upsert(&item).await?;
         self.publish_item(item.id).await;
         Ok(item)
@@ -507,5 +542,170 @@ impl App {
             )
             .await?;
         Ok(())
+    }
+}
+
+/// Provenance of a field a person set on the shared item: a refresh keeps its value
+/// (v1-plan.md 7, B3).
+pub const USER_PROVENANCE: &str = "user";
+/// Largest page total a person may set.
+pub const MAX_PAGE_COUNT: u32 = 100_000;
+/// The attribute that holds the page total of a paged item.
+const PAGE_COUNT: &str = "page_count";
+
+/// `fresh` with the attributes a person set taken from `stored`: kept when the source gives
+/// another value, and when it gives none.
+fn keep_user_attributes(
+    fresh: serde_json::Value,
+    stored: &serde_json::Value,
+    by_user: &std::collections::BTreeSet<String>,
+) -> serde_json::Value {
+    let mut names = by_user
+        .iter()
+        .filter_map(|f| f.strip_prefix("attributes."))
+        .peekable();
+    if names.peek().is_none() {
+        return fresh;
+    }
+    let mut out = match fresh {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    for name in names {
+        match stored.get(name) {
+            Some(v) => out.insert(name.to_string(), v.clone()),
+            None => out.remove(name),
+        };
+    }
+    serde_json::Value::Object(out)
+}
+
+impl App {
+    /// Does an item of `kind` hold a page total: a paged kind whose attributes have
+    /// `page_count` (book, comic; a manga counts chapters and has none). The item page
+    /// offers "Set page total" only then (review BOOK-5).
+    #[must_use]
+    pub fn takes_page_total(&self, kind: &KindId) -> bool {
+        self.kinds.get(kind).is_some_and(|k| {
+            k.progress_model == domain::kind::ProgressModel::Paged && k.has_attribute(PAGE_COUNT)
+        })
+    }
+
+    /// A person corrects the page total of a paged item (the median of a work is an
+    /// estimate, v1-plan.md 3.1.3). The value is marked as theirs, so a refresh keeps it.
+    /// A change of the shared item: who may do it is the caller's rule.
+    ///
+    /// # Errors
+    /// Unknown item, a kind that holds no page total ([`App::takes_page_total`]), a total
+    /// outside 1..=[`MAX_PAGE_COUNT`].
+    pub async fn set_item_page_count(&self, id: ItemId, pages: u32) -> AppResult<CatalogItem> {
+        let mut item = self.catalog_item(id).await?;
+        if !self.takes_page_total(&item.kind) {
+            return Err(DomainError::invalid("page_count", "this kind has no pages").into());
+        }
+        if !(1..=MAX_PAGE_COUNT).contains(&pages) {
+            return Err(DomainError::invalid("page_count", "1 to 100000 pages").into());
+        }
+        let mut attributes = match std::mem::take(&mut item.attributes) {
+            serde_json::Value::Object(map) => map,
+            _ => serde_json::Map::new(),
+        };
+        attributes.insert(PAGE_COUNT.into(), pages.into());
+        item.attributes = self
+            .kinds
+            .validate_attributes(&item.kind, &serde_json::Value::Object(attributes))
+            .map_err(|r| DomainError::invalid("page_count", r))?;
+        item.provenance
+            .insert(format!("attributes.{PAGE_COUNT}"), USER_PROVENANCE.into());
+        self.repos.catalog.upsert(&item).await?;
+        self.publish_item(item.id).await;
+        Ok(item)
+    }
+
+    /// Store what a batch answer holds for an item (title, authors, year, cover, page count)
+    /// and leave it due for its full refresh, which brings the rest when its page is opened.
+    ///
+    /// # Errors
+    /// Unknown item or storage errors.
+    pub async fn apply_catalog_partial(
+        &self,
+        id: ItemId,
+        refresh: CatalogRefresh,
+    ) -> AppResult<CatalogItem> {
+        self.store_refresh(id, refresh, false).await
+    }
+
+    /// Give the items that never got their data another refresh (v1-plan.md 7, B1): every
+    /// item [`App::unfetched_items`] names (of `kind`, when given) that holds an external id
+    /// in one of `namespaces` (the ids of the registered sources) is due again, a failed one
+    /// is a stub again, and each gets a refresh job on the background lane. Returns them.
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn requeue_failed(
+        &self,
+        kind: Option<&KindId>,
+        namespaces: &[String],
+    ) -> AppResult<Vec<CatalogItem>> {
+        let mut again = Vec::new();
+        for mut item in self.unfetched_items(kind).await? {
+            if !item
+                .external_ids
+                .iter()
+                .any(|e| namespaces.contains(&e.namespace))
+            {
+                continue;
+            }
+            if item.state == EntityState::Failed {
+                item.state = EntityState::Stub;
+            }
+            item.fresh_until = None;
+            self.repos.catalog.upsert(&item).await?;
+            self.jobs
+                .enqueue(crate::ports::NewJob {
+                    lane: crate::ports::Lane::BackgroundRefresh,
+                    kind: REFRESH_JOB.into(),
+                    payload: serde_json::json!({ "item_id": item.id }),
+                    dedupe_key: Some(format!("{REFRESH_JOB}:{}", item.id)),
+                    priority: 0,
+                    run_at: None,
+                })
+                .await
+                .map_err(|e| crate::ports::RepoError::Backend(e.to_string()))?;
+            self.publish_item(item.id).await;
+            again.push(item);
+        }
+        Ok(again)
+    }
+
+    /// The items that never got their data (of `kind`, when given): in state `failed` (a
+    /// stub whose refresh failed is never refreshed again on its own), or never fetched and
+    /// in somebody's library (an import stub, which is `partial` and only retried when its
+    /// page is opened). Search results nobody added are not among them.
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn unfetched_items(&self, kind: Option<&KindId>) -> AppResult<Vec<CatalogItem>> {
+        let ids = self.repos.catalog.unfetched_items(kind).await?;
+        Ok(self.repos.catalog.get_many(&ids).await?)
+    }
+
+    /// The items of `kind` that hold no external id in `namespace`, by title.
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn items_without_id_from(
+        &self,
+        kind: &KindId,
+        namespace: &str,
+    ) -> AppResult<Vec<CatalogItem>> {
+        let ids = self
+            .repos
+            .catalog
+            .items_without_namespace(kind, namespace)
+            .await?;
+        let mut items = self.repos.catalog.get_many(&ids).await?;
+        items.sort_by_key(|i| ids.iter().position(|id| *id == i.id));
+        Ok(items)
     }
 }

@@ -22,6 +22,8 @@ pub enum CredentialState {
     Invalid,
     /// A stored key exists but cannot be decrypted (addendum-1 2.2).
     Locked,
+    /// The source asks for the operator contact and none is set: it is not asked.
+    NeedsContact,
 }
 
 impl CredentialState {
@@ -34,6 +36,7 @@ impl CredentialState {
             Self::Db => "db",
             Self::Invalid => "invalid",
             Self::Locked => "locked",
+            Self::NeedsContact => "needs_contact",
         }
     }
 

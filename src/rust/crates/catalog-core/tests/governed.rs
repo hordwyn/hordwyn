@@ -23,6 +23,8 @@ fn policy(server: &MockServer) -> ConnectorPolicy {
         breaker_cooldown: Duration::from_secs(60),
         max_retry_wait: Duration::from_secs(5),
         max_retries: 2,
+        contact: catalog_core::ContactUse::None,
+        shared_pace: false,
     }
 }
 
@@ -360,4 +362,129 @@ async fn host_allowlist_changes_at_run_time() {
         .fetch(get(&server, "/.well-known/openid-configuration"))
         .await;
     assert!(matches!(r, Err(HttpError::Blocked(_))), "{r:?}");
+}
+
+fn contact_client(
+    server: &MockServer,
+    wants: catalog_core::ContactUse,
+    contact: Option<&str>,
+) -> GovernedHttp {
+    let mut p = policy(server);
+    p.cache_ttl_secs = 0;
+    p.contact = wants;
+    let shared = catalog_core::OperatorContact::default();
+    shared.set(contact).unwrap();
+    let mut h = GovernedHttp::new("tracker/1.2 (+https://support.example)", None);
+    h.add_connector("fake", p);
+    h.with_contact("tracker/1.2", shared)
+}
+
+/// v1-books 3.1.1: Open Library and Wikidata ask clients to name a contact.
+#[tokio::test]
+async fn a_connector_that_wants_the_contact_sends_it_in_the_user_agent() {
+    use catalog_core::ContactUse;
+    for wants in [ContactUse::Preferred, ContactUse::Required] {
+        let server = MockServer::start().await;
+        Mock::given(path("/x"))
+            .and(header("user-agent", "tracker/1.2 (ops@example.org)"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let http = contact_client(&server, wants, Some("ops@example.org"));
+        assert_eq!(http.fetch(get(&server, "/x")).await.unwrap().status, 200);
+    }
+    // a preferred contact that is not set: the plain header, and the source is still asked
+    let server = MockServer::start().await;
+    Mock::given(path("/x"))
+        .and(header(
+            "user-agent",
+            "tracker/1.2 (+https://support.example)",
+        ))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let http = contact_client(&server, ContactUse::Preferred, None);
+    assert_eq!(http.fetch(get(&server, "/x")).await.unwrap().status, 200);
+}
+
+#[tokio::test]
+async fn other_connectors_never_send_the_contact() {
+    let server = MockServer::start().await;
+    Mock::given(path("/x"))
+        .and(header(
+            "user-agent",
+            "tracker/1.2 (+https://support.example)",
+        ))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let http = contact_client(
+        &server,
+        catalog_core::ContactUse::None,
+        Some("ops@example.org"),
+    );
+    assert_eq!(http.fetch(get(&server, "/x")).await.unwrap().status, 200);
+    let sent = &server.received_requests().await.unwrap()[0];
+    let all = format!("{:?}", sent.headers);
+    assert!(!all.contains("ops@example.org"), "{all}");
+}
+
+#[tokio::test]
+async fn a_required_contact_that_is_missing_blocks_the_call_without_a_request() {
+    let server = MockServer::start().await;
+    Mock::given(path("/x"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let http = contact_client(&server, catalog_core::ContactUse::Required, None);
+    let err = http.fetch(get(&server, "/x")).await.unwrap_err();
+    assert!(matches!(err, HttpError::Blocked(_)), "{err:?}");
+    assert_eq!(http.upstream_calls(), 0);
+}
+
+/// The turns a client took from the shared pace.
+#[derive(Default)]
+struct Turns(std::sync::Mutex<Vec<(String, Duration)>>);
+
+#[async_trait::async_trait]
+impl catalog_core::SharedPace for Turns {
+    async fn turn(&self, source: &str, every: Duration) {
+        self.0.lock().unwrap().push((source.to_string(), every));
+    }
+}
+
+/// Review BOOK-8: a source that limits per address takes a turn from the pace all processes
+/// share before every request it sends, at the interval of its rate limit; a source with a
+/// key keeps to this client's own token bucket.
+#[tokio::test]
+async fn a_source_without_a_key_takes_its_turn_from_the_shared_pace() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(3)
+        .mount(&server)
+        .await;
+    let mut shared = policy(&server);
+    shared.shared_pace = true;
+    shared.rate_limit.per_second = 2;
+    let turns = Arc::new(Turns::default());
+    let mut h = GovernedHttp::new("test-agent/1", None);
+    h.add_connector("fake", shared);
+    h.add_connector("keyed", policy(&server));
+    let h = h.with_shared_pace(turns.clone());
+    for p in ["/a", "/b"] {
+        assert_eq!(h.fetch(get(&server, p)).await.unwrap().status, 200);
+    }
+    let mut keyed = get(&server, "/c");
+    keyed.connector = "keyed".into();
+    assert_eq!(h.fetch(keyed).await.unwrap().status, 200);
+    let half = Duration::from_millis(500);
+    assert_eq!(
+        *turns.0.lock().unwrap(),
+        [("fake".to_string(), half), ("fake".to_string(), half)]
+    );
 }

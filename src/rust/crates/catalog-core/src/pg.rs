@@ -222,3 +222,59 @@ impl StatsStore for PgSourceStats {
         Ok(out)
     }
 }
+
+/// The pace of a source for every process that uses this database (store-pg migration
+/// `0100`, table `source_pace`): each turn reserves the next free slot of the source in one
+/// statement and waits until it starts. The row lock orders the callers, and the clock is
+/// the database's, so the web role, a separate worker and the shell commands never send two
+/// requests to one source closer together than the interval (review BOOK-8).
+#[derive(Clone)]
+pub struct PgPace {
+    pool: PgPool,
+}
+
+impl PgPace {
+    #[must_use]
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    /// Reserve the next slot of `source` and answer how long until it starts.
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn reserve(
+        &self,
+        source: &str,
+        every: std::time::Duration,
+    ) -> Result<std::time::Duration, PortError> {
+        let every = every.as_secs_f64();
+        let wait = sqlx::query_scalar!(
+            r#"INSERT INTO source_pace AS p (source, next_free)
+               VALUES ($1, clock_timestamp() + make_interval(secs => $2))
+               ON CONFLICT (source) DO UPDATE
+                   SET next_free = GREATEST(p.next_free, clock_timestamp())
+                                   + make_interval(secs => $2)
+               RETURNING (EXTRACT(EPOCH FROM p.next_free - clock_timestamp()) - $2)::float8
+                   AS "wait!""#,
+            source,
+            every
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(pe)?;
+        Ok(std::time::Duration::try_from_secs_f64(wait).unwrap_or_default())
+    }
+}
+
+#[async_trait]
+impl crate::http::SharedPace for PgPace {
+    async fn turn(&self, source: &str, every: std::time::Duration) {
+        match self.reserve(source, every).await {
+            Ok(wait) => tokio::time::sleep(wait).await,
+            // without the database nothing else works either; this client's own token
+            // bucket still holds
+            Err(e) => tracing::warn!(source, error = %e.0, "shared pace not available"),
+        }
+    }
+}

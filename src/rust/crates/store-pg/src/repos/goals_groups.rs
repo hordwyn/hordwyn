@@ -203,8 +203,11 @@ impl PgStore {
     ) -> Res<Vec<KindAmounts>> {
         let rows = sqlx::query!(
             r#"WITH touched AS (
-                 SELECT DISTINCT item_id FROM progress_events
+                 SELECT item_id FROM progress_events
                  WHERE user_id = $1 AND occurred_at >= $2 AND occurred_at < $3
+                 UNION
+                 SELECT item_id FROM library_entries
+                 WHERE user_id = $1 AND completed_at >= $2 AND completed_at < $3
                ), live AS (
                  SELECT x.id, x.item_id, x.occurred_at, x.status_change, c.kind, c.attributes,
                         x.progress ->> 'type' AS t,
@@ -222,6 +225,15 @@ impl PgStore {
                                    THEN x.progress ->> 'session_id' END)::uuid
                  WHERE x.user_id = $1 AND x.undoes IS NULL
                    AND NOT EXISTS (SELECT 1 FROM progress_events u WHERE u.undoes = x.id)
+                 UNION ALL
+                 -- LB-14: the completion no event made is one completion on its day (one
+                 -- without a day is in no window, LB-15)
+                 SELECT e.id, e.item_id, e.completed_at, jsonb_build_object('to', 'completed'),
+                        c.kind, c.attributes, 'status', NULL, NULL, NULL
+                 FROM library_entries e
+                 JOIN touched USING (item_id)
+                 JOIN catalog_items c ON c.id = e.item_id
+                 WHERE e.user_id = $1 AND e.completed_at IS NOT NULL
                ), moves AS (
                  SELECT l.*,
                         COALESCE(lag(page) OVER (PARTITION BY item_id, page IS NULL
@@ -231,7 +243,7 @@ impl PgStore {
                  FROM live l
                )
                SELECT kind AS "kind!",
-                      COUNT(*) AS "events?",
+                      COUNT(*) FILTER (WHERE t <> 'status') AS "events?",
                       COUNT(*) FILTER (WHERE status_change ->> 'to' = 'completed'
                                         AND t <> 'rewatch_stop') AS "completions?",
                       COUNT(*) FILTER (WHERE t = 'finished') AS "finished?",

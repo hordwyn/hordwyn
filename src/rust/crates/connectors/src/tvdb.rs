@@ -89,6 +89,7 @@ impl Tvdb {
                 },
                 hosts: vec![host_of(&api_base), IMAGE_HOST.into()],
                 cache_ttl_secs: 7 * 24 * 3600,
+                contact: catalog_core::ContactUse::None,
             },
             api_base,
             key: KeySlot::new(key),

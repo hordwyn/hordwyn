@@ -22,6 +22,16 @@ const USAGE: &str = "usage: cli [--config <file>] <command>
   storage evict                    run eviction now (normally a background job)
   reindex [--clear]                queue every catalog item, library entry and companion for
                                    the search indexer (--clear: empty the indexes first)
+  refresh-failed [--kind <kind>] [--apply]
+                                   ask the sources again for every item that never got its
+                                   data (a failed refresh, or an imported title that was
+                                   never fetched); books with an Open Library id are filled
+                                   with one request per 50, the rest is queued for the
+                                   worker. Prints what it would do; --apply does it
+  match-books [--apply | --applied]
+                                   find the Open Library work of every book that has none, by
+                                   title; prints the matches, --apply stores them (and logs
+                                   what each book was before), --applied lists that log
   admin promote <username>         make an account admin
   admin reset-password <username>  print a one-time password reset link (1 hour)
   admin reset-totp <username>      remove the authenticator and its recovery codes
@@ -37,6 +47,9 @@ enum Cmd {
     StorageReport { json: bool },
     StorageEvict,
     Reindex { clear: bool },
+    RefreshFailed { kind: Option<String>, apply: bool },
+    MatchBooks { apply: bool },
+    MatchesApplied,
     Promote(String),
     ResetPassword(String),
     ResetTotp(String),
@@ -56,33 +69,36 @@ struct Args {
 
 fn parse(args: &[String]) -> Result<Args> {
     let mut config = None;
+    let mut kind = None;
     let mut rest = Vec::new();
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--config" => config = Some(PathBuf::from(it.next().context("--config needs a path")?)),
+            "--kind" => kind = Some(it.next().context("--kind needs a kind id")?.clone()),
             _ => rest.push(a.as_str()),
         }
     }
-    let flags: Vec<&str> = rest
-        .iter()
-        .copied()
-        .filter(|a| a.starts_with("--"))
-        .collect();
-    let words: Vec<&str> = rest
-        .iter()
-        .copied()
-        .filter(|a| !a.starts_with("--"))
-        .collect();
+    let (flags, words): (Vec<&str>, Vec<&str>) = rest.iter().partition(|a| a.starts_with("--"));
+    let cmd = command(&words, &flags, &mut kind)?;
+    if kind.is_some() {
+        bail!("--kind belongs to refresh-failed\n\n{USAGE}");
+    }
+    Ok(Args { config, cmd })
+}
+
+/// The command of the words and options of a call; `kind` is the value of `--kind`, taken
+/// by the command it belongs to.
+fn command(words: &[&str], flags: &[&str], kind: &mut Option<String>) -> Result<Cmd> {
     let known = |allowed: &[&str]| -> Result<()> {
-        for f in &flags {
+        for f in flags {
             if !allowed.contains(f) {
                 bail!("unknown option `{f}`\n\n{USAGE}");
             }
         }
         Ok(())
     };
-    let cmd = match words.as_slice() {
+    Ok(match words {
         ["migrate"] => {
             known(&["--dry-run"])?;
             Cmd::Migrate {
@@ -103,6 +119,21 @@ fn parse(args: &[String]) -> Result<Args> {
             known(&["--clear"])?;
             Cmd::Reindex {
                 clear: flags.contains(&"--clear"),
+            }
+        }
+        ["refresh-failed"] => {
+            known(&["--apply"])?;
+            Cmd::RefreshFailed {
+                kind: kind.take(),
+                apply: flags.contains(&"--apply"),
+            }
+        }
+        ["match-books"] => {
+            known(&["--apply", "--applied"])?;
+            match (flags.contains(&"--apply"), flags.contains(&"--applied")) {
+                (true, true) => bail!("--apply or --applied, not both\n\n{USAGE}"),
+                (_, true) => Cmd::MatchesApplied,
+                (apply, false) => Cmd::MatchBooks { apply },
             }
         }
         ["admin", "promote", u] => {
@@ -139,8 +170,7 @@ fn parse(args: &[String]) -> Result<Args> {
         }
         [] | ["help"] => Cmd::Help,
         _ => bail!("unknown command `{}`\n\n{USAGE}", words.join(" ")),
-    };
-    Ok(Args { config, cmd })
+    })
 }
 
 fn human(bytes: u64) -> String {
@@ -242,6 +272,10 @@ async fn run(args: Args) -> Result<()> {
         println!("{done}");
         return Ok(());
     }
+    if let Some(done) = catalog(&args.cmd, &cfg).await? {
+        println!("{done}");
+        return Ok(());
+    }
     let pool = store_pg::connect(&cfg.database.url, 2)
         .await
         .context("connect to the database")?;
@@ -308,6 +342,23 @@ async fn run(args: Args) -> Result<()> {
         _ => unreachable!("handled above"),
     }
     Ok(())
+}
+
+/// `refresh-failed` and `match-books` (`server::book_stubs`); `None` for the other commands.
+async fn catalog(cmd: &Cmd, cfg: &config::AppConfig) -> Result<Option<String>> {
+    use server::book_stubs::{Catalog, match_text, refresh_text};
+    Ok(Some(match cmd {
+        Cmd::RefreshFailed { kind, apply } => {
+            let c = Catalog::open(cfg).await?;
+            refresh_text(&c.refresh_failed(kind.as_deref(), *apply).await?)
+        }
+        Cmd::MatchesApplied => Catalog::open(cfg).await?.applied_matches().await?,
+        Cmd::MatchBooks { apply } => {
+            let c = Catalog::open(cfg).await?;
+            match_text(&c.match_books(*apply).await?, *apply)
+        }
+        _ => return Ok(None),
+    }))
 }
 
 /// The escape hatches (`server::escape`); `None` for the other commands.
@@ -532,6 +583,38 @@ mod tests {
         assert_eq!(p("secrets prune").unwrap().cmd, Cmd::SecretsPrune);
         assert!(p("admin promote").is_err());
         assert!(p("frobnicate").is_err());
+        assert_eq!(
+            p("refresh-failed").unwrap().cmd,
+            Cmd::RefreshFailed {
+                kind: None,
+                apply: false
+            },
+            "a dry run unless asked"
+        );
+        assert_eq!(
+            p("refresh-failed --kind book --apply").unwrap().cmd,
+            Cmd::RefreshFailed {
+                kind: Some("book".into()),
+                apply: true
+            }
+        );
+        assert!(p("refresh-failed --kind").is_err());
+        assert!(p("refresh-failed --applied").is_err());
+        assert_eq!(p("match-books --applied").unwrap().cmd, Cmd::MatchesApplied);
+        assert!(p("match-books --apply --applied").is_err());
+        assert!(
+            p("reindex --kind book").is_err(),
+            "--kind is refresh-failed's"
+        );
+        assert_eq!(
+            p("match-books").unwrap().cmd,
+            Cmd::MatchBooks { apply: false },
+            "a dry run unless asked"
+        );
+        assert_eq!(
+            p("match-books --apply").unwrap().cmd,
+            Cmd::MatchBooks { apply: true }
+        );
     }
 
     #[test]

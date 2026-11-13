@@ -60,6 +60,7 @@ fn registry(tmdb_key: Option<&str>) -> Registry {
             },
             hosts: vec![],
             cache_ttl_secs: 0,
+            contact: catalog_core::ContactUse::None,
         },
         key: KeySlot::new(tmdb_key.map(String::from)),
     }));

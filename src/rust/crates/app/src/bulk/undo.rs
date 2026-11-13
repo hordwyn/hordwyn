@@ -91,6 +91,7 @@ impl App {
             let before = Status::new(&b.before);
             self.kind(&e.kind)?.check_status(&before)?;
             e.status = Lww::new(before, self.stamp(None));
+            e.completed = b.completed;
             writes.push((e, None));
         }
         Ok(writes)
@@ -223,6 +224,8 @@ impl App {
             rating: Lww::new(rating, self.stamp(None)),
             notes: Lww::new(s.notes.clone(), self.stamp(None)),
             added_at: s.added_at.min(self.now()),
+            // finished by a status when and as it was (a new status stamp must not date it)
+            completed: s.completed,
         };
         Ok((entry, Some(tags)))
     }

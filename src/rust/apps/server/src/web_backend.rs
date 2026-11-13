@@ -446,6 +446,18 @@ impl Backend for WebBackend {
             .map_err(err)
     }
 
+    async fn set_page_count(
+        &self,
+        token: &str,
+        item_id: &str,
+        pages: u32,
+    ) -> BResult<contracts::CatalogItemDto> {
+        let a = self.actor(token).await?;
+        ops::set_page_count(&self.0, a, item_id, pages)
+            .await
+            .map_err(err)
+    }
+
     async fn library_bulk(
         &self,
         token: &str,

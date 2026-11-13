@@ -84,6 +84,7 @@ they are never written back or logged.
 |Key |Environment |Type |Default |Description
 
 |`hosting` |`APP__INSTANCE__HOSTING` |`home` \| `hosted` |`"home"` |`home` or `hosted`. When set here or in the environment the admin area shows it read-only; otherwise the setup wizard and Admin > Instance store it in the database.
+|`operator_contact` |`APP__INSTANCE__OPERATOR_CONTACT` |string |- |Contact of the person who runs the instance: an e-mail address (preferred) or an https URL, at most 200 characters. Sent in the `User-Agent` of requests to the data sources that ask clients to identify themselves (Open Library), to no other source. Short form: `KK_OPERATOR_CONTACT`. When set here or in the environment the admin area shows it read-only; otherwise Admin > Data sources stores it in the database.
 |===
 
 == `[jobs]`

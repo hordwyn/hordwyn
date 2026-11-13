@@ -38,6 +38,7 @@ impl Spy {
                 },
                 hosts: vec![],
                 cache_ttl_secs: 0,
+                contact: catalog_core::ContactUse::None,
             },
             key: KeySlot::new(Some("instance".into())),
             seen,

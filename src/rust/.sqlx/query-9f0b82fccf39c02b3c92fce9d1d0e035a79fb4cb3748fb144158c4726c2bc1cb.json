@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT hosting, signup, session_days, secure_cookies, storage_max_total_bytes,\n                    storage_high_watermark, storage_low_watermark, setup_completed_at, setup_step,\n                    sign_in_mode, mail_host, mail_port, mail_security, mail_username, mail_from,\n                    mail_password IS NOT NULL AS \"mail_password_set!\", mail_last_test_at,\n                    mail_last_test_result, updated_at, updated_by, usage_funnel\n             FROM instance_settings WHERE id",
+  "query": "SELECT hosting, signup, session_days, secure_cookies, storage_max_total_bytes,\n                    storage_high_watermark, storage_low_watermark, setup_completed_at, setup_step,\n                    sign_in_mode, mail_host, mail_port, mail_security, mail_username, mail_from,\n                    mail_password IS NOT NULL AS \"mail_password_set!\", mail_last_test_at,\n                    mail_last_test_result, updated_at, updated_by, usage_funnel,\n                    operator_contact\n             FROM instance_settings WHERE id",
   "describe": {
     "columns": [
       {
@@ -228,6 +228,17 @@
             "name": "usage_funnel"
           }
         }
+      },
+      {
+        "ordinal": 21,
+        "name": "operator_contact",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_settings",
+            "name": "operator_contact"
+          }
+        }
       }
     ],
     "parameters": {
@@ -254,8 +265,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "dccd8188a56eae24478bb853ff1b4cde883308f7e6b3d88398699535517a447d"
+  "hash": "9f0b82fccf39c02b3c92fce9d1d0e035a79fb4cb3748fb144158c4726c2bc1cb"
 }

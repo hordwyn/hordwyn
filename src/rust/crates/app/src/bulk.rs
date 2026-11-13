@@ -14,8 +14,9 @@ use domain::Timestamp;
 use domain::hlc::Hlc;
 use domain::ids::{EntryId, ItemId, ListId};
 use domain::kind::Status;
-use domain::library::{LibraryEntry, Rating};
+use domain::library::{HandCompletion, LibraryEntry, Rating};
 use domain::list::{List, ListItem};
+use domain::progress::{ProgressEvent, effective};
 use domain::tag::{MAX_TAGS_PER_ENTRY, normalize_tag, tag_key};
 use domain::user::Actor;
 
@@ -74,6 +75,9 @@ pub struct EntrySnapshot {
     pub notes: Option<String>,
     pub added_at: Timestamp,
     pub tags: Vec<String>,
+    /// The completion no event made, so a restored entry is finished when it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed: Option<HandCompletion>,
 }
 
 /// A status a bulk change set, and the one it replaced.
@@ -83,6 +87,9 @@ pub struct StatusBack {
     pub before: String,
     /// The stamp the change wrote: the undo applies only while the status still carries it.
     pub set: Hlc,
+    /// The completion no event made that the entry had before, put back with the status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed: Option<HandCompletion>,
 }
 
 /// The inverse of one bulk change: only what that change did is put back, so a change made in
@@ -162,6 +169,11 @@ impl App {
             tags.entry(e).or_default().push(t);
         }
         let mut plan = Plan::default();
+        if let BulkOp::SetStatus(s) = &op {
+            let undated = found.values().filter(|e| e.dates_completion(s));
+            let items: Vec<ItemId> = undated.map(|e| e.item_id).collect();
+            plan.dated = self.hand_completions(actor, &items).await?;
+        }
         let mut results = Vec::with_capacity(ids.len());
         for id in &ids {
             let failure = match found.get(id) {
@@ -184,6 +196,28 @@ impl App {
         self.run_plan(actor, plan, list, results, undo).await
     }
 
+    /// The completion a status write to Completed makes for each of the actor's `items`
+    /// ([`HandCompletion::from_history`]), from one read of their events.
+    async fn hand_completions(
+        &self,
+        actor: Actor,
+        items: &[ItemId],
+    ) -> AppResult<HashMap<ItemId, Option<HandCompletion>>> {
+        if items.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let events = self.repos.progress.for_items(actor.user_id, items).await?;
+        let mut by_item: HashMap<ItemId, Vec<ProgressEvent>> = HashMap::new();
+        for e in events {
+            by_item.entry(e.item_id).or_default().push(e);
+        }
+        let dated = |i: &ItemId| {
+            let history = by_item.get(i).map_or(&[][..], Vec::as_slice);
+            (*i, HandCompletion::from_history(&effective(history)))
+        };
+        Ok(items.iter().map(dated).collect())
+    }
+
     /// What `op` does to one entry, added to `plan`; `Some` when it fails for this entry.
     fn plan_one(
         &self,
@@ -201,11 +235,13 @@ impl App {
                 }
                 let mut changed = e.clone();
                 let stamp = self.stamp(None);
-                if changed.status.set(s.clone(), stamp) {
+                let dated = plan.dated.get(&e.item_id).copied().flatten();
+                if changed.set_status_by_hand(s.clone(), stamp, dated) {
                     plan.status.push(StatusBack {
                         item_id: e.item_id,
                         before: e.status.value.as_str().to_string(),
                         set: stamp,
+                        completed: e.completed,
                     });
                     plan.writes.push((changed, None));
                 }
@@ -298,6 +334,9 @@ impl App {
 #[derive(Default)]
 struct Plan {
     writes: Vec<(LibraryEntry, Option<Vec<String>>)>,
+    /// For a status change to Completed: the completion it makes per entry that has no
+    /// day yet.
+    dated: HashMap<ItemId, Option<HandCompletion>>,
     removes: Vec<EntryId>,
     status: Vec<StatusBack>,
     /// Items that gained or lost the tag, or that the list gained.
@@ -340,5 +379,6 @@ fn snapshot(e: &LibraryEntry, tags: &[String]) -> EntrySnapshot {
         notes: e.notes.value.clone(),
         added_at: e.added_at,
         tags: tags.to_vec(),
+        completed: e.completed,
     }
 }

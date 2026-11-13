@@ -247,8 +247,18 @@ pub fn source_state(state: &str) -> StatusState {
     match state {
         "working" => StatusState::Ok,
         "rate_limited" | "slow" | "retrying" | "circuit_open" => StatusState::Warn,
-        "key_rejected" | "key_unavailable" | "unavailable" => StatusState::Bad,
+        "key_rejected" | "key_unavailable" | "unavailable" | "needs_contact" => StatusState::Bad,
         _ => StatusState::Off,
+    }
+}
+
+/// A sentence the card of one source shows under its usage lines (a rule of the source the
+/// operator has to know; from `docs/connectors/<id>.md`).
+#[must_use]
+pub fn source_note(id: &str) -> Option<&'static str> {
+    match id {
+        "openlibrary" => Some("admin-sources-note-openlibrary"),
+        _ => None,
     }
 }
 

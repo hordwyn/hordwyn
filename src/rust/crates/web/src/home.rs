@@ -962,6 +962,7 @@ mod tests {
                 overall: none,
                 groups: Vec::new(),
                 kinds: Vec::new(),
+                undated_completions: 0,
             },
         }
     }

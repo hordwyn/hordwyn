@@ -464,6 +464,41 @@ Two packages. Common decisions:
 5. The generic export and import keep kind, title and year of a hand-entered item
    (`crates/importers/src/generic.rs:55-56`); the cover address is added as an optional
    column `cover_url` if the format has none (confirm; additive).
+6. Required work from the review of v1-books (docs/reviews/2026-11-13-v1-books-review.md,
+   BOOK-10): the rule "a field whose provenance is `user` keeps its value and its
+   provenance" holds in one of four writers today (`App::store_refresh`: a full refresh and
+   a partial fill). v1-books marks only `attributes.page_count` of a book or comic as
+   `user`, and those kinds have no cache-limited source, so nothing fails yet. It fails as
+   soon as this package lets a member set the title, year or cover of an item a
+   cache-limited source answers for. Before "Edit details" ships, with a failing test
+   first for each:
+   - Retention purge (`crates/store-pg/src/repos/catalog.rs` `purge_provider_data`,
+     DEC-453, DEC-466): it sets `attributes = '{}'`, `provenance = '{}'` and clears
+     title, year, description and cover. It has to keep every field whose provenance is
+     `user`, and those provenance entries, or the next refetch cannot know the field was a
+     person's (one `jsonb` expression in the UPDATE, or the purge done in the application
+     through the same `kept()` rule). Test: `crates/catalog-core/tests/retention.rs` with a
+     `user` title, a `user` cover address and a `user` page total; after the purge and the
+     refetch all three are the person's.
+   - Merge writer (`crates/app/src/catalog.rs` `update_existing` in mode `Merge`, reached
+     by `upsert_catalog_item`): it replaces attributes and title. Route it through
+     `store_refresh`, or apply `kept()` there. Test in `crates/app/tests/books.rs` beside
+     `a_refresh_keeps_every_field_a_person_set`.
+   - Cover job (`apps/server/src/handlers.rs`, the asset job takes its connector from
+     `provenance["cover_url"]`): `user` is no connector, the governed client would answer
+     `Blocked`. Skip a cover whose provenance is `user` (DEC-640: never fetched by the
+     server); this is the same change as the bullet "The server never fetches a member's
+     cover address" of scope 1 and B5 of section 7, named here so it is not built twice.
+   - The lost update between a person's save and a refresh: `set_item_page_count` and
+     `store_refresh` read the item, change it and write the whole row; a refresh that read
+     the item just before a person saved writes the old attributes and provenance over it
+     (a window of milliseconds). "Edit details" widens the window to every field: write
+     the `user` fields with a statement that touches only them, or re-read inside the
+     transaction of the refresh.
+   - Decide once for all editable fields (review BOOK-19): an audit entry and an undo for a
+     change of the shared item (v1-books changes the page total without either), and
+     exclude items whose title provenance is `user` from `cli match-books` (review
+     BOOK-9), or a hand-made book is offered to the title match.
 
 **Files and crates**: `crates/app/src/catalog.rs`, `crates/api/src/routes.rs`,
 `crates/api/src/ops.rs`, `crates/contracts`, `crates/web/src/palette.rs`,

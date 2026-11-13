@@ -193,7 +193,8 @@ impl AdminStore for PgAdminStore {
                     storage_high_watermark, storage_low_watermark, setup_completed_at, setup_step,
                     sign_in_mode, mail_host, mail_port, mail_security, mail_username, mail_from,
                     mail_password IS NOT NULL AS "mail_password_set!", mail_last_test_at,
-                    mail_last_test_result, updated_at, updated_by, usage_funnel
+                    mail_last_test_result, updated_at, updated_by, usage_funnel,
+                    operator_contact
              FROM instance_settings WHERE id"#
         )
         .fetch_optional(&self.pool)
@@ -210,6 +211,7 @@ impl AdminStore for PgAdminStore {
             storage_high_watermark: r.storage_high_watermark,
             storage_low_watermark: r.storage_low_watermark,
             usage_funnel: r.usage_funnel,
+            operator_contact: r.operator_contact,
             setup_completed_at: r.setup_completed_at,
             setup_step: r.setup_step,
             sign_in_mode: r.sign_in_mode,
@@ -239,15 +241,16 @@ impl AdminStore for PgAdminStore {
             "INSERT INTO instance_settings (id, hosting, signup, session_days, secure_cookies,
                  storage_max_total_bytes, storage_high_watermark, storage_low_watermark,
                  setup_completed_at, setup_step, updated_at, updated_by, sign_in_mode, mail_host,
-                 mail_port, mail_security, mail_username, mail_from, usage_funnel)
+                 mail_port, mail_security, mail_username, mail_from, usage_funnel,
+                 operator_contact)
              VALUES (true, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-                     $17, $18)
+                     $17, $18, $19)
              ON CONFLICT (id) DO UPDATE SET hosting = $1, signup = $2, session_days = $3,
                  secure_cookies = $4, storage_max_total_bytes = $5, storage_high_watermark = $6,
                  storage_low_watermark = $7, setup_completed_at = $8, setup_step = $9,
                  updated_at = $10, updated_by = $11, sign_in_mode = $12, mail_host = $13,
                  mail_port = $14, mail_security = $15, mail_username = $16, mail_from = $17,
-                 usage_funnel = $18",
+                 usage_funnel = $18, operator_contact = $19",
             s.hosting,
             s.signup,
             s.session_days.and_then(|d| i32::try_from(d).ok()),
@@ -266,7 +269,8 @@ impl AdminStore for PgAdminStore {
             s.mail.security,
             s.mail.username,
             s.mail.from,
-            s.usage_funnel
+            s.usage_funnel,
+            s.operator_contact
         )
         .execute(&mut *tx)
         .await

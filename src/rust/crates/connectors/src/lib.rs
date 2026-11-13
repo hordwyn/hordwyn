@@ -11,6 +11,8 @@ mod util;
 
 #[cfg(feature = "igdb")]
 pub mod igdb;
+#[cfg(feature = "openlibrary")]
+pub mod openlibrary;
 #[cfg(feature = "podcastindex")]
 pub mod podcastindex;
 #[cfg(feature = "tmdb")]

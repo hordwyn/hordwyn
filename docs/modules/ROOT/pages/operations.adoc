@@ -491,6 +491,61 @@ Rotate every two years or when staff changes (the admin overview reminds after t
 . when no value uses `v1` any more, the page marks it removable: delete the line yourself once
   no backup you keep still needs it. The server never edits the key file.
 
+== Titles that never got their data
+
+An item can be left with a title and nothing else: an import ran while its source had no
+key, was switched off or did not answer, or the source did not exist yet (books before the
+Open Library connector). Such an item is asked again only when somebody opens its page, and
+an item whose refresh failed while it had no data at all is not asked again on its own.
+Two commands of the admin tool take care of them. Both use the server's configuration and
+database; the jobs they queue are run by the worker of the running server.
+
+[source,sh]
+----
+cli refresh-failed                      # a dry run: what would be done, nothing is asked or changed
+cli refresh-failed --apply              # every kind
+cli refresh-failed --kind book --apply  # one kind
+----
+
+`refresh-failed` takes every item whose refresh failed, and every item in somebody's
+library that was never fetched, as long as it holds an id of a source this build has and
+that is not switched off. Books with an Open Library work id are filled first, with one
+request per 50 books (title, authors, year, cover, page count; the description follows when
+the page of the book is opened). Everything else gets a refresh job on the background lane.
+Without `--apply` it only lists (the first 20 titles of each group and the totals): the
+books it would ask for in batches, the items it would queue, and how many hold no id of a
+registered source. With `--apply` it prints one line per item and the totals; a batch
+search that failed is a line of its own with the reason, and its books go to the refresh
+jobs. Items without an id of a registered source are counted and left as they are. Running
+it twice does no harm.
+
+[source,sh]
+----
+cli match-books            # a dry run: prints the table, changes nothing
+cli match-books --apply    # stores the matches
+cli match-books --applied  # lists every match that was ever stored
+----
+
+`match-books` is for books that hold no Open Library id (an import from a tool that used
+another catalogue). It asks Open Library for each title, one request per second, and takes
+a work only when exactly one of the 20 results it asks for has the same title (case,
+punctuation and a leading article aside), the year agrees or the book has none, the book's
+first author (when it has one) is among the work's authors, and no other item holds that
+work. Without `--apply` it prints for every book the match or the reason there is none:
+read that table before you apply it, a common title can still be the wrong work. With
+`--apply` the book gets the id and what the search answered, and the book as it was before
+is written into the table `catalog_match_log`; `--applied` lists those lines (when, which
+item, its title and year before, the id it got), so a wrong match can be found and the
+earlier values put back by hand. Nothing is merged and nothing is guessed:
+what stays unmatched is still a book that can be tracked, and its page total can be set by
+hand on its page.
+
+Both need the Open Library source: it is asked from the machine the command runs on, with
+the operator contact of the instance when one is set. The commands and the running server
+share one pace for it through the database (at most one request per second from all of them
+together), so they can run while the server is up and while its worker works off the
+queue; they are then simply slower.
+
 == Search index
 
 [source,shell]

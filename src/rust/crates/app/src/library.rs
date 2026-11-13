@@ -3,7 +3,7 @@ use domain::Timestamp;
 use domain::hlc::{Hlc, Lww};
 use domain::ids::{EntryId, EventId, ItemId, ReviewId};
 use domain::kind::Status;
-use domain::library::{LibraryEntry, Rating};
+use domain::library::{HandCompletion, LibraryEntry, Rating};
 use domain::list::Visibility;
 use domain::progress::{Progress, ProgressEvent, StatusChange, effective};
 use domain::review::{Review, validate_review_body};
@@ -44,6 +44,14 @@ impl App {
         } else {
             unset
         };
+        // added as Completed: finished by a status, on the newest step logged so far (the
+        // history of a removed entry stays) or undated
+        let completed = match &status {
+            Some(s) if s.as_str() == Status::COMPLETED => {
+                self.hand_completion(actor, item_id).await?
+            }
+            _ => None,
+        };
         let entry = LibraryEntry {
             id: EntryId(self.uuid()),
             user_id: actor.user_id,
@@ -53,6 +61,7 @@ impl App {
             rating: Lww::new(None, unset),
             notes: Lww::new(None, unset),
             added_at: self.now(),
+            completed,
         };
         self.save_entry(&entry).await?;
         Ok(entry)
@@ -117,7 +126,10 @@ impl App {
         Ok((page.entries, page.total, next))
     }
 
-    /// Set the status (LWW). Adds the item to the library if needed.
+    /// Set the status (LWW). Adds the item to the library if needed. A status written here
+    /// is one a person or an import chose: Completed makes the entry's completion when no
+    /// event made one (on the newest logged step, or undated), any other status takes it
+    /// away, and a completion that has its day keeps it ([`LibraryEntry::set_status_by_hand`]).
     ///
     /// # Errors
     /// Unknown item or disallowed status.
@@ -130,10 +142,26 @@ impl App {
     ) -> AppResult<LibraryEntry> {
         let mut entry = self.add_to_library(actor, item_id, None).await?;
         self.kind(&entry.kind)?.check_status(&status)?;
-        if entry.status.set(status, self.stamp(stamp)) {
+        let dated = if entry.dates_completion(&status) {
+            self.hand_completion(actor, item_id).await?
+        } else {
+            None
+        };
+        if entry.set_status_by_hand(status, self.stamp(stamp), dated) {
             self.save_entry(&entry).await?;
         }
         Ok(entry)
+    }
+
+    /// The completion a status write to Completed makes for the actor's entry of `item_id`
+    /// right now ([`HandCompletion::from_history`]).
+    pub(crate) async fn hand_completion(
+        &self,
+        actor: Actor,
+        item_id: ItemId,
+    ) -> AppResult<Option<HandCompletion>> {
+        let history = self.repos.progress.for_item(actor.user_id, item_id).await?;
+        Ok(HandCompletion::from_history(&effective(&history)))
     }
 
     /// Set or clear the rating (LWW).

@@ -114,6 +114,7 @@ pub fn router(state: ApiState) -> axum::Router {
         .routes(routes!(stats_series))
         .routes(routes!(home))
         .routes(routes!(item_page))
+        .routes(routes!(set_page_count))
         .merge(crate::admin_routes::routes())
         .merge(crate::people_routes::routes())
         .merge(crate::goals_routes::routes())
@@ -1311,6 +1312,21 @@ async fn item_page(
     Path(id): Path<String>,
 ) -> ApiResult<Json<contracts::ItemPageDto>> {
     Ok(Json(ops::item_page(&s, a, &id).await?))
+}
+
+/// Correct the page total of a book (or another paged item). The value replaces the
+/// source's estimate and survives its refreshes. A change of the shared item: every member
+/// on a home instance, admins only on a hosted one.
+#[utoipa::path(put, path = "/items/{id}/page-count", tag = "catalog", request_body = contracts::PageCountDto,
+    params(("id" = String, Path)), responses((status = 200, body = CatalogItemDto),
+        (status = 403, body = contracts::ErrorDto), (status = 422, body = contracts::ErrorDto)))]
+async fn set_page_count(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+    Json(b): Json<contracts::PageCountDto>,
+) -> ApiResult<Json<CatalogItemDto>> {
+    Ok(Json(ops::set_page_count(&s, a, &id, b.pages).await?))
 }
 
 #[utoipa::path(put, path = "/auth/me/time-zone", tag = "auth", request_body = contracts::TimeZoneDto,
