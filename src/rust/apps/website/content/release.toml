@@ -1,0 +1,16 @@
+# The release gate of the website. Set by the owner or the orchestrator when a release is
+# tagged, after reading the features page against that tag - never before.
+#
+# A kind or feature that features.toml (or the landing page) marks `status = "shipped"` is
+# a claim. Strict mode (the deploy gate) refuses to publish while `version` is empty or a
+# shipped id is missing from `confirmed`. Blocks of the text pages between
+# `<!-- shipped:ID -->` and `<!-- /shipped -->` appear only once their id is confirmed.
+#
+# Ids: the kinds (movie, show, book, podcast, video_game, board_game), the features of
+# `[[everything.points]]` in features.toml (their `id`), and security_headers.
+
+# the tag the claims were checked against, e.g. "v1.0.0"
+version = ""
+
+# ids confirmed to be in that release
+confirmed = []

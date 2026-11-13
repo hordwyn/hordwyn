@@ -1,0 +1,191 @@
+title = "{name}"
+description = "{name} ist ein selbst gehosteter, quelloffener Tracker für die Filme, Serien, Bücher, Podcasts und Spiele, die dir wichtig sind - und für die Menschen, mit denen du sie teilst."
+
+[hero]
+eyebrow = "Selbst gehosteter Medien-Tracker"
+headline = "Halte fest, was du schaust, liest, hörst und spielst - und mit wem."
+sub = "{name} ist ein ruhiger Ort für deine Filme, Serien, Bücher, Podcasts, Videospiele und Brettspiele. Es läuft auf deinem eigenen Server, deine Daten bleiben bei dir, und es merkt sich, wer dabei war."
+primary = { label = "Selbst hosten", href = "{root}/self-hosting/" }
+secondary = { label = "Was v1 kann", href = "{root}/features/" }
+
+[[facts]]
+value = "{kinds_shipped}"
+label = "Medienarten in v1"
+
+[[facts]]
+value = "Dein Server"
+label = "deine Daten"
+
+[[facts]]
+value = "MIT"
+label = "quelloffen"
+
+[[facts]]
+value = "DE + EN"
+label = "in der Anwendung"
+
+[kinds]
+later = "Anime, Manga, Comics, Hörbücher, Musik und Visual Novels sind eigene Arten. Katalogquellen dafür kommen später, ebenso das Eintragen eines Titels von Hand."
+more = { label = "Funktionen nach Medienart", href = "{root}/features/" }
+
+[kinds.intro]
+eyebrow = "Was es festhält"
+heading = "Ein Regal für alles, was dir wichtig ist"
+text = "Jede Art wird so geführt, wie man sie wirklich nutzt: Folgen bei Serien, Seiten bei Büchern, Partien mit Punkten bei Spielen."
+
+[[kinds.items]]
+kind = "movie"
+title = "Filme"
+text = "Markiere einen Film als gesehen - jedes weitere Mal zählt mit. Notiere, wer mitgeschaut hat."
+status = "shipped"
+
+[[kinds.items]]
+kind = "show"
+title = "Serien"
+text = "Folge für Folge oder eine ganze Staffel auf einmal, mit sauberen Wiederholungsdurchgängen."
+status = "shipped"
+
+[[kinds.items]]
+kind = "book"
+title = "Bücher"
+text = "Lesefortschritt nach Seiten, mit Seitenzahlen aus Open Library."
+status = "coming"
+
+[[kinds.items]]
+kind = "podcast"
+title = "Podcasts"
+text = "Finde einen Podcast, füge ihn hinzu und zähle die gehörten Folgen."
+status = "shipped"
+
+[[kinds.items]]
+kind = "video_game"
+title = "Videospiele"
+text = "Trage Sitzungen mit Dauer und Mitspielenden ein; Koop und Gegeneinander passen beide."
+status = "shipped"
+
+[[kinds.items]]
+kind = "board_game"
+title = "Brettspiele"
+text = "Partien mit Mitspielenden, Punkten und Siegerin oder Sieger - und deine Siegquote über die Zeit."
+status = "coming"
+
+[together.intro]
+eyebrow = "Mit wem"
+heading = "Der Abend zählt so viel wie der Titel"
+text = "Die meisten Tracker wissen, was du gesehen hast. {name} weiß auch, wer neben dir saß."
+
+[[together.points]]
+icon = "users"
+title = "Deine Leute"
+text = "Führe dein eigenes Adressbuch der Menschen, mit denen du schaust, liest und spielst. Sie brauchen kein Konto."
+
+[[together.points]]
+icon = "link"
+title = "Verknüpft, wenn sie dazukommen"
+text = "Bekommt eine Freundin oder ein Freund ein Konto auf deiner Instanz, verknüpfst du sie: Gemeinsame Sitzungen erscheinen in ihrem Verlauf und lassen sich ins eigene Protokoll übernehmen."
+
+[[together.points]]
+icon = "trophy"
+title = "Partien, Punkte, Siege"
+text = "Ein Spieleabend wird mit Mitspielenden, Punkten und Sieg eingetragen - oder als Koop-Partie, die ihr gemeinsam gewonnen oder verloren habt."
+
+[[together.points]]
+icon = "history"
+title = "Ein Verlauf zum Nachlesen"
+text = "Jedes Ansehen und jede Partie bleibt mit Datum und Gesellschaft erhalten. So lässt sich ein Jahr voller Abende nachlesen."
+
+[screenshots]
+note = "Das sind echte Aufnahmen der Anwendung, betrieben mit erfundenen Beispieldaten. Die Cover sind die Platzhalter der Anwendung: Diese Website zeigt keine Bilder aus den Datenquellen."
+
+[screenshots.intro]
+eyebrow = "Ein Blick hinein"
+heading = "So sieht es aus"
+text = "Ein Haushalt, der es schon eine Weile nutzt. Die Bilder folgen dem Design, das du für diese Seite gewählt hast."
+
+[screenshots.hero]
+view = "home-top"
+alt = "Die Startseite der Anwendung mit erfundenen Beispieldaten: die Begrüßung \"Willkommen zurück, Mara\", sechs Titel zum Weitermachen - darunter eine Serie bei 11 von 22 Folgen, ein Buch, ein Brettspiel und ein Podcast, jeweils mit einer Schaltfläche für den nächsten Schritt - und sechs geplante Titel als Nächstes."
+
+[screenshots.wide]
+view = "home"
+alt = "Die Startseite weiter unten: die letzte Aktivität mit fünf Einträgen, etwa einer mit Jonas gesehenen Serienfolge und einer Brettspielpartie mit vier Mitspielenden und ihren Punkten, darunter die Statistik insgesamt: 70 Stunden, 11 Filme, 27 Folgen, 1.243 Seiten und 20 Partien."
+caption = "Startseite: letzte Aktivität und Statistik insgesamt"
+
+[[screenshots.phones]]
+view = "item"
+alt = "Die Seite der Serie Hollow Tide Station auf einem Telefon: in Arbeit bei 11 von 22 Folgen, eine Schaltfläche, um Staffel 2, Folge 4 als gesehen zu markieren, \"Gesehen mit\", eine Bewertung von 4,5 Sternen und die drei Staffeln mit ihrem Fortschritt."
+caption = "Eine Serie"
+
+[[screenshots.phones]]
+view = "episodes"
+alt = "Die Folgenliste von Staffel 2 auf einem Telefon: Folge 1 bis 3 sind gesehen, Folge 4 ist als Nächstes dran, die übrigen sind offen; zwei Schaltflächen markieren die Staffel oder die ganze Serie als gesehen."
+caption = "Folge für Folge"
+
+[[screenshots.phones]]
+view = "library"
+alt = "Die Bibliothek auf einem Telefon: Reiter für alle 35 Titel, 9 geplante, 11 laufende und 15 abgeschlossene, ein Filterfeld und ein Raster von Karten mit Platzhalter-Covern."
+caption = "Die Bibliothek"
+
+[[screenshots.phones]]
+view = "log"
+alt = "Der Dialog \"Partie eintragen\" für ein Brettspiel auf einem Telefon: vier von sechs Personen als Mitspielende gewählt, Punkte für jede, die höchste Punktzahl als Sieg markiert, und die Schaltfläche zum Speichern."
+caption = "Ein Spieleabend"
+
+[name]
+eyebrow = "Warum der Name"
+heading = "Die Freude am Hort"
+gloss = "<i lang=\"ang\">hord-wynn</i>: \"Freude am Hort\""
+body = """
+{name} kommt von einem altenglischen Wort. <i lang="ang">Hord</i> ist der Hort, ein gut verwahrter Schatz; <i lang="ang">wynn</i> ist die Freude, verwandt mit dem deutschen Wort Wonne. Zusammen bedeutet <i lang="ang">hord-wynn</i> die Freude am Hort: ein Schatz, der die erfreut, die ihn besitzen.
+
+Das Wort ist an einer einzigen Stelle überliefert: in Zeile 2270 des *Beowulf*. Dort findet der alte Drache eine solche Hortfreude offen daliegen und nimmt sie in Besitz. Dann bewacht er sie dreihundert Winter lang unter einem Hügelgrab, allein.
+
+Wir mögen das Wort und finden, der Drache hat es falsch verstanden. Dein Hort sind die Geschichten und Spiele, die dir wichtig sind - und die Freude liegt darin, sie mit deinen Leuten zu teilen: der Filmabend, das Buch, das du einer Freundin in die Hand gedrückt hast, das Spiel, das den ganzen Tisch bis nach Mitternacht wachgehalten hat. {name} hütet den Hort und merkt sich, wer dabei war.
+
+Die Schreibweise lässt das zweite n der Wörterbuchform weg. Gesprochen wird es HORD-win.
+"""
+sources = """
+Bedeutung und Beleg: <a href="https://atlas.perseus.tufts.edu/dictionaries/entry/urn:cite2:scaife-viewer:dictionary-entries.atlas_v1:ang-short-def-1632" hreflang="en" lang="en">Brunetti, short definitions for <em>Beowulf</em> (Scaife ATLAS)</a> (<i lang="ang">hord-wynn</i>, <span lang="en">"joy of the hoard"</span>); <a href="https://clasp.ell.ox.ac.uk/db-latest/word/hordwynne" hreflang="en" lang="en">A Consolidated Library of Anglo-Saxon Poetry</a> (ein Beleg, *Beowulf* 2270).
+"""
+
+[[name.parts]]
+part = "hord"
+meaning = "Hort, Schatz"
+
+[[name.parts]]
+part = "wynn"
+meaning = "Freude, Wonne"
+
+[selfhost]
+more = { label = "Anleitung zum Selbsthosten", href = "{root}/self-hosting/" }
+
+[selfhost.intro]
+eyebrow = "Selbst hosten"
+heading = "Läuft auf deinem eigenen Server"
+text = "Eine Compose-Datei startet die Anwendung, Postgres und Meilisearch auf einem Host. Nichts meldet sich nach außen; ausgehende Anfragen gehen nur an die Datenquellen, die du einschaltest."
+
+[[selfhost.steps]]
+title = "Zwei Geheimnisse setzen"
+text = "Kopiere die Beispiel-Umgebungsdatei und setze ein Datenbankpasswort und einen Suchschlüssel."
+
+[[selfhost.steps]]
+title = "Starten"
+text = "Docker Compose oder Podman Compose baut das Image aus dem Quelltext und startet die drei Dienste."
+
+[[selfhost.steps]]
+title = "Öffnen"
+text = "Stelle deinen Reverse Proxy mit TLS davor, öffne die Adresse und lege im Einrichtungsassistenten das erste Konto an."
+
+[hub]
+more = { label = "Über den Hub", href = "{root}/hub/" }
+
+[hub.intro]
+eyebrow = "Nach v1"
+heading = "Ein offener Katalog-Hub ist geplant"
+text = "Für manches gibt es noch keinen guten offenen Katalog, vor allem für Brettspiele. Der {name}-Hub ist als gemeinsamer, offen lizenzierter Katalog geplant, aus dem Instanzen lesen und zu dem sie beitragen können. Er ist noch nicht gebaut."
+
+[closing]
+heading = "Beginne deinen Hort"
+text = "{name} ist frei, quelloffen und gehört dir. Lies die Anleitung, starte eine Instanz und lade deine Leute ein."
+primary = { label = "Anleitung zum Selbsthosten", href = "{root}/self-hosting/" }
+secondary = { label = "Dokumentation lesen", href = "{docs}", hreflang = "en" }

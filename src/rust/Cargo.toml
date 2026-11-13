@@ -88,6 +88,8 @@ rayon = "1.12.0"
 fs4 = "1.1.0"
 proptest = "1.12.0"
 toml = "1.2.0"
+# project website (apps/website): CommonMark to HTML for its content pages, MIT (crates.io 2026-11-13)
+pulldown-cmark = { version = "0.13.6", default-features = false, features = ["html"] }
 # auth, api, realtime, server (versions checked on crates.io 2026-11-06)
 argon2 = "0.6.0"
 totp-rs = { version = "6.0.0", features = ["otpauth"] }

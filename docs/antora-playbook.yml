@@ -10,7 +10,7 @@ asciidoc:
   extensions:
     - asciidoctor-kroki
   attributes:
-    kroki-fetch-diagram: false
+    kroki-fetch-diagram: true
 ui:
   bundle:
     url: https://gitlab.com/antora/antora-ui-default/-/jobs/artifacts/HEAD/raw/build/ui-bundle.zip?job=bundle-stable

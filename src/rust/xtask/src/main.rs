@@ -16,6 +16,10 @@ const USAGE: &str = "usage: cargo xtask <command>
   dev                start the development server
   services up|down   start or stop local Postgres, Meilisearch and RustFS (S3)
   sqlx-prepare       migrate the dev database and refresh the sqlx offline cache
+  site [--out <dir>] [--strict]
+                     build the project website (default <repo>/build/public); --strict
+                     fails while anything blocks publishing (owner slots, security.txt,
+                     the release gate; `cargo run -p website -- check` lists it)
   record <connector> re-record connector fixtures from the live API (needs its key)
   load [--release] [--clients N]
                      the ignored load test against the local services (not in ci;
@@ -40,6 +44,7 @@ fn main() -> Result<()> {
             Some("down") => xtask::services::down(),
             _ => bail!("usage: cargo xtask services up|down"),
         },
+        "site" => site(),
         "sqlx-prepare" => sqlx_prepare(false),
         "load" => load(),
         "record" => match std::env::args().nth(2) {
@@ -312,6 +317,43 @@ fn sqlx_prepare(check: bool) -> Result<()> {
     }
     args.extend(["--", "--all-targets", "--features", NATIVE_FEATURES]);
     cargo(&args, &[("DATABASE_URL", &url)])
+}
+
+/// The project website (`apps/website`): Tailwind compiles `src/web/style/site.css`, then the
+/// generator renders the pages next to it. The same two steps run in the CI job `website`.
+fn site() -> Result<()> {
+    let root = xtask::repo_root();
+    let mut out = root.join("build/public");
+    let mut strict = false;
+    let mut args = std::env::args().skip(2);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--strict" => strict = true,
+            "--out" => match args.next() {
+                Some(dir) => out = std::path::PathBuf::from(dir),
+                None => bail!("--out needs a directory"),
+            },
+            other => bail!("usage: cargo xtask site [--out <dir>] [--strict] (got `{other}`)"),
+        }
+    }
+    if out.is_relative() {
+        out = std::env::current_dir()?.join(out);
+    }
+    let css = xtask::workspace_root().join("target/website/site.css");
+    run(Command::new("tailwindcss")
+        .arg("--input")
+        .arg(root.join("src/web/style/site.css"))
+        .arg("--output")
+        .arg(&css)
+        .arg("--minify"))?;
+    let (css, out) = (css.to_string_lossy(), out.to_string_lossy());
+    let mut build = vec![
+        "run", "--quiet", "-p", "website", "--", "build", "--css", &css, "--out", &out,
+    ];
+    if strict {
+        build.push("--strict");
+    }
+    cargo(&build, &[])
 }
 
 fn step(name: &str, f: impl FnOnce() -> Result<()>) -> Result<()> {
