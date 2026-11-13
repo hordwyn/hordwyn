@@ -6,7 +6,7 @@ the owner's review are covered, each with: research findings (cited, numbered `A
 so they do not collide with `R-nn`), concrete design decisions, changes to `design.md`
 by section number, and new owner decisions with a default (`OD-nn`).
 
-Conventions as in `design.md`: the product is "[Brand]"; codename only in
+Conventions as in `design.md`: the product is "[Brand]"; default name (Hordwyn) only in
 `config/brand/default/brand.toml`; ASCII throughout except the German microcopy.
 Mockups for this addendum: `mockups/admin.html` and `mockups/signin-sso.html`
 (linked from `mockups/index.html`).

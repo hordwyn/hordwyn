@@ -1,8 +1,9 @@
-# kithkeep
+# Hordwyn
 
 Self-hosted, multi-user, white-label tracker for movies, shows, anime, manga, books,
 audiobooks, podcasts, music, video games, visual novels, comics and board games.
-`kithkeep` is a codename; deployments set their own name through the brand config.
+Hordwyn (Old English `hordwynn`, "joy of the hoard") is the name of the default brand;
+deployments can set their own name through the brand config.
 
 Status: under construction. See `docs/design/DESIGN.md` (spec) and `docs/DECISIONS.md`.
 

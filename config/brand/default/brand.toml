@@ -1,6 +1,6 @@
 # Default brand. Replace this directory (or point APP__BRAND__DIR elsewhere) to white-label.
-name = "kithkeep"
-short_name = "kithkeep"
+name = "Hordwyn"
+short_name = "Hordwyn"
 default_locale = "en"
 
 # UI font, self-hosted from this directory (design.md 2.8, DEC-171). Source, commit and

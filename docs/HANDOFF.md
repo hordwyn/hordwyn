@@ -142,6 +142,11 @@ rules and the decisions below.
 Copied from `docs/design/KICKOFF.md` sections 2 to 5 and 7. Section 4 of this file records
 where the owner has since changed or clarified a rule; those rulings win.
 
+Renamed 2026-11-12 (section 4.8): the product is now `hordwyn`. The text below is kept
+verbatim; where it says `kithkeep` (rule 9, Q8), read `hordwyn`. The rule 9 test
+(`src/rust/xtask/src/whitelabel.rs`) looks for both names, so the old one cannot linger in
+code.
+
 ### 2. Ground rules
 
 1. **Do not hallucinate.** Research everything: read crate docs (docs.rs), source,
@@ -896,6 +901,10 @@ lawyer list for HUB-11. None of them blocks the next package.
   a staging environment to test the upgrade against. Consequences: no compatibility shims or
   upgrade notes for pre-v1 builds; migrations squashed into one v1 baseline (OWN-9 a) as the
   last code step; package v1-release (see v1-plan.md addendum 2) before the acceptance run.
+- 2026-11-12: product renamed to hordwyn (owner). Display name "Hordwyn"; Old English
+  hord-wynn, "joy of the hoard", Beowulf 2270 (docs/research/names.md sections 10-11). Default
+  brand, guard, README and current docs are renamed; the GitLab path, the checkout directory
+  and the `KK_` variable prefix are unchanged; no domain is registered yet (section 6).
 
 ## 5. Action list from the rulings
 
@@ -924,6 +933,11 @@ lawyer list for HUB-11. None of them blocks the next package.
   (a neutral placeholder "Title unavailable - source data expired" is shown, the item is fetched
   again once TMDB is usable), and items nobody refers to are deleted. To reverse: keep title and
   year as the person's record (DEC-453's reading) - see DEC-466 "how to reverse".
+- **After the rename to hordwyn (2026-11-12):** rename the GitLab project path
+  (`hordwyn/hordwyn`) or keep it; register the domains and reserve the
+  namespaces (docs/research/names.md section 6 item 8, domains.md 3.2 and 8) and then set
+  `support_url` in the brand file; decide whether the `KK_` prefix of the provider key
+  variables stays.
 - Optional: more RAM for the VM (section 8).
 - New owner questions go to a review page or a short chat question; never block work (rule 2).
 

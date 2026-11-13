@@ -7,7 +7,8 @@ detail from `docs/fable/round2/ux-owner-test.md` and the owner's rulings in
 
 Rules: `docs/handoff/agent-briefs/rules.md` (test-driven: failing test seen red first; DEC
 entries at the next free number, check right before writing; ASCII; Fluent en + de for every
-string; WCAG 2.2 AA; OD-01 density; icons only from the vendored set; no "kithkeep" in code;
+string; WCAG 2.2 AA; OD-01 density; icons only from the vendored set; no "hordwyn" (or the
+former "kithkeep") in code;
 no attribution; do not commit). Build limits: `CARGO_BUILD_JOBS=3 CARGO_INCREMENTAL=0`, one
 cargo/Playwright command at a time, targeted tests only, check `free -g` (wait below 6 GB
 available) and `df -h /` (stop and report below 5 GB free; delete only executables in

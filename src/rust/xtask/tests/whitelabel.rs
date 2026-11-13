@@ -1,11 +1,12 @@
-//! Fails if the codename appears in code outside `config/brand/` and `docs/` (KICKOFF rule 9).
+//! Fails if the product name or the codename it replaced appears in code outside
+//! `config/brand/` and `docs/` (KICKOFF rule 9).
 
 #[test]
 fn codename_not_hard_coded() {
     let found = xtask::whitelabel::offenders(&xtask::repo_root());
     assert!(
         found.is_empty(),
-        "codename found outside config/brand/ and docs/: {found:?}"
+        "product name found outside config/brand/ and docs/: {found:?}"
     );
 }
 

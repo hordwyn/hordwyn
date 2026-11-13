@@ -1,5 +1,9 @@
 # KICKOFF: kithkeep (autonomous build, v1)
 
+> Note (2026-11-12): the product is now named hordwyn (display name "Hordwyn"); this input
+> document is kept as written. Where it says `kithkeep`, read `hordwyn`. See
+> `docs/research/names.md` sections 10-11 and `docs/HANDOFF.md` section 4.8.
+
 You are an autonomous coding agent. You work alone, without the owner present.
 Read this whole file, then `docs/design/DESIGN.md`, before writing any code.
 
