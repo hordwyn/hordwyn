@@ -1,4 +1,4 @@
-import { expect, request, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, request, type APIRequestContext, type Page } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
 import { execFileSync } from "node:child_process";
 import { createHmac } from "node:crypto";

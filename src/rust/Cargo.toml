@@ -142,6 +142,8 @@ bin-package = "server"
 lib-package = "web"
 site-root = "target/site"
 site-pkg-dir = "pkg"
+# content hashes in the names of the bundle files (OPS-8, DEC-536): cacheable for good
+hash-files = true
 tailwind-input-file = "../web/style/input.css"
 assets-dir = "../web/public"
 site-addr = "127.0.0.1:3000"

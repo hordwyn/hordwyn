@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { expectReflow, importDone } from "./helpers";
 
 // Per-user language (owner ruling DEC-171, DEC-201): the account menu switches the language,

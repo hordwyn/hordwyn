@@ -132,6 +132,12 @@ async fn run() -> anyhow::Result<()> {
         let conf = get_configuration(None).context("leptos configuration")?;
         let mut options = conf.leptos_options;
         options.site_addr = server.config.server.bind.parse().context("server.bind")?;
+        options.hash_files = server::infra::bundle_hashes(
+            options.hash_files,
+            &server::infra::hash_file_path(&options.hash_file),
+            &std::path::Path::new(&*options.site_root).join(&*options.site_pkg_dir),
+            &options.output_name,
+        )?;
         let app = server.app_router(&options);
         let listener = tokio::net::TcpListener::bind(options.site_addr)
             .await

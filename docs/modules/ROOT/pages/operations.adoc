@@ -68,9 +68,11 @@ directory under the running old server).
   each one and then `listening`.
 . Read the upgrade notes below for the migrations that ran; run `dc exec app cli reindex`
   when a note asks for it.
-. Check: sign in, open a title, search for one. Browsers ask the server before they reuse
-  the application bundle (`/pkg` is sent with `Cache-Control: no-cache`), so nobody needs a
-  hard reload after an upgrade.
+. Check: sign in, open a title, search for one. Nobody needs a hard reload after an
+  upgrade: the files of the application bundle under `/pkg` carry a hash of their content
+  in their names, a page is never stored by the browser and names the files of the build
+  that rendered it. A tab that was open during the upgrade runs the old bundle until it is
+  reloaded.
 
 The way back is its own section, "Going back".
 

@@ -1,4 +1,4 @@
-import { test, expect, type Browser, type Page } from "@playwright/test";
+import { test, expect, type Browser, type Page } from "./fixtures";
 import { addPerson, hydrated, PASSWORD } from "./helpers";
 
 // M15 acceptance, on the People page of UX phase 3 (WP3-6, design.md 5.10, 5.11, 6.7):

@@ -1,4 +1,4 @@
-import { test, expect, request, type APIRequestContext, type Browser, type Page } from "@playwright/test";
+import { test, expect, request, type APIRequestContext, type Browser, type Page } from "./fixtures";
 import {
   ADMIN,
   PASSWORD,

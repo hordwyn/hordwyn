@@ -99,6 +99,8 @@ struct Resp {
     body: Value,
     text: String,
     cache_control: Option<String>,
+    /// The content security policy of the answer.
+    policy: Option<String>,
     location: Option<String>,
     /// `name=value` of every Set-Cookie.
     cookies: Vec<String>,
@@ -163,6 +165,7 @@ async fn send(router: &axum::Router, r: Req<'_>) -> Resp {
     };
     let location = header("location");
     let cache_control = header("cache-control");
+    let policy = header("content-security-policy");
     let cookies = resp
         .headers()
         .get_all("set-cookie")
@@ -175,6 +178,7 @@ async fn send(router: &axum::Router, r: Req<'_>) -> Resp {
         body: serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         text: String::from_utf8_lossy(&bytes).into_owned(),
         cache_control,
+        policy,
         location,
         cookies,
     }
@@ -1715,6 +1719,14 @@ async fn rp_initiated_logout_is_local_first() {
         .unwrap();
     assert_eq!(rows.len(), 1);
     assert!(!rows[0].windows(3).any(|w| w == b"eyJ"), "not plain text");
+    // sec1: the sign-out form posts to this server and is redirected to the provider; a
+    // browser may check that redirect against `form-action`, so the policy of a page names the
+    // end-session origin of every enabled provider that has one (a: yes, b: no)
+    let policy = page(&t, "/signed-out", None).await.policy.unwrap();
+    assert!(
+        policy.contains("form-action 'self' https://id-a.example.test;"),
+        "{policy}"
+    );
     let logout = |cookie: Option<&str>| {
         let cookie = cookie.map(String::from);
         let app = t.app.clone();

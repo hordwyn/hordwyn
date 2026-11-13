@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { changeMine, expectNoA11yViolations, hydrated, importDone, signUp } from "./helpers";
 
 // Keyboard map (WP4-4; design.md 3.2, 6.1-6.3, 8): the G chords with their hint and focus on

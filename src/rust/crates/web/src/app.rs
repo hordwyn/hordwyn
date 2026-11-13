@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use leptos::prelude::*;
-use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
+use leptos_meta::{HashedStylesheet, MetaTags, Title, provide_meta_context};
 use leptos_router::components::{Route, Router, Routes};
 use leptos_router::{SsrMode, path};
 use serde::{Deserialize, Serialize};
@@ -145,6 +145,9 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
     let theme = String::new();
     crate::provide_page_context(&cfg);
     let json = config_json(&cfg);
+    // the nonce of this answer's content security policy (the server puts it in the
+    // context); without it the browser runs neither script nor applies the brand theme
+    let nonce = leptos::nonce::use_nonce();
     view! {
         <!DOCTYPE html>
         // the tab bar (and the room kept for it) exists only for a signed-in user (UX0-13)
@@ -152,13 +155,15 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
             <head>
                 <meta charset="utf-8"/>
                 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-                <script>{THEME_BOOT}</script>
+                <script nonce=nonce.clone()>{THEME_BOOT}</script>
                 <script type="application/json" id=CONFIG_ID inner_html=json></script>
                 <AutoReload options=options.clone()/>
-                <HydrationScripts options/>
+                <HydrationScripts options=options.clone()/>
+                // the stylesheet under the name of this build (content hash, OPS-8)
+                <HashedStylesheet options id="leptos"/>
                 <MetaTags/>
                 // after the stylesheet link: brand fonts (same origin) and theme tokens
-                <style id="brand-theme" inner_html=theme></style>
+                <style id="brand-theme" nonce=nonce inner_html=theme></style>
             </head>
             <body class="min-h-screen bg-background text-foreground antialiased">
                 <App/>
@@ -192,7 +197,6 @@ pub fn App() -> impl IntoView {
     // settings area `/settings/*` replaced `/notifications`, `/integrations` and `/sources`,
     // without redirects (owner ruling, DEC-171); the old paths are 404s.
     view! {
-            <Stylesheet id="leptos" href="/pkg/app.css"/>
             <Title text=cfg.product_name.clone()/>
             <Router>
                 <crate::shell::AppShell>

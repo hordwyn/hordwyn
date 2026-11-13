@@ -35,7 +35,7 @@ integrations = { workspace = true, features = ["pg"] }
 serde_json.workspace = true
 notify = { workspace = true, features = ["all"] }
 kinds.workspace = true
-leptos = { workspace = true, features = ["ssr"] }
+leptos = { workspace = true, features = ["ssr", "nonce"] }
 leptos_axum.workspace = true
 realtime.workspace = true
 importers = { workspace = true, features = ["generic"] }

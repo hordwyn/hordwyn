@@ -173,3 +173,189 @@ mod exposure_tests {
         assert_eq!(exposure_warnings("nonsense", "nonsense", true).len(), 0);
     }
 }
+
+/// Where the Leptos components look for the hash file of the bundle (`hash.txt`, written by
+/// cargo-leptos with `hash-files`): next to this executable, unless `name` is a full path.
+#[must_use]
+pub fn hash_file_path(name: &str) -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
+        .unwrap_or_default()
+        .join(name)
+}
+
+/// What the hash file says the bundle files are called: `<output name>.<hash>.<ext>` for
+/// each `js`, `wasm` and `css` line (the lines the pages read; cargo-leptos writes all three).
+fn hashed_names(hashes: &str, output_name: &str) -> Vec<String> {
+    hashes
+        .lines()
+        .filter_map(|line| line.trim().split_once(':'))
+        .filter(|(kind, _)| matches!(*kind, "js" | "wasm" | "css"))
+        .map(|(kind, hash)| format!("{output_name}.{}.{kind}", hash.trim()))
+        .collect()
+}
+
+/// Do the pages name the bundle files with their content hashes (OPS-8)? They do whenever
+/// the hash file is there and the files it names are in `pkg` (`<site root>/pkg`), whatever
+/// `LEPTOS_HASH_FILES` says (`configured`): a site built with hashes has no file under the
+/// plain names, and a page that asks for `app.js` would stay without scripts.
+///
+/// The hash file is not trusted on its own (review SEC1-6, DEC-663): it lies next to the
+/// executable and the site root is another directory, so one can be older than the other (a
+/// release build wipes the site and writes its own hash file; a build with `hash-files`
+/// switched off leaves the old hash file behind). When a named file is missing and the site
+/// has the plain `<output name>.js`, the pages use the plain names and a warning says so.
+///
+/// # Errors
+/// The server does not start when its pages would name files that do not exist: hashed
+/// names are asked for and the hash file is missing, or the hash file names files the site
+/// does not have and the plain names are not there either.
+pub fn bundle_hashes(
+    configured: bool,
+    hash_file: &std::path::Path,
+    pkg: &std::path::Path,
+    output_name: &str,
+) -> anyhow::Result<bool> {
+    let Ok(hashes) = std::fs::read_to_string(hash_file) else {
+        if configured {
+            anyhow::bail!(
+                "LEPTOS_HASH_FILES is on, but the hash file {} is missing: copy `hash.txt` of \
+                 the build next to the server executable (or name it with \
+                 LEPTOS_HASH_FILE_NAME)",
+                hash_file.display()
+            );
+        }
+        return Ok(false);
+    };
+    let names = hashed_names(&hashes, output_name);
+    let missing: Vec<&str> = names
+        .iter()
+        .filter(|name| !pkg.join(name).is_file())
+        .map(String::as_str)
+        .collect();
+    let scripts = ["js", "wasm"]
+        .iter()
+        .all(|ext| names.iter().any(|n| n.ends_with(&format!(".{ext}"))));
+    if scripts && missing.is_empty() {
+        return Ok(true);
+    }
+    let what = if scripts {
+        format!("names files that are not in {}", pkg.display())
+    } else {
+        "has no `js` and `wasm` line".to_string()
+    };
+    if pkg.join(format!("{output_name}.js")).is_file() {
+        tracing::warn!(
+            hash_file = %hash_file.display(),
+            missing = ?missing,
+            "the hash file {what}; the site has `{output_name}.js`, so the pages use the \
+             names without hashes (delete the stale hash file to silence this)"
+        );
+        return Ok(false);
+    }
+    anyhow::bail!(
+        "the hash file {} {what} (missing: {}): the site root and the hash file come from \
+         different builds. Build both again for the profile of this executable (`cargo \
+         leptos build`, with `--release` for a release executable), or copy the `hash.txt` \
+         that belongs to the site next to the server executable",
+        hash_file.display(),
+        if missing.is_empty() {
+            "nothing".to_string()
+        } else {
+            missing.join(", ")
+        }
+    );
+}
+
+#[cfg(test)]
+mod bundle_tests {
+    use super::*;
+
+    fn site() -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("hashes-{}", uuid::Uuid::now_v7()));
+        let pkg = dir.join("site/pkg");
+        std::fs::create_dir_all(&pkg).unwrap();
+        (dir.clone(), dir.join("hash.txt"), pkg)
+    }
+
+    #[test]
+    fn the_hash_file_decides_and_a_missing_one_is_an_error_when_asked_for() {
+        let (dir, file, pkg) = site();
+        assert!(
+            !bundle_hashes(false, &file, &pkg, "app").unwrap(),
+            "a build without hashes"
+        );
+        let e = bundle_hashes(true, &file, &pkg, "app")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("hash.txt") && e.contains("LEPTOS_HASH_FILES"),
+            "{e}"
+        );
+        std::fs::write(&file, "js: a\nwasm: b\ncss: c\n").unwrap();
+        for name in ["app.a.js", "app.b.wasm", "app.c.css"] {
+            std::fs::write(pkg.join(name), "x").unwrap();
+        }
+        assert!(bundle_hashes(true, &file, &pkg, "app").unwrap());
+        assert!(
+            bundle_hashes(false, &file, &pkg, "app").unwrap(),
+            "the file is enough"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Review SEC1-6: a hash file from another build than the site root.
+    #[test]
+    fn a_hash_file_that_names_missing_files_is_not_followed() {
+        let (dir, file, pkg) = site();
+        std::fs::write(&file, "js: old1\nwasm: old2\ncss: old3\n").unwrap();
+        // the site of a newer build: other hashes, no plain names
+        for name in ["app.new1.js", "app.new2.wasm", "app.new3.css"] {
+            std::fs::write(pkg.join(name), "x").unwrap();
+        }
+        for configured in [true, false] {
+            let e = bundle_hashes(configured, &file, &pkg, "app")
+                .unwrap_err()
+                .to_string();
+            for part in ["hash.txt", "app.old1.js", "app.old2.wasm", "app.old3.css"] {
+                assert!(e.contains(part), "{part}: {e}");
+            }
+            assert!(e.contains("different builds"), "{e}");
+        }
+        // one file of three is enough to refuse
+        std::fs::write(pkg.join("app.old1.js"), "x").unwrap();
+        std::fs::write(pkg.join("app.old2.wasm"), "x").unwrap();
+        let e = bundle_hashes(true, &file, &pkg, "app")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("app.old3.css") && !e.contains("app.old1.js"),
+            "{e}"
+        );
+        // a site built without hashes next to a stale hash file: the plain names are used
+        std::fs::write(pkg.join("app.js"), "x").unwrap();
+        for configured in [true, false] {
+            assert!(!bundle_hashes(configured, &file, &pkg, "app").unwrap());
+        }
+        // a hash file without the script lines names nothing a page could load
+        std::fs::remove_file(pkg.join("app.js")).unwrap();
+        std::fs::write(&file, "css: old3\n").unwrap();
+        std::fs::write(pkg.join("app.old3.css"), "x").unwrap();
+        let e = bundle_hashes(true, &file, &pkg, "app")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("`js` and `wasm`"), "{e}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_hash_file_is_looked_for_next_to_the_executable() {
+        let p = hash_file_path("hash.txt");
+        assert_eq!(p.parent(), std::env::current_exe().unwrap().parent());
+        assert_eq!(
+            hash_file_path("/srv/site/hash.txt"),
+            std::path::Path::new("/srv/site/hash.txt")
+        );
+    }
+}

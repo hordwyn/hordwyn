@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { expectNoA11yViolations, expectReflow, hydrated, signUp, importDone } from "./helpers";
 
 // UX phase 1 Library page (design.md 6.2, 3.5; addendum-1 1.3): group switcher, kind chips,

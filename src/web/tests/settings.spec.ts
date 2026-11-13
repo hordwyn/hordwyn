@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { ADMIN, PASSWORD, expectNoA11yViolations, expectReflow, hydrated, signIn, signUp } from "./helpers";
 
 // The phase 2 behaviours DEC-281 left for phase 3 (WP3-4): every settings page reflows and

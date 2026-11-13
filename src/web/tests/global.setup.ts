@@ -1,4 +1,6 @@
-import { test as setup, expect, request, type Page } from "@playwright/test";
+import { test as setup, expect, request, type Page } from "./fixtures";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { ADMIN, PASSWORD, REAUTH_ADMIN, expectNoA11yViolations, expectReflow, hydrated } from "./helpers";
 
 // Runs before every spec (project dependency). On a fresh database it walks the whole setup
@@ -93,4 +95,58 @@ setup("the setup wizard makes the instance admin", async ({ page, baseURL }) => 
     expect(promote.ok(), `promote ${promote.status()} ${await promote.text()}`).toBeTruthy();
   }
   await other.dispose();
+});
+
+// sec1: the policy guard of tests/fixtures.ts sees a test only when the spec takes `test`
+// from there
+//
+// Review SEC1-3: the check must not be passed by accident (single quotes, `require`, a
+// dynamic import, a helper module that hands the package's `test` on). So no file under
+// tests/ but fixtures.ts may name a Playwright package as a module at all, in any kind of
+// quotes; what a spec or a helper needs from it (`expect`, `request`, the types), it takes
+// from "./fixtures". (`@axe-core/playwright` is another package and not meant.)
+const namesPlaywright = (source: string) => /["'`]@?playwright(-core)?(\/[\w.\/-]*)?["'`]/.test(source);
+
+/** Every script file under `dir`, relative to it. */
+function scripts(dir: string, under = ""): string[] {
+  return readdirSync(join(dir, under), { withFileTypes: true }).flatMap((entry) => {
+    const path = under ? `${under}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) return scripts(dir, path);
+    return /\.[cm]?[jt]sx?$/.test(entry.name) ? [path] : [];
+  });
+}
+
+setup("every spec uses the shared fixtures", () => {
+  // the package names are put together here, so that this file does not name them itself
+  const pw = "play" + "wright";
+  const pkg = `@${pw}/test`;
+  for (const taken of [
+    `import { test } from "${pkg}";`,
+    `import { test } from '${pkg}';`,
+    `import {\n  test,\n  expect,\n} from\n  '${pkg}';`,
+    `export * from '${pkg}';`,
+    `const { test } = require("${pkg}");`,
+    `const { test } = require('${pkg}');`,
+    `const { test } = await import("${pkg}");`,
+    "const pw = await import(`" + pkg + "`);",
+    `import { test } from "${pw}/test";`,
+    `import { chromium } from "${pw}";`,
+    `import { chromium } from "${pw}-core";`,
+  ]) {
+    expect(namesPlaywright(taken), taken).toBe(true);
+  }
+  for (const fine of [
+    'import { test, expect } from "./fixtures";',
+    `import AxeBuilder from "@axe-core/${pw}";`,
+    `// never from the ${pkg} package`,
+  ]) {
+    expect(namesPlaywright(fine), fine).toBe(false);
+  }
+
+  const files = scripts(__dirname).filter((f) => f !== "fixtures.ts");
+  expect(files.filter((f) => f.endsWith(".spec.ts")).length).toBeGreaterThan(20);
+  expect(files).toContain("helpers.ts");
+  expect(files).toContain("global.setup.ts");
+  const direct = files.filter((f) => namesPlaywright(readFileSync(join(__dirname, f), "utf8")));
+  expect(direct, 'these name a Playwright package themselves instead of taking what they need from "./fixtures"').toEqual([]);
 });

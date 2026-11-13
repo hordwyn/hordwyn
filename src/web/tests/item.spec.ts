@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { expectNoA11yViolations, expectReflow, hydrated, signUp, importDone } from "./helpers";
 
 // UX phase 1 item page (design.md 6.3, 5.4, 5.5, 3.4; addendum-1 1.3 Item row): the next step
@@ -384,7 +384,12 @@ test("an item outside the library: two actions, the add toast with Undo, the sta
   await expect(mark).not.toHaveAttribute("aria-busy", "true");
   await expect(mark).toBeDisabled();
   await expect(want).toBeDisabled();
+  // review SEC1-1: the held route is answered before its handler is removed (removing it
+  // first lets Playwright continue the route itself, and the handler's own
+  // `route.continue()` then fails with "Route is already handled!")
+  const shown = page.waitForResponse((res) => res.url().includes("/_fn/item_page"));
   show();
+  await shown;
   await page.unroute("**/_fn/item_page*");
   await expect(pill).toHaveText("Completed");
   await logged.getByRole("button", { name: "Undo" }).click();
@@ -1193,7 +1198,10 @@ test("one add at a time, and the add toast's Undo keeps an entry that was change
   await expect(want).not.toHaveAttribute("aria-busy", "true");
   await expect(want).toBeDisabled();
   await expect(mark).toBeDisabled();
+  // review SEC1-1: answered first, then the handler goes (see the note further up)
+  const shown = page.waitForResponse((res) => res.url().includes("/_fn/item_page"));
   show();
+  await shown;
   await page.unroute("**/_fn/item_page*");
   await expect(pill).toHaveText("Planned");
 

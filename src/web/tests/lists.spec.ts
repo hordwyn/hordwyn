@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { expectNoA11yViolations, expectReflow, hydrated, signUp, importDone } from "./helpers";
 
 // Lists (WP3-6, design.md 6.5, 5.10; mockup lists.html): the overview with Mine / Shared with

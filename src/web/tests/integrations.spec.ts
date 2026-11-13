@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { expectNoA11yViolations, expectReflow, hydrated, signUp } from "./helpers";
 
 // Settings > Integrations (design.md 6.9, 5.9, R-38; WP3-5): "Connect a sender" in three

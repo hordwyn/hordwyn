@@ -312,7 +312,9 @@ async fn unhashed_bundle_files_are_revalidated() {
     assert_eq!(other.body().len(), "export default 1;".len());
     let r = call(&t, "GET", "/pkg/missing.wasm", None, "en", None).await;
     assert_eq!(r.status, 404);
-    assert_eq!(r.cache.as_deref(), Some("no-cache"));
+    // the 404 page is a page, and no page is stored (review SEC1-4, DEC-658;
+    // `security_headers::hashed_bundle_files_are_kept_for_good`)
+    assert_eq!(r.cache.as_deref(), Some("no-store"));
     let r = call(&t, "GET", "/plain.txt", None, "en", None).await;
     assert_eq!(r.status, 200);
     assert_eq!(r.cache, None, "only /pkg");

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { addPerson, ADMIN, expectNoA11yViolations, expectReflow, hydrated, importDone, requestLink, signIn, signUp } from "./helpers";
 
 // Settings > Notifications (design.md 6.8, 5.8; WP3-5): the inbox grouped by day with "Mark

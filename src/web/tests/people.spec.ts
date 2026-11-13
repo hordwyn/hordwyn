@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { addPerson, expectNoA11yViolations, expectReflow, hydrated, signUp, importDone } from "./helpers";
 
 // People (WP3-6, design.md 6.7, 5.11; mockup companions.html): person cards with initials,

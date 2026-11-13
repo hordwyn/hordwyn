@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { addPerson } from "./helpers";
 
 // M07 acceptance: sign up -> search a movie (TMDB fixtures via the mock) -> add -> mark watched

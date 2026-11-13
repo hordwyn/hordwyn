@@ -34,22 +34,100 @@ What the proxy must do:
 
 == Security headers
 
-Until the application sends them itself (planned with its content security policy), set
-these at the proxy:
+The application sends them itself, on every answer (pages, the API, files, refusals). The
+proxy passes them on and sets none of them: a second `Content-Security-Policy` from the
+proxy would apply in addition to the application's, and a policy written at the proxy
+cannot know the per-answer nonce of the inline scripts.
 
-[cols="2,3"]
+Not covered that way: what the proxy answers by itself, for example its `502` while the
+application restarts during an upgrade. Such an answer has none of the headers. Its content
+is the proxy's own short error text, so this is a small gap; <<proxy-defaults>> shows how to
+close it with Caddy.
+
+[cols="2,4"]
 |===
 |Header |Value
 
-|`Strict-Transport-Security` |`max-age=31536000` (add `includeSubDomains` only if every
-subdomain is served over HTTPS)
+|`Content-Security-Policy`
+|On pages: scripts and styles only from the instance and inline ones with the nonce of that
+answer, WebAssembly may be compiled (`'wasm-unsafe-eval'`, no `eval`), pictures from the
+instance, `data:` and any HTTPS host (covers come straight from the data sources and
+podcast hosts), connections only to the instance, forms only to the instance and to the
+end-session address of an enabled sign-in provider, no plugins, no `<base>`, no framing
+(`frame-ancestors 'none'`). On everything that is not a page:
+`default-src 'none'; frame-ancestors 'none'`.
+
 |`X-Content-Type-Options` |`nosniff`
 |`X-Frame-Options` |`DENY`
-|`Referrer-Policy` |`strict-origin-when-cross-origin`
-|`Content-Security-Policy` |`frame-ancestors 'none'` and nothing more: a stricter policy
-set at the proxy breaks the pages, because their inline scripts need a per-response nonce
-that only the application can give.
+|`Referrer-Policy` |`same-origin`: other sites learn nothing about the instance from a link
+or a picture, not even its name.
+|`Permissions-Policy` |camera, microphone, location, payment, USB, MIDI, screen capture and
+the motion sensors are switched off.
+|`Strict-Transport-Security` |`max-age=31536000`, only when `APP__SERVER__PUBLIC_URL` starts
+with `https://`. Without `includeSubDomains`: the application does not know the other names
+of the domain.
+|`Cache-Control` |`no-store` on pages, the API and server functions; pictures, fonts and
+the application bundle are cacheable (the bundle's file names change with every build).
 |===
+
+Two settings:
+
+`APP__SERVER__HSTS_MAX_AGE_SECS`:: The age in seconds; `0` sends no
+`Strict-Transport-Security`. A browser that has seen the header refuses plain HTTP for that
+host until the time is over, so set `0` (or a small number) while you are still trying an
+address out, and `0` if the proxy sends its own header (for example with
+`includeSubDomains`): of two such headers a browser reads only the first.
++
+Taking it back: `0` only stops the application from sending the header; a browser that has
+already seen it keeps refusing plain HTTP until its time is over. A browser forgets the rule
+when it receives `Strict-Transport-Security: max-age=0` over HTTPS (RFC 6797, section 6.1.1:
+https://www.rfc-editor.org/rfc/rfc6797#section-6.1.1), and the application has no value
+that sends this. So before a host name goes back to plain HTTP (or to a service without
+TLS): set `APP__SERVER__HSTS_MAX_AGE_SECS=0`, let the proxy send the header with
+`max-age=0` while the name still answers over HTTPS (Caddy:
+`header Strict-Transport-Security "max-age=0"`; nginx:
+`add_header Strict-Transport-Security "max-age=0" always;`), and keep that up until every
+browser that used the instance has opened it once. A browser that does not come by in that
+time keeps the rule for the rest of the age it was given.
+
+`APP__SERVER__CSP_REPORT_ONLY`:: `true` sends the policy as
+`Content-Security-Policy-Report-Only`: the browser lists in its console what the policy
+would refuse and refuses nothing. For finding out whether the policy is why something does
+not load; not for normal operation.
+
+Sign-out through a provider: the sign-out button posts a form to the application, which
+redirects the browser to the provider's end-session address. A browser may hold each
+redirect of a form against the policy (CSP Level 3, `form-action`:
+https://www.w3.org/TR/CSP3/#directive-form-action), which is why the policy names the
+origin of that address; the entry is needed and stays. It names that origin only: a
+browser that checks stops a provider that redirects on to another host from there; the
+session of the application is already ended at that point.
+
+[#proxy-defaults]
+=== Headers on the proxy's own answers (optional)
+
+Caddy can set a header only when the answer has none yet (`?` in front of the field name:
+"The field is only written if it doesn't yet exist", Caddy documentation, `header`, read
+2026-11-13: https://caddyserver.com/docs/caddyfile/directives/header), so the
+application's headers stay the only ones on its answers:
+
+[source]
+----
+tracker.example.org {
+    encode zstd gzip
+    header ?X-Content-Type-Options nosniff
+    header ?X-Frame-Options DENY
+    header ?Strict-Transport-Security "max-age=31536000"
+    reverse_proxy 127.0.0.1:3000
+}
+----
+
+Never do this for `Content-Security-Policy` (see above), and leave the
+`Strict-Transport-Security` line out while `APP__SERVER__HSTS_MAX_AGE_SECS` is `0`. nginx
+has no such form: its `add_header` puts a second header next to the application's, so the
+nginx snippet below stays without. Not tried on the project's build host; in particular it
+was not checked whether Caddy puts these defaults on the error answer it writes when the
+application is not reachable.
 
 == Caddy
 
@@ -57,13 +135,6 @@ that only the application can give.
 ----
 tracker.example.org {
     encode zstd gzip
-    header {
-        Strict-Transport-Security "max-age=31536000"
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        Referrer-Policy "strict-origin-when-cross-origin"
-        Content-Security-Policy "frame-ancestors 'none'"
-    }
     reverse_proxy 127.0.0.1:3000
 }
 ----
@@ -86,12 +157,6 @@ server {
     # ssl_certificate and ssl_certificate_key as on your host
 
     client_max_body_size 64m;
-
-    add_header Strict-Transport-Security "max-age=31536000" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "DENY" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    add_header Content-Security-Policy "frame-ancestors 'none'" always;
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -123,12 +188,12 @@ form answers 403 until `APP__SERVER__PUBLIC_URL` is exactly right. The `http2` d
 exists since nginx 1.25.1 (https://nginx.org/en/docs/http/ngx_http_v2_module.html#http2);
 `nginx -t` of an older version refuses it as an unknown directive.
 
-`add_header` in a `location` block replaces the ones of the `server` block: if you add a
-header inside a location, repeat the five there.
-
 == Check
 
-. `curl -sI https://tracker.example.org/healthz` answers `200` and shows the five headers.
+. `curl -sI https://tracker.example.org/healthz` answers `200` and shows
+  `content-security-policy`, `x-content-type-options`, `x-frame-options`, `referrer-policy`,
+  `permissions-policy` and `strict-transport-security`, each once. One of them twice means
+  the proxy sets it too: remove it there.
 . Sign in from another machine. A sign-in page that comes back without a message means the
   session cookie was dropped: the public URL is not HTTPS while secure cookies are on.
 . A `403 cross-site request refused` on every form means the proxy rewrites `Host` or

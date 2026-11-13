@@ -317,6 +317,29 @@ Playwright specs green under axe in both themes.
 - Depends on: ot2 done (the CSP must be tested against the final pages).
 - Blocked on the owner: nothing.
 
+### sec1b - no `style` attributes, then drop `style-src-attr 'unsafe-inline'` (review SEC1-5, DEC-661)
+
+- Why: with the directive, injected markup can still draw a full-page overlay (a fake
+  sign-in form) although scripts are blocked. It needs a markup-injection bug first; none
+  is known. Not part of v1 unless the owner says so.
+- Scope: the four places that render a `style` attribute get another technique that works
+  on the server and after hydration: bar widths (`crates/ui/src/progress.rs`) and the
+  rating (`crates/ui/src/rating.rs`) as `<progress>` or SVG `width` attributes; cover
+  placeholders (`crates/web/src/widgets.rs`, thumbhash or dominant colour) as an
+  `<img src="data:...">` or one nonce'd rule per cover; brand swatches
+  (`crates/web/src/admin/mod.rs`) as classes or SVG. Then remove the directive from
+  `Headers::page_policy` (`apps/server/src/security_headers.rs`).
+- Tests first: the server test row `style-src-attr 'unsafe-inline'` in
+  `tests/it/security_headers.rs` turned around (the policy has no such directive); the
+  whole Playwright suite with the policy guard (red first: 553 `style-src-attr` events,
+  sec1-progress.md "Red 2"); a server page test that no rendered page has a `style="`
+  attribute.
+- Also: visual re-test of the bars, stars, placeholders and swatches in light and dark
+  (screenshots before and after), WCAG non-text contrast unchanged.
+- Migrations: none. Size: M.
+- Depends on: sec1. Blocked on the owner: nothing (when to do it is the orchestrator's
+  call).
+
 ### sec2 - outbound confinement and sign-in throttling (SEC-4 b, SEC-5 b)
 
 - Scope: (1) the governed HTTP client follows no redirects (or re-checks the allowlist per

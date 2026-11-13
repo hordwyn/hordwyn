@@ -7,6 +7,7 @@ mod csrf;
 pub mod escape;
 mod handlers;
 pub mod infra;
+pub mod security_headers;
 pub mod web_admin;
 pub mod web_backend;
 
@@ -51,6 +52,8 @@ pub struct Server {
     pub deliverer: Arc<notify::Deliverer>,
     /// Proxies whose forwarded client address and request id are believed (DEC-284).
     pub trusted_proxies: Arc<api::request_meta::TrustedProxies>,
+    /// The security headers of every answer (SEC-1).
+    pub headers: Arc<security_headers::Headers>,
 }
 
 /// Test and embedding hooks; production uses the defaults.
@@ -405,9 +408,16 @@ impl Server {
             api::request_meta::TrustedProxies::parse(&config.server.trusted_proxies)
                 .map_err(anyhow::Error::msg)?,
         );
+        let headers = Arc::new(security_headers::Headers::new(
+            &config.server,
+            api.oidc
+                .clone()
+                .map(|o| o as Arc<dyn security_headers::FormTargets>),
+        ));
         Ok(Self {
             config,
             trusted_proxies,
+            headers,
             brand,
             app,
             api,
@@ -441,7 +451,9 @@ impl Server {
     }
 
     /// Cross-site request protection for cookie-authenticated mutations (G2-1).
-    /// Also gives every request its client address and request id (DEC-284).
+    /// Also gives every request its client address and request id (DEC-284), and every
+    /// answer its security headers (SEC-1): that layer is the outermost, so a request
+    /// refused by one of the others is answered with them too.
     fn guarded(&self, r: Router) -> Router {
         r.layer(axum::middleware::from_fn_with_state(
             csrf::public_origin(&self.config.server.public_url),
@@ -450,6 +462,10 @@ impl Server {
         .layer(axum::middleware::from_fn_with_state(
             self.trusted_proxies.clone(),
             api::request_meta::layer,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            self.headers.clone(),
+            security_headers::layer,
         ))
     }
 
@@ -786,6 +802,15 @@ impl Server {
         let admin: Arc<dyn web::admin_backend::AdminBackend> =
             Arc::new(web_admin::WebAdmin(self.api.clone()));
         move || {
+            // the nonce of this request's policy, in place of the one Leptos made for itself:
+            // the hydration script, the scripts of the shell and the data streamed after it
+            // read it from the context
+            let nonce = leptos::prelude::with_context(|p: &axum::http::request::Parts| {
+                p.extensions.get::<security_headers::CspNonce>().cloned()
+            });
+            if let Some(Some(nonce)) = nonce {
+                leptos::prelude::provide_context(leptos::nonce::Nonce::from_value(nonce.0));
+            }
             leptos::prelude::provide_context(brand.clone());
             leptos::prelude::provide_context(backend.clone());
             leptos::prelude::provide_context(admin.clone());
@@ -887,10 +912,30 @@ async fn body_limit(req: axum::extract::Request, next: axum::middleware::Next) -
     next.run(req).await
 }
 
-/// `Cache-Control: no-cache` on the bundle under `/pkg` (OPS-8, DEC-623): `app.js`,
-/// `app.wasm` and `app.css` keep their names across releases, so a browser has to ask
-/// before it reuses its copy; otherwise the pages of a new release are hydrated by the old
-/// bundle until a hard reload.
+/// Is `path` a bundle file under the name cargo-leptos gives it with `hash-files`:
+/// `<name>.<hash>.<extension>`, the hash being 22 characters of the URL-safe base64
+/// alphabet (128 bits of the content's hash)? Such a name never gets other content.
+fn hashed_bundle_file(path: &str) -> bool {
+    let file = path.rsplit('/').next().unwrap_or_default();
+    let mut parts = file.rsplitn(3, '.');
+    let (Some(_extension), Some(hash), Some(name)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    !name.is_empty()
+        && hash.len() == 22
+        && hash
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+}
+
+/// The cache directive of the bundle under `/pkg` (OPS-8, DEC-536, DEC-623). A file with a
+/// content hash in its name is kept for good (`immutable`): a new build has new names, and
+/// the page (never stored) names them. Every other file under `/pkg` gets `no-cache`: a
+/// browser has to ask before it reuses its copy. A name that does not exist is answered
+/// with the 404 page; that is a page (a nonce, and the shell with the name of a signed-in
+/// visitor), so it gets no directive here and the header layer makes it `no-store` like
+/// every page (DEC-658, review SEC1-4).
 ///
 /// "Ask first" must not mean "download again", and the Leptos file handler does not pass
 /// the request's headers on to the file service, so it never answers a conditional request
@@ -903,11 +948,19 @@ async fn pkg_no_cache(req: axum::extract::Request, next: axum::middleware::Next)
         return next.run(req).await;
     }
     let since = req.headers().get(header::IF_MODIFIED_SINCE).cloned();
+    let hashed = hashed_bundle_file(req.uri().path());
     let mut resp = next.run(req).await;
-    if !resp.headers().contains_key(header::CACHE_CONTROL) {
+    if !resp.headers().contains_key(header::CACHE_CONTROL)
+        && !security_headers::is_document(resp.headers())
+    {
+        let keep = hashed && resp.status() == StatusCode::OK;
         resp.headers_mut().insert(
             header::CACHE_CONTROL,
-            axum::http::HeaderValue::from_static("no-cache"),
+            axum::http::HeaderValue::from_static(if keep {
+                "public, max-age=31536000, immutable"
+            } else {
+                "no-cache"
+            }),
         );
     }
     let stamp = resp.headers().get(header::LAST_MODIFIED).cloned();

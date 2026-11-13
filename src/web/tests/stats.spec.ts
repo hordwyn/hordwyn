@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { expectNoA11yViolations, expectReflow, hydrated, signUp, importDone } from "./helpers";
 
 // WP4-6 (design.md 6.1, 6.6, 9; research R-04): the Stats page compares this year so far with

@@ -103,6 +103,16 @@ pub struct ServerConfig {
     /// Reverse proxies (addresses or CIDR networks, e.g. `10.0.0.0/8`) whose `X-Forwarded-For`
     /// and `X-Request-Id` are believed for audit rows (DEC-284). Empty: the socket address.
     pub trusted_proxies: Vec<String>,
+    /// Seconds a browser remembers to use HTTPS only for this host
+    /// (`Strict-Transport-Security: max-age=...`). The header is sent only when `public_url`
+    /// starts with `https://`; `0` never sends it (for a proxy that sets its own, or while an
+    /// address is still being tried out: a browser that saw the header refuses plain HTTP
+    /// for that host until the time is over).
+    pub hsts_max_age_secs: u64,
+    /// Send the content security policy as `Content-Security-Policy-Report-Only`: the
+    /// browser reports what the policy would refuse in its console and refuses nothing.
+    /// For finding out whether the policy is the reason something does not load.
+    pub csp_report_only: bool,
 }
 
 impl Default for ServerConfig {
@@ -113,6 +123,8 @@ impl Default for ServerConfig {
             role: ServerRole::All,
             assets_base_url: None,
             trusted_proxies: Vec::new(),
+            hsts_max_age_secs: 31_536_000,
+            csp_report_only: false,
         }
     }
 }

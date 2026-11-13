@@ -26,7 +26,8 @@ RUN rustup target add wasm32-unknown-unknown \
     && cargo leptos build --release --frontend-only \
     && cargo leptos build --release --server-only \
     && mkdir -p /out/site && cp -r target/site/. /out/site/ \
-    && cp target/release/server /out/server
+    && cp target/release/server /out/server \
+    && cp target/release/hash.txt /out/hash.txt
 # The admin CLI (migrate, reindex, key rotation, escape hatches). Same features for the
 # `server` library as the build above (bin-features in Cargo.toml), so it is not compiled twice.
 RUN cargo build --release -p cli -p server --bin cli \
@@ -44,10 +45,14 @@ COPY --from=build /out/cli /usr/local/bin/cli
 # the image build fails here when the CLI is missing or does not start (OPS-1)
 RUN /usr/local/bin/cli help >/dev/null
 COPY --from=build /out/site /srv/site
+# The content hashes in the names of the bundle files under /srv/site/pkg (hash-files in
+# Cargo.toml); the server reads the file next to its executable and fails to start without it.
+COPY --from=build /out/hash.txt /usr/local/bin/hash.txt
 COPY config/brand /etc/app/brand
 COPY src/rust/crates/ui/icons/vendor /usr/share/doc/app/icons
 ENV LEPTOS_SITE_ROOT=/srv/site \
     LEPTOS_OUTPUT_NAME=app \
+    LEPTOS_HASH_FILES=true \
     LEPTOS_SITE_ADDR=0.0.0.0:3000 \
     LEPTOS_ENV=PROD \
     APP__BRAND__DIR=/etc/app/brand/default \

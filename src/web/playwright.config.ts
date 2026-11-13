@@ -71,6 +71,8 @@ export default defineConfig({
       env: {
         LEPTOS_SITE_ROOT: "target/site",
         LEPTOS_OUTPUT_NAME: "app",
+        // the bundle files carry content hashes (hash-files in Cargo.toml; target/debug/hash.txt)
+        LEPTOS_HASH_FILES: "true",
         LEPTOS_SITE_ADDR: `127.0.0.1:${port}`,
         LEPTOS_ENV: "DEV",
         APP__SERVER__BIND: `127.0.0.1:${port}`,

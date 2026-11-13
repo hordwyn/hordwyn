@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { expectNoA11yViolations, hydrated, PASSWORD } from "./helpers";
 
 // UX phase 0, form discipline (design.md 5.2): rules before typing, live normalisation,

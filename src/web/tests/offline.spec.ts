@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { changeElsewhere, changeMine, countEntityEvents, entityEvents, entityIds, expectNoA11yViolations, expectReflow, hydrated, importDone, signIn, signUp } from "./helpers";
 
 // WP4-5 offline queue (DEC-237, design.md 5.4, 2.4, 6.15): offline, the next step is queued
@@ -114,7 +114,7 @@ async function signOut(page: Page) {
 }
 
 /** Queue the next step on Home while the sync push cannot get through. */
-async function queueOne(page: Page, context: import("@playwright/test").BrowserContext) {
+async function queueOne(page: Page, context: import("./fixtures").BrowserContext) {
   await page.route("**/api/v1/sync/commands", (r) => r.abort());
   const card = await home(page);
   await context.setOffline(true);

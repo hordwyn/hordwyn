@@ -1,4 +1,4 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "./fixtures";
 import { brandValue, contrast, countEntityEvents, entityEvents, expectNoA11yViolations, expectReflow, hydrated, signUp, importDone, token } from "./helpers";
 
 // UX phase 1 Home, Stats and History (design.md 6.1, 6.6; addendum-1 1.3): Home sections and

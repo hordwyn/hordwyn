@@ -230,9 +230,18 @@ pub struct EnvProvider {
 
 pub struct Oidc {
     parts: OidcParts,
+    /// Where the sign-out form of a page may be redirected to: see
+    /// [`Oidc::end_session_origins`].
+    end_session: std::sync::RwLock<Vec<String>>,
     env_secret: Mutex<Option<Zeroizing<String>>>,
     cache: Mutex<HashMap<Uuid, Discovered>>,
     guards: sso::Guards,
+}
+
+/// `scheme://host[:port]` of an http(s) URL.
+fn origin_of(url: &str) -> Option<String> {
+    let u = openidconnect::url::Url::parse(url).ok()?;
+    matches!(u.scheme(), "https" | "http").then(|| u.origin().ascii_serialization())
 }
 
 fn host_of(url: &str) -> Option<String> {
@@ -292,7 +301,21 @@ impl Oidc {
             env_secret: Mutex::new(None),
             cache: Mutex::new(HashMap::new()),
             guards: sso::Guards::default(),
+            end_session: std::sync::RwLock::new(Vec::new()),
         }
+    }
+
+    /// The origins (`scheme://host[:port]`) of the end-session endpoints of the enabled
+    /// providers, as of the last change to a provider or its discovery document. The
+    /// sign-out form posts to this server, which redirects to such an endpoint
+    /// (RP-initiated logout); a browser may hold every redirect of a form post against the
+    /// `form-action` rule of the page (CSP Level 3), so the page policy names them.
+    #[must_use]
+    pub fn end_session_origins(&self) -> Vec<String> {
+        self.end_session
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     #[must_use]
@@ -397,9 +420,6 @@ impl Oidc {
     /// Test of a provider that is switched off, UX3-10) and the endpoints of `extra` (its
     /// document).
     async fn allow(&self, being: Option<&Provider>, extra: Option<&Value>) {
-        let Some(hosts) = &self.parts.hosts else {
-            return;
-        };
         let providers = match self.parts.store.providers().await {
             Ok(p) => p,
             Err(e) => {
@@ -413,9 +433,17 @@ impl Oidc {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         let mut set = BTreeSet::new();
+        let mut origins = BTreeSet::new();
         for p in providers.iter().filter(|p| p.enabled) {
             set.extend(host_of(&p.issuer));
             let doc = cache.get(&p.id).map(|d| &d.doc).or(p.discovery.as_ref());
+            let mut end = doc.and_then(|d| d["end_session_endpoint"].as_str());
+            if being.is_some_and(|b| b.id == p.id) {
+                end = extra
+                    .and_then(|d| d["end_session_endpoint"].as_str())
+                    .or(end);
+            }
+            origins.extend(end.and_then(origin_of));
             for key in ["token_endpoint", "jwks_uri", "userinfo_endpoint"] {
                 set.extend(doc.and_then(|d| d[key].as_str()).and_then(host_of));
             }
@@ -424,7 +452,13 @@ impl Oidc {
         for key in ["token_endpoint", "jwks_uri", "userinfo_endpoint"] {
             set.extend(extra.and_then(|d| d[key].as_str()).and_then(host_of));
         }
-        hosts.set_hosts(set.into_iter().collect());
+        *self
+            .end_session
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = origins.into_iter().collect();
+        if let Some(hosts) = &self.parts.hosts {
+            hosts.set_hosts(set.into_iter().collect());
+        }
     }
 
     /// Adapter from the oauth2 HTTP client contract to the `HttpFetch` port.

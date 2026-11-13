@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { ADMIN, expectNoA11yViolations, expectReflow, hydrated, signIn, signUp, token } from "./helpers";
 
 // UX phase 2, "why is nothing happening" (design.md 4.4, 6.1, 6.4): the palette's no-results
