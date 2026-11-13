@@ -6,6 +6,8 @@
 /src/web/playwright-report/
 /docs/build/
 /build/
+# GitLab Pages output of the `pages` job (cargo xtask site --out public)
+/public/
 # local state and secrets
 .env
 /config/.env

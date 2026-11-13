@@ -167,6 +167,8 @@ pub const COMPONENT_DIRS: &[&str] = &[
     "src/rust/crates/ui/src",
     "src/rust/crates/web/src",
     "src/rust/apps/server/src",
+    // the project website renders with the same components and tokens
+    "src/rust/apps/website/src",
 ];
 
 /// The stylesheet: no palette family of the brand ([`BRAND_PALETTES`]). Its neutral

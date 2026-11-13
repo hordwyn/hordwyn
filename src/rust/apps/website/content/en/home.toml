@@ -1,0 +1,191 @@
+title = "{name}"
+description = "{name} is a self-hosted, open-source tracker for the movies, shows, books, podcasts and games you treasure - and for the people you share them with."
+
+[hero]
+eyebrow = "Self-hosted media tracker"
+headline = "Keep what you watch, read, hear and play - and who you shared it with."
+sub = "{name} is one quiet place for your movies, shows, books, podcasts, video games and board games. It runs on your own server, your data stays yours, and it remembers the people who were there."
+primary = { label = "Host it yourself", href = "{root}/self-hosting/" }
+secondary = { label = "See what v1 covers", href = "{root}/features/" }
+
+[[facts]]
+value = "{kinds_shipped}"
+label = "media kinds in v1"
+
+[[facts]]
+value = "Your server"
+label = "your data"
+
+[[facts]]
+value = "MIT"
+label = "open source"
+
+[[facts]]
+value = "EN + DE"
+label = "in the application"
+
+[kinds.intro]
+eyebrow = "What it tracks"
+heading = "One shelf for everything you treasure"
+text = "Each kind is tracked the way it is actually used: episodes for shows, pages for books, sessions with scores for games."
+
+[[kinds.items]]
+kind = "movie"
+title = "Movies"
+text = "Mark a movie watched, and every later viewing counts too. Note who watched with you."
+status = "shipped"
+
+[[kinds.items]]
+kind = "show"
+title = "Shows"
+text = "Episode by episode or a season at once, with proper rewatch runs."
+status = "shipped"
+
+[[kinds.items]]
+kind = "book"
+title = "Books"
+text = "Reading progress by page, with page totals from Open Library."
+status = "coming"
+
+[[kinds.items]]
+kind = "podcast"
+title = "Podcasts"
+text = "Find a podcast, add it and keep count of the episodes you heard."
+status = "shipped"
+
+[[kinds.items]]
+kind = "video_game"
+title = "Video games"
+text = "Log sessions with duration and players; co-op and versus both fit."
+status = "shipped"
+
+[[kinds.items]]
+kind = "board_game"
+title = "Board games"
+text = "Plays with players, scores and a winner - and your win rate over time."
+status = "coming"
+
+[kinds]
+later = "Anime, manga, comics, audiobooks, music and visual novels are kinds of their own. Catalogue sources for them come later, and so does entering a title by hand."
+more = { label = "Features by media kind", href = "{root}/features/" }
+
+[together.intro]
+eyebrow = "With whom"
+heading = "The evening matters as much as the title"
+text = "Most trackers know what you watched. {name} also knows who sat next to you."
+
+[[together.points]]
+icon = "users"
+title = "Your people"
+text = "Keep your own address book of the people you watch, read and play with. They need no account."
+
+[[together.points]]
+icon = "link"
+title = "Linked when they join"
+text = "When a friend gets an account on your instance, link them: sessions you shared appear in their history, and they can copy them into their own log."
+
+[[together.points]]
+icon = "trophy"
+title = "Plays, scores, winners"
+text = "A game night is logged with its players, scores and winner - or as a co-op game you won or lost together."
+
+[[together.points]]
+icon = "history"
+title = "A history worth rereading"
+text = "Every viewing and every play is kept with its date and its company, so a year of evenings can be read back."
+
+[screenshots.intro]
+eyebrow = "A look inside"
+heading = "What it looks like"
+text = "A household that has used it for a while. The pictures follow the theme you chose for this page."
+
+[screenshots]
+note = "These are real captures of the application, running with invented sample data. The covers are the application's own placeholders: this website shows no pictures from the data sources."
+
+[screenshots.hero]
+view = "home-top"
+alt = "The Home page of the application with invented sample data: the greeting \"Welcome back, Mara\", six titles to continue - among them a show at 11 of 22 episodes, a book, a board game and a podcast, each with a button for the next step - and six planned titles up next."
+
+[screenshots.wide]
+view = "home"
+alt = "The Home page further down: recent activity with five entries, such as a show episode watched with Jonas and a board game session with four players and their scores, and below it the all-time statistics: 70 hours in total, 11 movies, 27 episodes, 1,243 pages and 20 plays."
+caption = "Home: recent activity and all-time statistics"
+
+[[screenshots.phones]]
+view = "item"
+alt = "The page of the show Hollow Tide Station on a phone: in progress at 11 of 22 episodes, a button to mark season 2, episode 4 as watched, \"Watched with\", a rating of 4.5 stars and the three seasons with their progress."
+caption = "A show"
+
+[[screenshots.phones]]
+view = "episodes"
+alt = "The episode list of season 2 on a phone: episodes 1 to 3 are watched, episode 4 is next up, the others are open; two buttons mark the season or the whole show as watched."
+caption = "Episode by episode"
+
+[[screenshots.phones]]
+view = "library"
+alt = "The library on a phone: tabs for all 35 titles, 9 planned, 11 in progress and 15 completed, a filter field, and a grid of cards with placeholder covers."
+caption = "The library"
+
+[[screenshots.phones]]
+view = "log"
+alt = "The dialog \"Log a play\" for a board game on a phone: four of six people selected as players, a score for each, the highest score marked as the winner, and the Save button."
+caption = "A game night"
+
+[name]
+eyebrow = "Why the name"
+heading = "The joy of the hoard"
+gloss = "<i lang=\"ang\">hord-wynn</i>: \"joy of the hoard\""
+body = """
+{name} comes from an Old English word. <i lang="ang">Hord</i> is a hoard, a treasure kept safe; <i lang="ang">wynn</i> is joy. Together, <i lang="ang">hord-wynn</i> means the joy of the hoard: a treasure that delights whoever holds it.
+
+The word survives in a single place: line 2270 of *Beowulf*, where the old dragon finds a hoard-joy standing open and takes it for his own. He then guards it under a barrow for three hundred winters, alone.
+
+We like the word and think the dragon got it wrong. Your hoard is the stories and games you treasure - and the joy is in sharing them with your people: the film night, the book you pressed into a friend's hands, the game that kept the whole table up past midnight. {name} keeps the hoard and remembers who was there.
+
+The spelling drops the second n of the dictionary form. Say it HORD-win.
+"""
+sources = """
+Meaning and attestation: [Brunetti, short definitions for *Beowulf* (Scaife ATLAS)](https://atlas.perseus.tufts.edu/dictionaries/entry/urn:cite2:scaife-viewer:dictionary-entries.atlas_v1:ang-short-def-1632) (<i lang="ang">hord-wynn</i>, "joy of the hoard"); [A Consolidated Library of Anglo-Saxon Poetry](https://clasp.ell.ox.ac.uk/db-latest/word/hordwynne) (one occurrence, *Beowulf* 2270).
+"""
+
+[[name.parts]]
+part = "hord"
+meaning = "hoard, treasure"
+
+[[name.parts]]
+part = "wynn"
+meaning = "joy, delight"
+
+[selfhost.intro]
+eyebrow = "Self-hosting"
+heading = "Runs on your own server"
+text = "One compose file starts the application, Postgres and Meilisearch on one host. Nothing phones home; the only outgoing calls go to the data sources you switch on."
+
+[[selfhost.steps]]
+title = "Set two secrets"
+text = "Copy the example environment file and set a database password and a search key."
+
+[[selfhost.steps]]
+title = "Start it"
+text = "Docker Compose or Podman Compose builds the image from the source and starts the three services."
+
+[[selfhost.steps]]
+title = "Open it"
+text = "Put your reverse proxy with TLS in front, open the address and create the first account in the setup wizard."
+
+[selfhost]
+more = { label = "Self-hosting guide", href = "{root}/self-hosting/" }
+
+[hub.intro]
+eyebrow = "After v1"
+heading = "An open catalogue hub is planned"
+text = "Some things have no good open catalogue yet, board games above all. The {name} hub is planned as a shared, openly licensed catalogue that instances can read from and contribute to. It is not built yet."
+
+[hub]
+more = { label = "About the hub", href = "{root}/hub/" }
+
+[closing]
+heading = "Start your hoard"
+text = "{name} is free, open source and yours to run. Read the guide, start an instance and invite your people."
+primary = { label = "Self-hosting guide", href = "{root}/self-hosting/" }
+secondary = { label = "Read the documentation", href = "{docs}" }

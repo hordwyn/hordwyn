@@ -1,0 +1,32 @@
+# The website's own configuration. The product name is written down here and nowhere else in
+# the website: content files say {name}, code never names it.
+#
+# A line that carries the marker PLACEHOLDER (outside a comment line like this one) is an
+# open slot for the owner: `website check` lists them and strict mode (the deploy gate)
+# refuses to publish while one is left. Fill the value and delete the marker. What else
+# blocks publishing (release.toml, the documentation) is listed by the same command.
+
+name = "Hordwyn"
+base_url = "https://hordwyn.com"
+locales = ["en", "de"]
+
+# the Antora documentation is published below the website
+docs_url = "/docs/"
+docs_install_url = "/docs/tracker/install.html"
+
+# the documentation is English only: links to it from other locales carry hreflang
+docs_lang = "en"
+
+# planned community hub (not built yet)
+hub_url = "https://hub.hordwyn.com"
+
+# public source repository (https: address). The site says "open source" and "host it
+# yourself", so strict mode refuses to publish without it.
+source_url = "" # PLACEHOLDER: address of the public source repository
+
+# security.txt (RFC 9116): a mailto: or https: URI, and an expiry date at most a year ahead,
+# e.g. "2027-11-01T00:00:00Z". While either is empty the built file says so in comments;
+# strict mode checks both values (scheme, date format, not past, at most a year ahead). The
+# contact is also the one shown on the security page.
+security_contact = "" # PLACEHOLDER: security contact (mailto: or https: URI)
+security_expires = "" # PLACEHOLDER: expiry date of security.txt (RFC 3339)

@@ -1,6 +1,6 @@
 # GitLab CI for a docker executor. No Nix: tools are installed by src/sh/ci-tools.sh with the
 # same versions as flake.nix (DEC-003).
-stages: [lint, test, build, docs]
+stages: [lint, test, build, docs, deploy]
 
 variables:
   RUST_IMAGE: "rust:1.99.1-slim-trixie"
@@ -181,3 +181,50 @@ antora:
     - antora --fetch --to-dir build/site docs/antora-playbook.yml
   artifacts:
     paths: [build/site]
+
+# The project website (src/rust/apps/website, docs/website/README.md): static pages rendered
+# with the `ui` components. Its Rust tests run in `test` with the workspace; this job builds
+# the site once - the build that is tested by `website-browser` and published by `pages` -
+# and writes down what still blocks publishing (open owner slots, security.txt, the release
+# gate, the documentation): build/website-blockers.txt, empty when nothing does.
+website:
+  extends: .rust
+  stage: build
+  script:
+    - sh ../sh/ci-tools.sh tailwind
+    - export PATH="$CARGO_HOME/bin:$PATH"
+    - cargo xtask site --out "$CI_PROJECT_DIR/build/public"
+    - cargo run --quiet -p website -- check --report "$CI_PROJECT_DIR/build/website-blockers.txt"
+  artifacts:
+    paths: [build/public, build/website-blockers.txt]
+    expire_in: 1 week
+
+# axe (WCAG 2.2 AA) on every page in both themes, the widths 320 to 2560 px, theme button,
+# menu, links; against the built site of the `website` job.
+website-browser:
+  stage: docs
+  image: node:24-trixie-slim
+  needs: [website]
+  script:
+    - cd src/web && npm ci --no-audit --no-fund && npx playwright install --with-deps chromium
+    - CI=1 npx playwright test -c playwright.site.config.ts
+  artifacts:
+    when: on_failure
+    paths: [src/web/test-results/site]
+
+# GitLab Pages: the website at / and the Antora documentation at /docs/. Publishing is off
+# until the owner sets the CI/CD variable PAGES_DEPLOY to "true" (docs/website/README.md).
+# The job compiles nothing: it publishes the build of `website` after `website-browser` has
+# passed on it, and only when the gate found no blocker. Then it checks what the two parts
+# promise each other: every /docs/ link of the website exists in the Antora output, and the
+# published pages load nothing from another server.
+pages:
+  stage: deploy
+  image: node:24-trixie-slim
+  needs: [website, website-browser, antora]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $PAGES_DEPLOY == "true"'
+  script:
+    - sh src/sh/pages-assemble.sh build/public build/site build/website-blockers.txt public
+  artifacts:
+    paths: [public]

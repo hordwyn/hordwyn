@@ -1,0 +1,187 @@
+title = "Funktionen"
+description = "Was {name} v1 kann, Art für Art: Filme, Serien, Bücher, Podcasts, Videospiele und Brettspiele - und was später kommt."
+eyebrow = "Funktionen"
+heading = "Was v1 kann, Art für Art"
+lead = "Diese Seite nennt, was die erste Version tut, Art für Art. Was mit \"Geplant\" markiert ist, ist vorgesehen und noch für keine Version bestätigt."
+source_label = "Daten:"
+
+[[groups]]
+heading = "Schauen"
+
+[[groups.items]]
+kind = "movie"
+title = "Filme"
+text = "Film finden, hinzufügen, als gesehen markieren - immer wieder."
+status = "shipped"
+points = [
+  "Suchen und Hinzufügen über TMDB",
+  "Jedes Ansehen zählt, mit eigenem Datum",
+  "\"Gesehen mit ...\": notiere, wer dabei war",
+  "Import deines Trakt-Verlaufs aus dessen JSON-Dateien; ein Medienserver kann Gesehenes per Webhook melden",
+  "Statistik: Filme und gesehene Stunden",
+]
+source = "TMDB"
+
+[[groups.items]]
+kind = "show"
+title = "Serien"
+text = "Folgen führen, so wie man wirklich schaut."
+status = "shipped"
+points = [
+  "Suchen und Hinzufügen über TMDB, mit eigenem Schlüssel auch über TheTVDB",
+  "Einzelne Folgen, eine ganze Staffel oder alles bis zu einer Folge markieren",
+  "Wiederholungsdurchgänge bleiben vom ersten Ansehen getrennt",
+  "\"Gesehen mit ...\" auch für Folgen",
+  "Statistik: Folgen, und Stunden, wo die Quelle eine Laufzeit nennt",
+]
+source = "TMDB, TheTVDB"
+
+[[groups]]
+heading = "Lesen"
+
+[[groups.items]]
+kind = "book"
+title = "Bücher"
+text = "Dein Lesen, Seite für Seite."
+status = "coming"
+points = [
+  "Suchen und Hinzufügen über Open Library",
+  "Fortschritt nach Seiten, mit der Seitenzahl aus der Quelle",
+  "Statistik: gelesene Seiten",
+]
+source = "Open Library"
+
+[[groups]]
+heading = "Hören"
+
+[[groups.items]]
+kind = "podcast"
+title = "Podcasts"
+text = "Folge den Podcasts, die du hörst, und zähle mit, was du gehört hast."
+status = "shipped"
+points = [
+  "Suchen und Hinzufügen über den Podcast Index",
+  "Die gehörten Folgen zählen",
+  "Statistik: Folgen",
+]
+source = "Podcast Index"
+
+[[groups]]
+heading = "Spielen"
+
+[[groups.items]]
+kind = "video_game"
+title = "Videospiele"
+text = "Sitzungen statt eines einzigen Hakens bei \"gespielt\"."
+status = "shipped"
+points = [
+  "Suchen und Hinzufügen über IGDB",
+  "Sitzungen mit Dauer und Mitspielenden eintragen",
+  "Punkte und Sieg, oder eine Koop-Partie mit oder ohne Ergebnis",
+  "Eine Partienübersicht je Spiel und deine Siegquote",
+  "Statistik: Partien und Stunden",
+]
+source = "IGDB"
+
+[[groups.items]]
+kind = "board_game"
+title = "Brettspiele"
+text = "Spieleabende mit allen am Tisch. Bilder der Schachteln gehören nicht zu v1."
+status = "coming"
+points = [
+  "Suchen und Hinzufügen über Wikidata",
+  "Partien mit Mitspielenden, Punkten und Sieg; feste Runden",
+  "Statistik: Partien, Stunden und Siegquote",
+]
+source = "Wikidata (CC0)"
+
+[everything.intro]
+eyebrow = "Für jede Art"
+heading = "Was dazugehört"
+text = ""
+
+[[everything.points]]
+id = "people"
+status = "shipped"
+icon = "users"
+title = "Menschen und gemeinsame Sitzungen"
+text = "Ein Adressbuch deiner Begleitungen; verknüpfte Konten sehen die Sitzungen, an denen sie teilgenommen haben."
+
+[[everything.points]]
+id = "lists"
+status = "shipped"
+icon = "list"
+title = "Listen und Ziele"
+text = "Sammle Titel in Listen und setze dir Ziele für das Jahr."
+
+[[everything.points]]
+id = "history"
+status = "shipped"
+icon = "history"
+title = "Verlauf und Statistik"
+text = "Ein datierter Verlauf von allem, was du eingetragen hast, und Statistiken nach Art und Jahr."
+
+[[everything.points]]
+id = "import_export"
+status = "shipped"
+icon = "upload"
+title = "Import und Export"
+text = "Bring deinen Verlauf aus Trakt mit (dessen JSON-Dateien), oder als CSV oder JSON Lines im dokumentierten Format; exportiere deine Bibliothek im selben Format."
+
+[[everything.points]]
+id = "notifications"
+status = "shipped"
+icon = "bell"
+title = "Benachrichtigungen"
+text = "Ein Posteingang in der Anwendung, mit Kopien per E-Mail, ntfy, Gotify, Discord, Matrix, Apprise oder Webhook."
+
+[[everything.points]]
+id = "integrations"
+status = "shipped"
+icon = "plug"
+title = "Integrationen"
+text = "Ein Medienserver oder dein eigenes Skript kann gesehene Filme und Folgen per Webhook melden. Es gibt eine REST-API."
+
+[[everything.points]]
+id = "accounts"
+status = "shipped"
+icon = "key-round"
+title = "Konten für deinen Haushalt"
+text = "Mehrere Konten je Instanz, Einladungen, Anmeldung mit zweitem Faktor und Single Sign-on über OpenID Connect."
+
+[[everything.points]]
+id = "themes_languages"
+status = "shipped"
+icon = "sun"
+title = "Hell, dunkel, Deutsch, Englisch"
+text = "Die Anwendung in beiden Designs und beiden Sprachen, gebaut nach WCAG 2.2 AA, mit der Tastatur bedienbar. Die Dokumentation ist englisch."
+
+[[everything.points]]
+id = "white_label"
+status = "shipped"
+icon = "pencil"
+title = "White-Label"
+text = "Name, Farben, Schrift und Texte kommen aus einem Markenverzeichnis: Betreibe es unter deinem eigenen Namen."
+
+[[everything.points]]
+id = "manual_entry"
+status = "coming"
+icon = "plus"
+title = "Titel von Hand eintragen"
+text = "Für ein Buch, ein Spiel oder alles andere, das keine Quelle kennt: Trage es selbst ein, mit den Angaben, die du hast."
+
+[later]
+items = [
+  "Katalogquellen für Anime, Manga, Comics, Hörbücher, Musik und Visual Novels",
+  "Der offene Katalog-Hub, zuerst für Brettspiele",
+  "Veröffentlichte Container-Images (v1 wird aus dem Quelltext gebaut)",
+  "Bilder für Brettspiele und ein Regal \"im Besitz\"",
+  "Push-Benachrichtigungen im Browser",
+  "Weitere Importe, zum Beispiel für Goodreads und BG Stats",
+  "Eine Desktop-Anwendung, die offline arbeitet",
+]
+
+[later.intro]
+eyebrow = "Geplant"
+heading = "Geplant, nicht in v1"
+text = "Termine versprechen wir nicht. Das sind die nächsten Punkte auf der Liste."
