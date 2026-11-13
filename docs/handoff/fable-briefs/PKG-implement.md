@@ -30,3 +30,9 @@ paths, compatibility code or upgrade notes for earlier builds or data; change mi
 if that is simpler (they are squashed into one v1 baseline in package v1-release). Only a fresh
 install has to work. This rule ends with the `v1` tag; from then on every package adds a
 CHANGELOG entry and release-specific upgrade notes.
+
+Before reporting (lesson from the race merge, 2026-11-13): besides your targeted tests, run
+`cargo test -p xtask` (locale parity and key families, white-label and colour guards, ops
+checks) and `cargo test -p web` (all its test binaries, e.g. button_classes, server_memos).
+These rule tests failed twice at the main-checkout gate after a lane had run only its own tests.
+Fluent key prefixes must not collide with storage keys or DOM ids (`app-` is taken).
