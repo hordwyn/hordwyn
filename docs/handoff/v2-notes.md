@@ -77,3 +77,16 @@ Design direction to research (fits what exists):
 - **Pluggable**: a sheet can reuse field types defined once (a "longest connected line" field
   type for river/railway, a "set collection" type, a "tasks fulfilled" counter), so new games
   are configuration, not code.
+
+## Owner priority for v2 (2026-11-14) - THE biggest v2 research item
+
+The biggest v2 research item is the score-sheet system above and how it fits into the hub.
+The two most important elements:
+1. **A UI that makes building a score card for a game easy** (e.g. Dorfromantik): define the
+   fields, then at the table type in cards / quests / railway length and see the final score
+   computed and shown. The UI helps build the sheet; the sheet does the calculation.
+2. **Players get sheets from the hub** so they do not have to build them themselves: the hub
+   distributes sheets (versioned, shared, forkable, votable).
+Financing idea for the hub: Open Collective or similar (research options and their terms).
+Order: research (design of the sheet model, the builder UI, hub distribution, financing) as the
+first v2 package after v1.0.0.
