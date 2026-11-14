@@ -19,3 +19,25 @@ Owner's list for after v1.0.0, in the owner's words, with first remarks. Not pla
      a series ordinal; Open Library series where present); the hub would hold curated, versioned
      order lists (core / extended / chronological / publication order) that members vote on;
      adding a series offers a checklist of its parts with the core set preselected.
+
+## Addition (owner, 2026-11-14): dynamic scoring for game tracking
+
+"Maybe we should research how to plug a dynamic scoring system into the game parts. So when we
+get public data (e.g. Wikidata) we can enhance it with rules and scoring metadata to help
+players."
+
+Research questions for the v2 planning:
+- A declarative scoring model attached to a game or variant (hub data, not code): points per
+  round or per hand, a target to reach ("first to 500" in Uno), highest or lowest wins, a loser
+  instead of a winner (Durak: the last player holding cards loses; Scheisskopf), teams,
+  elimination order, ties, cumulative vs per-round, bonus/penalty items.
+- How expressive it must be: a fixed set of building blocks (target, direction, rounds, teams,
+  loser rule) vs small formulas; if formulas, a safe evaluator (no general code; DESIGN.md's
+  wasmtime plugin idea only if declarative is not enough).
+- What the play logger does with it: pre-fill the right inputs (round sheet vs final scores vs
+  "who lost"), compute totals and the result, stats per variant (win rate, average score).
+- Data: Wikidata only names the game; rules and scoring are our own (hub-curated, CC0 like the
+  rest of the hub; rule texts written fresh, never copied from rulebooks); variants and house
+  rules as forks of a base definition, votable in the hub like the order lists.
+- Prior art to look at (licence first, no GPL code): open scorekeeping apps and their data
+  formats, BG Stats' export format (owner sample pending) for what players record.
