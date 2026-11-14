@@ -129,6 +129,14 @@ What an instance reachable from the internet needs beyond the table above:
 * *The trusted proxy.* Admin > Overview, row "Reverse proxy", reads "No forwarded requests
   from an unlisted proxy", and Admin > Audit log shows your own address on your sign-in, not
   the proxy's (`APP__SERVER__TRUSTED_PROXIES` above).
+* *Lift the temporary restriction.* If you restricted the proxy site to your own address for
+  the first start (warning above), remove that restriction now, once the administrator
+  account exists and has an authenticator: the restriction is only for the minutes before the
+  first account, not for running the instance. Left in place, it refuses every other address
+  with a plain "403 Forbidden" from the proxy (your phone on mobile data, you away from
+  home). Sign-in throttling, the security headers and the cross-site guard protect the
+  instance from then on. Keep a restriction only if you want the instance private on
+  purpose, and then say so in your proxy configuration.
 
 == Back up the secrets key now
 

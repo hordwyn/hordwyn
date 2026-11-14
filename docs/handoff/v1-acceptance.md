@@ -156,6 +156,12 @@ H 45 min.
   reload. Then Settings > "Password and authenticator": set up an authenticator for the
   admin account and keep the recovery codes; sign out and in once with the code.
 
+- [ ] **12a. Lift the temporary restriction.** If the proxy site was restricted to your own
+  address for the first start (step 5), remove that `allow`/`deny` (or equivalent) now and
+  reload the proxy. Expected: the site opens from your phone on mobile data. A plain "403
+  Forbidden" from another address means the restriction is still there (the proxy's error
+  log names the refusing rule).
+
 ## D. Sign-in provider and mail in the LAN (skip what you do not use)
 
 - [ ] **13. Identity provider.** Admin > Sign-in and SSO: add the provider (issuer URL,
