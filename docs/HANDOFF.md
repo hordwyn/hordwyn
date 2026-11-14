@@ -13,6 +13,8 @@ rules (section 2, verbatim), `docs/DECISIONS.md`, `docs/design/DESIGN.md`, the U
 
 **Update 2026-11-10 (after the restart), this wins over the threads below:**
 
+- **RESUME HERE (2026-11-14):** all v1 packages are on main and pushed (last code gate: ci 1351 passed, e2e 195 passed). The owner deployed main on their server (tracker.example.org, nginx; the Ryot import worked). Open: (1) owner removes the temporary nginx allow/deny restriction when home (install.adoc "Lift the temporary restriction", checklist step 12a), (2) owner reports the mobile bottom-bar issue on Home (details pending), (3) owner finishes docs/handoff/v1-acceptance.md, (4) baseline freeze: owner asked to test on prod, so 0001_v1_baseline.sql is treated as frozen from 7b30bf5 on - any schema change from now is 0002+, (5) then tag v1.0.0-rc.1 and v1.0.0 on the owner's OK. v2 notes and the top v2 research item (score-sheet builder + hub distribution, Open Collective): docs/handoff/v2-notes.md. Fable only for reviews (weekly limit).
+
 - **2026-11-13: Fable usage limit reached; four lanes paused, uncommitted, resumable from their progress logs:**
   - `<worktree lane-sec2>` (lane/sec2): items 1-7 built, item 8 (final runs) open; then review.
   - `<worktree lane-polish>` (lane/v1-manual): items 1-4, 6, 7, 9 green; 5 (cover job) and 8 (web) written, not run; then review.
