@@ -44,11 +44,36 @@ Research questions for the v2 planning:
 
 Owner example (2026-11-14): a cooperative hex-tile game where the group builds one landscape,
 fulfils quest tasks and scores categories such as the longest river, keeps the score together,
-records how long each play took and which campaign items it unlocks (owner forgot the name; it
-matches Dorfromantik: The Board Game - to confirm). Requirements this adds:
+records how long each play took and which campaign items it unlocks (owner confirmed: Dorfromantik: The Board Game). Requirements this adds:
 - **Score sheets with categories** a person can define for a game themselves ("add the game's
   scoring card"), with a computed total; later shareable through the hub.
 - **Cooperative plays**: one shared score, no winner; a personal best per group.
 - **Campaign progress**: a running total across plays and the next unlock thresholds
   ("which things to free up"), with the unlock state per group.
 - Duration per play exists already (v1 play log).
+
+## Addition (owner, 2026-11-14): pluggable, configurable game stats
+
+The owner confirmed the example is Dorfromantik. Wish: configure in the UI which values a game's
+score sheet tracks (e.g. "longest railway" in Dorfromantik), and get them as game statistics
+across plays - "your longest railway ever", best, average, totals - searchable like any other
+stat. The data types must be pluggable into each other, in the same spirit as the existing
+adapter/connector architecture.
+
+Design direction to research (fits what exists):
+- **Field definitions as data**, like `crates/kinds` already describes media kinds with JSON
+  schemas: a score sheet = a list of typed fields (integer points, length/count, yes/no, choice,
+  per-player vs shared), with a declared aggregation per field (max, min, sum, average, latest,
+  count of true) and an optional total formula from the scoring model above.
+- **Storage**: the play keeps its field values as validated JSON (Postgres JSONB, checked
+  against the sheet's schema version); statistics computed by generic queries over those
+  fields (or a small per-field stats cache like the existing stats cache), not per-game code.
+- **Search and stats UI**: fields marked "statistic" appear as stats on the game page and the
+  Stats Play tab ("Longest railway: 18, on 2026-11-13 with ..."); Meilisearch facets only where
+  it helps to find plays.
+- **Sharing**: sheets versioned and shared through the hub (CC0), forked for house rules,
+  votable like order lists; a play records which sheet version it used, so old plays keep their
+  meaning when a sheet changes.
+- **Pluggable**: a sheet can reuse field types defined once (a "longest connected line" field
+  type for river/railway, a "set collection" type, a "tasks fulfilled" counter), so new games
+  are configuration, not code.
