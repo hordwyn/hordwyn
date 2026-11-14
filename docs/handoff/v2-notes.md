@@ -41,3 +41,14 @@ Research questions for the v2 planning:
   rules as forks of a base definition, votable in the hub like the order lists.
 - Prior art to look at (licence first, no GPL code): open scorekeeping apps and their data
   formats, BG Stats' export format (owner sample pending) for what players record.
+
+Owner example (2026-11-14): a cooperative hex-tile game where the group builds one landscape,
+fulfils quest tasks and scores categories such as the longest river, keeps the score together,
+records how long each play took and which campaign items it unlocks (owner forgot the name; it
+matches Dorfromantik: The Board Game - to confirm). Requirements this adds:
+- **Score sheets with categories** a person can define for a game themselves ("add the game's
+  scoring card"), with a computed total; later shareable through the hub.
+- **Cooperative plays**: one shared score, no winner; a personal best per group.
+- **Campaign progress**: a running total across plays and the next unlock thresholds
+  ("which things to free up"), with the unlock state per group.
+- Duration per play exists already (v1 play log).
