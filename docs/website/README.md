@@ -78,7 +78,9 @@ It blocks on:
    and `version` must name the tag they were checked against. Set this when `v1` is tagged,
    after reading the features page against the tag: flip `book`, `board_game` and
    `manual_entry` from `coming` to `shipped` only if they are in the release, then list every
-   shipped id. Until then the site shows them as "Coming" and cannot be published.
+   shipped id. Until then the site shows them as "Coming" and cannot be published. The
+   release file is set at the release tag even while the website stays unpublished, so the
+   built pages match the release (DEC-831).
 5. **The documentation** (read from `docs/antora-playbook.yml`): its title must carry the
    product name (today it is the working title, changed by the rename lane), and
    `kroki-fetch-diagram` must be `true`, so the diagrams are fetched when the documentation is
@@ -122,7 +124,11 @@ output directory is emptied on every build (only if it is empty or an earlier bu
 
 ## Publishing (GitLab Pages)
 
-Nothing is published until the owner turns it on:
+Nothing is published until the owner turns it on. Publishing is not part of a release:
+v1.0.0 ships without the website (DEC-831). The release checklist (`docs/HANDOFF.md`
+section 1, step 4) builds the site without `--strict` (`cargo xtask site`), which checks the
+pages but not the owner slots; the website goes live later, as its own step, once the owner
+has filled the slots and `cargo xtask site --strict` is green:
 
 1. Settle everything `cargo run -p website -- check` lists (slots, security.txt, the source
    address, `release.toml`, the documentation).

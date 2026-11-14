@@ -175,8 +175,14 @@ is green, in this order:
 4. **Website.** `src/rust/apps/website/content/release.toml`: `version` and `confirmed` are set
    by the owner or the orchestrator after reading the features page against this commit (the
    prepared list of ids is a comment in that file). For v1 also switch `book`, `board_game`
-   and `manual_entry` from "coming" to "shipped" in `features.toml` and `home.toml` (LV-8).
-   Then `cargo xtask site --strict`.
+   and `manual_entry` from "coming" to "shipped" in `features.toml` and `home.toml` (LV-8);
+   the `[kinds] later` sentence of `home.toml` (en, de) already describes entering a title by
+   hand as available (DEC-833), read it once more. Then `cargo xtask site`: a build without
+   `--strict` is the check of a release (it fails on a broken page, not on an open owner
+   slot). Publishing the website is a separate step and not part of a release while owner
+   slots are open (v1.0.0 ships without the website, DEC-831): once the owner filled the
+   slots of `docs/website/README.md` ("What blocks publishing"), `cargo xtask site --strict`
+   must be green, then the owner sets `PAGES_DEPLOY`.
 5. **Migrations.** No migration file that is in an earlier release tag has changed:
    `git diff --name-status <previous tag> -- src/rust/crates/store-pg/migrations` shows only
    `A` lines, and the always-on store-pg test `released_migrations_have_not_changed` is
@@ -196,6 +202,12 @@ is green, in this order:
    (docs: Staging), built from `vX.Y.Z-rc.N` in place of `vX.Y.Z` as the page says, and
    confirms its checklist. No release tag before that confirmation. When a line fails: fix
    on `main`, then steps 1-7 again with the next candidate number.
+   **First release (v1.0.0, no production yet; DEC-832):** there is nothing to upgrade from.
+   The candidate `v1.0.0-rc.1` is confirmed by a fresh install of exactly that tag passing
+   `docs/handoff/v1-acceptance.md` (go in its step 27); the staging procedure runs once on
+   that install as a dry run with the same version (its step 26). If the acceptance run was
+   on an earlier commit, the fresh install of the candidate repeats the steps its step 28
+   names. From v1.0.1 on, this step is the staging upgrade above.
 9. **Tag and push.** The release tag goes on the commit that passed, with nothing changed
    after it: `git tag -a vX.Y.Z -m "vX.Y.Z" vX.Y.Z-rc.N^{commit}`, then
    `git push origin vX.Y.Z`.

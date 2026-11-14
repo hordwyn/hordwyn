@@ -284,12 +284,15 @@ dcr exec app cli secrets status                    # no version says NOT LOADED
 dcr exec -T postgres psql -U app -d app -c 'SELECT count(*) FROM users'
 ----
 +
-The last line is the number of accounts of the live instance at the time of the dump. To
-look at the pages, open `http://127.0.0.1:3001` in a browser on the host (from another
-machine: `ssh -L 3001:127.0.0.1:3001 <host>`), sign in and open Admin > Data sources: the
-keys are shown as set, not as locked. If the sign-in page simply comes back, the browser
-dropped the session cookie because the copy is reached over plain HTTP; the four commands
-above are the check then.
+The last line is the number of accounts of the live instance at the time of the dump. The
+copy runs with the live `config/.env`: it has the live public URL, secure cookies and the
+same sign-in provider, so its links point at the live instance and a sign-in through the
+provider ends there, not on the copy. To look at the pages anyway, open
+`http://127.0.0.1:3001/sign-in/local` in a browser on the host (from another machine:
+`ssh -L 3001:127.0.0.1:3001 <host>`), sign in with the local password and open Admin > Data
+sources: the keys are shown as set, not as locked. If the sign-in page simply comes back,
+the browser dropped the secure session cookie because the copy is reached over plain HTTP;
+the four commands above are the check then.
 . Remove the copy, its volumes included, and its image:
 +
 [source,shell]

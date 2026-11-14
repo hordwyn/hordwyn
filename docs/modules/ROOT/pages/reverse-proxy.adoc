@@ -259,10 +259,15 @@ exists since nginx 1.25.1 (https://nginx.org/en/docs/http/ngx_http_v2_module.htm
 . Open the same title in two browser windows and log it in one: the other updates without
   a reload. If it does not, the proxy buffers the event stream.
 . Admin > Audit log shows your own address, not the proxy's.
-. Type a wrong password four times, then once more: the page says
-  "Too many failed attempts. Try again in 1 second." From another network (a phone without
-  Wi-Fi) the same account signs in without a wait at that moment. If it has to wait too,
-  the application sees the proxy's address for both: check `APP__SERVER__TRUSTED_PROXIES`.
+. Type a wrong password for one account several times in quick succession. The first three
+  failures cost nothing; from the fourth on, each one adds a wait that doubles (1, 2, 4, 8
+  seconds, ...), so the first waits are over before a person has typed again. After about
+  seven or eight quick failures the page says "Too many failed attempts. Try again in N
+  seconds." (a loop with `curl` shows it faster: the answers turn from `401` to `429` with a
+  `Retry-After`). Stay well below 30 failures: from the thirtieth in 15 minutes the whole
+  address is refused. From another network (a phone without Wi-Fi) the same account signs
+  in without a wait at that moment. If it has to wait too, the application sees the proxy's
+  address for both: check `APP__SERVER__TRUSTED_PROXIES`.
 
 The snippets were written from the Caddy and nginx documentation and were not run on the
 project's build host.

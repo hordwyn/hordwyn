@@ -32,7 +32,9 @@ Die <a href="{install}" hreflang="en">Installationsanleitung</a> (englisch) enth
 ## Deine Daten bleiben bei dir
 
 - Alles liegt in deiner Postgres-Datenbank und deinem Datenverzeichnis.
-- {name} hat keine Telemetrie und meldet sich nirgends. Ausgehende Anfragen gehen an die Datenquellen, die du eingeschaltet hast, um Titel und Cover zu holen, und an die Benachrichtigungskanäle, die du eingerichtet hast.
+- {name} hat keine Telemetrie und meldet sich nirgends. Ausgehende Anfragen gehen an die Datenquellen, die du eingeschaltet hast, um Titel und Cover zu holen, an den Anmeldedienst und den Mailserver, die du eingerichtet hast, und an deine Benachrichtigungskanäle.
+- Dein Betreiberkontakt geht, wenn du ihn einträgst, an Open Library und Wikidata (sie erwarten ihn von jedem Client), an keine andere Quelle.
+- Ein Cover, das noch nicht gespeichert ist, lädt der Browser direkt vom Server der Datenquelle; danach kommt es von deinem Server.
 - Der Export gibt dir deine Bibliothek - Titel, Status, Bewertungen und Verlauf - in einem dokumentierten, offenen Format. Mitspielende, Punkte und Siege von Spielsitzungen gehören noch nicht zum Export.
 - {name} führt Metadaten. Es sucht, indiziert und lädt niemals Medien.
 

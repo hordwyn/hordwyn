@@ -25,7 +25,7 @@ value = "DE + EN"
 label = "in der Anwendung"
 
 [kinds]
-later = "Anime, Manga, Comics, Hörbücher, Musik und Visual Novels sind eigene Arten. Katalogquellen dafür kommen später, ebenso das Eintragen eines Titels von Hand."
+later = "Anime, Manga, Comics, Hörbücher, Musik und Visual Novels sind eigene Arten: Titel davon legst du von Hand an und trägst sie ein wie jeden anderen. Katalogquellen dafür kommen später."
 more = { label = "Funktionen nach Medienart", href = "{root}/features/" }
 
 [kinds.intro]
@@ -162,7 +162,7 @@ more = { label = "Anleitung zum Selbsthosten", href = "{root}/self-hosting/" }
 [selfhost.intro]
 eyebrow = "Selbst hosten"
 heading = "Läuft auf deinem eigenen Server"
-text = "Eine Compose-Datei startet die Anwendung, Postgres und Meilisearch auf einem Host. Nichts meldet sich nach außen; ausgehende Anfragen gehen nur an die Datenquellen, die du einschaltest."
+text = "Eine Compose-Datei startet die Anwendung, Postgres und Meilisearch auf einem Host. Nichts meldet sich nach außen; ausgehende Anfragen gehen nur an die Datenquellen, den Anmeldedienst, den Mailserver und die Benachrichtigungskanäle, die du einrichtest."
 
 [[selfhost.steps]]
 title = "Zwei Geheimnisse setzen"

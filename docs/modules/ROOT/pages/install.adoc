@@ -6,6 +6,14 @@ application, Postgres and Meilisearch on one host, the application published on
 (xref:reverse-proxy.adoc[Behind a reverse proxy]). `docker compose` and `podman compose` take
 the same commands.
 
+The compose files need Docker Compose 2.24.0 or newer (`docker compose version`): they use
+the long form of `env_file` with `path` and `required: false`, which Compose has accepted
+since 2.24.0 (https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/,
+"As of Docker Compose version 2.24.0, you can set your `.env` file ... to be optional"). An
+older Compose, as some distribution packages ship it, refuses the file before anything
+starts. The other features the files use (`depends_on` with `condition: service_healthy`,
+`${VAR:?message}`) are older than that.
+
 This page is for a new installation. An instance that is already running is upgraded by
 xref:operations.adoc#_upgrade[Operations, Upgrade].
 
@@ -89,8 +97,38 @@ set `CARGO_BUILD_JOBS=1` in `config/.env` on a smaller host), applies the databa
 migrations and generates the secrets key `/data/secrets.key` in the `app-data` volume. The
 application answers on `http://127.0.0.1:3000/healthz` when it is ready.
 
-Open the public URL. The first account is created in the setup wizard and becomes the
-administrator.
+Open the public URL right away and finish the setup wizard. The first account is created
+in the wizard and becomes the administrator.
+
+WARNING: Until the wizard has created that account, whoever opens the address first becomes
+the administrator of the instance, with the data-source keys of the environment. Finish the
+wizard as soon as the application is healthy, and keep the instance unreachable from the
+internet until then: leave the proxy site switched off, or restrict it at the proxy to your
+own address, until the account exists. If the first page you see is a sign-in page and not
+the wizard, somebody else was first: `docker compose --env-file config/.env -f
+src/docker/compose.yml down -v` (it removes the volumes of this instance) and start again.
+
+== After the first start
+
+What an instance reachable from the internet needs beyond the table above:
+
+* *Operator contact.* Set your e-mail address (or an https URL) on Admin > Data sources, or
+  `SOURCE_OPERATOR_CONTACT` in `config/.env`. Open Library and Wikidata receive it in the
+  `User-Agent` of their requests, no other source does; without it Wikidata is not asked at
+  all and a board game search finds nothing there
+  (xref:connectors.adoc#_the_operator_contact[The operator contact]).
+* *An authenticator for the administrator.* Settings > "Password and authenticator": set up
+  a one-time code app for the admin account and keep the recovery codes somewhere else. A
+  password alone is then the only protection of the account that controls the instance, its
+  members and its data-source keys.
+* *A short HSTS time while you try the public address.* With an https public URL the
+  application tells browsers to refuse plain HTTP for the host for a year. While the address
+  is still a trial, set `APP__SERVER__HSTS_MAX_AGE_SECS=300` (five minutes), and set it back
+  to empty (one year) once the address is final
+  (xref:reverse-proxy.adoc[Behind a reverse proxy], "Security headers").
+* *The trusted proxy.* Admin > Overview, row "Reverse proxy", reads "No forwarded requests
+  from an unlisted proxy", and Admin > Audit log shows your own address on your sign-in, not
+  the proxy's (`APP__SERVER__TRUSTED_PROXIES` above).
 
 == Back up the secrets key now
 

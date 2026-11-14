@@ -9,3 +9,5 @@ src/web/playwright-report
 build
 docs/build
 config/.env
+backup
+secrets.key

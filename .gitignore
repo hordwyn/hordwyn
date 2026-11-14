@@ -11,6 +11,9 @@
 # local state and secrets
 .env
 /config/.env
+# the secrets key and the dumps the docs write into the checkout (Install, Operations Backup)
+/backup/
+/secrets.key
 # extra CA certificates of the local network (config/certs/README.md)
 /config/certs/*.crt
 /.dev/

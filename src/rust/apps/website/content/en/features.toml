@@ -89,7 +89,7 @@ title = "Board games"
 text = "Game nights with everyone at the table. Box pictures are not part of v1."
 status = "coming"
 points = [
-  "Search and add from Wikidata",
+  "Search and add from Wikidata, once the operator contact is set",
   "Plays with players, scores and a winner; regular groups",
   "Statistics: plays, hours and win rate",
 ]

@@ -32,7 +32,9 @@ The [install guide]({install}) has every step, the settings behind a reverse pro
 ## Your data stays yours
 
 - Everything is stored in your Postgres database and your data directory.
-- {name} has no telemetry and does not call home. Outgoing requests go to the data sources you switched on, to fetch titles and covers, and to the notification channels you configured.
+- {name} has no telemetry and does not call home. Outgoing requests go to the data sources you switched on, to fetch titles and covers, to the sign-in provider and the mail server you set up, and to the notification channels you configured.
+- Your operator contact, when you set it, is sent to Open Library and Wikidata (as they ask of every client), to no other source.
+- A cover that is not stored yet is loaded by the browser straight from the data source's host; once stored, it comes from your server.
 - The export gives you your library - titles, status, ratings and history - in a documented, open format. Players, scores and winners of game sessions are not part of the export yet.
 - {name} is a tracker of metadata. It never searches for, indexes or downloads media.
 

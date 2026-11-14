@@ -89,7 +89,7 @@ title = "Brettspiele"
 text = "Spieleabende mit allen am Tisch. Bilder der Schachteln gehören nicht zu v1."
 status = "coming"
 points = [
-  "Suchen und Hinzufügen über Wikidata",
+  "Suchen und Hinzufügen über Wikidata, sobald der Betreiberkontakt eingetragen ist",
   "Partien mit Mitspielenden, Punkten und Sieg; feste Runden",
   "Statistik: Partien, Stunden und Siegquote",
 ]

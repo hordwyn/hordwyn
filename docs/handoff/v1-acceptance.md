@@ -320,10 +320,12 @@ page, History and Stats. Tick the row when all four columns held.
 
   Always type `dcr`, never a bare compose command with `-p tracker-restore`: the helper's
   `APP_ROLE=web` is what keeps the copy from sending your notifications a second time.
-  Optional: `ssh -L 3001:127.0.0.1:3001 <host>` and open `http://127.0.0.1:3001`; sign in
-  with the local password and look at Admin > Data sources (keys set, not locked). If the
-  sign-in page just comes back, the cookie was dropped over plain HTTP: the four commands
-  above are the check. Then remove the copy and confirm the live one is unharmed:
+  Optional: `ssh -L 3001:127.0.0.1:3001 <host>` and open
+  `http://127.0.0.1:3001/sign-in/local`; sign in with the local password (the copy shares
+  the live public URL and sign-in provider, so a provider sign-in would end on the live
+  instance, F-10) and look at Admin > Data sources (keys set, not locked). If the sign-in
+  page just comes back, the cookie was dropped over plain HTTP: the four commands above are
+  the check. Then remove the copy and confirm the live one is unharmed:
 
   ```sh
   dcr down -v && docker image rm localhost/tracker-restore-app:local
@@ -378,8 +380,10 @@ page, History and Stats. Tick the row when all four columns held.
   |---|---|---|
   | | | |
 
-  Owner decisions still open (review section 6): the website slots or a non-strict site
-  build for v1 (F-1); what confirms the candidate (F-4); inline style attributes accepted
+  Owner decisions (review section 6). Two have an orchestrator default you may reverse: v1
+  ships without publishing the website, with a non-strict site build (F-1, DEC-831); the
+  candidate is confirmed by a fresh install of `v1.0.0-rc.1` passing this list, staging
+  once as a dry run (F-4, DEC-832). Still open: inline style attributes accepted
   (F-8); a second account before account deletion and the session cap are built (F-9); the
   two book questions; the operator contact value.
 
@@ -390,7 +394,8 @@ page, History and Stats. Tick the row when all four columns held.
 - [ ] **28. What happens next** (release checklist, `docs/HANDOFF.md` section 1).
 
   1. Orchestrator: changelog date, release notes date, version 1.0.0 with `Cargo.lock`,
-     website release file and the three "coming" marks, the migration fixture; full gate;
+     website release file and the three "coming" marks (site built without `--strict`, not
+     published), the migration fixture; full gate;
      commit; tag `v1.0.0-rc.1`; push.
   2. Owner: if this run was on an earlier commit, a fresh install of `v1.0.0-rc.1`
      (`dc down -v`, `git fetch --tags`, `git checkout v1.0.0-rc.1`, steps 6 to 12 and 15 to

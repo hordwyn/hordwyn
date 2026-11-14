@@ -14,6 +14,18 @@ release is tagged, the project checks it here first: then the copy is built from
 candidate tag `vX.Y.Z-rc.N` (the release commit), in place of `vX.Y.Z` in every command of
 this page. The release tag is set on that same commit only after the copy passed.
 
+NOTE: *First release.* For v1.0.0 there is no production instance and no earlier release to
+upgrade from. The candidate `v1.0.0-rc.1` is confirmed by a fresh installation of exactly
+that tag (xref:install.adoc[Install and first run]) that passes the project's acceptance
+checklist; this page is then followed once on that installation as a dry run, with the same
+version in both checkouts (the dry run lists no pending migration). From v1.0.1 on it is the
+real check.
+
+The copy reads production's `config/.env`, so it shares production's public URL, its secure
+cookies and its sign-in provider: links it makes point at production, and a sign-in through
+the provider sends the browser back to production, not to the copy. Check the copy anyway
+on its own port with the local password, as the checklist below says.
+
 == Prepare
 
 Run these in the production checkout (the commands of this page use the `dc` helper of
@@ -111,10 +123,11 @@ The copy passes when every line holds:
   a title you know. `--now` indexes in the command itself: the copy runs no worker, and
   without it the documents would only be queued.
 * [ ] In a browser on the host (from another machine: `ssh -L 3002:127.0.0.1:3002 <host>`),
-  `http://127.0.0.1:3002`: sign in, open a title of your library and its history, open
-  Admin > Data sources (the keys are shown as set, not as locked). If the sign-in page simply
-  comes back, the browser dropped the session cookie over plain HTTP; the commands above are
-  the check then.
+  `http://127.0.0.1:3002/sign-in/local`: sign in with the local password (not through the
+  sign-in provider, which would send you to production), open a title of your library and
+  its history, open Admin > Data sources (the keys are shown as set, not as locked). If the
+  sign-in page simply comes back, the browser dropped the secure session cookie over plain
+  HTTP; the commands above are the check then.
 * [ ] What the release notes name under "Highlights" and "Known issues" behaves as described.
 
 If a line fails, do not upgrade production: keep the copy for a look, and report it with the

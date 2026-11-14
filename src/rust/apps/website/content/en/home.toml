@@ -66,7 +66,7 @@ text = "Plays with players, scores and a winner - and your win rate over time."
 status = "coming"
 
 [kinds]
-later = "Anime, manga, comics, audiobooks, music and visual novels are kinds of their own. Catalogue sources for them come later, and so does entering a title by hand."
+later = "Anime, manga, comics, audiobooks, music and visual novels are kinds of their own: enter a title of them by hand and log it like any other. Catalogue sources for them come later."
 more = { label = "Features by media kind", href = "{root}/features/" }
 
 [together.intro]
@@ -159,7 +159,7 @@ meaning = "joy, delight"
 [selfhost.intro]
 eyebrow = "Self-hosting"
 heading = "Runs on your own server"
-text = "One compose file starts the application, Postgres and Meilisearch on one host. Nothing phones home; the only outgoing calls go to the data sources you switch on."
+text = "One compose file starts the application, Postgres and Meilisearch on one host. Nothing phones home; outgoing calls go only to the data sources, the sign-in provider, the mail server and the notification channels you set up."
 
 [[selfhost.steps]]
 title = "Set two secrets"
