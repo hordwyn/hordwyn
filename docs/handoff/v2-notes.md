@@ -90,3 +90,23 @@ The two most important elements:
 Financing idea for the hub: Open Collective or similar (research options and their terms).
 Order: research (design of the sheet model, the builder UI, hub distribution, financing) as the
 first v2 package after v1.0.0.
+
+## Addition (owner, 2026-11-15): book editions (note only, for the v2 talk)
+
+Found on prod (OT-26 in docs/handoff/owner-test-2026-11-15.md): a Collector's Edition added
+by ISBN shows the work with the median page count of all editions, "(estimate)". Today one item
+is one work and the edition is dropped. The owner's wish, "it is quite important to have the
+edition right":
+
+- **ISBN search = that edition.** Someone who types the ISBN of their copy gets exactly that
+  edition (name, format, publisher, date, pages), no estimate.
+- **Title search lets you choose the edition.** The work first with the regular hardcover,
+  the other editions below (paperback, special or collector's editions, re-releases), with a
+  filter field for the edition or collection name.
+- **Numbered pages first.** The page total starts from the edition's numbered (readable)
+  pages, e.g. Open Library `pagination` "433 pages : map, ..." over `number_of_pages` 448;
+  a hand-set total still wins, as today.
+- **Where it fits (to discuss):** an edition belongs to the person's entry, not to the shared
+  item (two people can own different editions of one work; stats and lists stay per work).
+  Possibly the same edition model for other kinds later (board game editions, director's cuts,
+  game remasters). Not decided whether this is 1.x or v2.
