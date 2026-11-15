@@ -3,7 +3,7 @@
 Owner's list for after v1.0.0, in the owner's words, with first remarks. Not planned yet.
 
 1. **Hub** - the community catalogue role (hub.hordwyn.com), planned since round 2
-   (docs/fable/round2/next-packages.md h1-h7, hub-design.md on branch wip/fable-reviews).
+   (docs/fable/round2/next-packages.md h1-h7, docs/fable/hub-design.md).
 2. **Normal tabletop game tracking** - poker; card games and their variants (Durak,
    Scheisskopf, etc.); Uno?; etc.
    - Remark: Wikidata's card game classes are already in the v1 board game search (DEC-792..811),
@@ -19,6 +19,12 @@ Owner's list for after v1.0.0, in the owner's words, with first remarks. Not pla
      a series ordinal; Open Library series where present); the hub would hold curated, versioned
      order lists (core / extended / chronological / publication order) that members vote on;
      adding a series offers a checklist of its parts with the core set preselected.
+   - Owner, 2026-11-16: lists are requested for importing items in one go, across kinds, e.g.
+     "all Marvel (MCU) films and shows" in release or chronological order. Same mechanism: a
+     hub list, imported as a checklist into the library (Planned) and optionally as a list.
+     Note: hub-design.md covers the shared catalogue only (items, review, takedown), not lists;
+     lists would be a second hub object type, and the design keeps movies and shows out of the
+     hub in v1 (licensing), so a Marvel list would hold references (TMDB ids), not data.
 
 ## Addition (owner, 2026-11-14): dynamic scoring for game tracking
 
@@ -156,3 +162,7 @@ so a link accepted later shows every earlier session with that entry and with en
 into it. Owner question: should a linked person get the item as a fully logged item of their
 own; candidates: automatic copy (opt-in per linked person), "copy all" for a late link, and
 copies that carry the episode or page.
+- Owner, 2026-11-16: **proper sharing is important.** One person logs the play-through and it
+  must not become a chore for the others to copy it over: an automatic copy into the linked
+  person's own log, **configurable** (per person who shares, and the receiver can opt out or
+  confirm), with the episode or page carried along.
