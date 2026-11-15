@@ -120,3 +120,9 @@ no edition or a provisional one; picking or changing it later keeps the entry's 
 Open for the talk: one edition per entry or per reading (a reread of the paperback after the
 special edition), and whether changing the edition updates the page total when it was not set
 by hand.
+
+## Addition (owner, 2026-11-15): views per episode (note only, for the v2 talk)
+
+Each episode row should show how often that episode was watched, as a small tag on the row
+("2x"), beside "Watched" (OT-29). The effective history has the counts already; open for the
+talk: count every view or only finished passes and runs, and how a rewatch run shows it.
