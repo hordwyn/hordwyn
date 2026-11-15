@@ -49,7 +49,7 @@ docs/modules/ROOT/pages/releases/) and then decide per finding.
 - Owner, 2026-11-16: the instance is production with personal data; no test or fake data there. Steps that need data (19a-19g, 21) move into the Playwright e2e suite for the next releases ("we should add UI tests"), so a later acceptance run on prod only reads and runs server commands.
 - Skipped: 20 podcasts, 23 notifications.
 - Step 3 owner question: secrets in `config/.env` vs the encrypted store in the database.
-- Decisions: rc.1 is confirmed by **upgrading prod in place** (backup first), no fresh install; OT-22..30 **do not block** the tag; F-8 and F-9 **accepted** (household accounts); imported Completed books **count their pages** (owner: the later edition fix must migrate existing entries, the instance is productive now); operator contact **set**; F-1 **publish the website** (with the website in its own repository, DEC-840, its publication need not wait for the app tag - to confirm); DEC-725 (does a Completed set by hand count in the year and goals) **unanswered**, owner asked what it means.
+- Decisions: rc.1 is confirmed by **upgrading prod in place** (backup first), no fresh install; OT-22..30 **do not block** the tag; F-8 and F-9 **accepted** (household accounts); imported Completed books **count their pages** (owner: the later edition fix must migrate existing entries, the instance is productive now); operator contact **set**; F-1 **publish the website** (with the website in its own repository, DEC-840, its publication need not wait for the app tag - to confirm); DEC-725 **confirmed as built** (DEC-842): a Completed without a finish date counts in no year.
 
 ## For the talk
 
