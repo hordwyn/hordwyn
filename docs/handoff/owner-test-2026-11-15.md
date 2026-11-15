@@ -43,7 +43,8 @@ docs/modules/ROOT/pages/releases/) and then decide per finding.
 - 14 passes (mail landed in spam, OT-31). 24 passes (backup taken and copied off the host).
 - Host remark: the server runs Ubuntu 20.04 (standard support ended 2025-05; ssh warns about missing post-quantum key exchange, nginx 1.18). Not an app finding; plan an OS upgrade to 24.04 after the release.
 - 16 passes: the break-glass sign-in notice named the public address 62.155.192.104, not 172.x (the proxy is believed); OT-32 stays for provider sign-ins.
-- Open: 18 live updates (413 passed), 25 restore rehearsal (needed for Go), 26 staging dry run.
+- 25 passes: restore copy beside live on a spare port (3001 is used by another service on the host), same user count, secrets v1 loaded (9 values, 0 locked), healthz ok; the copy reused the live image. Checklist fix: step 25 should reuse the live image and say to pick a free port.
+- Open: 18 live updates (413 passed), 26 staging dry run (optional with the in-place upgrade).
 - Skipped: 20 podcasts, 23 notifications.
 - Step 3 owner question: secrets in `config/.env` vs the encrypted store in the database.
 - Decisions: rc.1 is confirmed by **upgrading prod in place** (backup first), no fresh install; OT-22..30 **do not block** the tag; F-8 and F-9 **accepted** (household accounts); imported Completed books **count their pages** (owner: the later edition fix must migrate existing entries, the instance is productive now); operator contact **set**; F-1 **publish the website** (with the website in its own repository, DEC-840, its publication need not wait for the app tag - to confirm); DEC-725 (does a Completed set by hand count in the year and goals) **unanswered**, owner asked what it means.
