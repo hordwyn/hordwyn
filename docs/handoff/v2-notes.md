@@ -137,3 +137,22 @@ talk: count every view or only finished passes and runs, and how a rewatch run s
   the library: next episodes and new seasons of shows (the episode job already stores air
   dates, DEC-448), sequels, new books of followed authors or series, game release dates,
   podcast episodes; optionally a notification when one is out (the notify crate exists).
+
+## Addition (owner, 2026-11-16): language per view (note only, for the v2 talk)
+
+Feature request: log in which language something was watched, read or listened to, e.g.
+Pokemon episodes watched in German and again in English, a book read in the original and in
+translation. Open: the language on the view (progress event) or on the session; audio vs
+subtitles; whether a view in another language counts as a rewatch; stats per language; a
+default language per entry (the last one used).
+
+## Addition (owner, 2026-11-16): shared sessions with linked people (for the v2 talk)
+
+How it works today (code read 2026-11-16, OT-33 in docs/handoff/owner-test-2026-11-15.md): a
+session logged "with" a person entry that is linked to an account is shown read-only to that
+account (if the owner shares sessions) and announced to them; it does not enter their library
+or history by itself. They can "Copy to my log" per session. Visibility is computed when read,
+so a link accepted later shows every earlier session with that entry and with entries merged
+into it. Owner question: should a linked person get the item as a fully logged item of their
+own; candidates: automatic copy (opt-in per linked person), "copy all" for a late link, and
+copies that carry the episode or page.
