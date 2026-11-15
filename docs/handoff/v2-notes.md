@@ -110,3 +110,13 @@ edition right":
   item (two people can own different editions of one work; stats and lists stay per work).
   Possibly the same edition model for other kinds later (board game editions, director's cuts,
   game remasters). Not decided whether this is 1.x or v2.
+
+Owner addition (2026-11-15), the edition can change after planning: someone searches a book,
+takes the regular edition and marks it Want to read, because they want to read the book, not
+a particular print. Later they buy a used special edition at a book fair. They must be able to
+say "read it, in the special edition" on the same entry: the plan, the reading and the stats
+stay one book. So the edition is optional and changeable on the entry (Want to read may have
+no edition or a provisional one; picking or changing it later keeps the entry's history).
+Open for the talk: one edition per entry or per reading (a reread of the paperback after the
+special edition), and whether changing the edition updates the page total when it was not set
+by hand.
