@@ -126,3 +126,14 @@ by hand.
 Each episode row should show how often that episode was watched, as a small tag on the row
 ("2x"), beside "Watched" (OT-29). The effective history has the counts already; open for the
 talk: count every view or only finished passes and runs, and how a rewatch run shows it.
+
+## Addition (owner, 2026-11-16): recommendations and upcoming releases (note only, for the v2 talk)
+
+- **Recommendation engine:** suggest what to watch, read or play next from the person's own
+  library, ratings and history (and possibly what the household or friends logged). Open for
+  the talk: local only (no profile leaves the instance) or with source data (TMDB / IGDB
+  "similar" and "recommended" lists), and how it is explained ("because you rated X").
+- **Upcoming releases for tracked items:** a calendar / list of what is coming for items in
+  the library: next episodes and new seasons of shows (the episode job already stores air
+  dates, DEC-448), sequels, new books of followed authors or series, game release dates,
+  podcast episodes; optionally a notification when one is out (the notify crate exists).
