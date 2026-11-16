@@ -2,6 +2,54 @@
 # same versions as flake.nix (DEC-003).
 stages: [lint, test, build, docs]
 
+# When pipelines run (DEC-846): merge requests, the default branch, tags, and branch pushes
+# without an open merge request (no duplicate branch + MR pipelines). A pipeline started by
+# hand ("Run pipeline", `glab ci run`) can set FULL_CI=1 to run every job on a branch.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+# Jobs that build or test code skip a push that only changed documentation (docs/, *.md,
+# owner-inbox/); tags and FULL_CI always run them.
+.code-rules:
+  rules:
+    - if: $CI_COMMIT_TAG || $FULL_CI == "1"
+    - changes:
+        - src/**/*
+        - config/**/*
+        - flake.nix
+        - flake.lock
+        - .gitlab-ci.yml
+        - "**/Cargo.toml"
+        - "**/Cargo.lock"
+        - deny.toml
+        - rust-toolchain.toml
+
+# The slow jobs (browser tests, image build) run where they count: the default branch, tags,
+# merge requests, or FULL_CI; on other branch pushes they can be started by hand.
+.heavy-rules:
+  rules:
+    - if: $CI_COMMIT_TAG || $FULL_CI == "1"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - src/**/*
+        - config/**/*
+        - flake.nix
+        - flake.lock
+        - .gitlab-ci.yml
+        - "**/Cargo.toml"
+        - "**/Cargo.lock"
+        - deny.toml
+        - rust-toolchain.toml
+    - if: $CI_COMMIT_BRANCH
+      when: manual
+      allow_failure: true
+
 variables:
   RUST_IMAGE: "rust:1.99.1-slim-trixie"
   CARGO_HOME: "$CI_PROJECT_DIR/.cargo-home"
@@ -56,12 +104,14 @@ commit-lint:
 fmt:
   extends: .rust
   stage: lint
+  rules: !reference [.code-rules, rules]
   script:
     - cargo fmt --all --check
 
 clippy:
   extends: .rust
   stage: lint
+  rules: !reference [.code-rules, rules]
   script:
     - rustup target add wasm32-unknown-unknown
     - cargo clippy --workspace --all-targets --features "$NATIVE_FEATURES" -- -D warnings -W clippy::pedantic
@@ -70,6 +120,7 @@ clippy:
 deny:
   extends: .rust
   stage: lint
+  rules: !reference [.code-rules, rules]
   script:
     - sh ../sh/ci-tools.sh deny
     - cargo deny --all-features check
@@ -77,6 +128,7 @@ deny:
 test:
   extends: .rust
   stage: test
+  rules: !reference [.code-rules, rules]
   services:
     - name: postgres:18.6-alpine
       alias: postgres
@@ -122,6 +174,7 @@ test:
 upgrade-test:
   extends: .rust
   stage: test
+  rules: !reference [.code-rules, rules]
   services:
     - name: postgres:18.6-alpine
       alias: postgres
@@ -136,6 +189,7 @@ upgrade-test:
 wasm-test:
   extends: .rust
   stage: test
+  rules: !reference [.code-rules, rules]
   script:
     - apt-get install -y -qq --no-install-recommends chromium chromium-driver >/dev/null
     - sh ../sh/ci-tools.sh wasm-bindgen
@@ -145,6 +199,7 @@ wasm-test:
 e2e:
   extends: .rust
   stage: test
+  rules: !reference [.heavy-rules, rules]
   services:
     - name: postgres:18.6-alpine
       alias: postgres
@@ -181,6 +236,7 @@ e2e:
 leptos-build:
   extends: .rust
   stage: build
+  rules: !reference [.heavy-rules, rules]
   script:
     - sh ../sh/ci-tools.sh leptos wasm-bindgen tailwind
     - rustup target add wasm32-unknown-unknown
@@ -188,18 +244,51 @@ leptos-build:
 
 docker-image:
   # The runner is not privileged, so no docker-in-docker; kaniko builds without a daemon
-  # (DEC-042). The image is built and checked, not pushed. The build is also the check that
-  # the image contains the admin CLI: the runtime stage runs `cli help` (OPS-1, DEC-618).
+  # (DEC-042). The build is also the check that the image contains the admin CLI: the
+  # runtime stage runs `cli help` (OPS-1, DEC-618). Where it goes (DEC-843, DEC-846): the
+  # default branch pushes `main` and the short commit, a release tag vX.Y.Z pushes X.Y.Z, X.Y
+  # and latest, a candidate vX.Y.Z-rc.N pushes only X.Y.Z-rc.N; every other pipeline builds
+  # without pushing. Layers are cached in the project registry (`/cache`), so a rebuild only
+  # compiles what changed.
   stage: build
   image:
     name: gcr.io/kaniko-project/executor:v1.24.0-debug
     entrypoint: [""]
+  rules: !reference [.heavy-rules, rules]
   script:
-    - /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/src/docker/Dockerfile" --no-push --tar-path image.tar --destination app:$CI_COMMIT_SHORT_SHA
-    - ls -l image.tar
+    - mkdir -p /kaniko/.docker
+    - printf '{"auths":{"%s":{"username":"%s","password":"%s"}}}' "$CI_REGISTRY" "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" > /kaniko/.docker/config.json
+    - |
+      set -eu
+      img="$CI_REGISTRY_IMAGE"
+      dest=""
+      if [ -n "${CI_COMMIT_TAG:-}" ]; then
+        v="${CI_COMMIT_TAG#v}"
+        case "$v" in
+          *-*) dest="--destination $img:$v" ;;
+          *) dest="--destination $img:$v --destination $img:${v%.*} --destination $img:latest" ;;
+        esac
+      elif [ "${CI_COMMIT_BRANCH:-}" = "$CI_DEFAULT_BRANCH" ]; then
+        dest="--destination $img:main --destination $img:$CI_COMMIT_SHORT_SHA"
+      fi
+      if [ -n "$dest" ]; then
+        echo "pushing:$dest"
+        # shellcheck disable=SC2086
+        /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/src/docker/Dockerfile" \
+          --cache=true --cache-repo "$img/cache" $dest
+      else
+        echo "build only, no push"
+        /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/src/docker/Dockerfile" \
+          --cache=true --cache-repo "$img/cache" --no-push --tar-path image.tar --destination "app:$CI_COMMIT_SHORT_SHA"
+        ls -l image.tar
+      fi
 
 antora:
   stage: docs
+  rules:
+    - if: $CI_COMMIT_TAG || $FULL_CI == "1"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes: [docs/**/*]
   image:
     name: antora/antora:3.2.2
     entrypoint: [""]

@@ -10,6 +10,12 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
 
 ## [Unreleased]
 
+### Added
+
+- The container image is published to the project's GitLab registry: `main` and the short commit
+  from the default branch, `X.Y.Z`, `X.Y` and `latest` from a release tag, `X.Y.Z-rc.N` from a
+  candidate (DEC-843, DEC-846).
+
 ### Fixed
 
 - Background jobs: a worker whose job lease lapsed (it was busy longer than the lease and
