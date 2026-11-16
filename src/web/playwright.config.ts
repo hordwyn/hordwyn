@@ -27,6 +27,9 @@ export default defineConfig({
   // (DEC-844).
   retries: process.env.CI ? 1 : 0,
   failOnFlakyTests: !!process.env.CI,
+  // The CI runner shares its host with other jobs (and, on the project runner, a live
+  // instance): two workers keep hydration within the waits; E2E_WORKERS overrides (DEC-847).
+  workers: process.env.E2E_WORKERS ? Number(process.env.E2E_WORKERS) : process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL: `http://127.0.0.1:${port}`,
