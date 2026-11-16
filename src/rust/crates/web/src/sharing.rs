@@ -33,16 +33,26 @@ pub(crate) fn absolute(path: &str) -> String {
 pub(crate) fn Privacy() -> impl IntoView {
     let user = expect_context::<crate::app::UserResource>();
     let on = RwSignal::new(true);
+    let message = RwSignal::new(None::<Result<String, String>>);
     Effect::new(move |_| {
         if let Some(Ok(Some(u))) = user.get() {
             on.set(u.share_sessions);
         }
     });
+    // The switch shows the new value while it is saved and is disabled meanwhile; it says
+    // when the server has it, and a failed save puts the switch back and says so (DEC-848):
+    // never a value on screen that the server does not have.
+    let i18n = crate::i18n::use_i18n();
     let save = Action::new(move |v: &bool| {
         let v = *v;
+        let i18n = i18n.clone();
         async move {
             if let Ok(u) = api::set_privacy(v).await {
                 on.set(u.share_sessions);
+                message.set(Some(Ok(i18n.t("privacy-saved"))));
+            } else {
+                on.set(!v);
+                message.set(Some(Err(i18n.t("privacy-save-failed"))));
             }
         }
     });
@@ -52,9 +62,11 @@ pub(crate) fn Privacy() -> impl IntoView {
             <div class="flex items-center gap-3">
                 <input id="share-sessions" type="checkbox" class="size-4 rounded border-input accent-primary"
                     prop:checked=move || on.get()
-                    on:change=move |ev| { let v = event_target_checked(&ev); on.set(v); save.dispatch(v); }/>
+                    prop:disabled=move || save.pending().get()
+                    on:change=move |ev| { let v = event_target_checked(&ev); on.set(v); message.set(None); save.dispatch(v); }/>
                 <Label r#for="share-sessions">{t("privacy-share-sessions")}</Label>
             </div>
+            <div class="mt-3"><crate::settings::Outcome message=message/></div>
         </section>
     }
 }

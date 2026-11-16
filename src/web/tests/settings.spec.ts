@@ -64,6 +64,9 @@ test("the privacy switch is kept", async ({ page }) => {
   const before = await share.isChecked();
   await share.click();
   await expect(share).toBeChecked({ checked: !before });
+  // the page says when the server has it (DEC-848); only then is a reload meaningful
+  await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
+  await expect(share).toBeEnabled();
   await visit(page, "/settings/privacy");
   await expect(page.getByLabel("Linked participants see the sessions I log")).toBeChecked({ checked: !before });
   // the usage line names exactly the measured sections (UX4-14)
@@ -71,6 +74,21 @@ test("the privacy switch is kept", async ({ page }) => {
   for (const part of ["the Library filters", "\"More\" in the log and play sheets", "\"Set a goal\" on Stats", "\"Sign-in\" in Settings > Account", "\"Usage measurement\" on Storage and jobs"]) {
     await expect(usage).toContainText(part);
   }
+});
+
+test("a privacy switch that is not saved goes back and says so", async ({ page }) => {
+  await signUp(page, `prf${Date.now()}`);
+  await visit(page, "/settings/privacy");
+  const share = page.getByLabel("Linked participants see the sessions I log");
+  const before = await share.isChecked();
+  await page.route("**/_fn/set_privacy*", (route) => route.fulfill({ status: 500, body: "refused by the test" }));
+  await share.click();
+  await expect(page.getByRole("alert")).toContainText("Not saved. The setting is back to what it was");
+  await expect(share).toBeChecked({ checked: before });
+  await expect(share).toBeEnabled();
+  await page.unroute("**/_fn/set_privacy*");
+  await visit(page, "/settings/privacy");
+  await expect(page.getByLabel("Linked participants see the sessions I log")).toBeChecked({ checked: before });
 });
 
 test("Snooze hides the admin nudge on Home for this browser", async ({ page }) => {

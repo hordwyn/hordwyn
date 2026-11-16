@@ -18,6 +18,9 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
 
 ### Fixed
 
+- Settings > Privacy: the "Linked participants see the sessions I log" switch says "Saved." once
+  the server has the change; a save that fails puts the switch back and says so. Before, a
+  failed save left the new value on screen while the server kept the old one (DEC-848).
 - Background jobs: a worker whose job lease lapsed (it was busy longer than the lease and
   another worker claimed the job) can no longer overwrite the newer claim's state. Its lease
   renewal, completion and failure only apply while the claim is still the current one; the
