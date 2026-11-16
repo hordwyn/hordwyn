@@ -14,7 +14,7 @@ rules (section 2, verbatim), `docs/DECISIONS.md`, `docs/design/DESIGN.md`, the U
 **Update 2026-11-10 (after the restart), this wins over the threads below:**
 
 - **2026-11-15, owner use on prod:** findings OT-22..26 in docs/handoff/owner-test-2026-11-15.md (OT-22 undo of "Watched with" leaves the session, OT-23 Merge dialog with one person, OT-24 "Watched with" after the fact, OT-25 rewatch count, OT-26 book editions, also a v2 note). Nothing built: the owner first goes through the v1 release discipline, then decides per finding: patch, 1.1.0 or 2.0.0.
-- **2026-11-15, where the source lives (DEC-840):** GitLab is the main home, `gitlab.com/hordwyn/hordwyn`; GitHub `hordwyn/hordwyn` is a read-only mirror; contributions as GitLab merge requests or mailed patches. The website moves to its own repo `hordwyn/website`, the hub (v2) later to its own. Open: move the project, set up the mirror, split the website (shares the `ui` and `brand` crates), CONTRIBUTING, `source_url`.
+- **2026-11-15, where the source lives (DEC-840):** GitLab is the main home, `gitlab.com/hordwyn/hordwyn`; GitHub `hordwyn/hordwyn` is a read-only mirror; contributions as GitLab merge requests or mailed patches. The website moves to its own repo `hordwyn/website`, the hub (v2) later to its own. Open: move the project, set up the mirror, CONTRIBUTING, `source_url`. Website split done on branch `split/website` (DEC-841): it lives in `gitlab.com/hordwyn/website` (private), on `ui` and `brand` as pinned git dependencies.
 - **RESUME HERE (2026-11-14):** all v1 packages are on main and pushed (last code gate: ci 1351 passed, e2e 195 passed). The owner deployed main on their server (tracker.example.org, nginx; the Ryot import worked). Open: (1) owner removes the temporary nginx allow/deny restriction when home (install.adoc "Lift the temporary restriction", checklist step 12a), (2) owner reports the mobile bottom-bar issue on Home (details pending), (3) owner finishes docs/handoff/v1-acceptance.md, (4) baseline freeze: owner asked to test on prod, so 0001_v1_baseline.sql is treated as frozen from 7b30bf5 on - any schema change from now is 0002+, (5) then tag v1.0.0-rc.1 and v1.0.0 on the owner's OK. **Owner's order from here:** (a) v1 release-candidate checks (the acceptance checklist on the deployed instance, F-2 container path, CI `docker-image` green on the candidate), (b) the full v1.0.0 release, (c) a v2 brainstorm with the owner before any v2 work starts. **v1 release still needs thought** (owner, 2026-11-14): `hordwyn` organisations on GitHub and GitLab (names were free per docs/research/domains.md and names.md - owner registers them), where the public source lives (the website's `source_url` slot, the GitLab project path still `hordwyn/hordwyn`), public images and registry (OPS-I, package ops2), the release page on the forge (notes from docs/modules/ROOT/pages/releases/), licence and CONTRIBUTING/security contact for a public repo, and publishing the website (owner slots). Decide these with the owner in the release step. v2 notes and the top v2 research item (score-sheet builder + hub distribution, Open Collective): docs/handoff/v2-notes.md. Fable only for reviews (weekly limit).
 
 - **2026-11-13: Fable usage limit reached; four lanes paused, uncommitted, resumable from their progress logs:**
@@ -176,17 +176,12 @@ is green, in this order:
    becomes X.Y.Z; then `cargo check` in `src/rust`, so that `Cargo.lock` carries the new
    version too: both files go into the same commit (a tag whose lock file is stale cannot be
    built with `--locked`).
-4. **Website.** `src/rust/apps/website/content/release.toml`: `version` and `confirmed` are set
-   by the owner or the orchestrator after reading the features page against this commit (the
-   prepared list of ids is a comment in that file). For v1 also switch `book`, `board_game`
-   and `manual_entry` from "coming" to "shipped" in `features.toml` and `home.toml` (LV-8);
-   the `[kinds] later` sentence of `home.toml` (en, de) already describes entering a title by
-   hand as available (DEC-833), read it once more. Then `cargo xtask site`: a build without
-   `--strict` is the check of a release (it fails on a broken page, not on an open owner
-   slot). Publishing the website is a separate step and not part of a release while owner
-   slots are open (v1.0.0 ships without the website, DEC-831): once the owner filled the
-   slots of `docs/website/README.md` ("What blocks publishing"), `cargo xtask site --strict`
-   must be green, then the owner sets `PAGES_DEPLOY`.
+4. **Website.** Not part of this repository or of a release any more (DEC-841): the website
+   lives in https://gitlab.com/hordwyn/website and follows a release on its own (its
+   README.md, "What blocks publishing" item 4: `release.toml`, the "coming" marks of `book`,
+   `board_game` and `manual_entry` in its `features.toml` and `home.toml` (LV-8, DEC-833),
+   and its pin of the `ui` and `brand`
+   crates set to the release tag).
 5. **Migrations.** No migration file that is in an earlier release tag has changed:
    `git diff --name-status <previous tag> -- src/rust/crates/store-pg/migrations` shows only
    `A` lines, and the always-on store-pg test `released_migrations_have_not_changed` is

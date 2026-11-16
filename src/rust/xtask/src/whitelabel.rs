@@ -27,9 +27,6 @@ pub fn codenames() -> Vec<String> {
 pub const ALLOWED_PREFIXES: &[&str] = &[
     "config/brand/",
     "docs/",
-    // The project's own website content names the product on purpose (the site is not
-    // white-label app code; its code reads the name from `content/site.toml`).
-    "src/rust/apps/website/content/",
     ".git/",
     "README.md",
     "LICENSE",
@@ -336,8 +333,6 @@ pub const COMPONENT_DIRS: &[&str] = &[
     "src/rust/crates/ui/src",
     "src/rust/crates/web/src",
     "src/rust/apps/server/src",
-    // the project website renders with the same components and tokens
-    "src/rust/apps/website/src",
 ];
 
 /// The stylesheet: no palette family of the brand ([`BRAND_PALETTES`]). Its neutral

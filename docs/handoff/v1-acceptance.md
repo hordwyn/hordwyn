@@ -400,8 +400,8 @@ page, History and Stats. Tick the row when all four columns held.
 - [ ] **28. What happens next** (release checklist, `docs/HANDOFF.md` section 1).
 
   1. Orchestrator: changelog date, release notes date, version 1.0.0 with `Cargo.lock`,
-     website release file and the three "coming" marks (site built without `--strict`, not
-     published), the migration fixture; full gate;
+     the migration fixture (the website release file and the three "coming" marks are
+     done in https://gitlab.com/hordwyn/website since DEC-841); full gate;
      commit; tag `v1.0.0-rc.1`; push.
   2. Owner: if this run was on an earlier commit, a fresh install of `v1.0.0-rc.1`
      (`dc down -v`, `git fetch --tags`, `git checkout v1.0.0-rc.1`, steps 6 to 12 and 15 to

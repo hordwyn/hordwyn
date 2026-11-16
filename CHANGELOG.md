@@ -10,6 +10,12 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
 
 ## [Unreleased]
 
+### Removed
+
+- The project website (its generator, content, browser checks and the GitLab Pages job) and
+  `cargo xtask site`: the website now lives in its own repository (`website` in the same
+  GitLab group, DEC-841). Nothing changes for an instance.
+
 ## [1.0.0] - unreleased
 
 The first release: a home instance for one household, one web process behind a reverse
