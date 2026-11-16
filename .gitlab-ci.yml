@@ -152,6 +152,15 @@ e2e:
     E2E_DATABASE_URL: "postgres://app:app@postgres:5432/app_test"
   script:
     - apt-get install -y -qq --no-install-recommends nodejs npm >/dev/null
+    # the specs set up state with `psql` (tests/helpers.ts `sql`); the client matches the
+    # major version of the postgres service (Debian trixie ships 17, so the PGDG repository)
+    - |
+      install -d /usr/share/postgresql-common/pgdg
+      curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+      echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+      apt-get update -qq && apt-get install -y -qq --no-install-recommends postgresql-client-18 >/dev/null
+      psql --version
+    - nproc && free -m
     - sh ../sh/ci-tools.sh leptos wasm-bindgen tailwind
     - rustup target add wasm32-unknown-unknown
     - cargo leptos build --bin-features gallery,all-connectors --lib-features hydrate,gallery

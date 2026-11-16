@@ -53,6 +53,9 @@ async function merge(page: Page, keep: string, fold: string) {
 }
 
 test("promote, accept, see history, unlink, merge and undo the merge", async ({ page, browser }) => {
+  // two sign-ups and about ten hydrated page loads, 3 to 5 s each on a loaded CI runner: the
+  // default 30 s ran out with every step still progressing (DEC-844)
+  test.setTimeout(150_000);
   const stamp = Date.now();
   await signUp(page, "/sign-up", `own${stamp}`, "Olive");
 
@@ -148,6 +151,8 @@ async function member(browser: Browser, user: string, display: string) {
 }
 
 test("a link request is accepted from the request card", async ({ page, browser }) => {
+  // two sign-ups and three hydrated page loads (DEC-844)
+  test.setTimeout(120_000);
   const stamp = Date.now();
   await signUp(page, "/sign-up", `req${stamp}`, "Rita");
   const bo = await member(browser, `bo${stamp}`, "Bo");

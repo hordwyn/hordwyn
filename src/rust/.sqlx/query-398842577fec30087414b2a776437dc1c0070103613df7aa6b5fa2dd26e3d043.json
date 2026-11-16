@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET state = 'dead', last_error = $2, locked_until = NULL, updated_at = now()\n                 WHERE id = $1 AND state = 'running' AND attempts = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "398842577fec30087414b2a776437dc1c0070103613df7aa6b5fa2dd26e3d043"
+}

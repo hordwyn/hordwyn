@@ -22,7 +22,11 @@ const serverLog = process.env.E2E_SERVER_LOG;
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: true,
+  // In CI a failed test runs once more for a second trace (does it fail the same way?), but a
+  // test that passes only on the retry still fails the run: a retry never hides a race
+  // (DEC-844).
   retries: process.env.CI ? 1 : 0,
+  failOnFlakyTests: !!process.env.CI,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL: `http://127.0.0.1:${port}`,

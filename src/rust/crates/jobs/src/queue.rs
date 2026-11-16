@@ -138,82 +138,102 @@ impl PgQueue {
     }
 
     /// Extend the lease of a running job (heartbeat of a long job, so no other worker
-    /// claims it meanwhile).
+    /// claims it meanwhile). Returns `false` when this claim no longer holds the job: its
+    /// lease lapsed and another worker claimed it, or it is no longer running.
+    ///
+    /// The claim is the fencing token (DEC-844): every claim increments `attempts`, so the
+    /// row only matches while `attempts` is still the value this claim was given. The same
+    /// fence guards [`PgQueue::complete`], [`PgQueue::fail`] and [`PgQueue::release`], so a
+    /// stale worker cannot overwrite the state of a newer claim.
     ///
     /// # Errors
     /// Database errors.
-    pub async fn extend(&self, id: Uuid, lease: Duration) -> Result<(), QueueError> {
+    pub async fn extend(&self, job: &Job, lease: Duration) -> Result<bool, QueueError> {
         let lease_ms = i64::try_from(lease.as_millis()).unwrap_or(i64::MAX);
-        sqlx::query!(
+        let done = sqlx::query!(
             "UPDATE jobs SET locked_until = now() + make_interval(secs => $2::bigint / 1000.0)
-             WHERE id = $1 AND state = 'running'",
-            id,
-            lease_ms
+             WHERE id = $1 AND state = 'running' AND attempts = $3",
+            job.id,
+            lease_ms,
+            job.attempts
         )
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(done.rows_affected() == 1)
     }
 
-    /// Mark a claimed job as done.
+    /// Mark a claimed job as done. Returns `false` and changes nothing when this claim no
+    /// longer holds the job (see [`PgQueue::extend`]).
     ///
     /// # Errors
     /// Database errors.
-    pub async fn complete(&self, id: Uuid) -> Result<(), QueueError> {
-        sqlx::query!(
-            "UPDATE jobs SET state = 'done', locked_until = NULL, updated_at = now() WHERE id = $1",
-            id
+    pub async fn complete(&self, job: &Job) -> Result<bool, QueueError> {
+        let done = sqlx::query!(
+            "UPDATE jobs SET state = 'done', locked_until = NULL, updated_at = now()
+             WHERE id = $1 AND state = 'running' AND attempts = $2",
+            job.id,
+            job.attempts
         )
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(done.rows_affected() == 1)
     }
 
     /// Record a failure: retry after [`backoff`], or mark the job dead after `max_attempts`.
+    /// Returns `false` and changes nothing when this claim no longer holds the job (see
+    /// [`PgQueue::extend`]).
     ///
     /// # Errors
     /// Database errors.
-    pub async fn fail(&self, job: &Job, error: &str) -> Result<(), QueueError> {
-        if job.attempts >= job.max_attempts {
-            tracing::warn!(job = %job.id, kind = %job.kind, error, "job is dead");
-            sqlx::query!(
+    pub async fn fail(&self, job: &Job, error: &str) -> Result<bool, QueueError> {
+        let done = if job.attempts >= job.max_attempts {
+            let done = sqlx::query!(
                 "UPDATE jobs SET state = 'dead', last_error = $2, locked_until = NULL, updated_at = now()
-                 WHERE id = $1",
+                 WHERE id = $1 AND state = 'running' AND attempts = $3",
                 job.id,
-                error
+                error,
+                job.attempts
             )
             .execute(&self.pool)
             .await?;
+            if done.rows_affected() == 1 {
+                tracing::warn!(job = %job.id, kind = %job.kind, error, "job is dead");
+            }
+            done
         } else {
             let delay_ms = i64::try_from(backoff(job.attempts).as_millis()).unwrap_or(i64::MAX);
             sqlx::query!(
                 "UPDATE jobs SET state = 'queued', last_error = $2, locked_until = NULL, updated_at = now(),
                                  run_at = now() + make_interval(secs => $3::bigint / 1000.0)
-                 WHERE id = $1",
+                 WHERE id = $1 AND state = 'running' AND attempts = $4",
                 job.id,
                 error,
-                delay_ms
+                delay_ms,
+                job.attempts
             )
             .execute(&self.pool)
-            .await?;
-        }
-        Ok(())
+            .await?
+        };
+        Ok(done.rows_affected() == 1)
     }
 
-    /// Release a claimed job without counting the attempt (used on shutdown).
+    /// Release a claimed job without counting the attempt (used on shutdown). Returns
+    /// `false` and changes nothing when this claim no longer holds the job (see
+    /// [`PgQueue::extend`]).
     ///
     /// # Errors
     /// Database errors.
-    pub async fn release(&self, id: Uuid) -> Result<(), QueueError> {
-        sqlx::query!(
+    pub async fn release(&self, job: &Job) -> Result<bool, QueueError> {
+        let done = sqlx::query!(
             "UPDATE jobs SET state = 'queued', attempts = greatest(attempts - 1, 0),
                              locked_until = NULL, updated_at = now()
-             WHERE id = $1 AND state = 'running'",
-            id
+             WHERE id = $1 AND state = 'running' AND attempts = $2",
+            job.id,
+            job.attempts
         )
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(done.rows_affected() == 1)
     }
 
     /// Create or replace a cron schedule (5-field cron, UTC).

@@ -54,7 +54,7 @@ async fn dedupe_key_prevents_duplicates_while_pending() {
         .await
         .unwrap();
     assert_eq!(third, first, "running job still dedupes");
-    q.complete(claimed.id).await.unwrap();
+    assert!(q.complete(&claimed).await.unwrap());
     let fourth = q
         .push(job(Lane::BackgroundRefresh, "refresh", Some("item:1")))
         .await
@@ -177,7 +177,7 @@ async fn failures_retry_with_backoff_then_die() {
     let id = q.push(job(Lane::Interactive, "x", None)).await.unwrap();
     let lease = Duration::from_secs(60);
     let j = q.claim(&[Lane::Interactive], lease).await.unwrap().unwrap();
-    q.fail(&j, "boom").await.unwrap();
+    assert!(q.fail(&j, "boom").await.unwrap());
     assert_eq!(
         state(&q, id).await,
         ("queued".into(), 1, Some("boom".into()))
@@ -208,7 +208,7 @@ async fn failures_retry_with_backoff_then_die() {
     .await
     .unwrap();
     let j = q.claim(&[Lane::Interactive], lease).await.unwrap().unwrap();
-    q.fail(&j, "still broken").await.unwrap();
+    assert!(q.fail(&j, "still broken").await.unwrap());
     assert_eq!(state(&q, id).await.0, "dead");
 }
 
@@ -402,16 +402,20 @@ impl Handler for Slow {
     }
 }
 
+/// The heartbeat keeps a job that runs longer than its lease with its worker. The lease has
+/// real slack (a renewal every 1 s of a 3 s lease, so two renewals may be late by up to 1 s
+/// each) because a 300 ms lease lapsed on slow shared CI runners; what happens when a lease
+/// does lapse is `a_stale_claim_cannot_extend_complete_or_fail` (DEC-844).
 #[tokio::test]
 async fn a_job_longer_than_its_lease_runs_once() {
     let Some(q) = queue().await else {
         return;
     };
     let id = q.push(job(Lane::UserImport, "slow", None)).await.unwrap();
-    let slow = Arc::new(Slow(Mutex::new(0), Duration::from_millis(1500)));
+    let slow = Arc::new(Slow(Mutex::new(0), Duration::from_millis(4000)));
     let cfg = || WorkerConfig {
         concurrency: 1,
-        lease: Duration::from_millis(300),
+        lease: Duration::from_secs(3),
         poll_interval: Duration::from_millis(20),
         ..WorkerConfig::default()
     };
@@ -427,10 +431,8 @@ async fn a_job_longer_than_its_lease_runs_once() {
             .handle("slow", slow.clone())
             .run(stop.clone()),
     );
-    for _ in 0..200 {
-        if state(&q, id).await.0 == "done" {
-            break;
-        }
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while state(&q, id).await.0 != "done" && std::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     stop.cancel();
@@ -441,6 +443,78 @@ async fn a_job_longer_than_its_lease_runs_once() {
         1,
         "claimed again while still running"
     );
+}
+
+/// Fencing (DEC-844): a worker whose lease lapsed and whose job another worker claimed can
+/// no longer extend, complete, fail or release it; the newer claim's state stands.
+#[tokio::test]
+async fn a_stale_claim_cannot_extend_complete_or_fail() {
+    let Some(q) = queue().await else { return };
+    let id = q.push(job(Lane::Interactive, "x", None)).await.unwrap();
+    let stale = q
+        .claim(&[Lane::Interactive], Duration::from_millis(1))
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let lease = Duration::from_secs(60);
+    let fresh = q.claim(&[Lane::Interactive], lease).await.unwrap().unwrap();
+    assert_eq!((fresh.id, stale.attempts, fresh.attempts), (id, 1, 2));
+
+    assert!(!q.extend(&stale, lease).await.unwrap(), "stale extend");
+    assert!(!q.fail(&stale, "late failure").await.unwrap(), "stale fail");
+    assert!(!q.release(&stale).await.unwrap(), "stale release");
+    assert!(!q.complete(&stale).await.unwrap(), "stale complete");
+    assert_eq!(state(&q, id).await, ("running".into(), 2, None));
+    // the stale extend did not shorten or move the newer lease either
+    let held: bool = sqlx::query_scalar!(
+        "SELECT locked_until > now() + interval '30 seconds' FROM jobs WHERE id = $1",
+        id
+    )
+    .fetch_one(q.pool())
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(held);
+
+    assert!(q.extend(&fresh, lease).await.unwrap());
+    assert!(q.complete(&fresh).await.unwrap());
+    assert_eq!(state(&q, id).await, ("done".into(), 2, None));
+    assert!(
+        !q.complete(&fresh).await.unwrap(),
+        "a finished job is not running"
+    );
+    assert!(!q.extend(&fresh, lease).await.unwrap());
+}
+
+/// A stale dead-letter (last attempt) does not kill the job a newer claim is running.
+#[tokio::test]
+async fn a_stale_last_attempt_does_not_mark_the_job_dead() {
+    let Some(q) = queue().await else { return };
+    let id = q.push(job(Lane::Interactive, "x", None)).await.unwrap();
+    sqlx::query!(
+        "UPDATE jobs SET attempts = max_attempts - 1 WHERE id = $1",
+        id
+    )
+    .execute(q.pool())
+    .await
+    .unwrap();
+    let stale = q
+        .claim(&[Lane::Interactive], Duration::from_millis(1))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stale.attempts, stale.max_attempts);
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let fresh = q
+        .claim(&[Lane::Interactive], Duration::from_secs(60))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!q.fail(&stale, "late failure").await.unwrap());
+    assert_eq!(state(&q, id).await.0, "running");
+    assert!(q.fail(&fresh, "real failure").await.unwrap());
+    assert_eq!(state(&q, id).await.0, "dead");
 }
 
 /// Admin > Storage and jobs (addendum-1 3.4): counts per lane, failed jobs with retry and

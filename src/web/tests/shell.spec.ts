@@ -696,8 +696,13 @@ test("palette: arrow keys move through provider results; the active row is marke
   await expect.soft(box).toHaveAttribute("aria-activedescendant", third);
   await expect(box).toBeFocused();
   // the keys were pressed before the late batch: otherwise this test proves nothing about
-  // it (OT1A-6; raise LATE_MS in tmdb-mock.mjs if a loaded host gets here too late)
+  // it (OT1A-6). The mock holds that answer until now (DEC-844).
   await expect(palette.getByRole("option", { name: /^Fight Club Nights/ })).toHaveCount(0);
+  const mock = `http://127.0.0.1:${process.env.TMDB_MOCK_PORT ?? 3011}/late`;
+  await expect
+    .poll(async () => (await (await fetch(`${mock}/held`)).json()).held, { message: "the show search waits in the mock" })
+    .toBeGreaterThanOrEqual(1);
+  await fetch(`${mock}/release`, { method: "POST" });
 
   // the late batch (the show search) must not move the active row
   await expect(palette.getByRole("option", { name: /^Fight Club Nights/ })).toBeVisible({ timeout: 20_000 });

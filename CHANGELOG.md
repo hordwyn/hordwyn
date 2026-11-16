@@ -10,6 +10,13 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
 
 ## [Unreleased]
 
+### Fixed
+
+- Background jobs: a worker whose job lease lapsed (it was busy longer than the lease and
+  another worker claimed the job) can no longer overwrite the newer claim's state. Its lease
+  renewal, completion and failure only apply while the claim is still the current one; the
+  worker logs a warning and its result is discarded. Jobs stay at-least-once (DEC-844).
+
 ### Removed
 
 - The project website (its generator, content, browser checks and the GitLab Pages job) and

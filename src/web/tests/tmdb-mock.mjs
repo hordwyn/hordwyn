@@ -61,8 +61,22 @@ const port = Number(process.env.TMDB_MOCK_PORT ?? 3011);
 // A show search for "fight club <number>" (the query of the palette test alone, OT1A-7: the
 // other specs search "fight club" and get the fixture at once) answers late and with one
 // synthetic show that exists only here (id 990002, shaped like Search > TV): the palette
-// test (OT-1) needs one batch that arrives after the first results are on screen.
-const LATE_MS = 1500;
+// test (OT-1) needs one batch that arrives after the first results are on screen. The answer
+// is held until the test asks for it (`POST /late/release`, after it pressed its keys), so a
+// slow host cannot let it arrive too early; a hold nobody releases ends after LATE_MAX_MS
+// (well inside the server's 30 s source timeout). It was a fixed 1.5 s delay before, which a
+// loaded CI runner outran (DEC-844).
+const LATE_MAX_MS = 15_000;
+const held = new Set();
+const answerLate = (send) => {
+  const hold = { send, timer: setTimeout(() => release(hold), LATE_MAX_MS) };
+  held.add(hold);
+};
+const release = (hold) => {
+  clearTimeout(hold.timer);
+  held.delete(hold);
+  hold.send();
+};
 const lateShow = {
   page: 1,
   results: [
@@ -94,6 +108,18 @@ createServer((req, res) => {
     res.writeHead(200).end("ok");
     return;
   }
+  if (path === "/late/held") {
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ held: held.size }));
+    return;
+  }
+  if (path === "/late/release" && req.method === "POST") {
+    const n = held.size;
+    for (const hold of [...held]) {
+      release(hold);
+    }
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ released: n }));
+    return;
+  }
   const fx = byPath.get(path);
   if (!fx) {
     res.writeHead(404, { "content-type": "application/json" });
@@ -101,11 +127,13 @@ createServer((req, res) => {
     return;
   }
   const late = path === "/3/search/tv" && /^fight club \d+$/.test(url.searchParams.get("query") ?? "");
-  setTimeout(
-    () => {
-      res.writeHead(fx.status, { "content-type": "application/json" });
-      res.end(JSON.stringify(late ? lateShow : fx.body));
-    },
-    late ? LATE_MS : 0,
-  );
+  if (late) {
+    answerLate(() => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(lateShow));
+    });
+    return;
+  }
+  res.writeHead(fx.status, { "content-type": "application/json" });
+  res.end(JSON.stringify(fx.body));
 }).listen(port, "127.0.0.1", () => console.log(`tmdb mock on ${port}`));

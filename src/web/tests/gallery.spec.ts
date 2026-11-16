@@ -13,7 +13,12 @@ async function openGallery(page: Page) {
   await expect(page.getByRole("dialog")).toBeHidden();
 }
 
+// One axe pass over the whole gallery took up to 15 s on a loaded CI runner: the gallery
+// tests that run axe get an honest budget for it (DEC-844).
+const AXE_BUDGET = 90_000;
+
 test("gallery has no WCAG A/AA violations in light and dark", async ({ page }) => {
+  test.setTimeout(AXE_BUDGET);
   await openGallery(page);
   await expectNoA11yViolations(page);
   await page.getByRole("main").getByRole("button", { name: "Switch to dark theme" }).click();
@@ -22,6 +27,7 @@ test("gallery has no WCAG A/AA violations in light and dark", async ({ page }) =
 });
 
 test("open dialog and menu have no violations", async ({ page }) => {
+  test.setTimeout(AXE_BUDGET);
   await openGallery(page);
   await page.getByRole("button", { name: "Open dialog" }).click();
   await expectNoA11yViolations(page);
@@ -48,6 +54,7 @@ test("dialog: focus moves in, Escape and close button close it", async ({ page }
 
 test("form dialog: centered, the rows scroll between the title and the footer", async ({ page }) => {
   // OT-10: the presentation of the log dialogs
+  test.setTimeout(AXE_BUDGET);
   await page.setViewportSize({ width: 1280, height: 600 });
   await openGallery(page);
   const opener = page.getByRole("button", { name: "Open form dialog" });

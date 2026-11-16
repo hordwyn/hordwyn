@@ -158,8 +158,15 @@ async fn execute_in_span(
         every.tick().await;
         loop {
             every.tick().await;
-            if let Err(e) = queue.extend(job.id, lease).await {
-                tracing::warn!(error = %e, "extending the job lease failed");
+            match queue.extend(&job, lease).await {
+                Ok(true) => {}
+                // fenced (DEC-844): the lease lapsed and another worker claimed the job;
+                // this run's result will not be recorded. The handler is not interrupted
+                // (at-least-once: in this rare case a job runs twice).
+                Ok(false) => tracing::warn!(
+                    "lost the job: its lease lapsed and another worker claimed it; this run's result will be discarded"
+                ),
+                Err(e) => tracing::warn!(error = %e, "extending the job lease failed"),
             }
         }
     };
@@ -168,13 +175,17 @@ async fn execute_in_span(
         () = beat => unreachable!("the heartbeat never ends"),
     };
     let stored = match result {
-        Ok(()) => queue.complete(job.id).await,
+        Ok(()) => queue.complete(&job).await,
         Err(e) => {
             tracing::warn!(error = %e, "job failed");
             queue.fail(&job, &e).await
         }
     };
-    if let Err(e) = stored {
-        tracing::error!(error = %e, "recording the job result failed");
+    match stored {
+        Ok(true) => {}
+        Ok(false) => tracing::warn!(
+            "the job result was discarded: its lease lapsed and another claim holds the job"
+        ),
+        Err(e) => tracing::error!(error = %e, "recording the job result failed"),
     }
 }

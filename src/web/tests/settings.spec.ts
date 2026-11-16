@@ -29,6 +29,9 @@ async function openSignIn(page: Page) {
 }
 
 test("every settings page reflows and passes axe at 360 px", async ({ page }) => {
+  // a sign-up, then six pages each hydrated and checked with axe: about 10 s a page on a
+  // loaded CI runner (DEC-844)
+  test.setTimeout(150_000);
   await signUp(page, `refl${Date.now()}`);
   await page.setViewportSize({ width: 360, height: 740 });
   for (const path of SETTINGS) {
