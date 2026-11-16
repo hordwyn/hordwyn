@@ -109,6 +109,15 @@ export const test = base.extend<{ policyViolations: string[]; appFailures: strin
   // the built-in context, before its first page exists
   context: async ({ context, policyViolations, appFailures }, use) => {
     await watchPolicy(context, policyViolations, appFailures);
+    // diagnosis of slow runners (DEC-845): E2E_CPU_THROTTLE=4 runs every page of the built-in
+    // context with Chromium's CPU throttled 4x (contexts a spec opens itself are not throttled)
+    const rate = Number(process.env.E2E_CPU_THROTTLE ?? 0);
+    if (rate > 1) {
+      context.on("page", async (p) => {
+        const s = await context.newCDPSession(p);
+        await s.send("Emulation.setCPUThrottlingRate", { rate });
+      });
+    }
     await use(context);
   },
 });
