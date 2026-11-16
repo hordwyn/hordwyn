@@ -166,3 +166,26 @@ copies that carry the episode or page.
   must not become a chore for the others to copy it over: an automatic copy into the linked
   person's own log, **configurable** (per person who shares, and the receiver can opt out or
   confirm), with the episode or page carried along.
+
+## Addition (owner, 2026-11-16): a public roadmap, apps, extensions, integrations
+
+- **Roadmap on the website, easy to find** (owner: roadmaps are hard to find for many apps):
+  its own page in the main navigation ("Roadmap"), replacing the "Planned, not in v1" block of
+  the features page; sourced from one data file in the website repository (hordwyn/website),
+  grouped Now / Next / Later / Ideas without dates, each entry with a one-line why. Updated
+  with every release (release checklist step for the website).
+- **Android app** built with Tauri (v2 mobile): proper mobile UI and offline-first: everything
+  that needs no internet keeps working on the device (library, logging, history, stats) and
+  syncs when back online. The web app already has an offline queue for logging (DEC-237,
+  `offline.spec.ts`); the app needs local storage of the library and a sync protocol.
+- **Browser extensions**: e.g. detect what plays on streaming sites and offer to log it, add an
+  item from a web page (TMDB, IMDb, Goodreads, BGG) to the library in one click.
+- **Integrations / automatic tracking:**
+  - Jellyfin: works today through the generic "watched" webhook (`crates/integrations`,
+    DEC-149) with a template the user writes; next: a ready-made template or a Jellyfin plugin,
+    then Emby, Plex webhooks, Kodi.
+  - Netflix and other streaming services have no public API: options are a browser extension
+    that sees playback, importing the service's viewing-history export (Netflix "Viewing
+    activity" CSV) as an importer, or going through Trakt (importer exists, `importers/trakt.rs`).
+  - Android: the app could read the system's media sessions (what plays in any app) and offer
+    to log it.
