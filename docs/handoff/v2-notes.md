@@ -202,3 +202,19 @@ version starts with it on until checked). Open for the talk: an admin toggle and
 command (`cli maintenance on|off`) so the upgrade steps can be scripted, how sync clients and
 the webhook are answered (503 with Retry-After), and whether the dump step checks that
 maintenance is on.
+
+## Addition (owner, 2026-11-17): version and About page
+
+- The running version is visible on every page: in the footer as a small extra (e.g.
+  "Hordwyn 1.0.0", a link to the release notes), or at least on an About page. Today the app
+  shows its version nowhere (it is only in the User-Agent of outgoing requests).
+- An About page (reachable from the account menu and the footer): version and build (commit),
+  links to source, release notes, documentation, licence (MIT), security contact, and proper
+  open source acknowledgments: the third-party crates and npm packages with their licences
+  and copyright notices (generated at build time, e.g. with cargo-about, so it is always
+  complete), the vendored icon sets (`crates/ui/icons/vendor/*/LICENSE`), fonts, and the data
+  sources with their attribution (the existing Sources page).
+- Note for the release talk: the published image ships compiled third-party code; MIT and
+  Apache-2.0 ask that their copyright and licence notices travel with copies. A generated
+  notices file in the image (and on the About page) closes that, so it may belong in a 1.0.x
+  patch rather than waiting for v2.
