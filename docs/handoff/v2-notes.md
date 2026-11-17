@@ -189,3 +189,16 @@ copies that carry the episode or page.
     activity" CSV) as an importer, or going through Trakt (importer exists, `importers/trakt.rs`).
   - Android: the app could read the system's media sessions (what plays in any app) and offer
     to log it.
+
+## Addition (owner, 2026-11-17): maintenance mode before an upgrade
+
+A maintenance switch the admin turns on before an upgrade, so that truly nothing is lost: today
+the backup is taken while the instance keeps accepting writes, so whatever is logged between
+the dump and the switch to the new version is in neither (Operations, Upgrade, step 1). In
+maintenance mode the app refuses writes (logging, imports, settings; a clear notice for
+members, the offline queue keeps changes in the browser and sends them afterwards), background
+jobs pause, then the dump is taken, the upgrade runs, and the admin switches it off (or the new
+version starts with it on until checked). Open for the talk: an admin toggle and/or a cli
+command (`cli maintenance on|off`) so the upgrade steps can be scripted, how sync clients and
+the webhook are answered (503 with Retry-After), and whether the dump step checks that
+maintenance is on.
