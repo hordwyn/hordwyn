@@ -14,6 +14,13 @@ ignore = [
     # (DEC-082). The only private key is the throw-away key of the testkit OIDC issuer
     # (dev-dependency, tests only, DEC-308).
     { id = "RUSTSEC-2023-0071", reason = "rsa verifies OIDC ID-token signatures with public keys; signing only in testkit tests" },
+    # chrono and chrono-tz are soft-deprecated by their maintainer (chronotope/chrono#1768,
+    # 2026-01-22; advisories dated 2026-09-14, in the database since 2026-11-17): unmaintained,
+    # not vulnerable. They carry every date and time of 16 crates and come in through sqlx,
+    # openidconnect, oauth2, schemars and croner too, so they cannot be dropped in a patch.
+    # Moving to jiff or time is planned (OT-38, DEC-851); review this entry by 2027-03-01.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained (soft-deprecated), no vulnerability; migration planned, OT-38" },
+    { id = "RUSTSEC-2026-0555", reason = "chrono-tz unmaintained (soft-deprecated), no vulnerability; migration planned, OT-38" },
 ]
 
 [licenses]
