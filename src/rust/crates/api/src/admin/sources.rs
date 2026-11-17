@@ -87,6 +87,9 @@ fn member_state(admin: &str, needs_account: bool) -> &'static str {
         "key_unavailable" | "key_rejected" => "unavailable",
         "rate_limited" => "slow",
         "circuit_open" => "retrying",
+        // a source the admin switched off serves nobody: never "working" for a member, or the
+        // status would count it for its group while the search skips it (DEC-850)
+        "disabled" => "disabled",
         _ if needs_account => "needs_account",
         _ => "working",
     }
@@ -845,4 +848,19 @@ pub async fn load_source_switches(s: &ApiState) -> ApiResult<()> {
         s.registry.set_enabled(&id, enabled);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::member_state;
+
+    #[test]
+    fn a_switched_off_source_is_not_working_for_a_member() {
+        assert_eq!(member_state("disabled", false), "disabled");
+        assert_eq!(member_state("disabled", true), "disabled");
+        assert_eq!(member_state("working", false), "working");
+        assert_eq!(member_state("working", true), "needs_account");
+        assert_eq!(member_state("not_set_up", false), "not_set_up");
+        assert_eq!(member_state("key_rejected", false), "unavailable");
+    }
 }

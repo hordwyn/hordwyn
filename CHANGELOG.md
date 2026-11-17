@@ -62,6 +62,8 @@ Found while the release candidate was checked on a production host and on the CI
   the server has the change; a save that fails puts the switch back and says so (DEC-848).
 - Background jobs: a worker whose job lease lapsed can no longer overwrite the state of the
   worker that took the job over; jobs stay at-least-once (DEC-844).
+- Data sources: a source the admin switched off showed as working to members, and the search
+  footer then left out that its kind group has no source (DEC-850).
 
 ### Security
 
