@@ -10,29 +10,7 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
 
 ## [Unreleased]
 
-### Added
-
-- The container image is published to the project's GitLab registry: `main` and the short commit
-  from the default branch, `X.Y.Z`, `X.Y` and `latest` from a release tag, `X.Y.Z-rc.N` from a
-  candidate (DEC-843, DEC-846).
-
-### Fixed
-
-- Settings > Privacy: the "Linked participants see the sessions I log" switch says "Saved." once
-  the server has the change; a save that fails puts the switch back and says so. Before, a
-  failed save left the new value on screen while the server kept the old one (DEC-848).
-- Background jobs: a worker whose job lease lapsed (it was busy longer than the lease and
-  another worker claimed the job) can no longer overwrite the newer claim's state. Its lease
-  renewal, completion and failure only apply while the claim is still the current one; the
-  worker logs a warning and its result is discarded. Jobs stay at-least-once (DEC-844).
-
-### Removed
-
-- The project website (its generator, content, browser checks and the GitLab Pages job) and
-  `cargo xtask site`: the website now lives in its own repository (`website` in the same
-  GitLab group, DEC-841). Nothing changes for an instance.
-
-## [1.0.0] - unreleased
+## [1.0.0] - 2026-11-17
 
 The first release: a home instance for one household, one web process behind a reverse
 proxy with TLS, reachable from the internet. The documentation page "What v1 covers"
@@ -42,6 +20,9 @@ not do yet.
 
 ### Added
 
+- The container image is published to the project's GitLab registry: `main` and the short commit
+  from the default branch, `X.Y.Z`, `X.Y` and `latest` from a release tag, `X.Y.Z-rc.N` from a
+  candidate (DEC-843, DEC-846).
 - Tracking of movies, shows, video games, podcasts, books and board games with a data source
   for each: TMDB for movies and shows (TheTVDB for shows when the instance has a key), IGDB
   for video games, Podcast Index for podcasts, Open Library for books, Wikidata for board
@@ -72,6 +53,15 @@ not do yet.
   key rotation, storage report), a compose file without default passwords that publishes on
   loopback, backup and restore with a rehearsal beside the live instance, a storage budget
   for pictures and cached responses, Postgres or Meilisearch search.
+
+### Fixed before the release
+
+Found while the release candidate was checked on a production host and on the CI runner.
+
+- Settings > Privacy: the "Linked participants see the sessions I log" switch says "Saved." once
+  the server has the change; a save that fails puts the switch back and says so (DEC-848).
+- Background jobs: a worker whose job lease lapsed can no longer overwrite the state of the
+  worker that took the job over; jobs stay at-least-once (DEC-844).
 
 ### Security
 

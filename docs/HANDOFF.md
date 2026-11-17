@@ -201,6 +201,12 @@ is green, in this order:
    (docs: Staging), built from `vX.Y.Z-rc.N` in place of `vX.Y.Z` as the page says, and
    confirms its checklist. No release tag before that confirmation. When a line fails: fix
    on `main`, then steps 1-7 again with the next candidate number.
+   **First release, as it was done (owner, 2026-11-15, "rc-path: upgrade"):** the owner's
+   instance became production during the acceptance run (personal data, see
+   docs/handoff/owner-test-2026-11-15.md), so `v1.0.0-rc.1` is confirmed by upgrading that
+   instance in place to the candidate image (backup first, then Operations, Upgrade with
+   `APP_IMAGE=registry.gitlab.com/hordwyn/hordwyn:1.0.0-rc.1`), not by a fresh install. The
+   paragraph below was the plan before that ruling.
    **First release (v1.0.0, no production yet; DEC-832):** there is nothing to upgrade from.
    The candidate `v1.0.0-rc.1` is confirmed by a fresh install of exactly that tag passing
    `docs/handoff/v1-acceptance.md` (go in its step 27); the staging procedure runs once on

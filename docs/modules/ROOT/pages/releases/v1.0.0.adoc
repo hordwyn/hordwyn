@@ -1,7 +1,7 @@
 = Release notes 1.0.0
 
-Not released yet; the date and the tag `v1.0.0` are set when the owner tags it. Changes in
-detail: `CHANGELOG.md`, section 1.0.0.
+Released 2026-11-17, tag `v1.0.0` (candidate `v1.0.0-rc.1`). Changes in detail:
+`CHANGELOG.md`, section 1.0.0.
 
 == Highlights
 
@@ -13,11 +13,15 @@ detail: `CHANGELOG.md`, section 1.0.0.
 * Library, progress, game sessions, history, statistics, goals, lists, people, import and
   export, notifications, a watched webhook and a REST API, single sign-on and two-factor
   sign-in, light and dark, English and German.
+* A published container image per release (`registry.gitlab.com/hordwyn/hordwyn:1.0.0`): the
+  host downloads it instead of compiling for up to an hour (xref:install.adoc#_start[Install,
+  Start]); building it yourself stays possible.
 
 == Upgrade steps, routine
 
 None: there is no earlier release. Install it as described in
-xref:install.adoc[Install and first run]. From this release on, upgrades follow
+xref:install.adoc[Install and first run], with
+`APP_IMAGE=registry.gitlab.com/hordwyn/hordwyn:1.0.0`. From this release on, upgrades follow
 xref:operations.adoc#_upgrade[Operations, Upgrade].
 
 == Upgrade steps, release-specific
@@ -40,6 +44,15 @@ The short environment variables of the data sources are named `SOURCE_<ID>_API_K
   throttle and the rate limits of the data sources are counted per process.
 * Board games: Wikidata knows about 4,700 board games, many with a title and a year only, and
   is not asked until the admin has entered the operator contact.
+* Shows found through TheTVDB list only the episodes already logged (the source's episode
+  counts are not read yet); find the show through TMDB where it has it.
+* Undo of "Watched with..." takes back the view but leaves the shared session, which still
+  counts for the person (until fixed, it cannot be removed in the app).
+* With the language on "automatic", search results come in the instance language (English by
+  default) even when the browser shows German; choose the language in Settings to search in
+  it. Titles of items already added stay in the instance language.
+* Open Library's "first published" year can be wrong when one edition carries a wrong date;
+  the year of an item from a source cannot be corrected in the app yet.
 
 == Rollback
 

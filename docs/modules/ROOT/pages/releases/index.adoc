@@ -10,7 +10,7 @@ lists the changes of every version in one file
 |Version |Date |Notes
 
 |1.0.0
-|not released yet
+|2026-11-17
 |xref:releases/v1.0.0.adoc[Release notes 1.0.0]: the first release. There is nothing to
 upgrade from.
 |===
