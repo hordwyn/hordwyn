@@ -15,8 +15,8 @@ Released <YYYY-MM-DD>, tag `vX.Y.Z`. Changes in detail: `CHANGELOG.md`, section 
 
 From <previous version>: the steps of xref:operations.adoc#_upgrade[Operations, Upgrade],
 tried on xref:staging.adoc[a staging copy] first. In short: backup (database dump and secrets
-key), `git fetch --tags` and `git checkout vX.Y.Z`, `dc build`, `cli migrate --dry-run`,
-`dc up -d`, check.
+key), `git fetch --tags` and `git checkout vX.Y.Z`, `APP_IMAGE=...:X.Y.Z` in `config/.env` and
+`dc pull` (self-built: `dc build`), `cli migrate --dry-run`, `dc up -d --no-build`, check.
 
 == Upgrade steps, release-specific
 

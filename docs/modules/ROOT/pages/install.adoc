@@ -85,17 +85,41 @@ stores them encrypted.
 
 == Start
 
+Each release is published as a container image, so the host downloads it instead of
+compiling it. Check out the release tag you install (`git checkout v1.0.0`: the compose file
+and the configuration come from the checkout) and name the same version in `config/.env`:
+
 [source,shell]
 ----
-docker compose --env-file config/.env -f src/docker/compose.yml up -d --build
+APP_IMAGE=registry.gitlab.com/hordwyn/hordwyn:1.0.0
+----
+
+Then:
+
+[source,shell]
+----
+docker compose --env-file config/.env -f src/docker/compose.yml pull
+docker compose --env-file config/.env -f src/docker/compose.yml up -d --no-build
 docker compose --env-file config/.env -f src/docker/compose.yml ps      # all three "healthy"
 docker compose --env-file config/.env -f src/docker/compose.yml logs app
 ----
 
-The first start builds the image (about 8 GB of memory with the default two compile jobs;
-set `CARGO_BUILD_JOBS=1` in `config/.env` on a smaller host), applies the database
-migrations and generates the secrets key `/data/secrets.key` in the `app-data` volume. The
-application answers on `http://127.0.0.1:3000/healthz` when it is ready.
+The image tag and the checked-out tag must be the same version: the compose file and the
+image belong together. The registry holds `X.Y.Z` for each release, `X.Y` for the newest
+release of a minor version, `latest` for the newest release, `X.Y.Z-rc.N` for release
+candidates and `main` for the newest state of the default branch (not a release). Pin
+`X.Y.Z`; `latest` changes under you.
+
+The first start applies the database migrations and generates the secrets key
+`/data/secrets.key` in the `app-data` volume. The application answers on
+`http://127.0.0.1:3000/healthz` when it is ready.
+
+=== Building the image yourself
+
+Leave `APP_IMAGE` empty and start with `up -d --build` instead of `pull` and `--no-build`:
+the image is built from the checkout as `localhost/tracker-app:local`. The build takes
+about 8 GB of memory with the default two compile jobs (set `CARGO_BUILD_JOBS=1` in
+`config/.env` on a smaller host) and up to an hour.
 
 Open the public URL right away and finish the setup wizard. The first account is created
 in the wizard and becomes the administrator.

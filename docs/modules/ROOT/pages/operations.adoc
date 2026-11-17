@@ -53,9 +53,12 @@ Then, in the production checkout:
 . Take the backup of the Backup section first, at least the database dump and the secrets
   key. It is the only way back: an older build refuses to start on a database a newer build
   has migrated.
-. Get the new version and build it: `git fetch --tags`, `git checkout vX.Y.Z`, then
-  `dc build` (without a service name: there is one image, and every container of the
-  project runs it).
+. Get the new version: `git fetch --tags`, `git checkout vX.Y.Z`, then set the same version
+  in `config/.env` (`APP_IMAGE=registry.gitlab.com/hordwyn/hordwyn:X.Y.Z`) and `dc pull`.
+  The old containers keep running until step 4. When you build the image yourself
+  (`APP_IMAGE` empty, Install, "Building the image yourself"): `dc build` instead of
+  `dc pull`, without a service name (there is one image, and every container of the project
+  runs it).
 . See what it will do to the database (nothing is changed):
 +
 [source,shell]
@@ -65,7 +68,7 @@ dc run --rm --no-deps --entrypoint cli app migrate --dry-run
 +
 It lists the migrations the release notes name. This is the only command to run from the
 new image while the old containers are still up.
-. Start it: `dc up -d`. Every container is replaced, the web process and the workers
+. Start it: `dc up -d --no-build` (with a self-built image: `dc up -d`). Every container is replaced, the web process and the workers
   together: all of them must run the same image, because two builds can disagree about the
   database and the blob store. If you start worker containers by another route than this
   compose file, stop them before this step and start them from the new image. The
@@ -97,8 +100,9 @@ dc exec -T postgres dropdb -U app --force --if-exists --maintenance-db=postgres 
 dc exec -T postgres createdb -U app --maintenance-db=postgres app
 dc exec -T postgres pg_restore --no-owner -U app -d app < backup/app-<date>.dump
 ----
-. Check out and build the version you came from, and start it: `git checkout <version>`,
-  `dc build`, `dc up -d`. `config/.env` stays as it is.
+. Go back to the version you came from and start it: `git checkout <version>`, set
+  `APP_IMAGE` in `config/.env` back to that version, `dc pull`, `dc up -d --no-build` (with
+  a self-built image: `dc build`, `dc up -d`). The rest of `config/.env` stays as it is.
 . The search index may still list titles added after the dump; `dc exec app cli reindex
   --clear` rebuilds it.
 
@@ -254,18 +258,21 @@ encrypted values and no key file exists, the server refuses to start and names t
 A backup that was never restored is not known to work, and the place to find that out is a
 second copy, not the instance you use. Never remove the volumes of the live instance to try
 a restore. The rehearsal runs as a second compose project on the same host: its own
-containers, network and volumes (all prefixed `tracker-restore`), its own image name and
-its own host port, from the same checkout and the same `config/.env`.
+containers, network and volumes (all prefixed `tracker-restore`) and its own host port, from
+the same checkout and the same `config/.env`. It runs the image the live instance runs (the
+published image of `APP_IMAGE`), so nothing is downloaded or built. Pick a free port: `ss
+-ltn` shows which ones are taken.
 
 [source,shell]
 ----
 dcr() {
   APP_PUBLISH_ADDR=127.0.0.1 APP_PUBLISH_PORT=3001 APP_ROLE=web \
-  APP_IMAGE=localhost/tracker-restore-app:local \
   docker compose -p tracker-restore --env-file config/.env -f src/docker/compose.yml "$@"
 }
-dcr build
 ----
+
+With a self-built image, give the copy its own: add
+`APP_IMAGE=localhost/tracker-restore-app:local` to the helper and run `dcr build` first.
 
 `-p` replaces the project name of the compose file; variables set in the shell win over
 the ones in `config/.env`. `APP_ROLE=web` starts the copy without background work: a second

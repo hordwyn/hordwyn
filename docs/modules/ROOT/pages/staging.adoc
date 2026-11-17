@@ -72,11 +72,15 @@ From here on, work in the staging checkout:
 cd ../tracker-staging
 dcs() {
   APP_PUBLISH_ADDR=127.0.0.1 APP_PUBLISH_PORT=3002 APP_ROLE=web \
-  APP_IMAGE=localhost/tracker-staging-app:local \
+  APP_IMAGE=registry.gitlab.com/hordwyn/hordwyn:X.Y.Z-rc.N \
   docker compose -p tracker-staging --env-file config/.env -f src/docker/compose.yml "$@"
 }
-dcs build
+dcs pull
 ----
+
+`APP_IMAGE` names the candidate you check, the same version as the staging checkout. With a
+self-built image: `APP_IMAGE=localhost/tracker-staging-app:local` in the helper and `dcs build`
+instead of `dcs pull`.
 
 `APP_ROLE=web` starts the copy without background work, as in the rehearsal: a second worker
 on a copy of your data would send every due notification a second time and ask the data
@@ -144,7 +148,7 @@ data entered since).
 [source,shell]
 ----
 dcs down -v
-docker image rm localhost/tracker-staging-app:local
+docker image rm "$(dcs config --images app)"   # the candidate image, or the self-built one
 cd ../tracker && git worktree remove --force ../tracker-staging
 ----
 
