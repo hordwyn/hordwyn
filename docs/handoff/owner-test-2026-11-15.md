@@ -1,7 +1,7 @@
 # Owner use on prod, 2026-11-15: findings
 
 First findings from the owner using the deployed v1 candidate (main, tracker.example.org).
-Numbering continues the owner-test series (OT-21 was the last). Nothing here is built yet.
+Numbering continues the owner-test series (OT-21 was the last). Since 2026-11-18 the work is tracked as GitLab issues in hordwyn/hordwyn (#1..#33, milestones 1.0.1, 1.1.0, Later 1.x; DEC-852); this file stays the record of how each item was found.
 **Release vehicle is open on purpose:** the owner wants to go through the v1 release
 discipline first (patch release vs 1.1.0 vs 2.0.0, see HANDOFF section 0 and
 docs/modules/ROOT/pages/releases/) and then decide per finding.
