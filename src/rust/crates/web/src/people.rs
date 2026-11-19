@@ -307,13 +307,16 @@ pub(crate) fn menu_items(ui: Ui, p: &PersonDto) -> Vec<MenuItem> {
             Callback::new(move |()| ui.open(&for_link, ui.link)),
         )),
     }
-    out.push(item(
-        "companions-merge",
-        false,
-        Callback::new(move |()| {
-            ui.open_merge(MergePair::with(&for_merge, &ui.others.get_untracked()));
-        }),
-    ));
+    // only with somebody to merge with (OT-23, #2): with one person the dialog had no choice
+    if ui.others.with_untracked(|o| o.iter().any(|x| x.id != p.id)) {
+        out.push(item(
+            "companions-merge",
+            false,
+            Callback::new(move |()| {
+                ui.open_merge(MergePair::with(&for_merge, &ui.others.get_untracked()));
+            }),
+        ));
+    }
     out.push(item(
         "companions-edit",
         false,

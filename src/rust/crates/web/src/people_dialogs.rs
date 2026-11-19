@@ -543,7 +543,7 @@ fn Merge(ui: Ui) -> impl IntoView {
                             <span class="text-sm text-muted-foreground">{fold.clone()}</span>
                         </div>
                     </div>
-                    <Button variant=ButtonVariant::Ghost class="w-fit" on:click=swap>{t("companions-merge-swap")}</Button>
+                    <Button variant=ButtonVariant::Ghost class="w-fit" on:click=swap disabled=Signal::derive(move || keep.get().is_empty())>{t("companions-merge-swap")}</Button>
                     <p role="status" class="text-sm">{consequence.clone()}</p>
                     {move || error.get().map(|e| view! { <Alert variant=AlertVariant::Destructive role=ui::AlertRole::Alert>{e}</Alert> })}
                     <div class="flex flex-wrap justify-end gap-2">

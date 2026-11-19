@@ -18,6 +18,8 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
 - Shows from TheTVDB list all their seasons and episodes: the connector reads the episode
   count and first air date of each season from the aired-order episode list; `cli
   refresh-source tvdb --apply` refreshes the shows stored before (#3, DEC-854).
+- People: "Merge with..." is offered only when there is another person to merge with, and Swap
+  in the merge dialog is disabled until a person to keep is chosen (#2, DEC-856).
 
 ### Added
 

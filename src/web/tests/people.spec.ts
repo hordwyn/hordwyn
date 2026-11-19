@@ -531,3 +531,35 @@ test("the event that announces an own action is answered at the end of the quiet
   // one read per quiet time (2 s, `Pace::QUIET_MS`), counted from the own refetch
   expect(starts[1] - starts[0]).toBeGreaterThanOrEqual(1_900);
 });
+
+test("Merge is offered only with somebody to merge with; Swap needs a choice (OT-23)", async ({ page }) => {
+  await signUp(page, `ppm${Date.now()}`, "Pia");
+  const solo = await person(page, "Solo");
+  await page.goto("/people");
+  await hydrated(page);
+  await page.getByRole("button", { name: "More actions for Solo" }).click();
+  await expect(page.getByRole("menuitem", { name: "Edit" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Merge with..." })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  // the person page offers it neither
+  await page.goto(`/people/${solo}`);
+  await hydrated(page);
+  await page.getByRole("button", { name: "More actions for Solo" }).click();
+  await expect(page.getByRole("menuitem", { name: "Edit" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Merge with..." })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  // with a second person: offered, Swap works with a choice and is disabled without one
+  await person(page, "Duo");
+  await page.goto("/people");
+  await hydrated(page);
+  await page.getByRole("button", { name: "More actions for Solo" }).click();
+  await page.getByRole("menuitem", { name: "Merge with..." }).click();
+  const dialog = page.getByRole("dialog", { name: "Merge duplicates" });
+  await expect(dialog.getByTestId("pp-merge-fold")).toHaveText("Solo");
+  await dialog.getByRole("button", { name: "Swap" }).click();
+  await expect(dialog.getByTestId("pp-merge-fold")).toHaveText("Duo");
+  await dialog.getByLabel("Keep").selectOption({ label: "Choose..." });
+  await expect(dialog.getByRole("button", { name: "Swap" })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Merge", exact: true })).toBeDisabled();
+});
