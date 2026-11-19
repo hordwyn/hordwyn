@@ -33,8 +33,8 @@ const USAGE: &str = "usage: cli [--config <file>] <command>
   refresh-source <source> [--apply]
                                    ask the source again for every item in a library that
                                    has its id (a release whose source reads more, see its
-                                   notes);
-                                   prints the items, --apply queues them for the worker
+                                   notes); prints the items, --apply queues them for the
+                                   worker
   match-books [--apply | --applied]
                                    find the Open Library work of every book that has none,
                                    by title (books entered by hand are left out); prints the
