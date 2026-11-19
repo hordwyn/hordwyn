@@ -26,6 +26,9 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
   refresh-source tvdb --apply` refreshes the shows stored before (#3, DEC-854).
 - People: "Merge with..." is offered only when there is another person to merge with, and Swap
   in the merge dialog is disabled until a person to keep is chosen (#2, DEC-856).
+- With the language on "automatic", the sources are searched in the language the page shows
+  (the browser's), not in the instance language; REST searches use the first language of
+  `Accept-Language` (#4, DEC-858).
 
 ### Added
 

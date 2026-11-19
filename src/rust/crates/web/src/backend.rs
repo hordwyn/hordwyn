@@ -122,6 +122,7 @@ pub trait Backend: Send + Sync {
         q: &str,
         kind: Option<String>,
         group: Option<String>,
+        ui_language: Option<String>,
     ) -> BResult<SearchResponseDto>;
     async fn add(&self, token: &str, item_id: &str) -> BResult<LibraryEntryDto>;
     async fn log_progress(

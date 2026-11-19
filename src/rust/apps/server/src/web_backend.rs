@@ -161,9 +161,12 @@ impl Backend for WebBackend {
         q: &str,
         kind: Option<String>,
         group: Option<String>,
+        ui_language: Option<String>,
     ) -> BResult<SearchResponseDto> {
         let a = self.actor(token).await?;
-        ops::search(&self.0, a, q, kind, group).await.map_err(err)
+        ops::search(&self.0, a, q, kind, group, ui_language)
+            .await
+            .map_err(err)
     }
 
     async fn add(&self, token: &str, item_id: &str) -> BResult<LibraryEntryDto> {

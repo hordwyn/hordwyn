@@ -33,6 +33,16 @@ pub(crate) mod server {
         crate::backend::session_token(&headers, &b.session_cookie())
     }
 
+    /// The locale the page took from the browser (`Accept-Language`, DEC-201) when it is a
+    /// supported one; `None` when the page fell back to the brand default.
+    pub async fn browser_locale() -> Option<String> {
+        let headers: HeaderMap = leptos_axum::extract().await.ok()?;
+        let accept = headers
+            .get(axum::http::header::ACCEPT_LANGUAGE)
+            .and_then(|v| v.to_str().ok());
+        crate::i18n::negotiated(accept)
+    }
+
     pub async fn require_token(b: &dyn Backend) -> Result<String, ServerFnError> {
         token(b)
             .await
@@ -154,7 +164,11 @@ pub async fn search(
 ) -> Result<SearchResponseDto, ServerFnError> {
     let b = server::backend()?;
     let t = server::require_token(b.as_ref()).await?;
-    b.search(&t, &q, kind, group).await.map_err(server::code)
+    // "automatic" language: the sources are asked in the language the page shows (OT-34, #4)
+    let ui_language = server::browser_locale().await;
+    b.search(&t, &q, kind, group, ui_language)
+        .await
+        .map_err(server::code)
 }
 
 #[server(prefix = "/_fn")]

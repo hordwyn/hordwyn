@@ -241,6 +241,13 @@ impl I18n {
 /// Pick a supported locale from an `Accept-Language` header.
 #[must_use]
 pub fn negotiate(accept_language: Option<&str>, default: &str) -> String {
+    negotiated(accept_language).unwrap_or_else(|| default.to_string())
+}
+
+/// The supported locale an `Accept-Language` header asks for, if any (no match: a page falls
+/// back to the brand default, see [`negotiate`]).
+#[must_use]
+pub fn negotiated(accept_language: Option<&str>) -> Option<String> {
     let mut prefs: Vec<(f32, String)> = accept_language
         .unwrap_or_default()
         .split(',')
@@ -259,7 +266,6 @@ pub fn negotiate(accept_language: Option<&str>, default: &str) -> String {
         .into_iter()
         .map(|(_, l)| l)
         .find(|l| LOCALES.contains(&l.as_str()))
-        .unwrap_or_else(|| default.to_string())
 }
 
 /// The locale a page renders in (DEC-201): the signed-in user's choice, else the browser's

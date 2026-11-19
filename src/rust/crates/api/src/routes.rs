@@ -297,15 +297,20 @@ struct SearchParams {
 }
 
 /// Local results immediately; each connector's results follow as `search.results` events
-/// on `/events` with the same `search_id` (D-6.6).
+/// on `/events` with the same `search_id` (D-6.6). A member whose language is automatic
+/// gets the sources' answers in the first language of `Accept-Language` (OT-34).
 #[utoipa::path(get, path = "/search", tag = "catalog", params(SearchParams),
     responses((status = 200, body = SearchResponseDto)))]
 async fn search(
     State(s): State<ApiState>,
     Authed(a): Authed,
+    headers: HeaderMap,
     Query(p): Query<SearchParams>,
 ) -> ApiResult<Json<SearchResponseDto>> {
-    Ok(Json(ops::search(&s, a, &p.q, p.kind, p.group).await?))
+    let ui_language = crate::ops::accept_language(&headers);
+    Ok(Json(
+        ops::search(&s, a, &p.q, p.kind, p.group, ui_language).await?,
+    ))
 }
 
 #[utoipa::path(get, path = "/sources", tag = "catalog",

@@ -210,7 +210,9 @@ fn search_kinds(s: &ApiState, kind: Option<String>, group: Option<&str>) -> ApiR
 }
 
 /// Local results now; connector results follow as `search.results` events. `group` limits
-/// the search to one kind group (`all` or none: every enabled kind).
+/// the search to one kind group (`all` or none: every enabled kind). `ui_language` is the
+/// language the caller's page shows (from the browser), used for the sources when the member
+/// left their language on automatic (OT-34, #4); `None`: the instance language.
 ///
 /// # Errors
 /// Empty query, unknown kind group.
@@ -220,6 +222,7 @@ pub async fn search(
     q: &str,
     kind: Option<String>,
     group: Option<String>,
+    ui_language: Option<String>,
 ) -> ApiResult<SearchResponseDto> {
     let text = q.trim().to_string();
     if text.is_empty() {
@@ -288,7 +291,7 @@ pub async fn search(
     let (skipped, groups_without_source) = crate::admin::search_reasons(s, a, &kinds);
     // nothing to ask: no credentials read, no task (DEC-493)
     if !pending.is_empty() {
-        stream_connector_results(s, a, text, kinds, search_id.clone()).await;
+        stream_connector_results(s, a, text, kinds, search_id.clone(), ui_language).await;
     }
     Ok(SearchResponseDto {
         search_id,
@@ -332,6 +335,35 @@ async fn hits_in_library(
         .collect()
 }
 
+/// The language a REST client asks for: the primary subtag (two or three letters, lower case)
+/// of the `Accept-Language` entry with the highest weight; `None` without a usable one (the
+/// instance language then applies). OT-34, #4.
+#[must_use]
+pub fn accept_language(headers: &axum::http::HeaderMap) -> Option<String> {
+    let header = headers
+        .get(axum::http::header::ACCEPT_LANGUAGE)?
+        .to_str()
+        .ok()?;
+    let mut best: Option<(f32, String)> = None;
+    for part in header.split(',') {
+        let mut it = part.trim().split(';');
+        let tag = it.next().unwrap_or_default().trim();
+        let lang = tag
+            .split('-')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let q: f32 = it
+            .find_map(|p| p.trim().strip_prefix("q=").and_then(|q| q.parse().ok()))
+            .unwrap_or(1.0);
+        let usable = (2..=3).contains(&lang.len()) && lang.bytes().all(|b| b.is_ascii_lowercase());
+        if usable && q > 0.0 && best.as_ref().is_none_or(|(w, _)| q > *w) {
+            best = Some((q, lang));
+        }
+    }
+    best.map(|(_, l)| l)
+}
+
 /// Ask the connectors in the background; each one's results go to the searching user as a
 /// `search.results` event.
 async fn stream_connector_results(
@@ -340,14 +372,16 @@ async fn stream_connector_results(
     text: String,
     kinds: Vec<String>,
     sid: String,
+    ui_language: Option<String>,
 ) {
     // the member's own credentials (TheTVDB PIN) go with their search (design.md 4.1)
-    // and the language they chose (`None`: automatic, the instance language; WD-2, LB-35)
+    // and the language they chose; on automatic the language their page shows, else the
+    // instance language (`None`; WD-2, LB-35, OT-34)
     let language = match s.app.user(a.user_id).await {
-        Ok(u) => u.locale,
+        Ok(u) => u.locale.or(ui_language),
         Err(e) => {
             tracing::warn!(error = %e, "member language unreadable");
-            None
+            ui_language
         }
     };
     let user_keys = crate::admin::user_keys(s, a).await.with_language(language);

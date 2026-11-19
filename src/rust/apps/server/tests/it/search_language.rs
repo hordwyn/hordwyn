@@ -1,6 +1,7 @@
 //! v1-wikidata review WD-2: a search asks the sources in the member's own language; a member
-//! who left the language automatic is asked in the instance language (the brand's
-//! `default_locale`).
+//! who left the language automatic is asked in the language the page shows (the browser's,
+//! OT-34 / #4; REST: the first of `Accept-Language`), else in the instance language (the
+//! brand's `default_locale`).
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -97,7 +98,10 @@ async fn a_search_asks_in_the_members_language_else_the_instance_language() {
     let base = format!("http://{}", listener.local_addr().unwrap());
     let stop = CancellationToken::new();
     let web = {
-        let router = srv.base_router();
+        let options = leptos::prelude::LeptosOptions::builder()
+            .output_name("app")
+            .build();
+        let router = srv.app_router(&options);
         let stop = stop.clone();
         let bus = srv.bus.clone();
         tokio::spawn(async move {
@@ -111,17 +115,23 @@ async fn a_search_asks_in_the_members_language_else_the_instance_language() {
         })
     };
     let http = reqwest::Client::new();
-    let signup: serde_json::Value = http
+    let signed = http
         .post(format!("{base}/api/v1/auth/sign-up"))
         .json(&serde_json::json!({
             "username": "lena", "display_name": "Lena", "password": "correct horse battery"
         }))
         .send()
         .await
-        .unwrap()
-        .json()
-        .await
         .unwrap();
+    // the page's session cookie, for the server function
+    let cookie = signed.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    let signup: serde_json::Value = signed.json().await.unwrap();
     let token = signup["token"].as_str().unwrap().to_string();
     let search = |q: &'static str| {
         http.get(format!("{base}/api/v1/search?q={q}&kind=movie"))
@@ -133,6 +143,50 @@ async fn a_search_asks_in_the_members_language_else_the_instance_language() {
     assert_eq!(search("alpha").await.unwrap().status(), 200);
     assert_eq!(seen_after(&seen, 1).await, [Some("en".to_string())]);
 
+    // automatic with a German browser (OT-34, #4): the sources are asked in German, through
+    // REST (the first language of Accept-Language) and through the page's server function
+    // (the locale the page negotiated)
+    let r = http
+        .get(format!("{base}/api/v1/search?q=gamma&kind=movie"))
+        .bearer_auth(&token)
+        .header("accept-language", "de-DE,de;q=0.9,en;q=0.8")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(seen_after(&seen, 2).await[1], Some("de".to_string()));
+    let r = http
+        .post(format!(
+            "{base}{}",
+            <web::api::Search as leptos::server_fn::ServerFn>::PATH
+        ))
+        .header("cookie", &cookie)
+        .header("accept-language", "de-AT,de;q=0.9")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .header("accept", "application/json")
+        .body("q=delta&kind=movie")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap_or_default());
+    assert_eq!(seen_after(&seen, 3).await[2], Some("de".to_string()));
+    // a browser language the UI does not have: the page shows the instance language
+    let r = http
+        .post(format!(
+            "{base}{}",
+            <web::api::Search as leptos::server_fn::ServerFn>::PATH
+        ))
+        .header("cookie", &cookie)
+        .header("accept-language", "xx")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .header("accept", "application/json")
+        .body("q=epsilon&kind=movie")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(seen_after(&seen, 4).await[3], Some("en".to_string()));
+
     // chosen: German
     let r = http
         .put(format!("{base}/api/v1/auth/me/locale"))
@@ -143,10 +197,7 @@ async fn a_search_asks_in_the_members_language_else_the_instance_language() {
         .unwrap();
     assert_eq!(r.status(), 200);
     assert_eq!(search("beta").await.unwrap().status(), 200);
-    assert_eq!(
-        seen_after(&seen, 2).await,
-        [Some("en".to_string()), Some("de".to_string())]
-    );
+    assert_eq!(seen_after(&seen, 5).await[4], Some("de".to_string()));
 
     stop.cancel();
     web.await.unwrap();
