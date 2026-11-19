@@ -8,7 +8,8 @@ COPY config/certs/ /usr/local/share/ca-certificates/extra/
 RUN update-ca-certificates >/dev/null
 WORKDIR /repo
 COPY src/sh/ci-tools.sh src/sh/ci-tools.sh
-RUN sh src/sh/ci-tools.sh leptos wasm-bindgen tailwind
+RUN sh src/sh/ci-tools.sh leptos wasm-bindgen tailwind about
+COPY src/sh/notices.sh src/sh/notices.sh
 COPY src/rust src/rust
 # Tailwind input and static files referenced by workspace.metadata.leptos
 COPY src/web/style src/web/style
@@ -33,6 +34,9 @@ RUN rustup target add wasm32-unknown-unknown \
 RUN cargo build --release -p cli -p server --bin cli \
       --no-default-features --features server/all-connectors \
     && cp target/release/cli /out/cli
+# Licence notices of every third-party part of the image (issue 9, DEC-855); the build fails
+# when they cannot be made (a licence cargo-about cannot resolve or that is not accepted).
+RUN sh /repo/src/sh/notices.sh /out/THIRD-PARTY-NOTICES.txt
 
 FROM debian:trixie-slim AS runtime
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates curl >/dev/null \
@@ -50,6 +54,8 @@ COPY --from=build /out/site /srv/site
 COPY --from=build /out/hash.txt /usr/local/bin/hash.txt
 COPY config/brand /etc/app/brand
 COPY src/rust/crates/ui/icons/vendor /usr/share/doc/app/icons
+COPY --from=build /out/THIRD-PARTY-NOTICES.txt /usr/share/doc/app/THIRD-PARTY-NOTICES.txt
+RUN test -s /usr/share/doc/app/THIRD-PARTY-NOTICES.txt
 ENV LEPTOS_SITE_ROOT=/srv/site \
     LEPTOS_OUTPUT_NAME=app \
     LEPTOS_HASH_FILES=true \

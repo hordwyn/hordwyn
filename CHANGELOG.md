@@ -19,6 +19,12 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
   count and first air date of each season from the aired-order episode list; `cli
   refresh-source tvdb --apply` refreshes the shows stored before (#3, DEC-854).
 
+### Added
+
+- The image carries the licence notices of its third-party parts (Rust crates, icons, fonts,
+  Tailwind CSS) in `/usr/share/doc/app/THIRD-PARTY-NOTICES.txt`, generated at build time;
+  the build and the CI job `notices` fail when they cannot be made (#9, DEC-855).
+
 ## [1.0.0] - 2026-11-17
 
 The first release: a home instance for one household, one web process behind a reverse

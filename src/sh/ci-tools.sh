@@ -1,8 +1,9 @@
 #!/bin/sh
 # Installs the pinned build tools without Nix (CI, Dockerfile). Versions must match flake.nix.
-# usage: ci-tools.sh <tool>...   tools: deny leptos wasm-bindgen tailwind
+# usage: ci-tools.sh <tool>...   tools: deny about leptos wasm-bindgen tailwind
 set -eu
 DENY_VERSION=0.20.2
+ABOUT_VERSION=0.9.0
 LEPTOS_VERSION=0.3.11
 WASM_BINDGEN_VERSION=0.2.130
 TAILWIND_VERSION=4.3.3
@@ -14,6 +15,9 @@ for tool in "$@"; do
     deny)
       fetch "https://github.com/EmbarkStudios/cargo-deny/releases/download/${DENY_VERSION}/cargo-deny-${DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
         | tar -xz --strip-components=1 -C "$BIN" "cargo-deny-${DENY_VERSION}-x86_64-unknown-linux-musl/cargo-deny" ;;
+    about)
+      fetch "https://github.com/EmbarkStudios/cargo-about/releases/download/${ABOUT_VERSION}/cargo-about-${ABOUT_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+        | tar -xz --strip-components=1 -C "$BIN" "cargo-about-${ABOUT_VERSION}-x86_64-unknown-linux-musl/cargo-about" ;;
     leptos)
       fetch "https://github.com/leptos-rs/cargo-leptos/releases/download/v${LEPTOS_VERSION}/cargo-leptos-x86_64-unknown-linux-gnu.tar.gz" \
         | tar -xz --strip-components=1 -C "$BIN" ;;

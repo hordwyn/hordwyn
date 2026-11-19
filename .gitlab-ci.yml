@@ -126,6 +126,20 @@ deny:
     - sh ../sh/ci-tools.sh deny
     - cargo deny --all-features check
 
+# Third-party licence notices (issue 9, DEC-855): the same file the image carries under
+# /usr/share/doc/app; the job fails when it cannot be made. Kept as an artifact, so a release
+# tag's pipeline holds it beside the source archive.
+notices:
+  extends: .rust
+  stage: lint
+  rules: !reference [.code-rules, rules]
+  script:
+    - sh ../sh/ci-tools.sh about
+    - sh ../sh/notices.sh "$CI_PROJECT_DIR/THIRD-PARTY-NOTICES.txt"
+  artifacts:
+    paths: [THIRD-PARTY-NOTICES.txt]
+    expire_in: never
+
 test:
   extends: .rust
   stage: test

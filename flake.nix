@@ -23,6 +23,8 @@
           rust
           pkgs.cargo-leptos
           pkgs.cargo-deny
+          # licence notices of the image (DEC-855), MIT OR Apache-2.0; version as in ci-tools.sh
+          pkgs.cargo-about
           pkgs.sqlx-cli
           # must match the wasm-bindgen crate version pinned in src/rust/Cargo.toml
           pkgs.wasm-bindgen-cli

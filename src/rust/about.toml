@@ -1,0 +1,34 @@
+# cargo-about (MIT OR Apache-2.0, https://github.com/EmbarkStudios/cargo-about): the licence
+# notices of every crate in the build, for THIRD-PARTY-NOTICES.txt (issue 9, DEC-855). Run
+# through `sh src/sh/notices.sh <out>`, never on its own. The accepted licences are the allow
+# list of deny.toml; keep both in step.
+accepted = [
+    "MIT",
+    "MIT-0",
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    "BSL-1.0",
+    "MPL-2.0",
+]
+# the image: the server and the cli on Linux, the web app in the browser
+targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
+# tests and test helpers are not shipped
+ignore-dev-dependencies = true
+# no network: licences come from the crates' own files and their SPDX expressions
+no-clearly-defined = true
+# workspace crates are ours (LICENSE at the repository root)
+private = { ignore = true }
+
+[webpki-root-certs]
+accepted = ["CDLA-Permissive-2.0"]
+
+[webpki-roots]
+accepted = ["CDLA-Permissive-2.0"]

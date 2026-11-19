@@ -8,7 +8,10 @@ licence (KICKOFF rule 11, DESIGN D-10). The research behind the choice is in
 
 Vendored under `src/rust/crates/ui/icons/vendor/`. Only the icons named in
 `src/rust/crates/ui/icons/icons.toml` are copied and compiled in. The licence files sit next
-to the icons and are copied into the Docker image (`/usr/share/doc/app/icons`).
+to the icons and are copied into the Docker image (`/usr/share/doc/app/icons`). From 1.0.1 the
+image also carries `/usr/share/doc/app/THIRD-PARTY-NOTICES.txt`, generated at build time by
+`src/sh/notices.sh`: the notices of every Rust crate (cargo-about), these icon licences, the
+font licences and the Tailwind CSS licence (DEC-855).
 
 [cols="1,1,1,2"]
 |===

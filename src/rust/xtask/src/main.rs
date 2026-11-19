@@ -8,8 +8,8 @@ use anyhow::{Context, Result, bail};
 const USAGE: &str = "usage: cargo xtask <command>
 
   ci                 everything CI runs that does not need docker: fmt check, clippy,
-                     cargo-deny, sqlx offline-cache check, tests (starts local services
-                     when TEST_DATABASE_URL is unset)
+                     cargo-deny, licence notices, sqlx offline-cache check, tests
+                     (starts local services when TEST_DATABASE_URL is unset)
   fmt                format the workspace
   e2e                run the Playwright end-to-end suite
   e2e-scan <log>     fail when a server log of an e2e run holds a panic (CI job)
@@ -103,6 +103,12 @@ fn ci() -> Result<()> {
         cargo(&args, &[])
     })?;
     step("deny", || cargo(&["deny", "--all-features", "check"], &[]))?;
+    step("notices", || {
+        let out = xtask::workspace_root().join("target/THIRD-PARTY-NOTICES.txt");
+        run(Command::new("sh")
+            .arg(xtask::repo_root().join("src/sh/notices.sh"))
+            .arg(out))
+    })?;
     step("sqlx", || sqlx_prepare(true))?;
     let test_db = if let Ok(url) = std::env::var("TEST_DATABASE_URL") {
         url
