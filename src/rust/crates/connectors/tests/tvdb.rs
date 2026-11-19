@@ -50,10 +50,30 @@ async fn search_details_and_login_once() {
     assert!(d.external_ids.contains(&ExternalId::new("tmdb", "1396")));
     assert_eq!(d.attributes["network"], "AMC");
     assert_eq!(d.attributes["airing_status"], "ended");
+    // OT-27 (#3): the counts and first air dates come from the aired-order episode list,
+    // read page by page; season 3 is only in that list, the DVD season 1 in neither
     assert_eq!(
-        d.attributes["seasons"].as_array().unwrap().len(),
-        3,
+        d.attributes["seasons"],
+        serde_json::json!([
+            {"number": 0, "episode_count": 1, "air_date": "2009-02-17"},
+            {"number": 1, "episode_count": 3, "air_date": "2008-01-20"},
+            {"number": 2, "episode_count": 2, "air_date": "2009-03-08"},
+            {"number": 3, "episode_count": 1, "air_date": "2010-03-21"},
+        ]),
         "aired order only"
+    );
+    let pages: Vec<String> = http
+        .requests()
+        .into_iter()
+        .filter(|r| r.op == "episodes")
+        .map(|r| r.url)
+        .collect();
+    assert_eq!(
+        pages,
+        [
+            "https://api4.thetvdb.com/v4/series/81189/episodes/official?page=0",
+            "https://api4.thetvdb.com/v4/series/81189/episodes/official?page=1",
+        ]
     );
     let kinds = kinds::Registry::with_builtins();
     app::ports::KindCatalog::validate_attributes(

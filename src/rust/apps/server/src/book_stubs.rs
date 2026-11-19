@@ -660,6 +660,44 @@ impl Catalog {
         refresh_failed(&self.app, &self.sources, books, kind, apply).await
     }
 
+    /// `cli refresh --source <id> [--apply]`: every stored item with an id of that source;
+    /// with `apply` each gets a refresh job for the worker ([`App::requeue_source`]).
+    ///
+    /// # Errors
+    /// A source that is not registered or is switched off; storage errors.
+    pub async fn refresh_source(&self, source: &str, apply: bool) -> anyhow::Result<String> {
+        use std::fmt::Write;
+        if !self.sources.iter().any(|s| s == source) {
+            anyhow::bail!(
+                "`{source}` is not a source of this instance, or it is switched off (known: {})",
+                self.sources.join(", ")
+            );
+        }
+        let items = self.app.requeue_source(source, apply).await?;
+        let mut out = String::new();
+        let word = if apply { "queued" } else { "would queue" };
+        for i in items
+            .iter()
+            .take(if apply { usize::MAX } else { DRY_LINES })
+        {
+            let _ = writeln!(out, "{word}  {}", i.title);
+        }
+        if !apply && items.len() > DRY_LINES {
+            let _ = writeln!(out, "             ... and {} more", items.len() - DRY_LINES);
+        }
+        let _ = write!(
+            out,
+            "{} items with a {source} id {}",
+            items.len(),
+            if apply {
+                "queued for the worker, which refreshes them one by one at the source's pace"
+            } else {
+                "would be queued; nothing was changed, run it again with --apply"
+            }
+        );
+        Ok(out)
+    }
+
     /// `cli match-books [--apply]`.
     ///
     /// # Errors

@@ -1,0 +1,16 @@
+{
+  "fixture": "synthetic: getSeriesEpisodes (data.episodes of EpisodeBaseRecord) in the TVDB v4 OpenAPI spec 4.7.10, with the links object of the paged v4 lists; values written for the test (OT-27)",
+  "request": {"method": "GET", "url": "https://api4.thetvdb.com/v4/series/81189/episodes/official?page=0"},
+  "status": 200,
+  "headers": [["content-type", "application/json"]],
+  "body": {"status": "success", "data": {
+    "series": {"id": 81189, "name": "Breaking Bad"},
+    "episodes": [
+      {"id": 109, "seriesId": 81189, "seasonNumber": 0, "number": 1, "aired": "2009-02-17", "runtime": 5, "isMovie": 0},
+      {"id": 101, "seriesId": 81189, "seasonNumber": 1, "number": 1, "aired": "2008-01-20", "runtime": 58, "isMovie": 0},
+      {"id": 102, "seriesId": 81189, "seasonNumber": 1, "number": 2, "aired": "2008-01-27", "runtime": null, "isMovie": 0},
+      {"id": 103, "seriesId": 81189, "seasonNumber": 1, "number": 3, "aired": null, "runtime": 47, "isMovie": 0}
+    ]
+  },
+  "links": {"prev": null, "self": "https://api4.thetvdb.com/v4/series/81189/episodes/official?page=0", "next": "https://api4.thetvdb.com/v4/series/81189/episodes/official?page=1", "total_items": 7, "page_size": 4}}
+}

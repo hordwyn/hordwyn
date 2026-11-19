@@ -6,7 +6,7 @@
 //! requesting member's own (`Ctx::user_key`, the user-supported model of design.md 4.1)
 //! when they stored one, else the one in the instance key (`<apikey>:<pin>`), if any.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -186,6 +186,30 @@ impl Tvdb {
     }
 }
 
+impl Tvdb {
+    /// [`season_counts`] of the whole aired-order episode list, page by page while the
+    /// answer names a next page (at most [`MAX_EPISODE_PAGES`]).
+    async fn season_counts(&self, ctx: &Ctx, id: u64) -> Result<Vec<SeasonInfo>, ConnectorError> {
+        let mut episodes = Vec::new();
+        for page in 0..MAX_EPISODE_PAGES {
+            let page = page.to_string();
+            let url = self.url(
+                &format!("/series/{id}/episodes/official"),
+                &[("page", &page)],
+            )?;
+            let headers = self.headers(ctx).await?;
+            let r: EpisodesPage = get_json(ctx, ID, "episodes", &url, headers).await?;
+            let last = r.data.episodes.is_empty()
+                || r.links.and_then(|l| l.next).is_none_or(|n| n.is_null());
+            episodes.extend(r.data.episodes);
+            if last {
+                break;
+            }
+        }
+        Ok(season_counts(&episodes))
+    }
+}
+
 fn cover(url: Option<String>) -> Vec<ImageRef> {
     non_empty(url)
         .map(|url| ImageRef {
@@ -273,6 +297,48 @@ struct Series {
 struct SeriesEpisodes {
     #[serde(default)]
     episodes: Vec<EpisodeRecord>,
+}
+
+/// The answer of `GET /series/{id}/episodes/{season-type}`. `links` is not in the spec's
+/// schema of this endpoint, but the paged v4 lists carry it: read when present.
+#[derive(Deserialize)]
+struct EpisodesPage {
+    data: SeriesEpisodes,
+    #[serde(default)]
+    links: Option<Links>,
+}
+
+#[derive(Deserialize)]
+struct Links {
+    next: Option<serde_json::Value>,
+}
+
+/// Pages of the series' episode list read for the season counts at most.
+const MAX_EPISODE_PAGES: u32 = 10;
+
+/// The aired-order seasons of the series' episode list (OT-27, #3): per season the number of
+/// regular episodes (number > 0) and the earliest air date. The extended series record has
+/// no counts, so without this every season counted 0 episodes.
+fn season_counts(episodes: &[EpisodeRecord]) -> Vec<SeasonInfo> {
+    type Season = (BTreeSet<u32>, Option<chrono::NaiveDate>);
+    let mut per: BTreeMap<u32, Season> = BTreeMap::new();
+    for e in episodes {
+        let (Some(season), Some(number)) = (e.season_number, e.number.filter(|n| *n > 0)) else {
+            continue;
+        };
+        let entry = per.entry(season).or_default();
+        entry.0.insert(number);
+        if let Some(d) = date_of(e.aired.as_deref().and_then(|d| d.get(..10))) {
+            entry.1 = Some(entry.1.map_or(d, |x| x.min(d)));
+        }
+    }
+    per.into_iter()
+        .map(|(number, (eps, air_date))| SeasonInfo {
+            number,
+            episode_count: u32::try_from(eps.len()).unwrap_or(u32::MAX),
+            air_date,
+        })
+        .collect()
 }
 
 /// The fields of `EpisodeBaseRecord` we keep (WP4-7: no names or overviews).
@@ -384,6 +450,14 @@ impl Details for Tvdb {
                 air_date: None,
             })
             .collect();
+        // counts and first air dates come from the episode list (OT-27, #3); a season only
+        // the episode list knows is kept as well
+        for counted in self.season_counts(ctx, id).await? {
+            match seasons.iter_mut().find(|x| x.number == counted.number) {
+                Some(x) => *x = counted,
+                None => seasons.push(counted),
+            }
+        }
         seasons.sort_by_key(|x| x.number);
         seasons.dedup_by_key(|x| x.number);
         let attributes = ShowAttributes {

@@ -1,0 +1,15 @@
+{
+  "fixture": "synthetic: second page of getSeriesEpisodes, as episodes-81189-p0.json; season 3 is in no season list of the series record (OT-27)",
+  "request": {"method": "GET", "url": "https://api4.thetvdb.com/v4/series/81189/episodes/official?page=1"},
+  "status": 200,
+  "headers": [["content-type", "application/json"]],
+  "body": {"status": "success", "data": {
+    "series": {"id": 81189, "name": "Breaking Bad"},
+    "episodes": [
+      {"id": 201, "seriesId": 81189, "seasonNumber": 2, "number": 1, "aired": "2009-03-08T00:00:00Z", "runtime": 47, "isMovie": 0},
+      {"id": 202, "seriesId": 81189, "seasonNumber": 2, "number": 2, "aired": "2009-03-15", "runtime": 47, "isMovie": 0},
+      {"id": 301, "seriesId": 81189, "seasonNumber": 3, "number": 1, "aired": "2010-03-21", "runtime": 47, "isMovie": 0}
+    ]
+  },
+  "links": {"prev": "https://api4.thetvdb.com/v4/series/81189/episodes/official?page=0", "self": "https://api4.thetvdb.com/v4/series/81189/episodes/official?page=1", "next": null, "total_items": 7, "page_size": 4}}
+}

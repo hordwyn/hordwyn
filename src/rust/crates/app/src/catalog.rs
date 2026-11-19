@@ -722,6 +722,51 @@ impl App {
         Ok(again)
     }
 
+    /// The items that hold an external id in `namespace` (the id of a source), oldest data
+    /// first; with `apply` each is due again and gets a refresh job on the background lane
+    /// (`cli refresh --source`, for a release whose connector reads more than before, such
+    /// as the `TheTVDB` episode counts of 1.0.1, #3). Returns them.
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub async fn requeue_source(
+        &self,
+        namespace: &str,
+        apply: bool,
+    ) -> AppResult<Vec<CatalogItem>> {
+        let namespaces = [namespace.to_string()];
+        let mut found = Vec::new();
+        // every item stamped before now: all of them
+        let now = self.now() + chrono::Duration::seconds(1);
+        let ids: Vec<ItemId> = self
+            .repos
+            .catalog
+            .provider_data_before(&namespaces, now, u32::MAX)
+            .await?
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        for mut item in self.repos.catalog.get_many(&ids).await? {
+            if apply {
+                item.fresh_until = None;
+                self.repos.catalog.upsert(&item).await?;
+                self.jobs
+                    .enqueue(crate::ports::NewJob {
+                        lane: crate::ports::Lane::BackgroundRefresh,
+                        kind: REFRESH_JOB.into(),
+                        payload: serde_json::json!({ "item_id": item.id }),
+                        dedupe_key: Some(format!("{REFRESH_JOB}:{}", item.id)),
+                        priority: 0,
+                        run_at: None,
+                    })
+                    .await
+                    .map_err(|e| crate::ports::RepoError::Backend(e.to_string()))?;
+            }
+            found.push(item);
+        }
+        Ok(found)
+    }
+
     /// The items that never got their data (of `kind`, when given): in state `failed` (a
     /// stub whose refresh failed is never refreshed again on its own), or never fetched and
     /// in somebody's library (an import stub, which is `partial` and only retried when its

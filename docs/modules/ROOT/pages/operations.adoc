@@ -407,6 +407,24 @@ share one pace for it through the database (at most one request per second from 
 together), so they can run while the server is up and while its worker works off the
 queue; they are then simply slower.
 
+== Asking a source again for everything it gave
+
+A release can make a source read more than before (1.0.1: the episode counts of TheTVDB
+shows). Items stored earlier get the new data with their next refresh; this command asks for
+all of them at once:
+
+[source,sh]
+----
+cli refresh-source tvdb          # a dry run: lists the items (the first 20), changes nothing
+cli refresh-source tvdb --apply  # queues a refresh job for every item with a TheTVDB id
+----
+
+The argument is the id of a source (`tmdb`, `tvdb`, `igdb`, `openlibrary`, `wikidata`,
+`podcastindex`); it must be compiled in and switched on. Each item with an id of that source
+is made due and gets a refresh job on the background lane; the worker of the running server
+works them off at the source's pace, and shows then fetch their episodes as after any
+refresh. Running it twice queues nothing twice (one job per item).
+
 == Sessions left behind by an undone view
 
 Before 1.0.1, Undo of a view logged "Watched with ..." took back the view but kept its

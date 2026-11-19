@@ -30,6 +30,10 @@ const USAGE: &str = "usage: cli [--config <file>] <command>
                                    never fetched); books with an Open Library id are filled
                                    with one request per 50, the rest is queued for the
                                    worker. Prints what it would do; --apply does it
+  refresh-source <source> [--apply]
+                                   ask the source again for every stored item with its id
+                                   (a release whose source reads more, see its notes);
+                                   prints the items, --apply queues them for the worker
   match-books [--apply | --applied]
                                    find the Open Library work of every book that has none,
                                    by title (books entered by hand are left out); prints the
@@ -55,6 +59,7 @@ enum Cmd {
     RefreshFailed { kind: Option<String>, apply: bool },
     MatchBooks { apply: bool },
     MatchesApplied,
+    RefreshSource { source: String, apply: bool },
     OrphanedSessions { apply: bool },
     Promote(String),
     ResetPassword(String),
@@ -141,6 +146,13 @@ fn command(words: &[&str], flags: &[&str], kind: &mut Option<String>) -> Result<
                 (true, true) => bail!("--apply or --applied, not both\n\n{USAGE}"),
                 (_, true) => Cmd::MatchesApplied,
                 (apply, false) => Cmd::MatchBooks { apply },
+            }
+        }
+        ["refresh-source", source] => {
+            known(&["--apply"])?;
+            Cmd::RefreshSource {
+                source: (*source).to_string(),
+                apply: flags.contains(&"--apply"),
             }
         }
         ["sessions", "orphaned"] => {
@@ -374,7 +386,8 @@ async fn run(args: Args) -> Result<()> {
     Ok(())
 }
 
-/// `refresh-failed` and `match-books` (`server::book_stubs`); `None` for the other commands.
+/// `refresh-failed`, `refresh-source` and `match-books` (`server::book_stubs`); `None` for the
+/// other commands.
 async fn catalog(cmd: &Cmd, cfg: &config::AppConfig) -> Result<Option<String>> {
     use server::book_stubs::{Catalog, match_text, refresh_text};
     Ok(Some(match cmd {
@@ -383,6 +396,12 @@ async fn catalog(cmd: &Cmd, cfg: &config::AppConfig) -> Result<Option<String>> {
             refresh_text(&c.refresh_failed(kind.as_deref(), *apply).await?)
         }
         Cmd::MatchesApplied => Catalog::open(cfg).await?.applied_matches().await?,
+        Cmd::RefreshSource { source, apply } => {
+            Catalog::open(cfg)
+                .await?
+                .refresh_source(source, *apply)
+                .await?
+        }
         Cmd::MatchBooks { apply } => {
             let c = Catalog::open(cfg).await?;
             match_text(&c.match_books(*apply).await?, *apply)
@@ -663,6 +682,22 @@ mod tests {
             Cmd::OrphanedSessions { apply: true }
         );
         assert!(p("sessions orphaned --now").is_err());
+        assert_eq!(
+            p("refresh-source tvdb").unwrap().cmd,
+            Cmd::RefreshSource {
+                source: "tvdb".into(),
+                apply: false
+            },
+            "a dry run unless asked"
+        );
+        assert_eq!(
+            p("refresh-source tvdb --apply").unwrap().cmd,
+            Cmd::RefreshSource {
+                source: "tvdb".into(),
+                apply: true
+            }
+        );
+        assert!(p("refresh-source").is_err());
     }
 
     #[test]

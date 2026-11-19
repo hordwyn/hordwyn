@@ -15,6 +15,9 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
 - Undo of a view logged "Watched with ..." also deletes its session with those people, so the
   person card and "History with ..." no longer count it; `cli sessions orphaned [--apply]`
   removes the sessions an earlier Undo left behind (#1, DEC-853).
+- Shows from TheTVDB list all their seasons and episodes: the connector reads the episode
+  count and first air date of each season from the aired-order episode list; `cli
+  refresh-source tvdb --apply` refreshes the shows stored before (#3, DEC-854).
 
 ## [1.0.0] - 2026-11-17
 

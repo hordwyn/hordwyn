@@ -334,3 +334,50 @@ async fn a_paged_kind_without_a_page_count_takes_no_total() {
         assert_eq!(set.attributes["page_count"], 180, "{kind}");
     }
 }
+
+/// `cli refresh-source tvdb` (#3): every stored item with an id of the source is listed;
+/// `--apply` makes each due and queues its refresh. Items of other sources stay.
+#[tokio::test]
+async fn requeue_source_queues_every_item_with_an_id_of_that_source() {
+    let env = TestEnv::new();
+    let ids = |items: &[CatalogItem]| items.iter().map(|i| i.id).collect::<Vec<_>>();
+    let new = |title: &str, ns: &str| NewCatalogItem {
+        kind: KindId::new("show").unwrap(),
+        title: title.into(),
+        original_title: None,
+        year: Some(2011),
+        description: None,
+        external_ids: vec![ExternalId::new(ns, title)],
+        attributes: json!({}),
+        cover_url: None,
+        popularity: None,
+    };
+    let show = env
+        .app
+        .upsert_catalog_item(new("Unforgettable", "tvdb"))
+        .await
+        .unwrap();
+    let other = env
+        .app
+        .upsert_catalog_item(new("Dark", "tmdb"))
+        .await
+        .unwrap();
+    let dry = env.app.requeue_source("tvdb", false).await.unwrap();
+    assert_eq!(ids(&dry), vec![show.id]);
+    assert!(env.jobs.drain().is_empty(), "a dry run queues nothing");
+    let done = env.app.requeue_source("tvdb", true).await.unwrap();
+    assert_eq!(ids(&done), vec![show.id]);
+    let jobs = env.jobs.drain();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].kind, REFRESH_JOB);
+    assert_eq!(jobs[0].payload["item_id"], json!(show.id));
+    assert!(
+        load(&env, show.id).await.needs_refresh(env.clock.now()),
+        "due at once"
+    );
+    assert_eq!(
+        load(&env, other.id).await.fresh_until,
+        other.fresh_until,
+        "another source"
+    );
+}
