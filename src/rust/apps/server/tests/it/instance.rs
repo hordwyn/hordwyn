@@ -503,6 +503,9 @@ async fn smtp_in_the_database_with_an_encrypted_password_and_a_recorded_test() {
             .with_writer(logs.clone())
             .finish(),
     );
+    // the info callsite may have been registered by a test on another thread before this
+    // subscriber existed (its interest then cached as "never"): recompute it
+    tracing::callsite::rebuild_interest_cache();
     let r = call(
         &t,
         "POST",
