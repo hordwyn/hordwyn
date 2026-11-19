@@ -206,7 +206,7 @@ fn SenderCard(
                 <div class="flex items-center gap-2">
                     <StatusDot state=dot label=words/>
                     <DropdownMenu label=menu_label id=format!("ig-menu-{}", i.id) items=menu
-                        open=kept_open.open active=kept_open.active/>
+                        open=kept_open.open active=kept_open.active active_label=kept_open.active_label/>
                 </div>
             </div>
             {detail.map(|d| view! { <p class="break-words text-sm">{d}</p> })}

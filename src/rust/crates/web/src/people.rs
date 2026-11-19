@@ -392,7 +392,7 @@ fn PersonCard(p: PersonDto, panel: &'static str) -> impl IntoView {
                     <LinkBadge p=p.clone()/>
                 </div>
                 <DropdownMenu label=menu_label id=format!("pp-menu-{}", p.id) items=items
-                    open=menu.open active=menu.active/>
+                    open=menu.open active=menu.active active_label=menu.active_label/>
             </div>
             <Numbers p=p.clone()/>
             {last.map(|l| view! { <p class="text-sm text-muted-foreground">{l}</p> })}
@@ -478,7 +478,7 @@ fn PersonBody(
                     <LinkBadge p=p.clone()/>
                 </div>
                 <DropdownMenu label=menu_label id="pp-page-menu" items=items
-                    open=menu.open active=menu.active/>
+                    open=menu.open active=menu.active active_label=menu.active_label/>
             </div>
             {p.notes.clone().map(|n| view! { <p class="text-sm">{n}</p> })}
             <Numbers p=p.clone()/>

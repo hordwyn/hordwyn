@@ -166,6 +166,8 @@ pub fn render_again() -> impl Fn() + Copy + Send + Sync + 'static {
 pub struct KeptMenu {
     pub open: RwSignal<bool>,
     pub active: RwSignal<usize>,
+    /// The label of the focused item (the focus follows it when items come or go).
+    pub active_label: RwSignal<String>,
 }
 
 impl KeptMenu {
@@ -175,12 +177,14 @@ impl KeptMenu {
         Self {
             open: RwSignal::new(false),
             active: RwSignal::new(0),
+            active_label: RwSignal::new(String::new()),
         }
     }
 
     pub fn close(self) {
         self.open.set(false);
         self.active.set(0);
+        self.active_label.set(String::new());
     }
 }
 
@@ -196,6 +200,7 @@ pub fn kept_menu(key: &str) -> KeptMenu {
     let menu = KeptMenu {
         open: kept(&format!("{key}-open"), || false),
         active: kept(&format!("{key}-active"), || 0_usize),
+        active_label: kept(&format!("{key}-active-label"), String::new),
     };
     if let Some(k) = use_context::<Kept>() {
         k.menus.update_value(|m| {

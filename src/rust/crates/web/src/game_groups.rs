@@ -147,7 +147,7 @@ fn GroupCard(g: GameGroupDto) -> impl IntoView {
                     <p class="text-sm text-muted-foreground">{members}</p>
                 </div>
                 <DropdownMenu label=menu_label id=format!("pp-group-menu-{}", g.id) items=items
-                    open=menu.open active=menu.active/>
+                    open=menu.open active=menu.active active_label=menu.active_label/>
             </div>
             <dl class="flex flex-wrap gap-x-6 gap-y-1">
                 <div class="grid">

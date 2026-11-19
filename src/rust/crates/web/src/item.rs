@@ -654,7 +654,7 @@ fn overflow(
     );
     Some(view! {
         <DropdownMenu label=label items=items id="item-actions" trigger_class="h-10 px-3"
-            open=ui.menus.actions.open active=ui.menus.actions.active
+            open=ui.menus.actions.open active=ui.menus.actions.active active_label=ui.menus.actions.active_label
             trigger=Box::new(|| view! { <Icon name=IconName::More/> }.into_any())/>
         {move || error.get().map(|e| view! { <p role="alert" class="w-full text-sm text-destructive-text">{e}</p> })}
     })
@@ -999,7 +999,7 @@ fn ListsCell(
             <div class="flex flex-wrap items-center gap-2">
                 {inside.into_iter().map(|l| view! { <Badge variant=BadgeVariant::Outline>{l.name}</Badge> }).collect_view()}
                 {has_more.then(|| view! {
-                    <DropdownMenu label=use_i18n().t("item-lists") items=items id="item-lists" trigger_class="h-8 px-3 text-sm" open=menu.open active=menu.active/>
+                    <DropdownMenu label=use_i18n().t("item-lists") items=items id="item-lists" trigger_class="h-8 px-3 text-sm" open=menu.open active=menu.active active_label=menu.active_label/>
                 })}
             </div>
         </div>

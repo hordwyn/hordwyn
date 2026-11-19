@@ -66,6 +66,8 @@ fn close_on_outside_press(open: RwSignal<bool>, root: NodeRef<html::Div>) {
 /// Arrow keys, Home and End move the active item (wrapping); Escape and Tab close the menu.
 fn menu_keys(
     active: RwSignal<usize>,
+    labels: StoredValue<Vec<String>>,
+    active_label: RwSignal<String>,
     count: usize,
     menu_ref: NodeRef<html::Div>,
     close: impl Fn() + Copy + 'static,
@@ -84,6 +86,7 @@ fn menu_keys(
         };
         ev.prevent_default();
         active.set(next);
+        active_label.set(labels.with_value(|l| l.get(next).cloned().unwrap_or_default()));
         if let Some(menu) = menu_ref.get_untracked() {
             focus_item(&menu, next);
         }
@@ -149,9 +152,26 @@ pub fn DropdownMenu(
     /// a new render gives the focus back to the same item (RACE-2).
     #[prop(optional_no_strip, into)]
     active: Option<RwSignal<usize>>,
+    /// The label of that item, owned by the caller next to `active`: when a new render has
+    /// other items before it (an item came or went), the focus follows the label, not the
+    /// position (#2).
+    #[prop(optional_no_strip, into)]
+    active_label: Option<RwSignal<String>>,
 ) -> impl IntoView {
     let open = open.unwrap_or_else(|| RwSignal::new(false));
     let active = active.unwrap_or_else(|| RwSignal::new(0usize));
+    let active_label = active_label.unwrap_or_else(|| RwSignal::new(String::new()));
+    let labels = StoredValue::new(items.iter().map(|i| i.label.clone()).collect::<Vec<_>>());
+    let remembered = active_label.get_untracked();
+    if !remembered.is_empty()
+        && let Some(i) = labels.with_value(|l| l.iter().position(|x| *x == remembered))
+    {
+        active.set(i);
+    }
+    let set_first = move || {
+        active.set(0);
+        active_label.set(labels.with_value(|l| l.first().cloned().unwrap_or_default()));
+    };
     let base = id.unwrap_or_else(|| slug(&label));
     let menu_id = format!("{base}-menu");
     let panel_id = menu_id.clone();
@@ -175,7 +195,7 @@ pub fn DropdownMenu(
             let _ = t.focus();
         }
     };
-    let on_menu_key = menu_keys(active, count, menu_ref, close);
+    let on_menu_key = menu_keys(active, labels, active_label, count, menu_ref, close);
     let trigger_label = label.clone();
     view! {
         <div node_ref=root_ref class=move || cn(&["relative inline-block", &class.get().unwrap_or_default()])>
@@ -188,13 +208,13 @@ pub fn DropdownMenu(
                 aria-label=trigger_label.clone()
                 tabindex=move || trigger_tabindex.get()
                 on:click=move |_| {
-                    active.set(0);
+                    set_first();
                     open.update(|o| *o = !*o);
                 }
                 on:keydown=move |ev: leptos::ev::KeyboardEvent| {
                     if ev.key() == "ArrowDown" {
                         ev.prevent_default();
-                        active.set(0);
+                        set_first();
                         open.set(true);
                     }
                 }
