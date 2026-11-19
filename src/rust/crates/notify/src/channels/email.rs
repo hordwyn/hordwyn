@@ -146,22 +146,24 @@ impl Email {
     async fn deliver(
         transports: &[AsyncSmtpTransport<Tokio1Executor>],
         mail: &lettre::Message,
-    ) -> Result<(), Option<lettre::transport::smtp::Error>> {
+    ) -> Result<lettre::transport::smtp::response::Response, Option<lettre::transport::smtp::Error>>
+    {
         let answered = |e: &lettre::transport::smtp::Error| {
             e.is_response() || e.is_permanent() || e.is_transient()
         };
         try_in_order(transports, answered, |t| {
             let mail = mail.clone();
-            async move { t.send(mail).await.map(|_| ()) }
+            async move { t.send(mail).await }
         })
         .await
     }
 
-    /// One plain-text message to `to` (the admin's "send a test").
+    /// One plain-text message to `to` (the admin's "send a test"); answers what the relay said
+    /// when it took the message ([`relay_answer`], OT-31).
     ///
     /// # Errors
     /// A bad address or the SMTP error, as text.
-    pub async fn send_text(&self, to: &str, subject: &str, body: &str) -> Result<(), String> {
+    pub async fn send_text(&self, to: &str, subject: &str, body: &str) -> Result<String, String> {
         let to: Mailbox = to.parse().map_err(|e| format!("recipient address: {e}"))?;
         let mail = lettre::Message::builder()
             .from(self.from.clone())
@@ -173,6 +175,7 @@ impl Email {
         let transports = self.transports().await?;
         Self::deliver(&transports, &mail)
             .await
+            .map(|r| relay_answer(&r))
             .map_err(|e| e.map_or_else(|| "no transport".to_string(), |e| e.to_string()))
     }
 
@@ -201,12 +204,27 @@ impl Email {
         let transports = self.transports().await.map_err(SendError::Retry)?;
         Self::deliver(&transports, &mail)
             .await
+            .map(|_| ())
             .map_err(|e| match e {
                 Some(e) if e.is_permanent() => SendError::Permanent(e.to_string()),
                 Some(e) => SendError::Retry(e.to_string()),
                 None => SendError::Retry("no transport".into()),
             })
     }
+}
+
+/// The relay's answer to a message it took, as one line: the code and its text ("250 2.0.0 Ok:
+/// queued as 4ABC"), with anything that looks like a mail address left out, for the log
+/// (OT-31: "accepted" can still end in a spam folder; the queue id finds it at the relay).
+#[must_use]
+pub fn relay_answer(r: &lettre::transport::smtp::response::Response) -> String {
+    let text = r
+        .message()
+        .flat_map(|l| l.split_whitespace())
+        .map(|w| if w.contains('@') { "<address>" } else { w })
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("{} {text}", r.code()).trim_end().to_string()
 }
 
 /// Try `items` in order: an attempt that fails before a server answered (`answered` is
@@ -405,6 +423,49 @@ mod tests {
         assert_eq!(*tried.lock().unwrap(), [1]);
     }
 
+    /// OT-31 (#7): a message the relay took answers the relay's words (its queue id), without
+    /// the address it may echo.
+    #[tokio::test]
+    async fn a_sent_message_answers_what_the_relay_said() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (read, mut write) = socket.into_split();
+            let mut lines = BufReader::new(read).lines();
+            write.write_all(b"220 relay.test ESMTP\r\n").await.unwrap();
+            let mut data = false;
+            while let Ok(Some(line)) = lines.next_line().await {
+                let answer: &[u8] = if data {
+                    if line != "." {
+                        continue;
+                    }
+                    data = false;
+                    b"250 2.0.0 Ok: queued as 4ABC for <anna@example.org>\r\n"
+                } else {
+                    match line.split_whitespace().next().unwrap_or_default() {
+                        "EHLO" => b"250-relay.test\r\n250 8BITMIME\r\n",
+                        "DATA" => {
+                            data = true;
+                            b"354 go ahead\r\n"
+                        }
+                        "QUIT" => {
+                            write.write_all(b"221 bye\r\n").await.unwrap();
+                            break;
+                        }
+                        _ => b"250 Ok\r\n",
+                    }
+                };
+                write.write_all(answer).await.unwrap();
+            }
+        });
+        let answer = local("127.0.0.1", port, true)
+            .send_text("anna@example.org", "Test", "Hello")
+            .await
+            .unwrap();
+        assert_eq!(answer, "250 2.0.0 Ok: queued as 4ABC for <address>");
+    }
     #[test]
     fn smtp_settings_hide_the_password_in_debug() {
         let s = SmtpSettings {

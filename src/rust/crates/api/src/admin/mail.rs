@@ -65,11 +65,12 @@ pub trait MailTransport: Send + Sync {
     /// # Errors
     /// Settings the transport cannot use (bad host or sender); mail is then off.
     fn configure(&self, settings: Option<&MailSettings>) -> Result<(), String>;
-    /// Send one plain-text message now.
+    /// Send one plain-text message now; answers what the relay said when it took it (for the
+    /// log, without addresses).
     ///
     /// # Errors
     /// The SMTP error, or "mail is not configured".
-    async fn send(&self, to: &str, subject: &str, body: &str) -> Result<(), String>;
+    async fn send(&self, to: &str, subject: &str, body: &str) -> Result<String, String>;
 }
 
 fn text(eff: &std::collections::BTreeMap<String, Value>, k: &str) -> Option<String> {
@@ -274,9 +275,13 @@ pub async fn send_test_mail(
     };
     // the admin sees the category, as it is stored (UX4-22, DEC-534): the transport's own
     // text can name hosts and say what answered on a port, so it goes to the log only
-    if let Err(err) = &outcome {
-        tracing::warn!(error = %err, "the mail test failed");
+    // a success says what the relay answered (OT-31, #7): "accepted" can still end in a spam
+    // folder, and the relay's queue id finds the message there; no address, no secret
+    match &outcome {
+        Ok(answer) => tracing::info!(relay = %answer, "the mail test was accepted by the relay"),
+        Err(err) => tracing::warn!(error = %err, "the mail test failed"),
     }
+    let outcome = outcome.map(|_| ());
     let result = stored_result(&outcome);
     let at = s.app.clock.now();
     adm.store.record_mail_test(at, &result).await.map_err(pe)?;
@@ -368,7 +373,7 @@ pub(crate) async fn send_mail(
     ) {
         (Some(settings), Some(transport)) => {
             transport.configure(Some(&settings))?;
-            transport.send(to.trim(), subject, body).await
+            transport.send(to.trim(), subject, body).await.map(|_| ())
         }
         _ => Err("mail is not configured".into()),
     }

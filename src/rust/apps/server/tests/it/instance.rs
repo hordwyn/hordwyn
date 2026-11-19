@@ -417,7 +417,7 @@ async fn fake_smtp() -> (u16, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
                         if l == "." {
                             data = false;
                             count.fetch_add(1, Ordering::SeqCst);
-                            b"250 queued\r\n"
+                            b"250 2.0.0 Ok: queued as 4ABC\r\n"
                         } else {
                             continue;
                         }
@@ -492,7 +492,15 @@ async fn smtp_in_the_database_with_an_encrypted_password_and_a_recorded_test() {
     assert_eq!(rows[0]["detail"]["purpose"], "smtp_password", "{rows:?}");
     assert!(!rows[0].to_string().contains("s3cret-pw"));
 
-    // the stored settings are used at once (no restart): the test mail arrives
+    // the stored settings are used at once (no restart): the test mail arrives, and the log
+    // says what the relay answered, without the address (OT-31, #7)
+    let logs = Logs::default();
+    let guard = tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(logs.clone())
+            .finish(),
+    );
     let r = call(
         &t,
         "POST",
@@ -501,6 +509,14 @@ async fn smtp_in_the_database_with_an_encrypted_password_and_a_recorded_test() {
         Some(json!({"to": "root@example.org"})),
     )
     .await;
+    drop(guard);
+    let log = logs.text();
+    assert!(
+        log.contains("the mail test was accepted by the relay")
+            && log.contains("relay=250 2.0.0 Ok: queued as 4ABC"),
+        "{log}"
+    );
+    assert!(!log.contains("root@example.org"), "{log}");
     assert_eq!(r.status, 200, "{}", r.text);
     assert_eq!(r.body["ok"], true, "{}", r.text);
     assert_eq!(sent.load(Ordering::SeqCst), 1);
@@ -1424,4 +1440,31 @@ async fn sign_in_is_slowed_per_account_and_client_address() {
     assert_eq!(r.status, 429, "{}", r.text);
     let r = sign_in_from(&t, proxy, owner, "/auth/sign-in", "root", good).await;
     assert_eq!(r.status, 200, "{}", r.text);
+}
+
+/// Log lines written in a test (`tracing::subscriber::set_default` on the test's thread).
+#[derive(Clone, Default)]
+struct Logs(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl Logs {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+    }
+}
+
+impl std::io::Write for Logs {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Logs {
+    type Writer = Logs;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
 }

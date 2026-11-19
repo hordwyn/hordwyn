@@ -379,7 +379,7 @@ impl api::admin::MailTransport for EmailTransport {
         }
     }
 
-    async fn send(&self, to: &str, subject: &str, body: &str) -> Result<(), String> {
+    async fn send(&self, to: &str, subject: &str, body: &str) -> Result<String, String> {
         let Some(e) = self.0.current() else {
             return Err("mail is not configured".into());
         };

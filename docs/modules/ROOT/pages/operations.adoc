@@ -648,7 +648,11 @@ A name is checked when it is resolved for the connection, so a DNS answer that c
 between a check and the request does not get through. A refused sign-in provider shows
 "its address is in a private network" on the provider's Test; a refused mail server shows
 the same on "Send a test". Both tests name a category of failure only, not the remote
-side's text; the full text of a mail failure is in the server log.
+side's text; the full text of a mail failure is in the server log. A test mail the relay took
+writes one info line with the relay's answer ("the mail test was accepted by the relay",
+`relay=250 2.0.0 Ok: queued as ...`, addresses left out): when the mail does not arrive,
+the queue id finds it in the relay's log, and "accepted" means the relay has it, not that
+it reached the inbox (spam folder, SPF or DKIM of the sender domain).
 
 Pictures that a browser loads straight from a data source (covers that are not stored yet)
 are requests of the browser, not of the server.

@@ -73,6 +73,7 @@ tvdb = ["connectors/tvdb"]
 all-connectors = ["tmdb", "igdb", "podcastindex", "tvdb", "openlibrary", "wikidata"]
 
 [dev-dependencies]
+tracing-subscriber.workspace = true
 totp-rs.workspace = true
 wiremock.workspace = true
 reqwest = { workspace = true, features = ["json", "stream"] }
