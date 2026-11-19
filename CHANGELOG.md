@@ -31,6 +31,9 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
   `Accept-Language` (#4, DEC-858).
 - Books from Open Library: one edition with a wrong date no longer sets the year; the year
   comes from the work's editions, leaving out impossible and lone outlier dates (#5, DEC-859).
+- A notification is sent once even when two workers (or a lapsed job lease) run its delivery
+  or digest: each run claims it first, and the delivery log shows "Sending" meanwhile (#6,
+  DEC-860).
 
 ### Added
 

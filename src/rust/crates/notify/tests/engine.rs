@@ -21,12 +21,17 @@ use testkit::{FixedClock, MemJobs, RecordingEvents, SeqIds};
 struct FakeChannel {
     sent: Mutex<Vec<Message>>,
     answers: Mutex<Vec<Result<(), SendError>>>,
+    /// Sending takes a while (another run can start meanwhile).
+    slow: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait]
 impl Notifier for FakeChannel {
     async fn send(&self, _c: &ChannelConfig, m: &Message) -> Result<(), SendError> {
         self.sent.lock().unwrap().push(m.clone());
+        if self.slow.load(std::sync::atomic::Ordering::SeqCst) {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
         let mut a = self.answers.lock().unwrap();
         if a.is_empty() { Ok(()) } else { a.remove(0) }
     }
@@ -234,8 +239,13 @@ async fn digest_collects_until_the_schedule_on_a_fixed_clock() {
             .body
             .starts_with("- New episode of Severance: Season 1, episode 1")
     );
+    let now = e.clock.now();
     assert_eq!(
-        e.store.due_digest(ch, e.clock.now()).await.unwrap().len(),
+        e.store
+            .claim_digest(ch, now, now, now - Duration::minutes(15))
+            .await
+            .unwrap()
+            .len(),
         0
     );
     // the next notification starts the next digest
@@ -512,5 +522,101 @@ async fn a_written_outcome_is_announced_to_the_channels_owner() {
         topics.iter().filter(|t| *t == DELIVERY_TOPIC).count(),
         1,
         "{topics:?}"
+    );
+}
+
+/// OT-37 (#6): two runs of one delivery (two workers, or a lease that lapsed) send it once;
+/// the one that finds it claimed sends nothing. A claim whose run died is taken over after
+/// `SENDING_STALE_MINUTES`.
+#[tokio::test]
+async fn two_runs_of_a_delivery_send_it_once() {
+    let e = env();
+    e.channel("phone").await;
+    e.subscribe("release.*", DeliveryMode::Immediate, |_| {})
+        .await;
+    e.channel
+        .slow
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    e.engine.emit(e.episode(1)).await;
+    let job = e.jobs.jobs()[0].clone();
+    let id: uuid::Uuid = job.payload["delivery_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let (a, b) = tokio::join!(e.deliverer.deliver(id), e.deliverer.deliver(id));
+    assert_eq!((a, b), (Ok(()), Ok(())));
+    assert_eq!(e.sent().len(), 1, "sent once");
+    let d = e.store.delivery(id).await.unwrap().unwrap();
+    assert_eq!((d.state, d.attempts), (DeliveryState::Sent, 1));
+
+    // a run that claimed the next one and died: nothing is sent until the claim is stale
+    e.engine.emit(e.episode(2)).await;
+    let id: uuid::Uuid = e.jobs.jobs()[1].payload["delivery_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let now = e.clock.now();
+    let claimed = e
+        .store
+        .claim_delivery(id, now, now - Duration::minutes(15))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(claimed.state, DeliveryState::Sending);
+    e.deliverer.deliver(id).await.unwrap();
+    assert_eq!(e.sent().len(), 1, "another run holds it");
+    e.clock
+        .advance(Duration::minutes(notify::SENDING_STALE_MINUTES + 1));
+    e.deliverer.deliver(id).await.unwrap();
+    assert_eq!(e.sent().len(), 2, "the stale claim is taken over");
+    let d = e.store.delivery(id).await.unwrap().unwrap();
+    assert_eq!(d.state, DeliveryState::Sent);
+}
+
+/// OT-37 (#6): two runs of one digest send it once; a retried digest goes back to waiting.
+#[tokio::test]
+async fn two_runs_of_a_digest_send_it_once() {
+    let e = env();
+    e.clock.set(at("2026-01-10T10:00:00Z"));
+    let ch = e.channel("mail").await;
+    e.subscribe(
+        "release.episode",
+        DeliveryMode::Digest {
+            cron: "0 8 * * *".into(),
+        },
+        |_| {},
+    )
+    .await;
+    for n in 1..=2 {
+        e.engine.emit(e.episode(n)).await;
+    }
+    e.clock.set(at("2026-01-11T07:00:00Z"));
+    let until = e.clock.now();
+    e.channel
+        .answers
+        .lock()
+        .unwrap()
+        .push(Err(SendError::Retry("503".into())));
+    assert!(
+        e.deliverer.digest(ch, until).await.is_err(),
+        "the job retries"
+    );
+    let log = e.store.deliveries(e.user, 10).await.unwrap();
+    assert!(
+        log.iter().all(|d| d.state == DeliveryState::Digest),
+        "{log:?}"
+    );
+    e.channel
+        .slow
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let (a, b) = tokio::join!(e.deliverer.digest(ch, until), e.deliverer.digest(ch, until));
+    assert_eq!((a, b), (Ok(()), Ok(())));
+    assert_eq!(e.sent().len(), 2, "the failed attempt and one digest");
+    let log = e.store.deliveries(e.user, 10).await.unwrap();
+    assert!(
+        log.iter().all(|d| d.state == DeliveryState::Sent),
+        "{log:?}"
     );
 }

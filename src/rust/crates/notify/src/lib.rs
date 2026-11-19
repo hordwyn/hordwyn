@@ -16,7 +16,7 @@ pub mod store;
 pub mod template;
 
 pub use bridge::AdminBridge;
-pub use deliver::{Deliverer, Message, Notifier, SendError};
+pub use deliver::{Deliverer, Message, Notifier, SENDING_STALE_MINUTES, SendError};
 pub use engine::{DELIVERY_TOPIC, Engine, INBOX_TOPIC};
 pub use store::{MemNotifyStore, NotifyStore};
 

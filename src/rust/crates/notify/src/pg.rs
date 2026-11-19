@@ -544,22 +544,59 @@ impl NotifyStore for PgNotifyStore {
         .collect()
     }
 
-    async fn due_digest(&self, channel: Uuid, until: DateTime<Utc>) -> StoreResult<Vec<Delivery>> {
+    async fn claim_delivery(
+        &self,
+        id: Uuid,
+        now: DateTime<Utc>,
+        stale_before: DateTime<Utc>,
+    ) -> StoreResult<Option<Delivery>> {
+        // one statement: of two runs only one finds the row in a claimable state (OT-37)
         sqlx::query_as!(
             DeliveryRow,
-            "SELECT id, user_id, channel_id, event, dedupe_key, title, body, link, state,
-                    attempts, last_error, due_at, created_at, sent_at
-             FROM notify_deliveries WHERE channel_id = $1 AND state = 'digest' AND due_at <= $2
-             ORDER BY created_at, id",
+            "UPDATE notify_deliveries SET state = 'sending', sent_at = $2
+             WHERE id = $1
+               AND (state = 'queued' OR (state = 'sending' AND (sent_at IS NULL OR sent_at < $3)))
+             RETURNING id, user_id, channel_id, event, dedupe_key, title, body, link, state,
+                    attempts, last_error, due_at, created_at, sent_at",
+            id,
+            now,
+            stale_before
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(pe)?
+        .map(DeliveryRow::into_delivery)
+        .transpose()
+    }
+
+    async fn claim_digest(
+        &self,
+        channel: Uuid,
+        until: DateTime<Utc>,
+        now: DateTime<Utc>,
+        stale_before: DateTime<Utc>,
+    ) -> StoreResult<Vec<Delivery>> {
+        let mut v = sqlx::query_as!(
+            DeliveryRow,
+            "UPDATE notify_deliveries SET state = 'sending', sent_at = $3
+             WHERE channel_id = $1 AND due_at <= $2
+               AND (state = 'digest'
+                    OR (state = 'sending' AND (sent_at IS NULL OR sent_at < $4)))
+             RETURNING id, user_id, channel_id, event, dedupe_key, title, body, link, state,
+                    attempts, last_error, due_at, created_at, sent_at",
             channel,
-            until
+            until,
+            now,
+            stale_before
         )
         .fetch_all(&self.pool)
         .await
         .map_err(pe)?
         .into_iter()
         .map(DeliveryRow::into_delivery)
-        .collect()
+        .collect::<StoreResult<Vec<_>>>()?;
+        v.sort_by_key(|d| (d.created_at, d.id));
+        Ok(v)
     }
 
     async fn count_since(

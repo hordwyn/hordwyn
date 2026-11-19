@@ -213,6 +213,10 @@ pub enum DeliveryState {
     Queued,
     /// Waiting for the next digest of its channel.
     Digest,
+    /// Claimed by a run that is sending it (OT-37, #6): `sent_at` holds the claim time until the
+    /// outcome is written; a claim older than [`crate::SENDING_STALE_MINUTES`] is
+    /// taken over (the run died).
+    Sending,
     Sent,
     Failed,
     /// Rate-limited or the channel was disabled.
@@ -225,6 +229,7 @@ impl DeliveryState {
         match self {
             Self::Queued => "queued",
             Self::Digest => "digest",
+            Self::Sending => "sending",
             Self::Sent => "sent",
             Self::Failed => "failed",
             Self::Suppressed => "suppressed",
@@ -236,6 +241,7 @@ impl DeliveryState {
         Some(match s {
             "queued" => Self::Queued,
             "digest" => Self::Digest,
+            "sending" => Self::Sending,
             "sent" => Self::Sent,
             "failed" => Self::Failed,
             "suppressed" => Self::Suppressed,

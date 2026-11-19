@@ -2280,7 +2280,8 @@ broken! {
     update_delivery(&notify::model::Delivery) -> ();
     deliveries(User, u32) -> Vec<notify::model::Delivery>;
     latest_deliveries(User) -> Vec<notify::model::Delivery>;
-    due_digest(uuid::Uuid, At) -> Vec<notify::model::Delivery>;
+    claim_delivery(uuid::Uuid, At, At) -> Option<notify::model::Delivery>;
+    claim_digest(uuid::Uuid, At, At, At) -> Vec<notify::model::Delivery>;
     count_since(uuid::Uuid, &str, At) -> u32;
     template_overrides() -> notify::template::Overrides;
     set_template_override(&str, &str, Option<&str>) -> ();

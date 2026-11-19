@@ -564,6 +564,7 @@ notify-log = Log
 notify-log-empty = Nothing was sent yet.
 notify-state-queued = Queued
 notify-state-digest = In digest
+notify-state-sending = Sending
 notify-state-sent = Sent
 notify-state-failed = Failed
 notify-state-suppressed = Suppressed

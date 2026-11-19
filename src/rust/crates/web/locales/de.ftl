@@ -563,6 +563,7 @@ notify-log = Protokoll
 notify-log-empty = Noch nichts gesendet.
 notify-state-queued = Wartet
 notify-state-digest = In Zusammenfassung
+notify-state-sending = Wird gesendet
 notify-state-sent = Gesendet
 notify-state-failed = Fehlgeschlagen
 notify-state-suppressed = Unterdrückt

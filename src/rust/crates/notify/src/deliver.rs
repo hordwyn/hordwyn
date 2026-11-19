@@ -44,6 +44,10 @@ pub trait Notifier: Send + Sync {
     async fn send(&self, channel: &ChannelConfig, m: &Message) -> Result<(), SendError>;
 }
 
+/// A claim older than this is taken over: the run that made it died before it wrote the
+/// outcome (a job lease is shorter, DEC-844), so the delivery is sent by the next run.
+pub const SENDING_STALE_MINUTES: i64 = 15;
+
 pub struct Deliverer {
     engine: Arc<Engine>,
     notifier: Arc<dyn Notifier>,
@@ -135,15 +139,21 @@ impl Deliverer {
     /// A temporary failure (the job is retried) or a storage error.
     pub async fn deliver(&self, id: Uuid) -> Result<(), String> {
         let store = self.engine.store();
-        let Some(mut d) = store.delivery(id).await.map_err(|e| e.to_string())? else {
+        // claimed before it is sent: a second run (two workers, a lapsed lease) finds nothing to
+        // claim and sends nothing (OT-37, #6)
+        let now = self.clock.now();
+        let stale = now - chrono::Duration::minutes(SENDING_STALE_MINUTES);
+        let Some(mut d) = store
+            .claim_delivery(id, now, stale)
+            .await
+            .map_err(|e| e.to_string())?
+        else {
             return Ok(());
         };
-        if d.state != DeliveryState::Queued {
-            return Ok(());
-        }
         let channel = store.channel(d.channel).await.map_err(|e| e.to_string())?;
         let Some(channel) = channel.filter(|c| c.enabled) else {
             d.state = DeliveryState::Suppressed;
+            d.sent_at = None;
             d.last_error = Some("channel disabled or deleted".into());
             self.save(&d).await?;
             self.announce(&d).await;
@@ -159,17 +169,22 @@ impl Deliverer {
         };
         d.attempts += 1;
         let result = self.notifier.send(&channel.config, &m).await;
-        let finished = self.finish(&mut d, result, self.clock.now()).await;
+        let finished = self
+            .finish(&mut d, result, self.clock.now(), DeliveryState::Queued)
+            .await;
         // also for an attempt that is retried: the log shows it
         self.announce(&d).await;
         finished
     }
 
+    /// Write the outcome of a claimed delivery; a retried one goes `back` to the state it was
+    /// claimed from (`queued`, or `digest` for the next digest run).
     async fn finish(
         &self,
         d: &mut Delivery,
         result: Result<(), SendError>,
         now: DateTime<Utc>,
+        back: DeliveryState,
     ) -> Result<(), String> {
         match result {
             Ok(()) => {
@@ -179,6 +194,8 @@ impl Deliverer {
                 self.save(d).await
             }
             Err(SendError::Retry(e)) if d.attempts < self.max_attempts => {
+                d.state = back;
+                d.sent_at = None;
                 d.last_error = Some(e.clone());
                 self.save(d).await?;
                 Err(e)
@@ -188,6 +205,7 @@ impl Deliverer {
                     self.disable(d.channel).await?;
                 }
                 d.state = DeliveryState::Failed;
+                d.sent_at = None;
                 d.last_error = Some(e.to_string());
                 self.save(d).await
             }
@@ -200,8 +218,11 @@ impl Deliverer {
     /// A temporary failure (the job is retried) or a storage error.
     pub async fn digest(&self, channel_id: Uuid, until: DateTime<Utc>) -> Result<(), String> {
         let store = self.engine.store();
+        // claimed in one step, as a single delivery is (OT-37, #6)
+        let now = self.clock.now();
+        let stale = now - chrono::Duration::minutes(SENDING_STALE_MINUTES);
         let mut items = store
-            .due_digest(channel_id, until)
+            .claim_digest(channel_id, until, now, stale)
             .await
             .map_err(|e| e.to_string())?;
         if items.is_empty() {
@@ -211,6 +232,7 @@ impl Deliverer {
         let Some(channel) = channel.filter(|c| c.enabled) else {
             for d in &mut items {
                 d.state = DeliveryState::Suppressed;
+                d.sent_at = None;
                 d.last_error = Some("channel disabled or deleted".into());
                 self.save(d).await?;
             }
@@ -248,7 +270,10 @@ impl Deliverer {
         let mut retry = None;
         for d in &mut items {
             d.attempts += 1;
-            if let Err(e) = self.finish(d, result.clone(), now).await {
+            if let Err(e) = self
+                .finish(d, result.clone(), now, DeliveryState::Digest)
+                .await
+            {
                 retry = Some(e);
             }
         }

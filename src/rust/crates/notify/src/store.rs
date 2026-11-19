@@ -52,7 +52,26 @@ pub trait NotifyStore: Send + Sync {
     /// health, design.md 6.8), in no particular order.
     async fn latest_deliveries(&self, user: UserId) -> StoreResult<Vec<Delivery>>;
     /// Digest entries of a channel due at or before `until`, oldest first.
-    async fn due_digest(&self, channel: Uuid, until: DateTime<Utc>) -> StoreResult<Vec<Delivery>>;
+    /// Claim a queued delivery for sending (OT-37, #6): in one step `queued` (or a `sending`
+    /// whose claim at `sent_at` is older than `stale_before`) becomes `sending` with
+    /// `sent_at` = `now`. `None` when there is nothing to claim (gone, done, or another run
+    /// holds it), so two runs never both send it.
+    async fn claim_delivery(
+        &self,
+        id: Uuid,
+        now: DateTime<Utc>,
+        stale_before: DateTime<Utc>,
+    ) -> StoreResult<Option<Delivery>>;
+    /// Claim what a channel collected for its digest until `until` (oldest first), as
+    /// [`Self::claim_delivery`] does for one delivery: `digest` rows due by then (and stale
+    /// `sending` ones) become `sending`.
+    async fn claim_digest(
+        &self,
+        channel: Uuid,
+        until: DateTime<Utc>,
+        now: DateTime<Utc>,
+        stale_before: DateTime<Utc>,
+    ) -> StoreResult<Vec<Delivery>>;
     /// Deliveries of an event to a channel created since `since` that were not suppressed.
     async fn count_since(
         &self,
@@ -278,16 +297,47 @@ impl NotifyStore for MemNotifyStore {
         Ok(v)
     }
 
-    async fn due_digest(&self, channel: Uuid, until: DateTime<Utc>) -> StoreResult<Vec<Delivery>> {
-        let mut v: Vec<_> = self
-            .m()
+    async fn claim_delivery(
+        &self,
+        id: Uuid,
+        now: DateTime<Utc>,
+        stale_before: DateTime<Utc>,
+    ) -> StoreResult<Option<Delivery>> {
+        let mut m = self.m();
+        let Some(d) = m.deliveries.iter_mut().find(|d| d.id == id) else {
+            return Ok(None);
+        };
+        let stale = d.state == DeliveryState::Sending && d.sent_at.is_none_or(|t| t < stale_before);
+        if d.state != DeliveryState::Queued && !stale {
+            return Ok(None);
+        }
+        d.state = DeliveryState::Sending;
+        d.sent_at = Some(now);
+        Ok(Some(d.clone()))
+    }
+
+    async fn claim_digest(
+        &self,
+        channel: Uuid,
+        until: DateTime<Utc>,
+        now: DateTime<Utc>,
+        stale_before: DateTime<Utc>,
+    ) -> StoreResult<Vec<Delivery>> {
+        let mut m = self.m();
+        let mut v = Vec::new();
+        for d in m
             .deliveries
-            .iter()
-            .filter(|d| {
-                d.channel == channel && d.state == DeliveryState::Digest && d.due_at <= until
-            })
-            .cloned()
-            .collect();
+            .iter_mut()
+            .filter(|d| d.channel == channel && d.due_at <= until)
+        {
+            let stale =
+                d.state == DeliveryState::Sending && d.sent_at.is_none_or(|t| t < stale_before);
+            if d.state == DeliveryState::Digest || stale {
+                d.state = DeliveryState::Sending;
+                d.sent_at = Some(now);
+                v.push(d.clone());
+            }
+        }
         v.sort_by_key(|d| (d.created_at, d.id));
         Ok(v)
     }

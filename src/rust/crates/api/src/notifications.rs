@@ -147,7 +147,7 @@ pub fn health(latest: Option<&Delivery>) -> ChannelHealthDto {
         // a queued delivery with an error waits for its retry: the last attempt failed
         S::Failed => ("failing", d.created_at, d.last_error.clone()),
         S::Queued if d.last_error.is_some() => ("failing", d.created_at, d.last_error.clone()),
-        S::Queued | S::Digest | S::Suppressed => ("waiting", d.created_at, None),
+        S::Queued | S::Digest | S::Sending | S::Suppressed => ("waiting", d.created_at, None),
     };
     ChannelHealthDto {
         state: state.into(),

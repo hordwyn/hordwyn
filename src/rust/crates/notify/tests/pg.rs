@@ -87,15 +87,33 @@ async fn engine_on_postgres_dedupes_and_queues_digests() {
     // 2026-01-01 is a Thursday: the digest is due Monday 2026-01-05 08:00 UTC
     let due: chrono::DateTime<chrono::Utc> = "2026-01-05T08:00:00Z".parse().unwrap();
     assert_eq!(log[0].due_at, due);
+    // the digest is claimed in one statement, once (OT-37, #6); a dead run's claim is taken
+    // over once it is stale
+    let now = t.clock.now();
+    let minutes = chrono::Duration::minutes;
+    let early = due - chrono::Duration::seconds(1);
+    let claim = |until, at| store.claim_digest(ch.id, until, at, at - minutes(15));
+    assert_eq!(claim(early, now).await.unwrap().len(), 0);
+    let claimed = claim(due, now).await.unwrap();
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].state, DeliveryState::Sending);
+    assert_eq!(claimed[0].sent_at, Some(now));
+    assert_eq!(claim(due, now).await.unwrap().len(), 0, "claimed once");
     assert_eq!(
+        claim(due, now + minutes(16)).await.unwrap().len(),
+        1,
+        "stale"
+    );
+    let id = claimed[0].id;
+    let later = now + minutes(16);
+    assert!(
         store
-            .due_digest(ch.id, due - chrono::Duration::seconds(1))
+            .claim_delivery(id, later, later - minutes(15))
             .await
             .unwrap()
-            .len(),
-        0
+            .is_none(),
+        "held by the digest run"
     );
-    assert_eq!(store.due_digest(ch.id, due).await.unwrap().len(), 1);
     assert_eq!(
         store
             .count_since(ch.id, "admin.signup", t.clock.now())
