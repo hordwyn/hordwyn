@@ -459,6 +459,20 @@ impl App {
             self.repos.sessions.delete(session_id).await?;
             self.publish_session(&s).await?;
         }
+        // a view "watched with" people: its session goes with it (OT-22)
+        if !matches!(target.progress, Progress::Session { .. })
+            && let Some(op) = target.client_op_id
+            && let Some(s) = self
+                .repos
+                .sessions
+                .get(crate::sessions::view_session_id(actor.user_id, op))
+                .await?
+            && s.owner == actor.user_id
+            && s.item_id == target.item_id
+        {
+            self.repos.sessions.delete(s.id).await?;
+            self.publish_session(&s).await?;
+        }
         self.publish(AppEvent::entity_updated(
             "progress_event",
             stored.id.0,

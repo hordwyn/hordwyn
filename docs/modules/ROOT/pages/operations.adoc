@@ -407,6 +407,22 @@ share one pace for it through the database (at most one request per second from 
 together), so they can run while the server is up and while its worker works off the
 queue; they are then simply slower.
 
+== Sessions left behind by an undone view
+
+Before 1.0.1, Undo of a view logged "Watched with ..." took back the view but kept its
+session with the people: their card still counted it and "History with ..." listed it.
+Undo deletes that session now. The ones left behind earlier are found and removed with:
+
+[source,sh]
+----
+cli sessions orphaned          # a dry run: lists owner, date and title, changes nothing
+cli sessions orphaned --apply  # deletes the sessions it listed
+----
+
+It lists only a session whose view was undone (the session id is derived from the view's
+client operation id); plays, sessions of views that stand and copies a linked person made
+with "Copy to my log" are never touched. Running it again finds nothing.
+
 == Search index
 
 [source,shell]

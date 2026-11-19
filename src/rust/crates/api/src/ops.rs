@@ -552,32 +552,20 @@ pub async fn log_progress(
         .map_err(|e| ApiError::bad_request(format!("progress: {e}")))?;
     let occurred_at = client_time(s, "occurred_at", b.occurred_at.as_deref())?;
     let op = b.client_op_id.map(|o| parse_id(&o, |u| u)).transpose()?;
-    if !b.with.is_empty() {
-        // the session is logged first: not for a view the log would refuse (a date before
-        // the start of a running rewatch run, DEC-591)
+    let e = if b.with.is_empty() {
         s.app
-            .check_progress(a, item_id, &progress, occurred_at, op)
-            .await?;
-        let me = s.app.user(a.user_id).await?;
-        let mut participants = vec![Participant::new(me.self_companion)];
-        for c in &b.with {
-            participants.push(Participant::new(parse_id(c, CompanionId)?));
-        }
-        let mut session = app::NewSession::new(item_id, participants);
-        session.started_at = occurred_at;
-        // Idempotency key of the session, derived from the client op id (replays are no-ops).
-        session.client_op_id = op.map(|o| {
-            let h = blake3::hash(&[o.as_bytes().as_slice(), b"session"].concat());
-            let mut bytes = [0u8; 16];
-            bytes.copy_from_slice(&h.as_bytes()[..16]);
-            uuid::Uuid::from_bytes(bytes)
-        });
-        s.app.log_session(a, session).await?;
-    }
-    let e = s
-        .app
-        .log_progress(a, item_id, progress, occurred_at, op)
-        .await?;
+            .log_progress(a, item_id, progress, occurred_at, op)
+            .await?
+    } else {
+        let with = b
+            .with
+            .iter()
+            .map(|c| parse_id(c, CompanionId))
+            .collect::<ApiResult<Vec<_>>>()?;
+        s.app
+            .log_view_with(a, item_id, progress, occurred_at, op, with)
+            .await?
+    };
     s.pin_cover(item_id).await;
     Ok(dto::progress(&e))
 }

@@ -55,7 +55,7 @@ pub use manual::{
 pub use next_step::{NextStep, Rewatch, first_step, next_step, pass_at, rewatch, times};
 pub use people::{CompanionStats, MergeSuggestion, MostPlayed, StatItem, suggest_merges};
 pub use plays::PlayTotals;
-pub use sessions::NewSession;
+pub use sessions::{NewSession, view_session_id};
 pub use stats::{
     Amounts, Bucket, GroupTotals, KindAmounts, KindTotals, MonthAmounts, SeriesPoint, StatsTotals,
     Totals, UNDATED, month_amounts, window_amounts,

@@ -38,6 +38,44 @@ pub(crate) fn shell_app(pool: &sqlx::PgPool) -> App {
     }
 }
 
+/// `cli sessions orphaned [--apply]` (OT-22, #1): the sessions of views "watched with" whose
+/// view was undone before 1.0.1 (Undo left them behind), as lines `owner  started  title`;
+/// with `apply` they are deleted. Nothing else is touched.
+///
+/// # Errors
+/// Database errors.
+pub async fn orphaned_sessions(pool: &sqlx::PgPool, apply: bool) -> anyhow::Result<String> {
+    use std::fmt::Write;
+    let app = shell_app(pool);
+    let found = app
+        .orphaned_view_sessions(apply)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut out = String::new();
+    for s in &found {
+        let owner = app
+            .user(s.owner)
+            .await
+            .map_or_else(|_| s.owner.0.to_string(), |u| u.username);
+        let title = app
+            .catalog_item(s.item_id)
+            .await
+            .map_or_else(|_| s.item_id.0.to_string(), |i| i.title);
+        let _ = writeln!(out, "  {owner}  {}  {title}", s.started_at.to_rfc3339());
+    }
+    let _ = write!(
+        out,
+        "{} session(s) left behind by an undone view{}",
+        found.len(),
+        match (apply, found.is_empty()) {
+            (_, true) => "; nothing to do",
+            (true, false) => ", deleted",
+            (false, false) => "; nothing was changed, --apply deletes them",
+        }
+    );
+    Ok(out)
+}
+
 /// `cli reindex --now` (REL-1): index everything the outbox holds in this process and wait,
 /// as the worker's indexer would; for an instance without a worker (a staging copy runs
 /// `--role=web` so that it sends no notification). Returns the outbox rows handled.

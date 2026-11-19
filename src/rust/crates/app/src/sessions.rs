@@ -45,7 +45,116 @@ impl NewSession {
     }
 }
 
+/// The id of the session that a view "watched with" people logs for `user` with the client op
+/// id `op` of its progress event (OT-22): the session's own op id is derived from the event's,
+/// and [`App::log_session`] derives the session id from that and the user. Undo finds the
+/// session of a view with it, and `cli sessions orphaned` the ones an Undo left behind.
+#[must_use]
+pub fn view_session_id(user: domain::ids::UserId, op: uuid::Uuid) -> SessionId {
+    session_id_for(user, view_session_op(op))
+}
+
+fn view_session_op(op: uuid::Uuid) -> uuid::Uuid {
+    let h = blake3::hash(&[op.as_bytes().as_slice(), b"session"].concat());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&h.as_bytes()[..16]);
+    uuid::Uuid::from_bytes(bytes)
+}
+
+fn session_id_for(user: domain::ids::UserId, op: uuid::Uuid) -> SessionId {
+    SessionId(uuid::Uuid::new_v5(&op, user.0.as_bytes()))
+}
+
 impl App {
+    /// Log a view of `item_id` "watched with" the companions `with`: a session with the
+    /// actor and them, then the progress event. The session's id is derived from the event's
+    /// client op id ([`view_session_id`]); without one the server picks the op id, so Undo of
+    /// the event always finds the session (OT-22). A replay of a view undone since answers
+    /// the undone event and stores no session.
+    ///
+    /// # Errors
+    /// As [`App::check_progress`], [`App::log_session`] and [`App::log_progress`].
+    pub async fn log_view_with(
+        &self,
+        actor: Actor,
+        item_id: ItemId,
+        progress: Progress,
+        occurred_at: Option<Timestamp>,
+        client_op_id: Option<uuid::Uuid>,
+        with: Vec<CompanionId>,
+    ) -> AppResult<domain::progress::ProgressEvent> {
+        let op = client_op_id.unwrap_or_else(|| self.uuid());
+        if client_op_id.is_some()
+            && let Some(e) = self
+                .repos
+                .progress
+                .for_item(actor.user_id, item_id)
+                .await?
+                .into_iter()
+                .find(|e| e.client_op_id == Some(op))
+            && self.is_undone(actor, &e).await?
+        {
+            return Ok(e);
+        }
+        // the session is logged first: not for a view the log would refuse (a date before
+        // the start of a running rewatch run, DEC-591)
+        self.check_progress(actor, item_id, &progress, occurred_at, Some(op))
+            .await?;
+        let me = self.user(actor.user_id).await?;
+        let mut participants = vec![Participant::new(me.self_companion)];
+        participants.extend(with.into_iter().map(Participant::new));
+        let mut session = NewSession::new(item_id, participants);
+        session.started_at = occurred_at;
+        // idempotency key of the session, derived from the event's (replays are no-ops)
+        session.client_op_id = Some(view_session_op(op));
+        self.log_session(actor, session).await?;
+        self.log_progress(actor, item_id, progress, occurred_at, Some(op))
+            .await
+    }
+
+    /// The sessions of views "watched with" whose view was undone, which an Undo before
+    /// 1.0.1 left behind (OT-22): per account, each session whose id is the
+    /// [`view_session_id`] of an undone event of its owner for its item. With `apply` they
+    /// are deleted (as Undo deletes them now). Plays are never among them (their Undo has
+    /// always deleted the session).
+    ///
+    /// # Errors
+    /// Store errors.
+    pub async fn orphaned_view_sessions(&self, apply: bool) -> AppResult<Vec<Session>> {
+        let mut found = Vec::new();
+        for user in self.repos.users.list().await? {
+            let events = self.repos.progress.by_user(user.id).await?;
+            let undone: HashSet<domain::ids::EventId> = events
+                .iter()
+                .filter_map(|e| match e.progress {
+                    Progress::Undo { event_id } => Some(event_id),
+                    _ => None,
+                })
+                .collect();
+            let gone: HashSet<(SessionId, ItemId)> = events
+                .iter()
+                .filter(|e| undone.contains(&e.id))
+                .filter(|e| !matches!(e.progress, Progress::Session { .. }))
+                .filter_map(|e| Some((view_session_id(user.id, e.client_op_id?), e.item_id)))
+                .collect();
+            if gone.is_empty() {
+                continue;
+            }
+            for s in self.repos.sessions.by_owner(user.id).await? {
+                if gone.contains(&(s.id, s.item_id)) {
+                    found.push(s);
+                }
+            }
+        }
+        if apply {
+            for s in &found {
+                self.repos.sessions.delete(s.id).await?;
+                self.publish_session(s).await?;
+            }
+        }
+        Ok(found)
+    }
+
     /// Log a session (play, gaming session, "watched with"). Participants must be active
     /// companions of the actor. For kinds with the `Sessions` progress model a progress event
     /// is appended as well.
@@ -96,7 +205,7 @@ impl App {
         // same session (UX1-3); the user id keeps the ids of two users apart
         let id = op.map_or_else(
             || SessionId(self.uuid()),
-            |o| SessionId(uuid::Uuid::new_v5(&o, actor.user_id.0.as_bytes())),
+            |o| session_id_for(actor.user_id, o),
         );
         let session = Session {
             id,

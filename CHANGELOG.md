@@ -10,6 +10,12 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
 
 ## [Unreleased]
 
+### Fixed
+
+- Undo of a view logged "Watched with ..." also deletes its session with those people, so the
+  person card and "History with ..." no longer count it; `cli sessions orphaned [--apply]`
+  removes the sessions an earlier Undo left behind (#1, DEC-853).
+
 ## [1.0.0] - 2026-11-17
 
 The first release: a home instance for one household, one web process behind a reverse

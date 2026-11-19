@@ -20,6 +20,7 @@ chrono.workspace = true
 # DEC-239: IANA zones, MIT OR Apache-2.0, tz data public domain; the version notify uses
 chrono-tz = "0.10.4"
 uuid = { version = "1.29.0", features = ["serde"] }
+blake3.workspace = true
 
 [dev-dependencies]
 kinds.workspace = true

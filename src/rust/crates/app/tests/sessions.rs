@@ -174,3 +174,57 @@ async fn owners_can_stop_sharing_sessions() {
     env.app.set_privacy(alice, true).await.unwrap();
     assert_eq!(env.app.shared_sessions(bob).await.unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn undo_of_a_view_with_a_person_deletes_its_session_and_leftovers_are_found() {
+    // OT-22 (#1)
+    let env = TestEnv::new();
+    let (u, me) = common::user(&env, "alice").await;
+    let movie = common::item(&env.app, "movie", "Coco").await;
+    let anna = env.app.create_companion(me, "Anna").await.unwrap();
+    let op = uuid::Uuid::from_u128(0xc1);
+    let e = env
+        .app
+        .log_view_with(
+            me,
+            movie.id,
+            Progress::Finished,
+            None,
+            Some(op),
+            vec![anna.id],
+        )
+        .await
+        .unwrap();
+    let id = app::view_session_id(u.id, op);
+    let session = env.app.repos.sessions.get(id).await.unwrap().unwrap();
+    assert_eq!(session.item_id, movie.id);
+    env.app.undo_progress(me, e.id).await.unwrap();
+    assert!(env.app.repos.sessions.get(id).await.unwrap().is_none());
+    assert_eq!(env.app.orphaned_view_sessions(false).await.unwrap(), vec![]);
+
+    // what an Undo before the fix left behind, beside a view with Anna that stays
+    env.app.repos.sessions.insert(&session).await.unwrap();
+    let kept = uuid::Uuid::from_u128(0xc2);
+    env.app
+        .log_view_with(
+            me,
+            movie.id,
+            Progress::Finished,
+            None,
+            Some(kept),
+            vec![anna.id],
+        )
+        .await
+        .unwrap();
+    let found = env.app.orphaned_view_sessions(false).await.unwrap();
+    assert_eq!(found.iter().map(|s| s.id).collect::<Vec<_>>(), vec![id]);
+    assert!(
+        env.app.repos.sessions.get(id).await.unwrap().is_some(),
+        "a dry run"
+    );
+    assert_eq!(env.app.orphaned_view_sessions(true).await.unwrap().len(), 1);
+    assert!(env.app.repos.sessions.get(id).await.unwrap().is_none());
+    let live = app::view_session_id(u.id, kept);
+    assert!(env.app.repos.sessions.get(live).await.unwrap().is_some());
+    assert_eq!(env.app.orphaned_view_sessions(false).await.unwrap(), vec![]);
+}

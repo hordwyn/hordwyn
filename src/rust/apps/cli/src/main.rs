@@ -35,6 +35,8 @@ const USAGE: &str = "usage: cli [--config <file>] <command>
                                    by title (books entered by hand are left out); prints the
                                    matches, --apply stores them (and logs what each book was
                                    before), --applied lists that log
+  sessions orphaned [--apply]      list the sessions of views watched with people that an undo
+                                   before 1.0.1 left behind; --apply deletes them
   admin promote <username>         make an account admin
   admin reset-password <username>  print a one-time password reset link (1 hour)
   admin reset-totp <username>      remove the authenticator and its recovery codes
@@ -53,6 +55,7 @@ enum Cmd {
     RefreshFailed { kind: Option<String>, apply: bool },
     MatchBooks { apply: bool },
     MatchesApplied,
+    OrphanedSessions { apply: bool },
     Promote(String),
     ResetPassword(String),
     ResetTotp(String),
@@ -138,6 +141,12 @@ fn command(words: &[&str], flags: &[&str], kind: &mut Option<String>) -> Result<
                 (true, true) => bail!("--apply or --applied, not both\n\n{USAGE}"),
                 (_, true) => Cmd::MatchesApplied,
                 (apply, false) => Cmd::MatchBooks { apply },
+            }
+        }
+        ["sessions", "orphaned"] => {
+            known(&["--apply"])?;
+            Cmd::OrphanedSessions {
+                apply: flags.contains(&"--apply"),
             }
         }
         ["admin", "promote", u] => {
@@ -356,6 +365,9 @@ async fn run(args: Args) -> Result<()> {
             } else {
                 println!("queued {n} documents; the worker's indexer picks them up");
             }
+        }
+        Cmd::OrphanedSessions { apply } => {
+            println!("{}", server::escape::orphaned_sessions(&pool, apply).await?);
         }
         _ => unreachable!("handled above"),
     }
@@ -637,6 +649,20 @@ mod tests {
             p("match-books --apply").unwrap().cmd,
             Cmd::MatchBooks { apply: true }
         );
+    }
+
+    #[test]
+    fn parses_the_1_0_1_commands() {
+        assert_eq!(
+            p("sessions orphaned").unwrap().cmd,
+            Cmd::OrphanedSessions { apply: false },
+            "a dry run unless asked"
+        );
+        assert_eq!(
+            p("sessions orphaned --apply").unwrap().cmd,
+            Cmd::OrphanedSessions { apply: true }
+        );
+        assert!(p("sessions orphaned --now").is_err());
     }
 
     #[test]

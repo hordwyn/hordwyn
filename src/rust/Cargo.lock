@@ -115,7 +115,6 @@ dependencies = [
  "auth",
  "axum",
  "base64 0.22.1",
- "blake3",
  "catalog-core",
  "chrono",
  "contracts",
@@ -148,6 +147,7 @@ version = "1.0.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
+ "blake3",
  "chrono",
  "chrono-tz",
  "domain",

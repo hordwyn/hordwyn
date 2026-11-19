@@ -2743,3 +2743,89 @@ async fn a_sourced_item_refuses_the_edit(
     assert_eq!(page["item"]["title"], "Heat");
     assert_eq!(t.jobs.jobs().len(), 1, "its source is asked");
 }
+
+#[tokio::test]
+async fn undo_of_a_view_with_a_person_removes_its_session() {
+    // OT-22 (#1): log "Watched with Ben", Undo; the session with Ben must go too, and a
+    // replay of the same command after the Undo must not bring it back
+    let (state, env) = state();
+    let movie = env
+        .app
+        .upsert_catalog_item(app::NewCatalogItem {
+            kind: domain::kind::KindId::new("movie").unwrap(),
+            title: "Heat".into(),
+            original_title: None,
+            year: Some(1995),
+            description: None,
+            external_ids: vec![domain::catalog::ExternalId::new("test", "heat")],
+            attributes: serde_json::json!({}),
+            cover_url: None,
+            popularity: None,
+        })
+        .await
+        .unwrap();
+    let app = api::router(state);
+    let token = signed_up(&app).await;
+    let tk = Some(token.as_str());
+    let (_, _, ben) = call(
+        &app,
+        "POST",
+        "/api/v1/companions",
+        tk,
+        Some(serde_json::json!({"name": "Ben"})),
+    )
+    .await;
+    let uri = format!("/api/v1/items/{}/progress", movie.id.0);
+    let person = format!("/api/v1/people/{}", ben["id"].as_str().unwrap());
+    let sessions = |app: axum::Router| {
+        let person = person.clone();
+        async move {
+            let (_, _, list) = call(&app, "GET", "/api/v1/sessions", tk, None).await;
+            let count = list.as_array().unwrap().len();
+            // the person card: "Together n" and "Last: ..."
+            let (_, _, card) = call(&app, "GET", &person, tk, None).await;
+            assert_eq!(card["person"]["together"], count, "{card}");
+            assert_eq!(card["person"]["last"].is_null(), count == 0, "{card}");
+            count
+        }
+    };
+    let watched = serde_json::json!({
+        "progress": {"type": "finished"},
+        "with": [ben["id"]],
+        "client_op_id": "01900000-0000-7000-8000-0000000000c1",
+    });
+    let (st, _, view) = call(&app, "POST", &uri, tk, Some(watched.clone())).await;
+    assert_eq!(st, StatusCode::OK, "{view}");
+    assert_eq!(sessions(app.clone()).await, 1);
+    let undo = format!("/api/v1/progress/{}/undo", view["id"].as_str().unwrap());
+    let (st, _, undone) = call(&app, "POST", &undo, tk, None).await;
+    assert_eq!(st, StatusCode::OK, "{undone}");
+    assert_eq!(sessions(app.clone()).await, 0, "the undo leaves no session");
+    let (st, _, again) = call(&app, "POST", &uri, tk, Some(watched)).await;
+    assert_eq!(st, StatusCode::OK, "{again}");
+    assert_eq!(
+        again["id"], view["id"],
+        "the replay answers the undone event"
+    );
+    assert_eq!(
+        sessions(app.clone()).await,
+        0,
+        "a replay after the undo stores none"
+    );
+
+    // a client without an op id: the server links the session to the event itself
+    let (st, _, view) = call(
+        &app,
+        "POST",
+        &uri,
+        tk,
+        Some(serde_json::json!({"progress": {"type": "finished"}, "with": [ben["id"]]})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{view}");
+    assert_eq!(sessions(app.clone()).await, 1);
+    let undo = format!("/api/v1/progress/{}/undo", view["id"].as_str().unwrap());
+    let (st, _, undone) = call(&app, "POST", &undo, tk, None).await;
+    assert_eq!(st, StatusCode::OK, "{undone}");
+    assert_eq!(sessions(app).await, 0, "the undo leaves no session");
+}
