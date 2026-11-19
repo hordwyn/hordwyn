@@ -11,7 +11,9 @@ const USAGE: &str = "usage: cargo xtask <command>
                      cargo-deny, licence notices, sqlx offline-cache check, tests
                      (starts local services when TEST_DATABASE_URL is unset)
   fmt                format the workspace
-  e2e                run the Playwright end-to-end suite
+  e2e [<playwright args>]
+                     run the Playwright end-to-end suite (arguments go to `playwright
+                     test`, such as a spec file or `-g <title>`)
   e2e-scan <log>     fail when a server log of an e2e run holds a panic (CI job)
   dev                start the development server
   services up|down   start or stop local Postgres, Meilisearch and RustFS (S3)
@@ -33,7 +35,7 @@ fn main() -> Result<()> {
     match cmd.as_str() {
         "ci" => ci(),
         "fmt" => cargo(&["fmt", "--all"], &[]),
-        "e2e" => e2e(),
+        "e2e" => e2e(&std::env::args().skip(2).collect::<Vec<_>>()),
         // the job keeps the file either way (an artifact on failure), so it never deletes it
         "e2e-scan" => match std::env::args().nth(2) {
             Some(log) => scan_server_log(std::path::Path::new(&log), false),
@@ -281,7 +283,7 @@ fn upgrade_test(given: Option<&str>) -> Result<()> {
 }
 
 /// Build the site with the dev gallery and run the Playwright suite against it.
-fn e2e() -> Result<()> {
+fn e2e(extra: &[String]) -> Result<()> {
     let web = xtask::repo_root().join("src/web");
     // a fresh database per run, unless the caller provides one (GitLab CI service)
     let db = if let Ok(url) = std::env::var("E2E_DATABASE_URL") {
@@ -316,6 +318,7 @@ fn e2e() -> Result<()> {
     ));
     let tests = run(Command::new("npx")
         .args(["playwright", "test"])
+        .args(extra)
         .env("E2E_DATABASE_URL", db)
         .env("E2E_SERVER_LOG", &log)
         .current_dir(web));
