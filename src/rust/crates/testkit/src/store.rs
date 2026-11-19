@@ -522,6 +522,20 @@ impl CatalogRepo for MemStore {
         Ok(ids)
     }
 
+    async fn library_items_from(&self, namespace: &str) -> RepoResult<Vec<ItemId>> {
+        let s = self.state();
+        let mut items: Vec<&CatalogItem> = s
+            .catalog
+            .values()
+            .filter(|i| {
+                i.external_ids.iter().any(|e| e.namespace == namespace)
+                    && s.library.values().any(|e| e.item_id == i.id)
+            })
+            .collect();
+        items.sort_by(|a, b| (&a.title, a.id.0).cmp(&(&b.title, b.id.0)));
+        Ok(items.into_iter().map(|i| i.id).collect())
+    }
+
     async fn items_without_namespace(
         &self,
         kind: &KindId,

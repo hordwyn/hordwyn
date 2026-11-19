@@ -722,8 +722,8 @@ impl App {
         Ok(again)
     }
 
-    /// The items that hold an external id in `namespace` (the id of a source), oldest data
-    /// first; with `apply` each is due again and gets a refresh job on the background lane
+    /// The items in somebody's library that hold an external id in `namespace` (the id of a
+    /// source), by title; search results nobody added are left out. With `apply` each is due again and gets a refresh job on the background lane
     /// (`cli refresh --source`, for a release whose connector reads more than before, such
     /// as the `TheTVDB` episode counts of 1.0.1, #3). Returns them.
     ///
@@ -734,18 +734,8 @@ impl App {
         namespace: &str,
         apply: bool,
     ) -> AppResult<Vec<CatalogItem>> {
-        let namespaces = [namespace.to_string()];
         let mut found = Vec::new();
-        // every item stamped before now: all of them
-        let now = self.now() + chrono::Duration::seconds(1);
-        let ids: Vec<ItemId> = self
-            .repos
-            .catalog
-            .provider_data_before(&namespaces, now, u32::MAX)
-            .await?
-            .into_iter()
-            .map(|(id, _)| id)
-            .collect();
+        let ids = self.repos.catalog.library_items_from(namespace).await?;
         for mut item in self.repos.catalog.get_many(&ids).await? {
             if apply {
                 item.fresh_until = None;

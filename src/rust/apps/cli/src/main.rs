@@ -31,8 +31,9 @@ const USAGE: &str = "usage: cli [--config <file>] <command>
                                    with one request per 50, the rest is queued for the
                                    worker. Prints what it would do; --apply does it
   refresh-source <source> [--apply]
-                                   ask the source again for every stored item with its id
-                                   (a release whose source reads more, see its notes);
+                                   ask the source again for every item in a library that
+                                   has its id (a release whose source reads more, see its
+                                   notes);
                                    prints the items, --apply queues them for the worker
   match-books [--apply | --applied]
                                    find the Open Library work of every book that has none,

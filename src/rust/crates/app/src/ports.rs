@@ -156,6 +156,9 @@ pub trait CatalogRepo: Send + Sync {
     /// state `failed`, or never fetched (`fetched_at` empty) and in somebody's library (an
     /// import stub; search results nobody added are left out).
     async fn unfetched_items(&self, kind: Option<&KindId>) -> RepoResult<Vec<ItemId>>;
+    /// The ids of the items in somebody's library that hold an external id in `namespace`, by
+    /// title (`cli refresh-source`; search results nobody added are left out).
+    async fn library_items_from(&self, namespace: &str) -> RepoResult<Vec<ItemId>>;
     /// The ids of the items of `kind` that hold no external id in `namespace`, by title.
     async fn items_without_namespace(
         &self,

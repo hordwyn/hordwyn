@@ -416,12 +416,13 @@ all of them at once:
 [source,sh]
 ----
 cli refresh-source tvdb          # a dry run: lists the items (the first 20), changes nothing
-cli refresh-source tvdb --apply  # queues a refresh job for every item with a TheTVDB id
+cli refresh-source tvdb --apply  # queues a refresh job for every such item
 ----
 
 The argument is the id of a source (`tmdb`, `tvdb`, `igdb`, `openlibrary`, `wikidata`,
-`podcastindex`); it must be compiled in and switched on. Each item with an id of that source
-is made due and gets a refresh job on the background lane; the worker of the running server
+`podcastindex`); it must be compiled in and switched on. It takes the items that are in
+somebody's library and hold an id of that source; search results nobody added are left out
+(the retention sweep handles those). Each of them is made due and gets a refresh job on the background lane; the worker of the running server
 works them off at the source's pace, and shows then fetch their episodes as after any
 refresh. Running it twice queues nothing twice (one job per item).
 

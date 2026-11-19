@@ -55,8 +55,8 @@ Other steps, in the order they are needed, after the new version is up:
 dc exec app cli sessions orphaned
 dc exec app cli sessions orphaned --apply
 ----
-. Shows from TheTVDB (issue 3): ask TheTVDB again for every stored show, so that their
-  seasons get episode counts. Only for an instance with a TheTVDB key. The worker refreshes
+. Shows from TheTVDB (issue 3): ask TheTVDB again for every show in a library, so that their
+  seasons get episode counts (search results nobody added are left out). Only for an instance with a TheTVDB key. The worker refreshes
   them one by one at the source's pace; a show's episodes follow with its refresh.
 +
 [source,sh]
@@ -72,7 +72,7 @@ dc exec app cli refresh-source tvdb --apply
 dc exec app cli refresh-source openlibrary --apply
 ----
 +
-This asks Open Library about every book (one request a second, shared with the running
+This asks Open Library about every book in a library (one request a second, shared with the running
 server), so on a large library it runs a while in the background.
 
 The delivery log of notifications can show a new state, "Sending", while a message is on its

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id FROM catalog_items c\n             WHERE EXISTS (SELECT 1 FROM external_ids e\n                           WHERE e.item_id = c.id AND e.namespace = $1)\n               AND EXISTS (SELECT 1 FROM library_entries l WHERE l.item_id = c.id)\n             ORDER BY c.title, c.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "catalog_items",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4705372941719b01db419c686a9c87ee014af291604f4566394ef6d8b667b1bf"
+}

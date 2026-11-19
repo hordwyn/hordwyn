@@ -429,6 +429,21 @@ impl CatalogRepo for PgStore {
         Ok(rows.into_iter().map(ItemId).collect())
     }
 
+    async fn library_items_from(&self, namespace: &str) -> Res<Vec<ItemId>> {
+        let rows = sqlx::query_scalar!(
+            "SELECT c.id FROM catalog_items c
+             WHERE EXISTS (SELECT 1 FROM external_ids e
+                           WHERE e.item_id = c.id AND e.namespace = $1)
+               AND EXISTS (SELECT 1 FROM library_entries l WHERE l.item_id = c.id)
+             ORDER BY c.title, c.id",
+            namespace
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(be)?;
+        Ok(rows.into_iter().map(ItemId).collect())
+    }
+
     async fn items_without_namespace(&self, kind: &KindId, namespace: &str) -> Res<Vec<ItemId>> {
         let rows = sqlx::query_scalar!(
             "SELECT c.id FROM catalog_items c

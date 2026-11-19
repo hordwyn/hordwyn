@@ -32,7 +32,8 @@ to 9) and a security update of the mail library. No database migration.
   removes the sessions an earlier Undo left behind (#1, DEC-853).
 - Shows from TheTVDB list all their seasons and episodes: the connector reads the episode
   count and first air date of each season from the aired-order episode list; `cli
-  refresh-source tvdb --apply` refreshes the shows stored before (#3, DEC-854).
+  refresh-source tvdb --apply` refreshes the shows in a library stored before (#3, DEC-854,
+  DEC-864).
 - People: "Merge with..." is offered only when there is another person to merge with, and Swap
   in the merge dialog is disabled until a person to keep is chosen (#2, DEC-856).
 - With the language on "automatic", the sources are searched in the language the page shows

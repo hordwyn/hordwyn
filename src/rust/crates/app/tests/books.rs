@@ -362,6 +362,17 @@ async fn requeue_source_queues_every_item_with_an_id_of_that_source() {
         .upsert_catalog_item(new("Dark", "tmdb"))
         .await
         .unwrap();
+    // a search result nobody added is left out (staging of 1.0.1-rc.1 listed 2055 of them)
+    let searched = env
+        .app
+        .upsert_catalog_item(new("Arnau", "tvdb"))
+        .await
+        .unwrap();
+    let (_, me) = common::user(&env, "robin").await;
+    for i in [show.id, other.id] {
+        env.app.add_to_library(me, i, None).await.unwrap();
+    }
+    env.jobs.drain();
     let dry = env.app.requeue_source("tvdb", false).await.unwrap();
     assert_eq!(ids(&dry), vec![show.id]);
     assert!(env.jobs.drain().is_empty(), "a dry run queues nothing");
@@ -379,5 +390,10 @@ async fn requeue_source_queues_every_item_with_an_id_of_that_source() {
         load(&env, other.id).await.fresh_until,
         other.fresh_until,
         "another source"
+    );
+    assert_eq!(
+        load(&env, searched.id).await.fresh_until,
+        searched.fresh_until,
+        "in nobody's library"
     );
 }
