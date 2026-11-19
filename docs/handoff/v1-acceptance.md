@@ -200,8 +200,9 @@ Use a machine outside your network (a phone hotspot, a rented shell) for steps 1
   session cookie is `Secure` and `HttpOnly`.
 
 - [ ] **16. The proxy is believed.** Sign in from the outside machine. Admin > Audit log
-  shows that machine's public address on the sign-in row, not `172.x` or the proxy's
-  address. Admin > Overview, "Reverse proxy", still reads "No forwarded requests from an
+  shows that machine's public address on the sign-in row (`auth.provider_sign_in` for a
+  sign-in through the identity provider, from 1.0.1; `auth.local_sign_in` for one at
+  `/sign-in/local`), not `172.x` or the proxy's address. Admin > Overview, "Reverse proxy", still reads "No forwarded requests from an
   unlisted proxy". If not: correct `APP__SERVER__TRUSTED_PROXIES`, `dc up -d`, again. Do
   not go on to step 17 before this holds (F-7).
 

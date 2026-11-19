@@ -248,6 +248,7 @@ async fn oidc_callback(
             return_to,
             hint,
         }) => {
+            audit_provider_sign_in(&s, &token.0, "oidc").await;
             let mut resp = redirect(&s, &return_to);
             let headers = resp.headers_mut();
             headers.append(
@@ -287,6 +288,26 @@ async fn oidc_callback(
         }
         Err(f) => redirect(&s, &failure_location(&f)),
     })
+}
+
+/// A sign-in through the identity provider is audited like a break-glass one (OT-32, #8):
+/// `auth.provider_sign_in` on the account, with its username and how it signed in; the audit
+/// row carries the client address. A failed lookup only skips the row.
+async fn audit_provider_sign_in(s: &ApiState, token: &str, method: &str) {
+    let Ok(Some(actor)) = s.auth.session(token).await else {
+        return;
+    };
+    let Ok(user) = s.app.user(actor.user_id).await else {
+        return;
+    };
+    crate::admin::audit(
+        s,
+        Some(actor),
+        "auth.provider_sign_in",
+        Some(("user", user.id.0.to_string())),
+        serde_json::json!({"username": user.username, "method": method}),
+    )
+    .await;
 }
 
 fn link_error(e: LinkError) -> ApiError {
@@ -501,6 +522,7 @@ async fn confirm_link(
         s.auth.session(&token.0).await?.ok_or_else(|| {
             ApiError::new(StatusCode::UNAUTHORIZED, "unauthorized", "not signed in")
         })?;
+    audit_provider_sign_in(&s, &token.0, "oidc_link_password").await;
     let user = crate::dto::user(&s.app.user(session.user_id).await?);
     let days = i64::from(s.auth.settings().session_days);
     let mut r = Json(SessionDto {

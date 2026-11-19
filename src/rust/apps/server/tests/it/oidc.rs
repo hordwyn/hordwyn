@@ -435,6 +435,47 @@ async fn env_provider_full_code_exchange_and_read_only_row() {
     assert_eq!(r.location.as_deref(), Some("/"));
     let again = r.cookie("_session").unwrap();
     assert_eq!(me(&t, &again).await["id"], u["id"]);
+
+    // OT-32 (#8): every sign-in through the provider is audited like a break-glass one, with
+    // the client address
+    let r = call(&t, "GET", "/auth/oidc/start", None, None).await;
+    let pending = r.cookie("_oidc").unwrap();
+    let back =
+        t.a.authorize(r.location.as_deref().unwrap(), &Login::new("Anna.Admin"));
+    let r = send(
+        &t.app,
+        Req {
+            peer: Some("203.0.113.7:50000"),
+            ..Req::get(
+                &format!("/api/v1/auth/oidc/callback?{back}"),
+                Some(&pending),
+            )
+        },
+    )
+    .await;
+    assert_eq!(r.status, 302, "{}", r.text);
+    let r = call(
+        &t,
+        "GET",
+        "/admin/audit?action=auth.provider_sign_in",
+        Some(&session),
+        None,
+    )
+    .await;
+    let rows = r.body["entries"].as_array().unwrap();
+    assert_eq!(rows.len(), 3, "{}", r.body);
+    assert!(
+        rows.iter().all(|e| e["action"] == "auth.provider_sign_in"
+            && e["detail"]["username"] == "anna.admin"
+            && e["detail"]["method"] == "oidc"),
+        "{}",
+        r.body
+    );
+    assert_eq!(
+        rows[0]["client_addr"], "203.0.113.7",
+        "newest first: {}",
+        r.body
+    );
     // the public button list for the sign-in page
     let r = call(&t, "GET", "/auth/oidc/providers", None, None).await;
     assert_eq!(r.body[0]["display_name"], "Family SSO", "{}", r.body);

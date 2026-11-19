@@ -39,6 +39,8 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
 
 - "Send a test" (Admin > Instance > Mail) writes one info line with the relay's answer when the
   relay took the message, such as its queue id, without addresses (#7, DEC-861).
+- Sign-ins through the identity provider write an audit row `auth.provider_sign_in` with the
+  username and the client address, like break-glass sign-ins (#8, DEC-862).
 - The image carries the licence notices of its third-party parts (Rust crates, icons, fonts,
   Tailwind CSS) in `/usr/share/doc/app/THIRD-PARTY-NOTICES.txt`, generated at build time;
   the build and the CI job `notices` fail when they cannot be made (#9, DEC-855).
