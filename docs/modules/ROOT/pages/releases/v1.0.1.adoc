@@ -1,0 +1,105 @@
+= Release notes 1.0.1
+
+Released 2026-11-19, tag `v1.0.1`. Changes in detail: `CHANGELOG.md`, section 1.0.1. The
+work items are the issues 1 to 9 of the milestone 1.0.1 in the project's GitLab.
+
+== Highlights
+
+* Undo of "Watched with..." also removes the session with those people: the person card and
+  "History with ..." no longer count it. A command removes the sessions an earlier Undo left
+  behind (below).
+* Shows from TheTVDB list all their seasons and episodes, so "Mark season watched" and "Mark
+  show watched" work for them. Shows stored before need one refresh (below).
+* With the language on "automatic", the sources are searched in the language the page
+  shows (the browser's), not in the instance language.
+* Books from Open Library no longer take their year from one edition with a wrong date.
+* A notification is sent once, also when two workers run it.
+* Sign-ins through the identity provider are in the audit log, with the client address.
+* "Send a test" for mail logs the relay's answer (its queue id) when the relay took the
+  message.
+* People: "Merge with..." is only offered when there is somebody to merge with.
+* The image carries the licence notices of its third-party parts in
+  `/usr/share/doc/app/THIRD-PARTY-NOTICES.txt`.
+* Security: the mail library (lettre 0.11.24) fixes RUSTSEC-2026-0560 to RUSTSEC-2026-0565,
+  among them a STARTTLS reply injection; it matters for every instance that sends mail
+  through a relay with STARTTLS.
+
+== Upgrade steps, routine
+
+From 1.0.0: the steps of xref:operations.adoc#_upgrade[Operations, Upgrade], tried on
+xref:staging.adoc[a staging copy] first. In short: backup (database dump and secrets key),
+`git fetch --tags` and `git checkout v1.0.1`, `APP_IMAGE=registry.gitlab.com/hordwyn/hordwyn:1.0.1`
+in `config/.env` and `dc pull` (self-built: `dc build`), `cli migrate --dry-run`,
+`dc up -d --no-build`, check.
+
+== Upgrade steps, release-specific
+
+Database migrations of this release:
+
+[cols="1,4"]
+|===
+|Migration |What it does, and what to know
+
+|None.
+|`cli migrate --dry-run` reports "no pending migrations". The database of 1.0.1 is the one
+of 1.0.0, so 1.0.0 can run on it again (see Rollback).
+|===
+
+Other steps, in the order they are needed, after the new version is up:
+
+. Sessions left behind by an undone "Watched with..." (issue 1): list them, then remove
+  them. The dry run changes nothing; read its list (owner, date, title) before `--apply`.
++
+[source,sh]
+----
+dc exec app cli sessions orphaned
+dc exec app cli sessions orphaned --apply
+----
+. Shows from TheTVDB (issue 3): ask TheTVDB again for every stored show, so that their
+  seasons get episode counts. Only for an instance with a TheTVDB key. The worker refreshes
+  them one by one at the source's pace; a show's episodes follow with its refresh.
++
+[source,sh]
+----
+dc exec app cli refresh-source tvdb
+dc exec app cli refresh-source tvdb --apply
+----
+. Books from Open Library (issue 5), optional: the year of a book changes with its next
+  refresh. To correct every stored book now:
++
+[source,sh]
+----
+dc exec app cli refresh-source openlibrary --apply
+----
++
+This asks Open Library about every book (one request a second, shared with the running
+server), so on a large library it runs a while in the background.
+
+The delivery log of notifications can show a new state, "Sending", while a message is on its
+way (issue 6). An integration that reads the deliveries through the REST API sees the value
+`sending`.
+
+Skipping versions: none; 1.0.1 follows 1.0.0.
+
+== Known issues
+
+* The limits of xref:v1-scope.adoc#_limits_to_know[Limits to know] still apply.
+* One web process only (xref:operations.adoc#_roles[Roles]).
+* Board games: Wikidata knows about 4,700 board games, many with a title and a year only, and
+  is not asked until the admin has entered the operator contact.
+* Episode rows show numbers, not names (planned for 1.1.0).
+* Titles of items already added stay in the instance language; the instance language is set
+  through the brand only (planned later).
+* A book's year can still be off when its earliest editions disagree (one rule cannot tell a
+  pre-order date from the release), and the year of an item from a source cannot be
+  corrected in the app yet.
+* A search lists a show from TMDB and from TheTVDB as two rows; either can be added.
+
+== Rollback
+
+Back to 1.0.0: the database dump taken in the first upgrade step and
+xref:operations.adoc#_going_back[Going back]. Everything entered after that dump is lost.
+Because 1.0.1 adds no migration, 1.0.0 also starts on the database as 1.0.1 left it
+(`APP_IMAGE=registry.gitlab.com/hordwyn/hordwyn:1.0.0`, `git checkout v1.0.0`,
+`dc up -d --no-build`); deliveries in the state "Sending" are then left as they are and not
+sent again. Sessions removed with `cli sessions orphaned --apply` come back only with the dump.

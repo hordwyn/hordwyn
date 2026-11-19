@@ -10,11 +10,20 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
 
 ## [Unreleased]
 
-### Security
+## [1.0.1] - 2026-11-19
 
-- lettre 0.11.24 for the mail it sends (notifications, test mail, password resets): fixes
-  RUSTSEC-2026-0560 to RUSTSEC-2026-0565 (STARTTLS reply injection, dot-stuffing after a
-  bare line ending, a panic on a blank EHLO line, quoted local parts and others; DEC-857).
+A patch release: nine fixes found in the first days of use (GitLab milestone 1.0.1, issues 1
+to 9) and a security update of the mail library. No database migration.
+
+### Added
+
+- "Send a test" (Admin > Instance > Mail) writes one info line with the relay's answer when the
+  relay took the message, such as its queue id, without addresses (#7, DEC-861).
+- Sign-ins through the identity provider write an audit row `auth.provider_sign_in` with the
+  username and the client address, like break-glass sign-ins (#8, DEC-862).
+- The image carries the licence notices of its third-party parts (Rust crates, icons, fonts,
+  Tailwind CSS) in `/usr/share/doc/app/THIRD-PARTY-NOTICES.txt`, generated at build time;
+  the build and the CI job `notices` fail when they cannot be made (#9, DEC-855).
 
 ### Fixed
 
@@ -35,15 +44,11 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
   or digest: each run claims it first, and the delivery log shows "Sending" meanwhile (#6,
   DEC-860).
 
-### Added
+### Security
 
-- "Send a test" (Admin > Instance > Mail) writes one info line with the relay's answer when the
-  relay took the message, such as its queue id, without addresses (#7, DEC-861).
-- Sign-ins through the identity provider write an audit row `auth.provider_sign_in` with the
-  username and the client address, like break-glass sign-ins (#8, DEC-862).
-- The image carries the licence notices of its third-party parts (Rust crates, icons, fonts,
-  Tailwind CSS) in `/usr/share/doc/app/THIRD-PARTY-NOTICES.txt`, generated at build time;
-  the build and the CI job `notices` fail when they cannot be made (#9, DEC-855).
+- lettre 0.11.24 for the mail it sends (notifications, test mail, password resets): fixes
+  RUSTSEC-2026-0560 to RUSTSEC-2026-0565 (STARTTLS reply injection, dot-stuffing after a
+  bare line ending, a panic on a blank EHLO line, quoted local parts and others; DEC-857).
 
 ## [1.0.0] - 2026-11-17
 

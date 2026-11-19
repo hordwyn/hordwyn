@@ -9,6 +9,7 @@
 * xref:operations.adoc[Operations]
 * xref:staging.adoc[Staging]
 * xref:releases/index.adoc[Releases]
+** xref:releases/v1.0.1.adoc[1.0.1]
 ** xref:releases/v1.0.0.adoc[1.0.0]
 * xref:white-labelling.adoc[White-labelling]
 * xref:connectors.adoc[Connectors]

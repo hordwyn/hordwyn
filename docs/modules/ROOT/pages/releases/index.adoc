@@ -9,6 +9,11 @@ lists the changes of every version in one file
 |===
 |Version |Date |Notes
 
+|1.0.1
+|2026-11-19
+|xref:releases/v1.0.1.adoc[Release notes 1.0.1]: nine fixes and a security update of the mail
+library; no migration. Two commands after the upgrade (sessions left by Undo, TheTVDB shows).
+
 |1.0.0
 |2026-11-17
 |xref:releases/v1.0.0.adoc[Release notes 1.0.0]: the first release. There is nothing to
