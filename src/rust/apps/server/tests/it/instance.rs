@@ -447,6 +447,8 @@ async fn fake_smtp() -> (u16, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
 /// addendum-1 3.2 / DEC-245: SMTP lives in the database with an encrypted password, the
 /// mailer changes without a restart and "send a test" is recorded for the Overview row.
 #[tokio::test]
+// One scenario on purpose: the steps share one server and its mail settings.
+#[allow(clippy::too_many_lines)]
 async fn smtp_in_the_database_with_an_encrypted_password_and_a_recorded_test() {
     use std::sync::atomic::Ordering;
     if skip() {

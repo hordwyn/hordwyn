@@ -69,6 +69,8 @@ async fn seen_after(seen: &Arc<Mutex<Vec<Option<String>>>>, n: usize) -> Vec<Opt
 }
 
 #[tokio::test]
+// One scenario on purpose: the searches share one server and its spy.
+#[allow(clippy::too_many_lines)]
 async fn a_search_asks_in_the_members_language_else_the_instance_language() {
     let Some(db_url) = store_pg::testing::fresh_db_url().await else {
         return;
