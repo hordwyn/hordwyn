@@ -1,0 +1,27 @@
+{
+  "fixture": "recorded 2026-11-19 from openlibrary.org, trimmed to the fields read",
+  "request": {
+    "method": "GET",
+    "url": "https://openlibrary.org/works/OL19984925W.json"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "content-type",
+      "application/json"
+    ]
+  ],
+  "body": {
+    "key": "/works/OL19984925W",
+    "title": "Redeemed",
+    "covers": [
+      11957286,
+      10176246
+    ],
+    "subjects": [
+      "Fiction",
+      "Zoey Redbird (Fictitious character)",
+      "Magic"
+    ]
+  }
+}

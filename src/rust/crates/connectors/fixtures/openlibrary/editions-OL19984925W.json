@@ -1,0 +1,100 @@
+{
+  "fixture": "recorded 2026-11-19 from openlibrary.org (OT-36: OL33456647M carries 1960), trimmed to the fields read",
+  "request": {
+    "method": "GET",
+    "url": "https://openlibrary.org/works/OL19984925W/editions.json?limit=100"
+  },
+  "status": 200,
+  "headers": [
+    [
+      "content-type",
+      "application/json"
+    ]
+  ],
+  "body": {
+    "size": 10,
+    "entries": [
+      {
+        "key": "/books/OL35907981M",
+        "publish_date": "2014",
+        "isbn_13": [
+          "9781466858497"
+        ]
+      },
+      {
+        "key": "/books/OL39639780M",
+        "publish_date": "2015",
+        "isbn_13": [
+          "9781484467237"
+        ]
+      },
+      {
+        "key": "/books/OL41355174M",
+        "publish_date": "Oct 14, 2014",
+        "isbn_13": [
+          "9781250066183"
+        ],
+        "isbn_10": [
+          "1250066182"
+        ]
+      },
+      {
+        "key": "/books/OL33456647M",
+        "publish_date": "1960",
+        "isbn_13": [
+          "9780349002101"
+        ]
+      },
+      {
+        "key": "/books/OL33533134M",
+        "publish_date": "2014",
+        "isbn_13": [
+          "9781905654932"
+        ]
+      },
+      {
+        "key": "/books/OL33655085M",
+        "publish_date": "2014",
+        "isbn_13": [
+          "9781905654925"
+        ]
+      },
+      {
+        "key": "/books/OL28835116M",
+        "publish_date": "2014",
+        "isbn_13": [
+          "9781410472854"
+        ]
+      },
+      {
+        "key": "/books/OL28245753M",
+        "publish_date": "Jun 12, 2012",
+        "isbn_13": [
+          "9780349002095"
+        ],
+        "isbn_10": [
+          "0349002096"
+        ]
+      },
+      {
+        "key": "/books/OL27543738M",
+        "publish_date": "Oct 14, 2014",
+        "isbn_13": [
+          "9781427244499"
+        ],
+        "isbn_10": [
+          "1427244499"
+        ]
+      },
+      {
+        "key": "/books/OL27165054M",
+        "publish_date": "2014",
+        "isbn_13": [
+          "9781250055439",
+          "9780312594442",
+          "9781250059529"
+        ]
+      }
+    ]
+  }
+}

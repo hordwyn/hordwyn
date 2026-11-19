@@ -29,6 +29,8 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
 - With the language on "automatic", the sources are searched in the language the page shows
   (the browser's), not in the instance language; REST searches use the first language of
   `Accept-Language` (#4, DEC-858).
+- Books from Open Library: one edition with a wrong date no longer sets the year; the year
+  comes from the work's editions, leaving out impossible and lone outlier dates (#5, DEC-859).
 
 ### Added
 

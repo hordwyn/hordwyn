@@ -7,6 +7,8 @@
 //! only, never by ISBN (that form is limited to 100 requests in 5 minutes per address).
 //! Written from the public API documentation alone (DEC-169).
 
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use catalog_core::{
     Attribution, Auth, Capability, Connector, ConnectorError, ConnectorInfo, ContactUse, Ctx,
@@ -181,6 +183,29 @@ impl OpenLibrary {
             )
             .await?;
         Ok(docs.into_iter().find(|d| work_id(&d.key) == Some(work)))
+    }
+
+    /// The publication year of a work by [`plausible_year`] over its editions, for a work of
+    /// at most [`EDITION_YEARS_UP_TO`] editions (one request); `None` for a bigger work or
+    /// when the list cannot be read (the caller keeps `first_publish_year`).
+    async fn edition_year(&self, ctx: &Ctx, work: &str, editions: Option<u32>) -> Option<i32> {
+        if !editions.is_some_and(|n| (1..=EDITION_YEARS_UP_TO).contains(&n)) {
+            return None;
+        }
+        let limit = EDITION_YEARS_UP_TO.to_string();
+        let url = self
+            .url(
+                &format!("/works/{work}/editions.json"),
+                &[("limit", &limit)],
+            )
+            .ok()?;
+        match get_json::<EditionList>(ctx, ID, "editions", &url, headers()).await {
+            Ok(list) => plausible_year(&list.entries),
+            Err(e) => {
+                tracing::debug!(work, error = %e, "editions unreadable; first_publish_year kept");
+                None
+            }
+        }
     }
 
     /// Works whose title field matches `title` (not the full text): the candidates for a
@@ -399,6 +424,74 @@ impl Edition {
     }
 }
 
+/// Works with at most this many editions get their year from the edition list (one page).
+const EDITION_YEARS_UP_TO: u32 = 100;
+/// The first year an ISBN can carry (the SBN of 1966, ISO 2108 of 1970; a margin of one).
+const FIRST_ISBN_YEAR: i32 = 1967;
+/// A lone earliest year this far before a year two editions share is taken for a data error.
+const LONE_YEAR_GAP: i32 = 5;
+
+/// `GET /works/{id}/editions.json`.
+#[derive(Deserialize)]
+struct EditionList {
+    #[serde(default)]
+    entries: Vec<EditionDate>,
+}
+
+/// The fields of an edition the year rule reads.
+#[derive(Deserialize)]
+pub struct EditionDate {
+    pub publish_date: Option<String>,
+    #[serde(default)]
+    pub isbn_13: Vec<String>,
+    #[serde(default)]
+    pub isbn_10: Vec<String>,
+}
+
+/// The year in an edition's free-text `publish_date` ("2014", "Oct 14, 2014", "2007-11-01",
+/// "September 29, 2009"): the first four-digit number from 1000 to 2999.
+fn year_in(date: &str) -> Option<i32> {
+    date.split(|c: char| !c.is_ascii_digit())
+        .filter(|w| w.len() == 4)
+        .filter_map(|w| w.parse().ok())
+        .find(|y| (1000..3000).contains(y))
+}
+
+/// The publication year of a work from its editions (OT-36, #5). Open Library's
+/// `first_publish_year` is the earliest year of any edition, so one edition with a wrong date
+/// wins. Here a year is left out when
+/// - its edition carries an ISBN but the year is before [`FIRST_ISBN_YEAR`] (impossible), or
+/// - it is the earliest, only one edition has it, and the next year comes more than
+///   [`LONE_YEAR_GAP`] years later and is shared by two or more editions (repeated).
+///
+/// The earliest year left is the answer; `None` without any dated edition. A real first
+/// edition is kept when later years are close (The Hobbit 1937, 1938), or when the next year
+/// has a single edition (Moby Dick 1851, 1892).
+#[must_use]
+pub fn plausible_year(editions: &[EditionDate]) -> Option<i32> {
+    let mut count: BTreeMap<i32, usize> = BTreeMap::new();
+    for e in editions {
+        let Some(y) = e.publish_date.as_deref().and_then(year_in) else {
+            continue;
+        };
+        let has_isbn = !(e.isbn_13.is_empty() && e.isbn_10.is_empty());
+        if has_isbn && y < FIRST_ISBN_YEAR {
+            continue;
+        }
+        *count.entry(y).or_default() += 1;
+    }
+    let years: Vec<(i32, usize)> = count.into_iter().collect();
+    let mut i = 0;
+    while let (Some(&(y, n)), Some(&(next, m))) = (years.get(i), years.get(i + 1)) {
+        if n == 1 && next - y > LONE_YEAR_GAP && m >= 2 {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    years.get(i).map(|&(y, _)| y)
+}
+
 /// A work's description: a plain string in some records, `{"type": "/type/text", "value":
 /// ...}` in others (both recorded on 2026-11-12).
 #[derive(Deserialize)]
@@ -498,6 +591,8 @@ impl Details for OpenLibrary {
                 )
             },
         );
+        // one edition with a wrong date must not set the year (OT-36, #5)
+        let year = self.edition_year(ctx, work_id, editions).await.or(year);
         let attributes = BookAttributes {
             authors,
             page_count: pages,
@@ -556,7 +651,95 @@ impl Connector for OpenLibrary {
 
 #[cfg(test)]
 mod tests {
-    use super::work_id;
+    use super::{EditionDate, plausible_year, work_id, year_in};
+
+    fn ed(date: &str, isbn: bool) -> EditionDate {
+        EditionDate {
+            publish_date: Some(date.into()),
+            isbn_13: if isbn {
+                vec!["9780000000000".into()]
+            } else {
+                vec![]
+            },
+            isbn_10: vec![],
+        }
+    }
+
+    #[test]
+    fn the_year_of_a_free_text_publish_date() {
+        assert_eq!(year_in("Oct 14, 2014"), Some(2014));
+        assert_eq!(year_in("2007-11-01"), Some(2007));
+        assert_eq!(year_in("September 29, 2009"), Some(2009));
+        assert_eq!(year_in("1960"), Some(1960));
+        assert_eq!(year_in("c. 19th century"), None);
+        assert_eq!(year_in(""), None);
+    }
+
+    /// OT-36 (#5), the two recorded cases and the classics the rule must not change.
+    #[test]
+    fn one_edition_with_a_wrong_date_does_not_set_the_year() {
+        // "Betrayed" (OL14957436W, recorded 2026-11-19): one edition says 2001, it came out
+        // in 2007, the year most editions share
+        let betrayed: Vec<EditionDate> = [
+            "2007-11-01",
+            "2007-10-02",
+            "2007",
+            "2007",
+            "Aug 01, 2017",
+            "2009",
+            "2010",
+            "2009",
+            "2009",
+            "2010",
+            "Jul 19, 2013",
+            "Sep 23, 2001",
+            "Sep 17, 2007",
+            "2009",
+            "September 29, 2009",
+            "2008",
+            "October 2, 2007",
+            "2011",
+        ]
+        .into_iter()
+        .map(|d| ed(d, true))
+        .collect();
+        assert_eq!(plausible_year(&betrayed), Some(2007));
+        // an ISBN before ISBNs existed
+        assert_eq!(
+            plausible_year(&[ed("1960", true), ed("2014", true), ed("2014", true)]),
+            Some(2014)
+        );
+        assert_eq!(
+            plausible_year(&[ed("1960", false), ed("2014", true), ed("2014", true)]),
+            Some(2014),
+            "without an ISBN the gap rule still applies"
+        );
+    }
+
+    #[test]
+    fn real_first_editions_stay() {
+        // Moby Dick: the first edition alone, the next 41 years later with one edition
+        let moby = [
+            ed("1851", false),
+            ed("1892", false),
+            ed("1900", false),
+            ed("1900", false),
+        ];
+        assert_eq!(plausible_year(&moby), Some(1851));
+        // The Hobbit: the next year is close
+        let hobbit = [ed("1937", false), ed("1938", false), ed("1938", false)];
+        assert_eq!(plausible_year(&hobbit), Some(1937));
+        // a hardcover, then paperbacks five years later: within the gap
+        let five = [ed("2005", true), ed("2010", true), ed("2010", true)];
+        assert_eq!(plausible_year(&five), Some(2005));
+        // two editions only
+        assert_eq!(
+            plausible_year(&[ed("1990", true), ed("1999", true)]),
+            Some(1990)
+        );
+        assert_eq!(plausible_year(&[]), None);
+        assert_eq!(plausible_year(&[ed("n.d.", false)]), None);
+    }
 
     /// Review BOOK-13: a search row is kept whichever form its key has.
     #[test]

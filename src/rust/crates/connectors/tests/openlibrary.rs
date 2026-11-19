@@ -418,3 +418,30 @@ async fn another_kind_is_refused() {
     assert!(matches!(r, Err(ConnectorError::Unsupported(_))), "{r:?}");
     assert_eq!(http.requests().len(), 0);
 }
+
+/// OT-36 (#5): "Redeemed" (recorded 2026-11-19) has `first_publish_year` 1960 from one
+/// edition with an ISBN (OL33456647M); the year comes from the edition list instead. The
+/// earliest year left is 2012, the date a pre-order edition carries (the book came out in
+/// 2014): no rule can tell that one apart.
+#[tokio::test]
+async fn details_takes_the_year_from_the_editions_not_one_wrong_edition() {
+    let (http, ctx) = replay();
+    let c = OpenLibrary::new();
+    let book = c.details(&ctx, &work("OL19984925W")).await.unwrap();
+    assert_eq!(book.title, "Redeemed");
+    assert_eq!(book.year, Some(2012), "not 1960");
+    let urls: Vec<String> = http.requests().into_iter().map(|r| r.url).collect();
+    assert!(
+        urls.contains(&"https://openlibrary.org/works/OL19984925W/editions.json?limit=100".into()),
+        "{urls:?}"
+    );
+    // a work with more than 100 editions keeps first_publish_year without asking
+    let before = http.requests().len();
+    let fox = c.details(&ctx, &work("OL45804W")).await.unwrap();
+    assert_eq!(fox.year, Some(1970));
+    assert_eq!(
+        http.requests().len() - before,
+        2,
+        "the work and its search row only"
+    );
+}

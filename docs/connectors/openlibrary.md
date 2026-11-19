@@ -65,6 +65,20 @@ is stored with provenance `user` and survives every refresh. `edition_count` ->
 `popularity` (a tie-break between rows, DEC-611). Cover: the work's first cover id, else the
 search row's `cover_i`. An item imported with an edition id keeps that id.
 
+Year (OT-36, issue 5, release 1.0.1; checked live 2026-11-19): `first_publish_year` is the
+earliest year of any edition, so one edition with a wrong date wins ("Redeemed" 1960 for a
+2014 book, "Betrayed" 2001 for 2007, each from one bulk-imported record). The search row's
+`publish_year` lists distinct years only, without counts. So `details` of a work with 1 to
+100 editions also reads `GET /works/{id}/editions.json?limit=100` (one request; `entries[]`:
+`publish_date`, `isbn_13`, `isbn_10`) and takes the earliest year left after two rules
+(`plausible_year`): a year before 1967 on an edition with an ISBN is impossible and left out;
+a lone earliest year (one edition) is left out when the next year comes more than 5 years
+later and two or more editions share it (repeated). Bigger works, a failed list and search
+rows keep `first_publish_year`. Checked against classics: The Hobbit 1937 (next 1938),
+Pride and Prejudice 1813, Frankenstein 1818 (next 1823, within 5), Moby Dick 1851 (next
+1892 with one edition) stay. "Redeemed" becomes 2012 (a pre-order edition's date), "Betrayed"
+2007. Stored books get it with `cli refresh-source openlibrary --apply`.
+
 ## Verified live (2026-11-12)
 
 Ten requests to `openlibrary.org`, one per 1.3 seconds, sent with a generic client name and
