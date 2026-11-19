@@ -10,6 +10,12 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
 
 ## [Unreleased]
 
+### Security
+
+- lettre 0.11.24 for the mail it sends (notifications, test mail, password resets): fixes
+  RUSTSEC-2026-0560 to RUSTSEC-2026-0565 (STARTTLS reply injection, dot-stuffing after a
+  bare line ending, a panic on a blank EHLO line, quoted local parts and others; DEC-857).
+
 ### Fixed
 
 - Undo of a view logged "Watched with ..." also deletes its session with those people, so the
