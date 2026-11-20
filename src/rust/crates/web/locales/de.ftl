@@ -928,6 +928,7 @@ history-play-scores = Punkte: { $scores }
 history-play-duration = { $minutes } Min.
 history-time-utc = { $time } UTC
 history-shared = Geteilt
+history-copied = In deinem Protokoll
 history-undo-named = Rückgängig: { $title }
 history-copy-named = In mein Protokoll kopieren: { $title }
 history-error = Der Verlauf konnte nicht geladen werden.

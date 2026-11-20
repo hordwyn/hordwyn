@@ -929,6 +929,7 @@ history-play-scores = Scores: { $scores }
 history-play-duration = { $minutes } min
 history-time-utc = { $time } UTC
 history-shared = Shared
+history-copied = In your log
 history-undo-named = Undo: { $title }
 history-copy-named = Copy to my log: { $title }
 history-error = The history could not be loaded.

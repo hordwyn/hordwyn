@@ -10,6 +10,12 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
 
 ## [Unreleased]
 
+### Fixed
+
+- "Copy to my log" on a shared row now turns the row into "In your log" and offers no second
+  copy, also after a reload; the copy is with the person who logged it when you have them in
+  People, with their score and result, and it is not shared back to them (#35, DEC-867).
+
 ## [1.0.1] - 2026-11-19
 
 A patch release: nine fixes found in the first days of use (GitLab milestone 1.0.1, issues 1

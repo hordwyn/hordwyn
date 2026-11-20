@@ -111,6 +111,14 @@ test("promote, accept, see history, unlink, merge and undo the merge", async ({ 
   // the copy is a row of Carl's own, next to the shared one
   await expect(carl.getByTestId("activity-row").filter({ hasText: "Fight Club" })).toHaveCount(2);
   await expect(carl.getByTestId("activity-row").filter({ hasText: "Fight Club" }).filter({ hasNotText: "by Olive" })).toHaveCount(1);
+  // #35: the shared row says it is in Carl's log and offers no second copy, also after a reload
+  await expect(shared.getByTestId("activity-copied")).toHaveText("In your log");
+  await expect(shared.getByRole("button", { name: /Copy to my log/ })).toHaveCount(0);
+  await carl.reload();
+  await hydrated(carl);
+  const again = carl.getByTestId("activity-row").filter({ hasText: "by Olive" }).first();
+  await expect(again.getByTestId("activity-copied")).toHaveText("In your log");
+  await expect(again.getByRole("button", { name: /Copy to my log/ })).toHaveCount(0);
   await carlContext.close();
 
   // the owner sees Carl linked, then unlinks him

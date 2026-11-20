@@ -375,7 +375,14 @@ impl App {
         if s.owner == actor.user_id {
             return Err(AppError::Conflict("the session is already yours".into()));
         }
-        let copy_id = SessionId(uuid::Uuid::new_v5(&s.id.0, actor.user_id.0.as_bytes()));
+        if !self
+            .copies_of_own(actor.user_id, &[(s.id, s.owner, s.started_at)])
+            .await?
+            .is_empty()
+        {
+            return Err(AppError::Conflict("the session is a copy of yours".into()));
+        }
+        let copy_id = Self::copy_id(s.id, actor.user_id);
         if let Some(existing) = self.repos.sessions.get(copy_id).await? {
             return Ok(existing);
         }
@@ -388,6 +395,21 @@ impl App {
             .cloned()
             .found("participant")?;
         participant.companion_id = me.self_companion;
+        let mut participants = vec![participant];
+        // the owner goes along as the copier's own entry for them, with the owner's score
+        // and result when they played (#35, DEC-867); without such an entry the copy names
+        // nobody else
+        if let Some(entry) = self.entry_for_user(actor.user_id, s.owner).await? {
+            let owner_self = self.user(s.owner).await?.self_companion;
+            let mut theirs = s
+                .participants
+                .iter()
+                .find(|p| p.companion_id == owner_self)
+                .cloned()
+                .unwrap_or_else(|| Participant::new(entry));
+            theirs.companion_id = entry;
+            participants.push(theirs);
+        }
         let copy = Session {
             id: copy_id,
             owner: actor.user_id,
@@ -396,7 +418,7 @@ impl App {
             duration_minutes: s.duration_minutes,
             location: None,
             notes: None,
-            participants: vec![participant],
+            participants,
             coop_outcome: s.coop_outcome,
             incomplete: s.incomplete,
             // the group is the owner's, not the copier's
@@ -453,6 +475,8 @@ impl App {
             }
         }
         sessions.retain(|s| !hidden.contains(&s.owner));
+        self.drop_copies_of_own(actor.user_id, &mut sessions)
+            .await?;
         sessions.sort_by_key(|s| std::cmp::Reverse(s.started_at));
         Ok(sessions)
     }
@@ -495,6 +519,78 @@ impl App {
 
     /// Companions of other users that stand for the actor: linked to them, plus companions
     /// merged into those.
+    /// The active entry in `owner`'s People that is linked to `user`, if any.
+    async fn entry_for_user(
+        &self,
+        owner: domain::ids::UserId,
+        user: domain::ids::UserId,
+    ) -> AppResult<Option<CompanionId>> {
+        Ok(self
+            .repos
+            .companions
+            .by_owner(owner)
+            .await?
+            .into_iter()
+            .filter(|c| c.linked_user == Some(user) && !c.is_self)
+            .filter(|c| c.merged_into.is_none() && c.removed_at.is_none())
+            .min_by_key(|c| c.created_at)
+            .map(|c| c.id))
+    }
+
+    /// The id of `user`'s copy of session `id` ("Copy to my log"): derived, so a claim is
+    /// idempotent and a shared row knows it was copied without a stored mark (#35).
+    pub(crate) fn copy_id(id: SessionId, user: domain::ids::UserId) -> SessionId {
+        SessionId(uuid::Uuid::new_v5(&id.0, user.0.as_bytes()))
+    }
+
+    /// Of the sessions `(id, owner, started_at)` others shared with `viewer`, those that are
+    /// copies of the viewer's own sessions ("Copy to my log" by someone the viewer played
+    /// with, #35): the viewer's own record already says it, so they are not shown as shared.
+    /// A copy starts when its original does; one read of the viewer's sessions per instant.
+    pub(crate) async fn copies_of_own(
+        &self,
+        viewer: domain::ids::UserId,
+        shared: &[(SessionId, domain::ids::UserId, Timestamp)],
+    ) -> AppResult<HashSet<SessionId>> {
+        let mut out = HashSet::new();
+        let instants: std::collections::BTreeSet<Timestamp> =
+            shared.iter().map(|(_, _, at)| *at).collect();
+        for at in instants {
+            let w = crate::ports::HistoryWindow {
+                before: Some((at, uuid::Uuid::max())),
+                since: Some(at),
+                kinds: vec![],
+                limit: 100,
+            };
+            let own = self.repos.sessions.by_owner_window(viewer, &w).await?;
+            for (id, owner, _) in shared.iter().filter(|(_, _, t)| *t == at) {
+                if own.iter().any(|o| Self::copy_id(o.id, *owner) == *id) {
+                    out.insert(*id);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Removes from `theirs` (sessions others shared with `viewer`) the copies of the
+    /// viewer's own sessions ([`App::copies_of_own`]).
+    pub(crate) async fn drop_copies_of_own(
+        &self,
+        viewer: domain::ids::UserId,
+        theirs: &mut Vec<Session>,
+    ) -> AppResult<()> {
+        if theirs.is_empty() {
+            return Ok(());
+        }
+        let keys: Vec<_> = theirs
+            .iter()
+            .map(|s| (s.id, s.owner, s.started_at))
+            .collect();
+        let copies = self.copies_of_own(viewer, &keys).await?;
+        theirs.retain(|s| !copies.contains(&s.id));
+        Ok(())
+    }
+
     pub(crate) async fn companion_ids_representing(
         &self,
         actor: Actor,

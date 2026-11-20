@@ -475,6 +475,7 @@ fn activity_row(r: &ActivityRow, zone: app::time_zone::Tz) -> ActivityRowDto {
         play: r.play.map(activity_play),
         shared: r.shared,
         owner_name: r.owner_name.clone(),
+        copied: r.copied,
         undoable: r.undoable,
     }
 }

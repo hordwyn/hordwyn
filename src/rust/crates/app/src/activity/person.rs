@@ -228,7 +228,7 @@ impl App {
             )
         };
         // a shared row with the person is an anchor of another owner
-        let theirs = if foreign && !feed.representing.is_empty() {
+        let mut theirs = if foreign && !feed.representing.is_empty() {
             self.repos
                 .sessions
                 .with_participants_spans(feed.representing, &spans)
@@ -236,8 +236,10 @@ impl App {
         } else {
             vec![]
         };
+        let full_read = theirs.len();
+        self.drop_copies_of_own(user, &mut theirs).await?;
         let full = |n: usize| n >= cap as usize;
-        if full(events.len()) || full(own.len()) || full(theirs.len()) {
+        if full(events.len()) || full(own.len()) || full(full_read) {
             return Ok(None);
         }
         let mut parts = Vec::with_capacity(regions.len());

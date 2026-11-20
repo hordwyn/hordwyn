@@ -329,6 +329,9 @@ pub struct ActivityRowDto {
     /// Shared with the viewer by a linked user ("Copy to my log").
     pub shared: bool,
     pub owner_name: Option<String>,
+    /// A shared row the viewer already copied to their log: no second copy (#35).
+    #[serde(default)]
+    pub copied: bool,
     pub undoable: bool,
 }
 

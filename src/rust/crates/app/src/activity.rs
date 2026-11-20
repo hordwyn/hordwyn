@@ -104,6 +104,8 @@ pub struct ActivityRow {
     pub shared: bool,
     /// Display name of the owner of a shared row.
     pub owner_name: Option<String>,
+    /// A shared row the viewer already copied to their log (#35).
+    pub copied: bool,
     /// The viewer may still undo it.
     pub undoable: bool,
 }
@@ -342,7 +344,37 @@ impl App {
         } else {
             None
         };
+        self.mark_copied(actor, &mut rows).await?;
         Ok(ActivityPage { rows, next })
+    }
+
+    /// Marks the shared rows the actor copied to their log: the copy has a derived id
+    /// ([`App::copy_id`]), so one read of the page's copies answers it (#35).
+    async fn mark_copied(&self, actor: Actor, rows: &mut [ActivityRow]) -> AppResult<()> {
+        let ids: Vec<SessionId> = rows
+            .iter()
+            .filter(|r| r.shared)
+            .filter_map(|r| r.session_id)
+            .map(|id| Self::copy_id(id, actor.user_id))
+            .collect();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let copies: HashSet<SessionId> = self
+            .repos
+            .sessions
+            .get_many(&ids)
+            .await?
+            .into_iter()
+            .filter(|s| s.owner == actor.user_id)
+            .map(|s| s.id)
+            .collect();
+        for r in rows.iter_mut().filter(|r| r.shared) {
+            r.copied = r
+                .session_id
+                .is_some_and(|id| copies.contains(&Self::copy_id(id, actor.user_id)));
+        }
+        Ok(())
     }
 
     async fn feed_streams(
@@ -407,6 +439,7 @@ impl App {
                 theirs.push(s);
             }
         }
+        self.drop_copies_of_own(actor.user_id, &mut theirs).await?;
         let pairing = if events.is_empty() && own.is_empty() {
             Pairing {
                 sessions: own,
@@ -679,6 +712,7 @@ impl App {
             play: session.map(play_of),
             shared: false,
             owner_name: None,
+            copied: false,
             undoable: false,
         }
     }

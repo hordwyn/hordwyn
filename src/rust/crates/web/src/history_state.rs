@@ -366,6 +366,7 @@ mod tests {
             play: None,
             shared: false,
             owner_name: None,
+            copied: false,
             undoable: false,
         }
     }

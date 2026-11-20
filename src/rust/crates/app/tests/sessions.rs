@@ -228,3 +228,112 @@ async fn undo_of_a_view_with_a_person_deletes_its_session_and_leftovers_are_foun
     assert!(env.app.repos.sessions.get(live).await.unwrap().is_some());
     assert_eq!(env.app.orphaned_view_sessions(false).await.unwrap(), vec![]);
 }
+
+/// Bob links his own entry "Alice" to alice (the way back of the link, #15).
+async fn link_back(
+    env: &TestEnv,
+    alice: domain::user::Actor,
+    bob: domain::user::Actor,
+) -> domain::ids::CompanionId {
+    let c = env.app.create_companion(bob, "Alice").await.unwrap();
+    let req = env
+        .app
+        .request_link(bob, c.id, alice.user_id)
+        .await
+        .unwrap();
+    env.app.accept_link(alice, req.id).await.unwrap();
+    c.id
+}
+
+#[tokio::test]
+async fn a_copy_is_with_the_owner_when_the_copier_has_them_in_people() {
+    // #35: the copy carries "with <owner>"
+    let env = TestEnv::new();
+    let (alice, bob, s) = shared_play(&env, "movie").await;
+    let alice_entry = link_back(&env, alice, bob).await;
+    let copy = env.app.claim_session(bob, s.id).await.unwrap();
+    let ids: Vec<_> = copy.participants.iter().map(|p| p.companion_id).collect();
+    let me = env.app.user(bob.user_id).await.unwrap();
+    assert_eq!(ids, vec![me.self_companion, alice_entry]);
+    // the copy names alice, but it is not shared back to her as a play of bob's
+    assert_eq!(env.app.shared_sessions(alice).await.unwrap().len(), 0);
+    let q = app::ActivityQuery {
+        shared_only: true,
+        ..Default::default()
+    };
+    let feed = env.app.activity_feed(alice, q).await.unwrap();
+    assert_eq!(feed.rows.len(), 0);
+    assert!(matches!(
+        env.app.claim_session(alice, copy.id).await,
+        Err(AppError::Conflict(_))
+    ));
+    // a play bob logs himself with his entry for alice is still shared with her
+    let own = env
+        .app
+        .log_session(
+            bob,
+            NewSession::new(s.item_id, vec![Participant::new(alice_entry)]),
+        )
+        .await
+        .unwrap();
+    let theirs = env.app.shared_sessions(alice).await.unwrap();
+    assert_eq!(
+        theirs.iter().map(|x| x.id).collect::<Vec<_>>(),
+        vec![own.id]
+    );
+}
+
+#[tokio::test]
+async fn a_copy_takes_the_owners_score_onto_the_copiers_entry_for_them() {
+    // #35: alice played too; her score goes with her into bob's copy
+    let env = TestEnv::new();
+    let (_, alice) = common::user(&env, "alice").await;
+    let (bob_user, bob) = common::user(&env, "bob").await;
+    let game = common::item(&env.app, "board_game", "Azul").await;
+    let c = env.app.create_companion(alice, "B.").await.unwrap();
+    let req = env
+        .app
+        .request_link(alice, c.id, bob_user.id)
+        .await
+        .unwrap();
+    env.app.accept_link(bob, req.id).await.unwrap();
+    let alice_entry = link_back(&env, alice, bob).await;
+    let a = env.app.user(alice.user_id).await.unwrap();
+    let mut p_alice = Participant::new(a.self_companion);
+    p_alice.score = Some(70.0);
+    p_alice.winner = true;
+    let mut p_bob = Participant::new(c.id);
+    p_bob.score = Some(61.0);
+    let s = env
+        .app
+        .log_session(alice, NewSession::new(game.id, vec![p_alice, p_bob]))
+        .await
+        .unwrap();
+    let copy = env.app.claim_session(bob, s.id).await.unwrap();
+    assert_eq!(copy.participants.len(), 2);
+    let theirs = copy
+        .participants
+        .iter()
+        .find(|p| p.companion_id == alice_entry)
+        .unwrap();
+    assert_eq!(theirs.score, Some(70.0));
+    assert!(theirs.winner);
+}
+
+#[tokio::test]
+async fn a_shared_row_says_when_it_was_copied() {
+    // #35: the feed knows a shared row is in the viewer's log, without a migration
+    let env = TestEnv::new();
+    let (_, bob, s) = shared_play(&env, "movie").await;
+    let q = || app::ActivityQuery {
+        shared_only: true,
+        ..Default::default()
+    };
+    let before = env.app.activity_feed(bob, q()).await.unwrap();
+    assert_eq!(before.rows.len(), 1);
+    assert!(!before.rows[0].copied);
+    env.app.claim_session(bob, s.id).await.unwrap();
+    let after = env.app.activity_feed(bob, q()).await.unwrap();
+    assert_eq!(after.rows.len(), 1);
+    assert!(after.rows[0].shared && after.rows[0].copied);
+}

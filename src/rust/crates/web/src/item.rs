@@ -1182,6 +1182,7 @@ fn history_rows(page: &ItemPageDto, title: &str) -> Vec<ActivityRowDto> {
                 play: play.map(|x| x.play.clone()),
                 shared: false,
                 owner_name: None,
+                copied: false,
                 // the item page has no recorded-at stamp; Undo stays on the toast and History
                 undoable: false,
             }

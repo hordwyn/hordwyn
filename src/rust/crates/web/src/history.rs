@@ -231,17 +231,40 @@ pub fn ActivityRow(
                 </Button>
             }
         });
+    // a copied shared row says so in place and offers no second copy (#35); the server
+    // knows it (`copied`), so a reload keeps it
     let copy = row.session_id.clone().filter(|_| row.shared).map(|id| {
         let label = i18n.t_args(
             "history-copy-named",
             &[("title", crate::i18n::title_text(&row.title).into())],
         );
         let ctx = ctx.clone();
-        view! {
-            <Button variant=ButtonVariant::Outline size=ButtonSize::Sm attr:aria-label=label
-                on:click=move |_| copy_to_log(&ctx, id.clone(), on_change)>
-                {t("sessions-claim")}
-            </Button>
+        let copied = RwSignal::new(row.copied);
+        let busy = RwSignal::new(false);
+        move || {
+            if copied.get() {
+                view! {
+                    <Badge variant=BadgeVariant::Success attr:data-testid="activity-copied">
+                        <Icon name=IconName::Check/> {t("history-copied")}
+                    </Badge>
+                }
+                .into_any()
+            } else {
+                let (ctx, id, label) = (ctx.clone(), id.clone(), label.clone());
+                view! {
+                    <Button variant=ButtonVariant::Outline size=ButtonSize::Sm attr:aria-label=label
+                        attr:aria-disabled=move || busy.get().then_some("true")
+                        on:click=move |_| {
+                            if !busy.get_untracked() {
+                                busy.set(true);
+                                copy_to_log(&ctx, id.clone(), copied, busy, on_change);
+                            }
+                        }>
+                        {t("sessions-claim")}
+                    </Button>
+                }
+                .into_any()
+            }
         }
     });
     let look = if row.shared {
@@ -274,13 +297,24 @@ pub fn ActivityRow(
     }
 }
 
-fn copy_to_log(ctx: &StepCtx, session_id: String, on_change: Option<Callback<()>>) {
+fn copy_to_log(
+    ctx: &StepCtx,
+    session_id: String,
+    copied: RwSignal<bool>,
+    busy: RwSignal<bool>,
+    on_change: Option<Callback<()>>,
+) {
     let (done, failed) = (ctx.i18n.t("sessions-claimed"), ctx.i18n.t("error-generic"));
     let toasts = ctx.toasts;
     leptos::task::spawn_local(async move {
-        match api::claim(session_id).await {
-            Ok(_) => toasts.push(done, None, ToastVariant::Default),
-            Err(_) => toasts.push(failed, None, ToastVariant::Destructive),
+        let ok = api::claim(session_id).await.is_ok();
+        // the row may have been replaced by a refetch meanwhile (DEC-865)
+        let _ = busy.try_set(false);
+        if ok {
+            let _ = copied.try_set(true);
+            toasts.push(done, None, ToastVariant::Default);
+        } else {
+            toasts.push(failed, None, ToastVariant::Destructive);
         }
         if let Some(cb) = on_change {
             cb.run(());
