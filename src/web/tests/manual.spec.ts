@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./fixtures";
-import { expectNoA11yViolations, expectReflow, hydrated, signUp } from "./helpers";
+import { expectNoA11yViolations, expectReflow, hydrated, importDone, signUp } from "./helpers";
 
 // v1-manual (v1-plan.md 4a): something no source knows is added by hand from the palette,
 // tracked like any other item, found again, and its details are corrected on its page. The
@@ -220,4 +220,54 @@ test("the dialog of an item added by hand reflows at 360 px and has no axe viola
   await expectNoA11yViolations(page, "add by hand, dark 360");
   await expectReflow(page, "add by hand 360");
   await expect(add.getByRole("button", { name: "Add to library" })).toBeInViewport({ ratio: 1 });
+});
+
+// #16 (OT-36): the year of an item a source answers for is wrong at the source; a person
+// corrects it, it stays, and "Use the source's title and year" gives it back. The item is
+// this test's own (a TMDB id the mock does not know), so no other test sees the change.
+test("title and year of an item a source answers for are corrected and given back", async ({ page }) => {
+  const stamp = Date.now();
+  await signUp(page, `fix${stamp}`, "Fay");
+  const title = `Redeemed ${stamp}`;
+  const row = { source_id: "r", kind: "movie", title, year: 1960, status: "planned", external_ids: { tmdb: `9${stamp}` } };
+  const file = [JSON.stringify({ format: "library-export", version: 1 }), JSON.stringify(row)].join("\n");
+  const started = await page.request.post("/api/v1/imports?format=generic-jsonl", {
+    data: file,
+    headers: { "content-type": "application/octet-stream" },
+  });
+  expect(started.status()).toBe(202);
+  await importDone(page, (await started.json()).id);
+  const lib = await (await page.request.get("/api/v1/library?limit=50")).json();
+  const id = lib.items.find((i: { item: { title: string } }) => i.item.title === title).item.id;
+
+  await page.goto(`/items/${id}`);
+  await hydrated(page);
+  const more = bar(page).getByRole("button", { name: `More actions for ${title}` });
+  await more.click();
+  await page.getByRole("menuitem", { name: "Edit details" }).click();
+  const edit = page.getByRole("dialog", { name: "Edit details" });
+  await expect(edit.getByLabel("Year")).toHaveValue("1960");
+  // the cover follows the source: no picture address, a note says what is kept
+  await expect(edit.getByLabel("Picture address")).toHaveCount(0);
+  await expect(edit.getByTestId("mi-sourced-note")).toContainText("stays when it updates");
+  await expect(edit.getByTestId("mi-use-source")).toHaveCount(0);
+  await edit.getByLabel("Year").fill("2014");
+  await edit.getByRole("button", { name: "Save" }).click();
+  await expect(edit).toHaveCount(0);
+  await expect(page.getByText("2014", { exact: true }).first()).toBeVisible();
+  await page.reload();
+  await hydrated(page);
+  await expect(page.getByText("2014", { exact: true }).first()).toBeVisible();
+  const p = await (await page.request.get(`/api/v1/items/${id}/page`)).json();
+  expect(p.item.year).toBe(2014);
+  expect(p.item.provenance.year).toBe("user");
+
+  // give it back to the source
+  await more.click();
+  await page.getByRole("menuitem", { name: "Edit details" }).click();
+  await edit.getByTestId("mi-use-source").click();
+  await expect(edit).toHaveCount(0);
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/v1/items/${id}/page`)).json()).item.provenance.year ?? null)
+    .not.toBe("user");
 });

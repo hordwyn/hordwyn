@@ -667,22 +667,6 @@ async fn edit_details_checks_what_create_checks() {
 }
 
 #[tokio::test]
-async fn edit_details_is_refused_for_an_item_a_source_answers_for() {
-    let env = TestEnv::new();
-    let item = common::item(&env.app, "movie", "Sourced").await;
-    let err = env
-        .app
-        .edit_item_details(item.id, details("Mine", None, None), true, &always)
-        .await
-        .unwrap_err();
-    assert!(matches!(err, AppError::Conflict(_)), "{err:?}");
-    assert_eq!(
-        env.app.catalog_item(item.id).await.unwrap().title,
-        "Sourced"
-    );
-}
-
-#[tokio::test]
 async fn items_with_the_same_title_are_found_before_a_second_entry() {
     let env = TestEnv::new();
     let first = env
@@ -735,4 +719,135 @@ async fn items_with_the_same_title_are_found_before_a_second_entry() {
             .len(),
         2
     );
+}
+
+/// #16 (OT-36): a person corrects the title and the year of an item a source answers for;
+/// the values are theirs (`user`) and every later refresh keeps them.
+#[tokio::test]
+async fn title_and_year_of_a_source_item_can_be_corrected_and_refresh_keeps_them() {
+    let env = TestEnv::new();
+    let item = env
+        .app
+        .upsert_catalog_item(source_item("Redeemed", Some("https://img.example/s.jpg")))
+        .await
+        .unwrap();
+    let state = item.state;
+    let fixed = env
+        .app
+        .edit_item_details(
+            item.id,
+            details("Redeemed", Some(2014), None),
+            true,
+            &always,
+        )
+        .await
+        .unwrap();
+    assert_eq!(fixed.year, Some(2014));
+    assert_eq!(
+        fixed.provenance.get("year").map(String::as_str),
+        Some(USER_PROVENANCE)
+    );
+    // the unchanged title keeps its provenance; the cover stays the source's
+    assert_ne!(
+        fixed.provenance.get("title").map(String::as_str),
+        Some(USER_PROVENANCE)
+    );
+    assert_eq!(
+        fixed.cover_url.as_deref(),
+        Some("https://img.example/s.jpg")
+    );
+    // a source item still follows its source for the rest: its state is not "complete"
+    assert_eq!(fixed.state, state);
+
+    let after = env
+        .app
+        .apply_catalog_refresh(item.id, refresh("Redeemed (House of Night 12)"))
+        .await
+        .unwrap();
+    assert_eq!(after.year, Some(2014), "the corrected year is kept");
+    assert_eq!(
+        after.title, "Redeemed (House of Night 12)",
+        "the title follows the source"
+    );
+
+    env.app
+        .edit_item_details(
+            item.id,
+            details("Redeemed", Some(2014), None),
+            true,
+            &always,
+        )
+        .await
+        .unwrap();
+    let again = env
+        .app
+        .apply_catalog_refresh(item.id, refresh("Redeemed (House of Night 12)"))
+        .await
+        .unwrap();
+    assert_eq!((again.title.as_str(), again.year), ("Redeemed", Some(2014)));
+}
+
+#[tokio::test]
+async fn the_cover_of_a_source_item_follows_the_source() {
+    let env = TestEnv::new();
+    let item = env
+        .app
+        .upsert_catalog_item(source_item("Sourced", Some("https://img.example/s.jpg")))
+        .await
+        .unwrap();
+    let err = env
+        .app
+        .edit_item_details(
+            item.id,
+            details("Mine", None, Some("https://img.example/mine.jpg")),
+            true,
+            &always,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AppError::Conflict(_)), "{err:?}");
+    let stored = env.app.catalog_item(item.id).await.unwrap();
+    assert_eq!(stored.title, "Sourced", "nothing is written");
+}
+
+/// #16: "Use the source's values" gives title and year back to the source: the provenance
+/// mark goes, and the next refresh writes the source's values.
+#[tokio::test]
+async fn corrections_of_a_source_item_can_be_given_back_to_the_source() {
+    let env = TestEnv::new();
+    let item = env
+        .app
+        .upsert_catalog_item(source_item("Source title", None))
+        .await
+        .unwrap();
+    env.app
+        .edit_item_details(
+            item.id,
+            details("My title", Some(2001), None),
+            true,
+            &always,
+        )
+        .await
+        .unwrap();
+    let back = env.app.reset_item_details(item.id, &always).await.unwrap();
+    assert!(!back.provenance.values().any(|p| p == USER_PROVENANCE));
+    let after = env
+        .app
+        .apply_catalog_refresh(item.id, refresh("Source title"))
+        .await
+        .unwrap();
+    assert_eq!(
+        (after.title.as_str(), after.year),
+        ("Source title", Some(1995))
+    );
+    // an item no source answers for has nothing to give back
+    let manual = env
+        .app
+        .create_manual_item(kind("book"), details("By hand", None, None), true)
+        .await
+        .unwrap();
+    assert!(matches!(
+        env.app.reset_item_details(manual.id, &never).await,
+        Err(AppError::Conflict(_))
+    ));
 }

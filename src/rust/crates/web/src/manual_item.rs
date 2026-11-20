@@ -21,6 +21,9 @@ enum Target {
     /// The details of an item; `done` runs after the save (the item page refetches).
     Edit {
         item: Box<CatalogItemDto>,
+        /// A source answers for the item: title and year only, the cover follows the source
+        /// (#16).
+        sourced: bool,
         done: Callback<()>,
     },
 }
@@ -70,9 +73,10 @@ impl ManualItem {
     }
 
     /// "Edit details" of `item`.
-    pub fn edit(self, item: CatalogItemDto, done: Callback<()>) {
+    pub fn edit(self, item: CatalogItemDto, sourced: bool, done: Callback<()>) {
         self.target.set(Some(Target::Edit {
             item: Box::new(item),
+            sourced,
             done,
         }));
         self.show();
@@ -269,6 +273,35 @@ pub fn distinct_labels(labels: Vec<String>) -> Vec<String> {
 /// (review MAN-11: `run` panics on a disposed callback and stops the app).
 fn after_edit(done: Callback<()>) {
     let _ = done.try_run(());
+}
+
+/// A person corrected the title or the year of the item (`user` provenance, #16).
+fn corrected_fields(item: &CatalogItemDto) -> bool {
+    ["title", "year"]
+        .iter()
+        .any(|f| item.provenance.get(*f).map(String::as_str) == Some("user"))
+}
+
+/// "Use the source's values": the corrections go back to the source, which refreshes the item.
+fn use_source(form: Form, handle: ManualItem) {
+    let Some(Target::Edit { item, done, .. }) = handle.target.get_untracked() else {
+        return;
+    };
+    if form.busy.get_untracked() {
+        return;
+    }
+    form.busy.set(true);
+    leptos::task::spawn_local(async move {
+        let path = format!("/items/{}/corrections", item.id);
+        match rest::call_dto::<CatalogItemDto>("DELETE", &path, None).await {
+            Ok(_) => {
+                handle.open.set(false);
+                form.busy.set(false);
+                after_edit(done);
+            }
+            Err(e) => form.refuse(&e, true),
+        }
+    });
 }
 
 /// The path of the "Already here" read.
@@ -488,7 +521,7 @@ fn submit(
     leptos::task::spawn_local(async move {
         match target {
             Target::New { .. } => create(form, handle, checked, navigate, ctx).await,
-            Target::Edit { item, done } => {
+            Target::Edit { item, done, .. } => {
                 let body = json!({
                     "title": checked.title, "year": checked.year, "cover_url": checked.cover_url,
                 });
@@ -568,6 +601,23 @@ pub fn ManualItemDialog() -> impl IntoView {
             .target
             .with(|t| matches!(t, Some(Target::New { .. })))
     });
+    // an item a source answers for: title and year are corrected, the cover stays (#16)
+    let sourced = Signal::derive(move || {
+        handle
+            .target
+            .with(|t| matches!(t, Some(Target::Edit { sourced: true, .. })))
+    });
+    // ... and when a person corrected one of them, "Use the source's values" gives them back
+    let corrected = Signal::derive(move || {
+        handle.target.with(|t| match t {
+            Some(Target::Edit {
+                item,
+                sourced: true,
+                ..
+            }) => corrected_fields(item),
+            _ => false,
+        })
+    });
     // the fields are set when the dialog opens, not while it is open
     Effect::new(move |was: Option<bool>| {
         let open = handle.open.get();
@@ -616,6 +666,12 @@ pub fn ManualItemDialog() -> impl IntoView {
                     <p role="alert" class="text-sm text-destructive-text" data-testid="mi-error">{e}</p>
                 })}
                 <div class="flex flex-wrap items-center justify-end gap-2">
+                    <Show when=move || corrected.get()>
+                        <Button variant=ButtonVariant::Ghost class="mr-auto max-sm:h-11 max-sm:w-full" attr:data-testid="mi-use-source"
+                            on:click=move |_| use_source(form, handle)>
+                            {t("manual-use-source")}
+                        </Button>
+                    </Show>
                     <Button variant=ButtonVariant::Outline class="max-sm:hidden" on:click=move |_| handle.open.set(false)>
                         {t("log-cancel")}
                     </Button>
@@ -630,7 +686,7 @@ pub fn ManualItemDialog() -> impl IntoView {
         <FormDialog open=handle.open title=title close_label=i18n.t("dialog-close") description=description
             initial_focus=Field::Title.id() footer=footer>
             <form id=FORM_ID class="grid gap-4" novalidate on:submit=move |ev| { ev.prevent_default(); save.run(()); }>
-                <Fields form=form is_new=is_new/>
+                <Fields form=form is_new=is_new sourced=sourced/>
                 <Existing form=form use_existing=use_existing/>
             </form>
         </FormDialog>
@@ -638,7 +694,7 @@ pub fn ManualItemDialog() -> impl IntoView {
 }
 
 #[component]
-fn Fields(form: Form, is_new: Signal<bool>) -> impl IntoView {
+fn Fields(form: Form, is_new: Signal<bool>, sourced: Signal<bool>) -> impl IntoView {
     let options = Signal::derive(move || {
         let mut out = vec![SelectOption {
             value: String::new(),
@@ -683,11 +739,14 @@ fn Fields(form: Form, is_new: Signal<bool>) -> impl IntoView {
             <Input id=Field::Year.id() value=form.year inputmode="numeric" autocomplete="off" class="max-w-32"
                 invalid=wrong(Field::Year) described_by=described(Field::Year, true)/>
         </FormField>
-        <FormField id=Field::Cover.id() label=t("manual-field-cover") description=t("manual-field-cover-hint")
-            error=form.message(Field::Cover)>
-            <Input id=Field::Cover.id() value=form.cover r#type="url" inputmode="url" autocomplete="off"
-                invalid=wrong(Field::Cover) described_by=described(Field::Cover, true)/>
-        </FormField>
+        <Show when=move || !sourced.get()
+            fallback=|| view! { <p class="text-sm text-muted-foreground" data-testid="mi-sourced-note">{t("manual-sourced-note")}</p> }>
+            <FormField id=Field::Cover.id() label=t("manual-field-cover") description=t("manual-field-cover-hint")
+                error=form.message(Field::Cover)>
+                <Input id=Field::Cover.id() value=form.cover r#type="url" inputmode="url" autocomplete="off"
+                    invalid=wrong(Field::Cover) described_by=described(Field::Cover, true)/>
+            </FormField>
+        </Show>
     }
 }
 

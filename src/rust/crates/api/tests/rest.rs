@@ -2575,7 +2575,7 @@ async fn details_are_edited_over_http_unless_a_source_answers() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{e}");
 
-    a_sourced_item_refuses_the_edit(&app, &t, tk).await;
+    a_sourced_item_takes_title_and_year(&app, &t, tk).await;
 }
 
 /// Review MAN-2: a second item of a kind and title is a choice, not an accident. `POST /items`
@@ -2699,13 +2699,13 @@ async fn refused_entries_name_their_field(app: &axum::Router, tk: Option<&str>) 
     }
 }
 
-/// An item the registered source answers for: no edit, no offer, and its refresh is queued.
-async fn a_sourced_item_refuses_the_edit(
+/// An item the registered source answers for (#16): title and year are corrected and kept,
+/// the cover follows the source, and "Use the source's values" queues its refresh.
+async fn a_sourced_item_takes_title_and_year(
     app: &axum::Router,
     t: &testkit::TestEnv,
     tk: Option<&str>,
 ) {
-    // an item the registered source answers for
     let sourced = t
         .app
         .upsert_catalog_item(app::NewCatalogItem {
@@ -2721,28 +2721,39 @@ async fn a_sourced_item_refuses_the_edit(
         })
         .await
         .unwrap();
+    let path = format!("/api/v1/items/{}", sourced.id.0);
+    // a cover address on a sourced item is refused, nothing is written
     let (status, _, e) = call(
         app,
         "PATCH",
-        &format!("/api/v1/items/{}", sourced.id.0),
+        &path,
         tk,
-        Some(serde_json::json!({"title": "Mine"})),
+        Some(serde_json::json!({"title": "Mine", "cover_url": "https://img.example/a.jpg"})),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{e}");
     assert_eq!(e["code"], "conflict");
     assert_eq!(t.jobs.jobs().len(), 0, "nothing was queued so far");
-    let (_, _, page) = call(
+    // title and year are taken
+    let (status, _, item) = call(
         app,
-        "GET",
-        &format!("/api/v1/items/{}/page", sourced.id.0),
+        "PATCH",
+        &path,
         tk,
-        None,
+        Some(serde_json::json!({"title": "Heat", "year": 1996})),
     )
     .await;
-    assert_eq!(page["details_editable"], false);
-    assert_eq!(page["item"]["title"], "Heat");
-    assert_eq!(t.jobs.jobs().len(), 1, "its source is asked");
+    assert_eq!(status, StatusCode::OK, "{item}");
+    assert_eq!(item["year"], 1996);
+    let (_, _, page) = call(app, "GET", &format!("{path}/page"), tk, None).await;
+    assert_eq!(page["details_editable"], true);
+    assert_eq!(page["details_sourced"], true);
+    assert_eq!(page["item"]["year"], 1996);
+    let queued = t.jobs.jobs().len();
+    // back to the source: its refresh is queued
+    let (status, _, back) = call(app, "DELETE", &format!("{path}/corrections"), tk, None).await;
+    assert_eq!(status, StatusCode::OK, "{back}");
+    assert!(t.jobs.jobs().len() >= queued.max(1), "its source is asked");
 }
 
 #[tokio::test]

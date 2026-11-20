@@ -11,6 +11,9 @@ use domain::kind::KindId;
 use crate::catalog::{MAX_TITLE_CHARS, USER_PROVENANCE};
 use crate::{App, AppError, AppResult};
 
+/// The fields a person may correct on an item a source answers for (#16).
+pub(crate) const CORRECTABLE: [&str; 2] = ["title", "year"];
+
 /// Longest cover address a person may type.
 pub const MAX_COVER_URL_CHARS: usize = 2000;
 /// How many years ahead of the current one a year may be (announced titles).
@@ -182,9 +185,14 @@ impl App {
     /// no address removes a cover the person set and leaves any other cover alone. The
     /// item is `full` afterwards.
     ///
+    /// An item a source answers for takes a corrected title and year the same way (#16,
+    /// OT-36, DEC-869): they become the person's and every refresh keeps them, like a
+    /// hand-set page total. Its cover follows the source, and it stays in the source's
+    /// refresh cycle (its state is not changed).
+    ///
     /// # Errors
-    /// Unknown item; `Conflict` when a source answers for it; the checks of
-    /// [`App::create_manual_item`]; `Forbidden` for another cover address when
+    /// Unknown item; `Conflict` for another cover address on an item a source answers for;
+    /// the checks of [`App::create_manual_item`]; `Forbidden` for another cover address when
     /// `may_set_cover` is false (keeping or removing the stored one is allowed).
     pub async fn edit_item_details(
         &self,
@@ -194,9 +202,15 @@ impl App {
         sourced: &(dyn Fn(&CatalogItem) -> bool + Sync),
     ) -> AppResult<CatalogItem> {
         let mut item = self.catalog_item(id).await?;
-        if sourced(&item) {
+        let from_source = sourced(&item);
+        if from_source
+            && details
+                .cover_url
+                .as_ref()
+                .is_some_and(|c| Some(c) != item.cover_url.as_ref())
+        {
             return Err(AppError::Conflict(
-                "a source answers for this item; its details follow the source".into(),
+                "a source answers for this item; its cover follows the source".into(),
             ));
         }
         let mut details = self.checked_details(details)?;
@@ -227,9 +241,45 @@ impl App {
         item.title = details.title;
         item.year = details.year;
         item.cover_url = details.cover_url;
-        item.state = EntityState::Full;
+        if !from_source {
+            item.state = EntityState::Full;
+        }
         self.repos.catalog.upsert(&item).await?;
         self.publish_item(item.id).await;
+        Ok(item)
+    }
+
+    /// "Use the source's values" (#16): the title and year a person corrected on an item a
+    /// source answers for go back to the source. Their `user` mark is removed and a refresh
+    /// is queued; until it ran the corrected values stay on the page.
+    ///
+    /// # Errors
+    /// Unknown item; `Conflict` when no source answers for it (its details are the
+    /// person's anyway).
+    pub async fn reset_item_details(
+        &self,
+        id: ItemId,
+        sourced: &(dyn Fn(&CatalogItem) -> bool + Sync),
+    ) -> AppResult<CatalogItem> {
+        let mut item = self.catalog_item(id).await?;
+        if !sourced(&item) {
+            return Err(AppError::Conflict(
+                "no source answers for this item; its details are kept as entered".into(),
+            ));
+        }
+        let mut changed = false;
+        for field in CORRECTABLE {
+            if item.provenance.get(field).map(String::as_str) == Some(USER_PROVENANCE) {
+                item.provenance.remove(field);
+                changed = true;
+            }
+        }
+        if changed {
+            item.fresh_until = None;
+            self.repos.catalog.upsert(&item).await?;
+            self.queue_item_refresh(item.id).await;
+            self.publish_item(item.id).await;
+        }
         Ok(item)
     }
 
@@ -244,5 +294,23 @@ impl App {
             return Ok(Vec::new());
         }
         Ok(self.repos.catalog.titled(kind, title, MAX_TITLED).await?)
+    }
+}
+
+impl App {
+    /// Queues a refresh of one item from its sources (deduplicated per item), for a person
+    /// waiting on the page. A full queue is not an error: the next view queues it again.
+    async fn queue_item_refresh(&self, id: ItemId) {
+        let _ = self
+            .jobs
+            .enqueue(crate::ports::NewJob {
+                lane: crate::ports::Lane::Interactive,
+                kind: crate::catalog::REFRESH_JOB.into(),
+                payload: serde_json::json!({ "item_id": id }),
+                dedupe_key: Some(format!("{}:{id}", crate::catalog::REFRESH_JOB)),
+                priority: 0,
+                run_at: None,
+            })
+            .await;
     }
 }

@@ -317,7 +317,9 @@ pub struct AttributionDto {
     pub licence: String,
 }
 
-/// Everything the item page shows.
+/// Everything the item page shows. Its flags are independent answers to the page (what may
+/// be edited, what a source owns), not a state machine.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ItemPageDto {
@@ -328,11 +330,16 @@ pub struct ItemPageDto {
     pub progress: Vec<ProgressEventDto>,
     /// Attribution of the connectors that supplied data for this item.
     pub sources: Vec<AttributionDto>,
-    /// "Edit details" is offered (v1-manual): no source of this instance answers for the
-    /// item (entered by hand, a title-only stub of an import) and the viewer may change
-    /// shared items (everybody on a home instance, admins only on a hosted one).
+    /// "Edit details" is offered (v1-manual): the viewer may change shared items (everybody
+    /// on a home instance, admins only on a hosted one). Since 1.1.0 also for an item a
+    /// source answers for, see `details_sourced` (#16).
     #[serde(default)]
     pub details_editable: bool,
+    /// A source of this instance answers for the item: "Edit details" corrects title and
+    /// year only (kept by every refresh), the cover follows the source, and
+    /// `DELETE /items/{id}/corrections` gives corrections back to the source (#16).
+    #[serde(default)]
+    pub details_sourced: bool,
     /// The entry's tags (empty when not in the library).
     #[serde(default)]
     pub tags: Vec<String>,

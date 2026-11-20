@@ -19,6 +19,7 @@ pub(crate) fn routes() -> OpenApiRouter<ApiState> {
         .routes(routes!(create_item))
         .routes(routes!(items_titled))
         .routes(routes!(edit_item))
+        .routes(routes!(reset_item))
 }
 
 /// Add an item no source knows, of any enabled kind. It has no external ids, is never
@@ -65,7 +66,8 @@ async fn items_titled(
 /// Correct title, year and cover address of an item no source of this instance answers for
 /// (entered by hand, a title-only stub of an import). Send the three fields together; a
 /// field whose value changes is marked as set by a person. Every member on a home
-/// instance, admins only on a hosted one; 409 when a source answers for the item.
+/// instance, admins only on a hosted one. An item a source answers for takes title and year
+/// (kept by every refresh, #16); 409 when such a request changes its cover address.
 #[utoipa::path(patch, path = "/items/{id}", tag = "catalog", request_body = ItemDetailsDto,
     params(("id" = String, Path, description = "catalog item id")),
     responses((status = 200, body = CatalogItemDto), (status = 403, body = contracts::ErrorDto),
@@ -78,4 +80,20 @@ async fn edit_item(
     Json(b): Json<ItemDetailsDto>,
 ) -> ApiResult<Json<CatalogItemDto>> {
     Ok(Json(manual::edit_item(&s, a, &id, b).await?))
+}
+
+/// Give the title and year a person corrected on an item a source answers for back to the
+/// source (#16): their mark as set by a person is removed and a refresh is queued, so the
+/// source's values come back within moments. Every member on a home instance, admins only
+/// on a hosted one; 409 when no source answers for the item.
+#[utoipa::path(delete, path = "/items/{id}/corrections", tag = "catalog",
+    params(("id" = String, Path, description = "catalog item id")),
+    responses((status = 200, body = CatalogItemDto), (status = 403, body = contracts::ErrorDto),
+        (status = 404, body = contracts::ErrorDto), (status = 409, body = contracts::ErrorDto)))]
+async fn reset_item(
+    State(s): State<ApiState>,
+    Authed(a): Authed,
+    Path(id): Path<String>,
+) -> ApiResult<Json<CatalogItemDto>> {
+    Ok(Json(manual::reset_item(&s, a, &id).await?))
 }

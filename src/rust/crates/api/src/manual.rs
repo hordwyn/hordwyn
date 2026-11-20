@@ -65,11 +65,12 @@ pub async fn create_item(s: &ApiState, a: Actor, new: NewItemDto) -> ApiResult<C
 }
 
 /// "Edit details": title, year and cover address of an item no source of this instance
-/// answers for.
+/// answers for; title and year of one a source answers for (#16, its cover follows the source).
 ///
 /// # Errors
 /// `forbidden` for a member of a hosted instance; `not_found`; `conflict` when a source
-/// answers for the item; `invalid` with the field as for [`create_item`].
+/// answers for the item and the cover address changes; `invalid` with the field as for
+/// [`create_item`].
 pub async fn edit_item(
     s: &ApiState,
     a: Actor,
@@ -118,4 +119,20 @@ pub async fn items_titled(
         out.push(dto::item(s, &item).await);
     }
     Ok(out)
+}
+
+/// "Use the source's values" (#16): the title and year a person corrected on an item a
+/// source answers for go back to the source; a refresh is queued.
+///
+/// # Errors
+/// `forbidden` for a member of a hosted instance; `not_found`; `conflict` when no source
+/// answers for the item.
+pub async fn reset_item(s: &ApiState, a: Actor, item_id: &str) -> ApiResult<CatalogItemDto> {
+    let id = parse_id(item_id, ItemId)?;
+    if !may_edit_items(s, a) {
+        return Err(AppError::Forbidden.into());
+    }
+    let sourced = |i: &CatalogItem| source_known(&s.registry, i);
+    let item = s.app.reset_item_details(id, &sourced).await?;
+    Ok(dto::item(s, &item).await)
 }

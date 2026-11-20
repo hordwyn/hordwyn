@@ -18,6 +18,9 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
   licence notices (`/about/notices.txt`) and the data sources (#18, DEC-868). New optional
   brand fields `source_url`, `docs_url`, `release_notes_url`, `security_url`; new setting
   `server.notices_path`.
+- "Edit details" also corrects the title and the year of an item a source answers for; the
+  correction stays when the source updates the item, and "Use the source's title and year"
+  gives it back to the source (#16, DEC-869).
 
 ### Fixed
 
