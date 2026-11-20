@@ -218,3 +218,14 @@ maintenance is on.
   Apache-2.0 ask that their copyright and licence notices travel with copies. A generated
   notices file in the image (and on the About page) closes that, so it may belong in a 1.0.x
   patch rather than waiting for v2.
+
+## Addition (owner, 2026-11-20): task executor in the frontend panel
+
+- Owner, for the 1.1.0 release talk: "task executor in the frontend panel. But let's design
+  it first before implementing."
+- Context (not the owner's words): 1.0.1 added maintenance commands that only the shell can
+  run (`cli sessions orphaned`, `cli refresh-source`, besides `reindex`, `refresh-failed`,
+  `match-books`, `storage evict`). Questions for the design: which tasks, who may run them
+  (admins, re-auth like other gated actions), dry run first and its result shown before
+  apply, progress and outcome of queued work, audit rows, what stays shell-only (secrets,
+  admin escape hatches). Tracked as a GitLab issue in milestone 1.1.0; design before code.
