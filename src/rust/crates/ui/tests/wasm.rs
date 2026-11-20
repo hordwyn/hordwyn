@@ -1167,6 +1167,8 @@ async fn a_command_row_whose_picture_fails_keeps_the_icon_and_shows_no_text() {
 /// button still in the page). The menu must not panic then (DEC-863, DEC-865).
 #[wasm_bindgen_test]
 async fn a_click_on_the_trigger_of_a_disposed_menu_does_not_panic() {
+    // a panic in an event listener does not reach `click()`: count panics instead
+    static PANICS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let owner = Owner::new();
     let open = RwSignal::new(false);
     let active = RwSignal::new(0usize);
@@ -1188,8 +1190,6 @@ async fn a_click_on_the_trigger_of_a_disposed_menu_does_not_panic() {
         .expect("trigger rendered")
         .dyn_into()
         .unwrap();
-    // a panic in an event listener does not reach `click()`: count panics instead
-    static PANICS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let before = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {
         PANICS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
