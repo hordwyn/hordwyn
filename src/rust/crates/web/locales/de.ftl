@@ -2485,3 +2485,18 @@ stats-tile-untimed-movies = { $count ->
 stats-tile-untimed-shows = Laufzeiten noch nicht bekannt
 stats-tile-untimed-books = noch keine Seiten eingetragen
 stats-tile-untimed-games = noch keine Spieldauer eingetragen
+
+## About page and footer version (#18)
+about-title = Info
+about-version = Version
+about-commit = Commit
+about-links = Links
+about-release-notes = Versionshinweise dieser Version
+about-source = Quellcode
+about-docs = Dokumentation
+about-security = Sicherheitsproblem vertraulich melden
+about-open-source = Open Source
+about-open-source-lead = Diese Software baut auf Open-Source-Teilen und offenen Daten auf. Ihre Lizenzen und Nennungen:
+about-notices = Lizenzhinweise der Fremdbestandteile (Text)
+about-data-sources = Datenquellen und ihre Nennungen
+about-licence = Lizenz

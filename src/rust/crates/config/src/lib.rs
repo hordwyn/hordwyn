@@ -128,6 +128,10 @@ pub struct ServerConfig {
     /// Seconds the body of an import upload (up to 64 MiB) may take to arrive; then the
     /// request is answered `408`. The default allows 64 MiB at about 0.3 Mbit/s.
     pub import_read_timeout_secs: u64,
+    /// The licence notices of the third-party parts of the build, served at
+    /// `/about/notices.txt` and linked from the About page (#18). The image writes them here;
+    /// a build without the file answers `404` there.
+    pub notices_path: String,
 }
 
 impl Default for ServerConfig {
@@ -144,6 +148,7 @@ impl Default for ServerConfig {
             body_idle_timeout_secs: 30,
             body_read_timeout_secs: 60,
             import_read_timeout_secs: 1800,
+            notices_path: "/usr/share/doc/app/THIRD-PARTY-NOTICES.txt".into(),
         }
     }
 }

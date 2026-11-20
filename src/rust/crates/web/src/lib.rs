@@ -9,6 +9,7 @@
 // each with its reason (DEC-234).
 #![allow(clippy::needless_pass_by_value, clippy::must_use_candidate)]
 
+mod about;
 mod account;
 mod admin;
 pub mod admin_api;

@@ -3,6 +3,12 @@ name = "Hordwyn"
 short_name = "Hordwyn"
 default_locale = "en"
 
+# Links of the About page (#18). `{version}` is the running version.
+source_url = "https://gitlab.com/hordwyn/hordwyn"
+docs_url = "https://gitlab.com/hordwyn/hordwyn/-/tree/main/docs/modules/ROOT/pages"
+release_notes_url = "https://gitlab.com/hordwyn/hordwyn/-/blob/v{version}/docs/modules/ROOT/pages/releases/v{version}.adoc"
+security_url = "https://gitlab.com/hordwyn/hordwyn/-/issues/new?issue[confidential]=true"
+
 # UI font, self-hosted from this directory (design.md 2.8, DEC-171). Source, commit and
 # licence: config/brand/ICONS.adoc and fonts/OFL.txt.
 [fonts]

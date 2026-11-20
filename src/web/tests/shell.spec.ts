@@ -27,6 +27,7 @@ const PAGES = [
   "/settings/sources",
   "/settings/imports",
   "/settings/privacy",
+  "/about",
   // a member on an admin page: the "admins only" page
   "/admin",
   "/no-such-page",
@@ -909,3 +910,25 @@ test("palette: the library leads, a source's answer keeps its order, rows lead w
   expect(all[0][0]).toBe("In your library - Movie");
   expect(of(all, "tmdb - Movie").slice(0, answer.length - 1)).toEqual(answer.filter((t) => t !== mine));
 });
+
+test("the account menu names the running version and leads to the About page (#18)", async ({ page }) => {
+  await signUp(page, `about${Date.now()}`, "Abby");
+  const version = readFileSync(`${__dirname}/../../rust/Cargo.toml`, "utf8").match(/^version = "([^"]+)"/m)![1];
+  await page.getByRole("button", { name: "Account menu for Abby" }).click();
+  await expect(page.getByTestId("app-version")).toHaveText(`${brand("name")} ${version}`);
+  await page.getByRole("menuitem", { name: "About", exact: true }).click();
+  await expect(page).toHaveURL(/\/about$/);
+  await hydrated(page);
+  await expect(page.getByRole("heading", { level: 1, name: "About" })).toBeVisible();
+  await expect(page.getByTestId("about-version")).toHaveText(version);
+  await expect(page.getByRole("link", { name: "Release notes of this version" })).toHaveAttribute("href", new RegExp(`releases/v${version.replace(/\./g, "\\.")}\\.adoc$`));
+  await expect(page.getByRole("link", { name: "Source code" })).toHaveAttribute("href", brand("source_url"));
+  await expect(page.getByRole("link", { name: "Licence notices of the third-party parts (text)" })).toHaveAttribute("href", "/about/notices.txt");
+  await expect(page.getByText("MIT License")).toBeVisible();
+});
+
+/** A value of the default brand: the product name is the brand's, never the code's. */
+function brand(key: string): string {
+  const file = readFileSync(`${__dirname}/../../../config/brand/default/brand.toml`, "utf8");
+  return file.match(new RegExp(`^${key} = "([^"]+)"`, "m"))![1];
+}

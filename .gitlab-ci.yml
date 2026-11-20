@@ -290,11 +290,11 @@ docker-image:
       if [ -n "$dest" ]; then
         echo "pushing:$dest"
         # shellcheck disable=SC2086
-        /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/src/docker/Dockerfile" \
+        /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/src/docker/Dockerfile" --build-arg "APP_BUILD_COMMIT=$CI_COMMIT_SHORT_SHA" \
           --cache=true --cache-repo "$img/cache" --snapshot-mode=redo $dest
       else
         echo "build only, no push"
-        /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/src/docker/Dockerfile" \
+        /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/src/docker/Dockerfile" --build-arg "APP_BUILD_COMMIT=$CI_COMMIT_SHORT_SHA" \
           --cache=true --cache-repo "$img/cache" --snapshot-mode=redo --no-push --tar-path image.tar --destination "app:$CI_COMMIT_SHORT_SHA"
         ls -l image.tar
       fi

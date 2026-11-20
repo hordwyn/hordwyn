@@ -8,6 +8,7 @@
 
 mod support;
 
+mod about;
 mod admin;
 mod admin_fns;
 mod admin_pages;

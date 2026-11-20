@@ -15,6 +15,8 @@ COPY src/rust src/rust
 COPY src/web/style src/web/style
 COPY src/web/public src/web/public
 COPY config config
+# the licence is part of the About page (#18)
+COPY LICENSE LICENSE
 WORKDIR /repo/src/rust
 ENV SQLX_OFFLINE=true
 # Memory: one release rustc of the web crate needs 3-4 GB, the wasm build (fat LTO, one codegen
@@ -23,6 +25,10 @@ ENV SQLX_OFFLINE=true
 ARG CARGO_BUILD_JOBS=2
 ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
 RUN rustup show active-toolchain || rustup toolchain install
+# The commit the image is built from, shown on the About page (#18); CI passes
+# CI_COMMIT_SHORT_SHA. Empty: the page shows the version only.
+ARG APP_BUILD_COMMIT=
+ENV APP_BUILD_COMMIT=${APP_BUILD_COMMIT}
 RUN rustup target add wasm32-unknown-unknown \
     && cargo leptos build --release --frontend-only \
     && cargo leptos build --release --server-only \

@@ -38,6 +38,19 @@ pub struct Brand {
     /// Support or project URL shown on the about page.
     #[serde(default)]
     pub support_url: Option<String>,
+    /// Where the source of this build lives (About page, #18).
+    #[serde(default)]
+    pub source_url: Option<String>,
+    /// The documentation (About page).
+    #[serde(default)]
+    pub docs_url: Option<String>,
+    /// The release notes of a version; `{version}` is replaced with the running one
+    /// (`1.1.0`). The footer's version and the About page link it.
+    #[serde(default)]
+    pub release_notes_url: Option<String>,
+    /// Where to report a security problem privately (About page).
+    #[serde(default)]
+    pub security_url: Option<String>,
     /// Legal links (imprint, privacy policy) shown in the footer.
     #[serde(default)]
     pub legal: BTreeMap<String, String>,

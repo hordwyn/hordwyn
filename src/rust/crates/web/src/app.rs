@@ -48,6 +48,15 @@ pub struct ClientConfig {
     /// The instance counts the logging funnel (WP4-5, `usage.funnel`): the browser records
     /// and sends its beacon only then, and Settings > Privacy says so.
     pub usage_funnel: bool,
+    /// The running version (`1.1.0`) and the commit it was built from when the build knew it
+    /// (`APP_BUILD_COMMIT` at build time): account menu and About page (#18).
+    pub version: String,
+    pub commit: Option<String>,
+    /// The brand's About links; `release_notes_url` has the version filled in.
+    pub source_url: Option<String>,
+    pub docs_url: Option<String>,
+    pub release_notes_url: Option<String>,
+    pub security_url: Option<String>,
 }
 
 impl ClientConfig {
@@ -85,6 +94,7 @@ fn server_config() -> ClientConfig {
         });
     let setting = session.as_ref().and_then(|s| s.locale.clone());
     let locale = crate::i18n::effective_locale(setting.as_deref(), accept.as_deref(), &default);
+    let signed_in = session.is_some();
     ClientConfig {
         strings: brand
             .as_ref()
@@ -93,7 +103,7 @@ fn server_config() -> ClientConfig {
         product_name: brand.as_ref().map(|b| b.name.clone()).unwrap_or_default(),
         locale,
         locale_setting: setting,
-        signed_in: session.is_some(),
+        signed_in,
         display_name: session
             .as_ref()
             .map(|s| s.display_name.clone())
@@ -116,6 +126,23 @@ fn server_config() -> ClientConfig {
             .unwrap_or_else(|| crate::history_state::Day::today_utc().iso()),
         session_ended,
         usage_funnel: session.as_ref().is_some_and(|s| s.usage_funnel),
+        // the build is told to signed-in people only (DEC-868): the config is in every page
+        version: if signed_in {
+            env!("CARGO_PKG_VERSION").to_string()
+        } else {
+            String::new()
+        },
+        commit: option_env!("APP_BUILD_COMMIT")
+            .filter(|c| signed_in && !c.is_empty())
+            .map(String::from),
+        source_url: brand.as_ref().and_then(|b| b.source_url.clone()),
+        docs_url: brand.as_ref().and_then(|b| b.docs_url.clone()),
+        release_notes_url: brand
+            .as_ref()
+            .and_then(|b| b.release_notes_url.as_ref())
+            .filter(|_| signed_in)
+            .map(|u| u.replace("{version}", env!("CARGO_PKG_VERSION"))),
+        security_url: brand.as_ref().and_then(|b| b.security_url.clone()),
     }
 }
 
@@ -213,6 +240,7 @@ pub fn App() -> impl IntoView {
                         <Route path=path!("/people/:id") view=crate::people::PersonPage/>
                         <Route path=path!("/history") view=crate::history::History/>
                         <Route path=path!("/stats") view=crate::home::Stats/>
+                        <Route path=path!("/about") view=crate::about::About/>
                         <Route path=path!("/you") view=crate::shell::You/>
                         <Route path=path!("/shared/lists/:token") view=crate::lists::SharedList ssr=SsrMode::Async/>
                         <Route path=path!("/lists") view=crate::lists::Lists/>

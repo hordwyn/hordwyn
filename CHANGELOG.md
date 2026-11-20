@@ -10,6 +10,15 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
 
 ## [Unreleased]
 
+### Added
+
+- The running version is shown under the account menu and on the You page, and a new About
+  page (account menu) shows version and commit, source, release
+  notes, documentation, how to report a security problem, the licence, the third-party
+  licence notices (`/about/notices.txt`) and the data sources (#18, DEC-868). New optional
+  brand fields `source_url`, `docs_url`, `release_notes_url`, `security_url`; new setting
+  `server.notices_path`.
+
 ### Fixed
 
 - "Copy to my log" on a shared row now turns the row into "In your log" and offers no second

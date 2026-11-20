@@ -105,6 +105,7 @@ pub fn account_entry(path: &str) -> Option<&'static str> {
         "stats" => Some("/stats"),
         "settings" => Some("/settings/account"),
         "admin" => Some(ADMIN_HREF),
+        "about" => Some("/about"),
         _ => None,
     }
 }
@@ -131,6 +132,7 @@ fn account_links(is_admin: bool) -> Vec<(&'static str, &'static str)> {
     if is_admin {
         links.push((ADMIN_HREF, "shell-admin"));
     }
+    links.push(("/about", "about-title"));
     links
 }
 
@@ -647,6 +649,7 @@ fn AccountMenu() -> impl IntoView {
                     <div node_ref=menu id="account-menu" role="menu" aria-label=label.clone() on:keydown=on_key>
                         <AccountMenuItems open=open close=close/>
                     </div>
+                    <crate::about::VersionLine class="border-t border-border px-2 pt-1.5 pb-1 mt-1"/>
                 </div>
             </Show>
         </div>
@@ -1026,6 +1029,7 @@ pub fn You() -> impl IntoView {
         <div class="grid max-w-md gap-6">
             <SideNav id="you" label=i18n.t("nav-you") groups=vec![NavGroup::new(items)] current=Signal::derive(move || location.pathname.get())/>
             <ThemeChoiceControl/>
+            <crate::about::VersionLine/>
             <LanguageChoice/>
             <div class="flex flex-wrap gap-2">
                 <Button variant=ButtonVariant::Outline class="min-h-11" on:click=move |_| help.set(true)>

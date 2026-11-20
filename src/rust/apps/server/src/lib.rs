@@ -601,6 +601,12 @@ impl Server {
         let r = Router::new()
             .route("/healthz", get(|| async { "ok" }))
             .route(
+                "/about/notices.txt",
+                get(serve_notices).with_state(Arc::new(std::path::PathBuf::from(
+                    &self.config.server.notices_path,
+                ))),
+            )
+            .route(
                 "/assets/{hash}/{file}",
                 get(serve_asset).with_state(self.assets.clone()),
             )
@@ -757,6 +763,22 @@ async fn serve_font(
         )
             .into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// `/about/notices.txt`: the licence notices of the build's third-party parts (#18, DEC-855),
+/// read from the file the image carries; `404` when the build has none (development).
+async fn serve_notices(State(path): State<Arc<std::path::PathBuf>>) -> Response {
+    match tokio::fs::read(path.as_path()).await {
+        Ok(text) => (
+            [
+                (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
+                (header::CACHE_CONTROL, "public, max-age=3600"),
+            ],
+            text,
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
 

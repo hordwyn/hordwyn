@@ -2495,3 +2495,18 @@ stats-tile-untimed-movies = { $count ->
 stats-tile-untimed-shows = runtimes not known yet
 stats-tile-untimed-books = no pages logged yet
 stats-tile-untimed-games = no play time logged yet
+
+## About page and footer version (#18)
+about-title = About
+about-version = Version
+about-commit = Commit
+about-links = Links
+about-release-notes = Release notes of this version
+about-source = Source code
+about-docs = Documentation
+about-security = Report a security problem privately
+about-open-source = Open source
+about-open-source-lead = This software is built on open source parts and open data. Their licences and credits:
+about-notices = Licence notices of the third-party parts (text)
+about-data-sources = Data sources and their credits
+about-licence = Licence
