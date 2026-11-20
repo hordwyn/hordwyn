@@ -30,6 +30,8 @@ to 9) and a security update of the mail library. No database migration.
 - Undo of a view logged "Watched with ..." also deletes its session with those people, so the
   person card and "History with ..." no longer count it; `cli sessions orphaned [--apply]`
   removes the sessions an earlier Undo left behind (#1, DEC-853).
+- A click on a menu at the moment its page refreshes no longer stops the page with an error
+  (DEC-865).
 - Shows from TheTVDB list all their seasons and episodes: the connector reads the episode
   count and first air date of each season from the aired-order episode list; `cli
   refresh-source tvdb --apply` refreshes the shows in a library stored before (#3, DEC-854,

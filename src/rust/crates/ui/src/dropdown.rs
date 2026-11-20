@@ -86,7 +86,12 @@ fn menu_keys(
         };
         ev.prevent_default();
         active.set(next);
-        active_label.set(labels.with_value(|l| l.get(next).cloned().unwrap_or_default()));
+        active_label.set(
+            labels
+                .try_with_value(|l| l.get(next).cloned())
+                .flatten()
+                .unwrap_or_default(),
+        );
         if let Some(menu) = menu_ref.get_untracked() {
             focus_item(&menu, next);
         }
@@ -98,7 +103,8 @@ fn menu_items(
     items: StoredValue<Vec<MenuItem>>,
     close: impl Fn() + Copy + 'static,
 ) -> impl IntoView {
-    items.with_value(|items| {
+    // `try_`: a menu opened on a trigger whose render was just replaced renders nothing
+    items.try_with_value(|items| {
         items
             .iter()
             .map(|it| {
@@ -170,7 +176,13 @@ pub fn DropdownMenu(
     }
     let set_first = move || {
         active.set(0);
-        active_label.set(labels.with_value(|l| l.first().cloned().unwrap_or_default()));
+        // `try_`: a click can reach the trigger of a menu whose render was just replaced
+        active_label.set(
+            labels
+                .try_with_value(|l| l.first().cloned())
+                .flatten()
+                .unwrap_or_default(),
+        );
     };
     let base = id.unwrap_or_else(|| slug(&label));
     let menu_id = format!("{base}-menu");
