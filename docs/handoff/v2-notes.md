@@ -229,3 +229,4 @@ maintenance is on.
   (admins, re-auth like other gated actions), dry run first and its result shown before
   apply, progress and outcome of queued work, audit rows, what stays shell-only (secrets,
   admin escape hatches). Tracked as a GitLab issue in milestone 1.1.0; design before code.
+- Owner, 2026-11-20: #11 and #14 apply to every kind (movies, books, games, ...), not only episodes. 1.1.0 scope: DEC-866, docs/handoff/1.1.0-plan.md.
