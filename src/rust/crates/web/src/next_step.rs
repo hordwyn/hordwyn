@@ -223,13 +223,31 @@ pub fn run_step(
 
 /// What follows a logged step: "Finished" on a book completes the entry after its last page
 /// is logged (v1-books).
-#[derive(Clone, Copy)]
+///
+/// The follow-up is a plain closure, not a reactive `Callback`: the bar that makes it is
+/// rendered again by the refetch the log itself starts, often before the log's answer is
+/// back, and a `Callback` dies with the bar's owner (DEC-870).
+#[derive(Clone)]
 pub struct Then {
     /// Runs once when the log went through (not after an undo of it).
-    pub online: Callback<()>,
+    online: std::sync::Arc<dyn Fn() + Send + Sync>,
     /// Offline nothing can run after the log: this status is queued behind it instead, so
     /// the sync logs the page and then sets the status, in that order (review BOOK-6).
     pub status: &'static str,
+}
+
+impl Then {
+    pub fn new(online: impl Fn() + Send + Sync + 'static, status: &'static str) -> Self {
+        Self {
+            online: std::sync::Arc::new(online),
+            status,
+        }
+    }
+
+    /// The follow-up, also when the bar that made it is gone.
+    pub fn run(&self) {
+        (self.online)();
+    }
 }
 
 /// [`run_step`] with what follows it ([`Then`]): run when the log went through, or queued
@@ -301,7 +319,7 @@ fn log_step(
                 }
                 ctx.done(on_done);
                 if let Some(then) = then {
-                    then.online.run(());
+                    then.run();
                 }
             }
             Err(e) if crate::offline::network_error(&e) && ctx.offline.is_some() => {
@@ -680,6 +698,27 @@ mod tests {
     use contracts::{NextStepDto, ProgressSummaryDto};
 
     use super::*;
+
+    /// "Finished" on a book (pipeline of #16, books.spec): the bar that made the follow-up is
+    /// rendered again by the refetch its own page log starts, and on a slow host that happens
+    /// before the log's answer. What follows the log must still run then: it completes the
+    /// entry, and a disposed follow-up panicked the page instead.
+    #[test]
+    fn what_follows_a_log_runs_after_the_bar_that_made_it_is_gone() {
+        let ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let bar = Owner::new();
+        let then = bar.with(|| {
+            let ran = ran.clone();
+            Then::new(
+                move || ran.store(true, std::sync::atomic::Ordering::SeqCst),
+                "completed",
+            )
+        });
+        bar.cleanup();
+        drop(bar);
+        then.run();
+        assert!(ran.load(std::sync::atomic::Ordering::SeqCst));
+    }
 
     fn step(action: &str, key: &str) -> NextStepDto {
         NextStepDto {

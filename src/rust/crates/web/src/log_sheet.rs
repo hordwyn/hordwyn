@@ -1206,7 +1206,9 @@ fn complete(item: (String, String), ctx: &StepCtx, refresh: Callback<()>) {
             }
             Err(_) => {}
         }
-        refresh.run(());
+        // the page that asked may be gone by now (another page, a re-render): nothing to
+        // refetch then (DEC-870)
+        let _ = refresh.try_run(());
     });
 }
 
@@ -1280,15 +1282,13 @@ pub fn PagesInline(
             ..
         } = info.get_value();
         let ctx = ctx2.clone();
-        let online =
-            Callback::new(move |()| complete((item_id.clone(), title.clone()), &ctx, refresh));
-        let then = Then {
-            online,
-            status: COMPLETED,
-        };
+        let then = Then::new(
+            move || complete((item_id.clone(), title.clone()), &ctx, refresh),
+            COMPLETED,
+        );
         match finish_page(at, pages) {
             Some(last) => log.with_value(|l| l(last.to_string(), Some(then))),
-            None => online.run(()),
+            None => then.run(),
         }
     };
     let initial = value.get_untracked();

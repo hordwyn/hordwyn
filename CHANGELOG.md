@@ -24,6 +24,8 @@ Every change that is merged after v1 adds its line under "Unreleased" in the sam
 
 ### Fixed
 
+- "Finished" on a book could stop after logging the last page, without marking the book
+  Completed, when the page was slow to answer (DEC-870).
 - "Copy to my log" on a shared row now turns the row into "In your log" and offers no second
   copy, also after a reload; the copy is with the person who logged it when you have them in
   People, with their score and result, and it is not shared back to them (#35, DEC-867).
